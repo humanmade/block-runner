@@ -1,0 +1,23 @@
+# Knowledge source — local-only research + design substrate, never committed.
+# This is the agent/human knowledge base, not shippable code.
+md/
+
+# Internal agent context — private (may reference internal/dogfood projects).
+# Never committed; the public repo must read clean.
+AGENTS.md
+CLAUDE.md
+
+# Node
+node_modules/
+dist/
+build/
+*.tsbuildinfo
+.env
+.env.*
+*.log
+
+# OS / editor
+.DS_Store
+.vite/
+.idea/
+.vscode/
