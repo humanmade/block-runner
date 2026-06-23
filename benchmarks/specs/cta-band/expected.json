@@ -1,0 +1,16 @@
+{
+  "intent": "A full-width call-to-action band on a dark background: an H2, a supporting paragraph, and a single button. Idiomatic core is a group (full-width, background color) holding heading + paragraph + a single-button buttons block. The inner max-width wrapper is layout-only and should be unwrapped, not emitted as its own block.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "cleaner blocks" },
+      { "block": "core/paragraph", "contains": "no lock-in" },
+      {
+        "block": "core/buttons",
+        "children": [
+          { "block": "core/button", "contains": "Get started free" }
+        ]
+      }
+    ]
+  }
+}

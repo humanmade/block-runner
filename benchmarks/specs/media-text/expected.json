@@ -1,0 +1,18 @@
+{
+  "intent": "An image-beside-text feature row. Idiomatically this is a single core/media-text block: the image is the media side, and the text side holds an H2, a paragraph, a bullet list, and a button. CAPABILITY GAP: the converter currently has no media-text rule and will emit core/columns instead — this fixture stays low until a media-text rule (or adapter) exists.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      {
+        "block": "core/media-text",
+        "contains": "dashboard.png",
+        "children": [
+          { "block": "core/heading", "contains": "one place" },
+          { "block": "core/paragraph", "contains": "content health" },
+          { "block": "core/list" },
+          { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "Take the tour" } ] }
+        ]
+      }
+    ]
+  }
+}

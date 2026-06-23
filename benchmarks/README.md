@@ -14,7 +14,8 @@ npm run bench
 This prints a scorecard (overall + per-producer) and writes two generated pages (gitignored,
 segregated from the committed suite) under `report/`:
 
-- **`report/review.html`** — per fixture, the rendered input beside the ideal end state.
+- **`report/review.html`** — per layout: the ideal end state beside *each producer's* render
+  (the cross-producer comparison matrix).
 - **`report/scoreboard.html`** — scores over time, built from the results log.
 
 ```sh
@@ -26,42 +27,47 @@ tagged with commit / branch / author / version and a `suiteHash` (so a score cha
 attributable to the converter only when the suite is unchanged). Plain `npm run bench` does
 not append; only `--record` does (CI records on merge — see `md/08-benchmark-system.md`).
 
-## The suite is grouped by producer
+## Structure: shared specs, many producers
 
-Each fixture is a self-contained design unit, grouped by the tool that produced its HTML
-(the input side — a benchmark testbed per producer):
+The ideal end state is defined **once per layout** (a spec); each producer supplies its own
+HTML answer to the same brief, and all are scored against the shared spec:
 
 ```
 benchmarks/
-  base/<producer>.css            # shared design system for that producer (fonts, tokens, components)
-  producers/<producer>/<layout>/
-    layout.html                  # semantic markup only — no <style>; the base owns the look
-    expected.json                # { intent, source, tree } — the ideal block tree
+  specs/<layout>/
+    prompt.md          # the brief given to EVERY producer (the shared question)
+    expected.json      # { intent, tree } — the ideal native block tree (the shared answer)
+  producers/<producer>/<layout>.html   # one producer's HTML answer to that layout's prompt
+  base/<producer>.css                  # optional; inlined into that producer's layouts at run time
+  results.jsonl        # committed run history
 ```
 
-e.g. `benchmarks/producers/impeccable/hero-split/`. At run time the runner composes the
-converter input by inlining `base/<producer>.css` into `layout.html`, so fixtures stay
-self-contained (the converter sees styling inline) with one place controlling the look.
-A producer with no base (e.g. raw Figma exports) can instead ship a full self-contained
-`input.html` and skip `layout.html`.
+The scorer pairs every `producers/*/<layout>.html` with `specs/<layout>/expected.json`. A
+producer only needs the layouts it has answers for. `impeccable` ships semantic markup and
+gets `base/impeccable.css` inlined; `figma` / `codex` / `claude` ship fully self-contained
+HTML. See `producers/README.md` for the drop-in convention.
 
-`source` in `expected.json` is the authoritative producer label for the per-producer
-rollup. The source is never fed to the converter and never affects scoring — the whole
-point is that Block Runner handles diverse-origin HTML it knows nothing about. Keep one
-coherent design unit per fixture (typically one top-level block subtree).
+The producer is never fed to the converter and never affects scoring — the whole point is
+that Block Runner handles diverse-origin HTML it knows nothing about.
 
-> Keep structural class tokens the converter reads (`row`/`grid`/`col`/`card`/`btn`/
-> `actions`/…) when restyling via the base — they drive block detection, so changing them
-> changes scores.
+> When authoring an `impeccable` layout, keep the structural class tokens the converter
+> reads (`row`/`grid`/`col`/`card`/`btn`/`actions`/…) — they drive block detection.
 
-## Authoring `expected.json`
+**Benchmark integrity.** The `impeccable` inputs are *hand-authored* with semantic class
+names that align with the converter's tokens, so treat `impeccable` as a clean-reference
+ceiling rather than a peer. The independent producers (`codex`, `figma`, `claude`) generate
+from the brief without that advantage, so their scores are the truer signal of how
+convertible real generator output is. (Same brief, different markup, different
+convertibility — that spread is the point.)
 
-Write the GUI-level intent in prose, then express it as a tree. You describe only the
-blocks and the content that matter — you never have to spell out every attribute.
+## Authoring a spec (`specs/<layout>/`)
+
+`prompt.md` is the brief, with **specific copy** so every producer's output is comparable.
+`expected.json` is the ideal tree — describe only the blocks and content that matter:
 
 ```json
 {
-  "intent": "A full-width cover. Inside, two columns: left an image; right a heading, a paragraph, then a button group with one button.",
+  "intent": "A full-width cover. Two columns: left an image; right a heading, a paragraph, a button.",
   "tree": {
     "block": "core/cover",
     "children": [
@@ -78,14 +84,10 @@ blocks and the content that matter — you never have to spell out every attribu
 }
 ```
 
-- `block` — the expected block name (e.g. `core/cover`, `coblocks/row`).
+- `block` — expected block name (e.g. `core/cover`, `coblocks/row`).
 - `children` — nested blocks, **in the order you expect them**.
 - `contains` *(optional)* — a substring that must appear in that block's content/attrs
   (text, url, alt, href). Use it to assert the right content landed in the right block.
-
-Workflow: you supply `input.html` + the prose intent; the intent is compiled once into
-the `tree` above for you to eyeball. The scorer is then deterministic, so rule changes
-move the score predictably.
 
 ## How scoring works
 

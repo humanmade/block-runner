@@ -1,22 +1,25 @@
 /**
- * Conversion benchmark harness.
+ * Conversion benchmark harness (cross-producer).
  *
- * Each fixture is a self-contained design unit under
- * benchmarks/producers/<producer>/<layout>/:
- *   layout.html    — semantic markup; base/<producer>.css is inlined at run time.
- *   input.html     — alternative: a fully self-contained design (CSS + markup inline).
- *   expected.json  — { intent, source, tree }: the ideal WordPress block tree.
+ * A SPEC defines one section once:
+ *   benchmarks/specs/<layout>/prompt.md      — the brief given to every producer
+ *   benchmarks/specs/<layout>/expected.json  — { intent, tree }: the ideal block tree
  *
- * The scorer runs convert() and measures the produced block tree against the
- * expected tree on four axes — structure, content, validity, fallbacks — and
- * prints a scorecard (overall + per-producer) to the CONSOLE.
+ * Each PRODUCER answers the same prompts with its own HTML:
+ *   benchmarks/producers/<producer>/<layout>.html
+ *   benchmarks/base/<producer>.css  — optional; inlined into that producer's
+ *       layouts at run time (so a producer can ship semantic markup + a shared
+ *       design system). Producers without a base ship fully self-contained HTML.
  *
- * It writes two generated pages (gitignored) under report/:
- *   review.html      — input beside ideal end state, grouped by producer (the spec).
- *   scoreboard.html  — scores over time from benchmarks/results.jsonl (the progress).
+ * The scorer runs convert() on every (producer × layout) input and measures the
+ * produced block tree against the SHARED spec on four axes — structure, content,
+ * validity, fallbacks — printing a per-producer scorecard to the console.
  *
- * With `--record` it appends one provenance-tagged record to
- * benchmarks/results.jsonl (the committed history). Plain runs do not append.
+ * Generated pages (gitignored) under report/:
+ *   review.html      — per layout: the ideal end state + each producer's render.
+ *   scoreboard.html  — scores over time from benchmarks/results.jsonl.
+ *
+ * With `--record` it appends one provenance-tagged record to results.jsonl.
  *
  * Run: `npm run bench` (or `npm run bench:record`).
  */
@@ -28,6 +31,46 @@ import { execSync } from 'node:child_process';
 import { convert } from '../src/index.js';
 import { parseMarkup } from '../src/headless/wp.js';
 import type { WpBlock } from '../src/types.js';
+
+interface ExpectedNode {
+  block: string;
+  contains?: string;
+  children?: ExpectedNode[];
+}
+
+interface DisplayNode {
+  name: string;
+  note?: string;
+  children: DisplayNode[];
+}
+
+interface Spec {
+  layout: string;
+  intent: string;
+  tree: ExpectedNode;
+  display: DisplayNode;
+}
+
+interface Tally {
+  structureTotal: number;
+  structureMatched: number;
+  contentTotal: number;
+  contentMatched: number;
+  misses: string[];
+}
+
+interface Result {
+  producer: string;
+  layout: string;
+  label: string;
+  inputHtml: string;
+  structurePct: number;
+  contentPct: number;
+  valid: boolean;
+  fallbacks: number;
+  score: number;
+  misses: string[];
+}
 
 interface RunRecord {
   runAt: string;
@@ -41,55 +84,79 @@ interface RunRecord {
   fixtures: Record<string, number>;
 }
 
-interface ExpectedNode {
-  block: string;
-  contains?: string;
-  children?: ExpectedNode[];
-}
-
-interface Expected {
-  intent?: string;
-  source?: string;
-  tree: ExpectedNode;
-}
-
-interface DisplayNode {
-  name: string;
-  note?: string;
-  children: DisplayNode[];
-}
-
-interface Tally {
-  structureTotal: number;
-  structureMatched: number;
-  contentTotal: number;
-  contentMatched: number;
-  misses: string[];
-}
-
-interface Result {
-  label: string;
-  layout: string;
-  source: string;
-  intent: string;
-  inputHtml: string;
-  expectedTree: DisplayNode;
-  structurePct: number;
-  contentPct: number;
-  valid: boolean;
-  fallbacks: number;
-  score: number;
-  misses: string[];
-}
-
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const EVAL_DIR = path.join(ROOT, 'benchmarks');
+const SPEC_DIR = path.join(EVAL_DIR, 'specs');
+const PRODUCERS_DIR = path.join(EVAL_DIR, 'producers');
 const REPORT_PATH = path.join(ROOT, 'report', 'review.html');
 const SCOREBOARD_PATH = path.join(ROOT, 'report', 'scoreboard.html');
 const RESULTS_PATH = path.join(EVAL_DIR, 'results.jsonl');
 
-// Per-producer base stylesheet, inlined into a fixture's layout at run time so
-// the converter still sees styling inline and the fixture stays self-contained.
+async function main(): Promise<void> {
+  const specs = loadSpecs();
+  if (specs.size === 0) {
+    console.log('No specs found under benchmarks/specs/.');
+    return;
+  }
+  const producers = existsSync(PRODUCERS_DIR)
+    ? readdirSync(PRODUCERS_DIR, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
+    : [];
+
+  const results: Result[] = [];
+  for (const producer of producers) {
+    for (const [layout, spec] of specs) {
+      if (existsSync(producerFile(producer, layout))) {
+        results.push(await scoreFixture(producer, layout, spec));
+      }
+    }
+  }
+  results.sort((a, b) => a.label.localeCompare(b.label));
+
+  if (results.length === 0) {
+    console.log('No producer inputs found under benchmarks/producers/.');
+    return;
+  }
+
+  printConsole(results);
+
+  const record = buildRecord(results, specs);
+  if (process.argv.includes('--record')) {
+    appendFileSync(RESULTS_PATH, `${JSON.stringify(record)}\n`, 'utf8');
+    console.log(`recorded run → ${RESULTS_PATH}`);
+  }
+
+  const history = readHistory();
+  mkdirSync(path.dirname(REPORT_PATH), { recursive: true }); // report/ is gitignored — absent on a clean checkout
+  writeFileSync(REPORT_PATH, renderHtml(specs, results), 'utf8');
+  writeFileSync(SCOREBOARD_PATH, renderScoreboard(history, record), 'utf8');
+  console.log(`\nreview page:  file://${REPORT_PATH}`);
+  console.log(`scoreboard:   file://${SCOREBOARD_PATH}\n`);
+}
+
+function loadSpecs(): Map<string, Spec> {
+  const specs = new Map<string, Spec>();
+  if (!existsSync(SPEC_DIR)) return specs;
+  for (const entry of readdirSync(SPEC_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+    if (!entry.isDirectory()) continue;
+    const file = path.join(SPEC_DIR, entry.name, 'expected.json');
+    if (!existsSync(file)) continue;
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { intent?: string; tree: ExpectedNode };
+    specs.set(entry.name, {
+      layout: entry.name,
+      intent: parsed.intent ?? '',
+      tree: parsed.tree,
+      display: expectedToDisplay(parsed.tree),
+    });
+  }
+  return specs;
+}
+
+function producerFile(producer: string, layout: string): string {
+  return path.join(PRODUCERS_DIR, producer, `${layout}.html`);
+}
+
+// Per-producer base stylesheet, inlined into a producer's layout at run time so
+// the converter still sees styling inline and the input stays self-contained.
 const baseCache = new Map<string, string>();
 function baseFor(producer: string): string {
   if (!baseCache.has(producer)) {
@@ -99,130 +166,21 @@ function baseFor(producer: string): string {
   return baseCache.get(producer)!;
 }
 
-function composeInput(dir: string): string {
-  const layoutPath = path.join(dir, 'layout.html');
-  if (existsSync(layoutPath)) {
-    const base = baseFor(path.basename(path.dirname(dir)));
-    const layout = readFileSync(layoutPath, 'utf8');
-    return base ? `<style>\n${base}\n</style>\n${layout}` : layout;
-  }
-  return readFileSync(path.join(dir, 'input.html'), 'utf8');
+function composeInput(producer: string, layout: string): string {
+  const markup = readFileSync(producerFile(producer, layout), 'utf8');
+  const base = baseFor(producer);
+  return base ? `<style>\n${base}\n</style>\n${markup}` : markup;
 }
 
-async function main(): Promise<void> {
-  const dirs = findFixtureDirs(EVAL_DIR).sort();
-  if (dirs.length === 0) {
-    console.log('No fixtures found under benchmarks/.');
-    return;
-  }
+async function scoreFixture(producer: string, layout: string, spec: Spec): Promise<Result> {
+  const label = `${producer}/${layout}`;
+  const inputHtml = composeInput(producer, layout);
 
-  const results: Result[] = [];
-  for (const dir of dirs) {
-    results.push(await scoreFixture(dir));
-  }
-
-  printConsole(results);
-
-  const record = buildRecord(results, dirs);
-  if (process.argv.includes('--record')) {
-    appendFileSync(RESULTS_PATH, `${JSON.stringify(record)}\n`, 'utf8');
-    console.log(`recorded run → ${RESULTS_PATH}`);
-  }
-
-  const history = readHistory();
-  mkdirSync(path.dirname(REPORT_PATH), { recursive: true }); // report/ is gitignored — absent on a clean checkout
-  writeFileSync(REPORT_PATH, renderHtml(results), 'utf8');
-  writeFileSync(SCOREBOARD_PATH, renderScoreboard(history, record), 'utf8');
-  console.log(`\nreview page:  file://${REPORT_PATH}`);
-  console.log(`scoreboard:   file://${SCOREBOARD_PATH}\n`);
-}
-
-function buildRecord(results: Result[], dirs: string[]): RunRecord {
-  return {
-    runAt: new Date().toISOString(),
-    ...gitInfo(),
-    version: readPackageVersion(),
-    suiteHash: suiteHash(dirs),
-    corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
-    producers: Object.fromEntries(bySource(results).map(([source, avg]) => [source, avg])),
-    fixtures: Object.fromEntries(results.map((r) => [r.label, r.score])),
-  };
-}
-
-function readHistory(): RunRecord[] {
-  if (!existsSync(RESULTS_PATH)) return [];
-  return readFileSync(RESULTS_PATH, 'utf8')
-    .split('\n')
-    .filter((line) => line.trim())
-    .map((line) => JSON.parse(line) as RunRecord);
-}
-
-function gitInfo(): { commit: string; branch: string; author: string } {
-  const run = (cmd: string): string => {
-    try {
-      return execSync(cmd, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
-    } catch {
-      return '';
-    }
-  };
-  return {
-    commit: process.env.GITHUB_SHA?.slice(0, 7) || run('git rev-parse --short HEAD') || 'unknown',
-    branch: process.env.GITHUB_REF_NAME || run('git rev-parse --abbrev-ref HEAD') || 'unknown',
-    author: process.env.GITHUB_ACTOR || run('git log -1 --format=%an') || 'unknown',
-  };
-}
-
-function readPackageVersion(): string {
-  try {
-    return (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: string }).version ?? '0.0.0';
-  } catch {
-    return '0.0.0';
-  }
-}
-
-// Hash the suite so a score change is attributable to the converter only when the
-// suite is unchanged; changing fixtures starts a new baseline.
-function suiteHash(dirs: string[]): string {
-  const h = createHash('sha256');
-  for (const dir of dirs) {
-    h.update(path.relative(EVAL_DIR, dir));
-    for (const file of ['layout.html', 'input.html', 'expected.json']) {
-      const p = path.join(dir, file);
-      if (existsSync(p)) h.update(readFileSync(p));
-    }
-  }
-  const baseDir = path.join(EVAL_DIR, 'base');
-  if (existsSync(baseDir)) {
-    for (const file of readdirSync(baseDir).sort()) h.update(readFileSync(path.join(baseDir, file)));
-  }
-  return `sha256:${h.digest('hex').slice(0, 12)}`;
-}
-
-function findFixtureDirs(root: string): string[] {
-  const out: string[] = [];
-  const walk = (dir: string) => {
-    if (existsSync(path.join(dir, 'expected.json'))) {
-      out.push(dir);
-      return;
-    }
-    for (const entry of readdirSync(dir, { withFileTypes: true })) {
-      if (entry.isDirectory()) walk(path.join(dir, entry.name));
-    }
-  };
-  walk(root);
-  return out;
-}
-
-async function scoreFixture(dir: string): Promise<Result> {
-  const label = path.relative(EVAL_DIR, dir);
-  const inputHtml = composeInput(dir);
-  const expected = JSON.parse(readFileSync(path.join(dir, 'expected.json'), 'utf8')) as Expected;
-
-  const report = await convert(inputHtml, { sourcePath: `${label}/input.html`, config: { media: { resolver: 'noop' } } });
+  const report = await convert(inputHtml, { sourcePath: `${label}.html`, config: { media: { resolver: 'noop' } } });
   const produced = await parseMarkup(report.output ?? '');
 
   const tally: Tally = { structureTotal: 0, structureMatched: 0, contentTotal: 0, contentMatched: 0, misses: [] };
-  matchNode(expected.tree, produced, tally, label);
+  matchNode(spec.tree, produced, tally, label);
 
   const structurePct = pct(tally.structureMatched, tally.structureTotal);
   const contentPct = tally.contentTotal === 0 ? 1 : tally.contentMatched / tally.contentTotal;
@@ -233,12 +191,10 @@ async function scoreFixture(dir: string): Promise<Result> {
   if (!valid) score *= 0.5;
 
   return {
+    producer,
+    layout,
     label,
-    layout: path.basename(dir),
-    source: expected.source ?? label.split(path.sep)[0],
-    intent: expected.intent ?? '',
     inputHtml,
-    expectedTree: expectedToDisplay(expected.tree),
     structurePct,
     contentPct,
     valid,
@@ -345,14 +301,14 @@ function printConsole(results: Result[]): void {
   const fallbacks = results.reduce((sum, r) => sum + r.fallbacks, 0);
   console.log(`corpus avg: ${avg}  ·  fixtures: ${results.length}  ·  invalid: ${invalid}  ·  fallbacks: ${fallbacks}`);
   for (const [source, avgScore, count] of bySource(results)) {
-    console.log(`  ${source.padEnd(20)} avg ${String(avgScore).padStart(3)}  (${count} fixtures)`);
+    console.log(`  ${source.padEnd(20)} avg ${String(avgScore).padStart(3)}  (${count} layouts)`);
   }
 }
 
 function bySource(results: Result[]): [string, number, number][] {
   const groups = new Map<string, number[]>();
   for (const r of results) {
-    groups.set(r.source, [...(groups.get(r.source) ?? []), r.score]);
+    groups.set(r.producer, [...(groups.get(r.producer) ?? []), r.score]);
   }
   return [...groups.entries()]
     .map(([source, scores]): [string, number, number] => [
@@ -363,11 +319,78 @@ function bySource(results: Result[]): [string, number, number][] {
     .sort((a, b) => a[0].localeCompare(b[0]));
 }
 
-// ── Review page (evals/report.html) ──────────────────────────────────────────
+// ── Provenance / history ─────────────────────────────────────────────────────
 
-// Neutral placeholders so the rendered preview reads as designed even though the
-// fixtures reference assets that don't exist. Applied only to the preview, never
-// to the fixture files.
+function buildRecord(results: Result[], specs: Map<string, Spec>): RunRecord {
+  return {
+    runAt: new Date().toISOString(),
+    ...gitInfo(),
+    version: readPackageVersion(),
+    suiteHash: suiteHash(specs),
+    corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
+    producers: Object.fromEntries(bySource(results).map(([source, avg]) => [source, avg])),
+    fixtures: Object.fromEntries(results.map((r) => [r.label, r.score])),
+  };
+}
+
+function readHistory(): RunRecord[] {
+  if (!existsSync(RESULTS_PATH)) return [];
+  return readFileSync(RESULTS_PATH, 'utf8')
+    .split('\n')
+    .filter((line) => line.trim())
+    .map((line) => JSON.parse(line) as RunRecord);
+}
+
+function gitInfo(): { commit: string; branch: string; author: string } {
+  const run = (cmd: string): string => {
+    try {
+      return execSync(cmd, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
+    } catch {
+      return '';
+    }
+  };
+  return {
+    commit: process.env.GITHUB_SHA?.slice(0, 7) || run('git rev-parse --short HEAD') || 'unknown',
+    branch: process.env.GITHUB_REF_NAME || run('git rev-parse --abbrev-ref HEAD') || 'unknown',
+    author: process.env.GITHUB_ACTOR || run('git log -1 --format=%an') || 'unknown',
+  };
+}
+
+function readPackageVersion(): string {
+  try {
+    return (JSON.parse(readFileSync(path.join(ROOT, 'package.json'), 'utf8')) as { version?: string }).version ?? '0.0.0';
+  } catch {
+    return '0.0.0';
+  }
+}
+
+// Hash the spec set + producer inputs + base, so a score change is attributable
+// to the converter only when the suite is unchanged.
+function suiteHash(specs: Map<string, Spec>): string {
+  const h = createHash('sha256');
+  for (const layout of [...specs.keys()].sort()) {
+    h.update(`spec:${layout}`);
+    h.update(readFileSync(path.join(SPEC_DIR, layout, 'expected.json')));
+  }
+  if (existsSync(PRODUCERS_DIR)) {
+    for (const entry of readdirSync(PRODUCERS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
+      if (!entry.isDirectory()) continue;
+      const dir = path.join(PRODUCERS_DIR, entry.name);
+      for (const file of readdirSync(dir).filter((f) => f.endsWith('.html')).sort()) {
+        h.update(`prod:${entry.name}/${file}`);
+        h.update(readFileSync(path.join(dir, file)));
+      }
+    }
+  }
+  const baseDir = path.join(EVAL_DIR, 'base');
+  if (existsSync(baseDir)) {
+    for (const file of readdirSync(baseDir).sort()) h.update(readFileSync(path.join(baseDir, file)));
+  }
+  return `sha256:${h.digest('hex').slice(0, 12)}`;
+}
+
+// ── Review page (report/review.html) — per layout, ideal vs each producer ─────
+
 const IMG_PLACEHOLDER = svgDataUri(
   `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" role="img">` +
     `<rect width="400" height="300" fill="#e7e9ee"/>` +
@@ -399,27 +422,49 @@ function preparePreview(html: string): string {
   return base + swapped;
 }
 
-function renderHtml(results: Result[]): string {
-  const producers = [...new Set(results.map((r) => r.source))].sort();
-  const sections = producers
-    .map((producer) => {
-      const items = results.filter((r) => r.source === producer);
-      return `<section class="producer">
-        <header class="producer__head">
-          <h2>${esc(titleCase(producer))}</h2>
-          <span class="count">${items.length} ${items.length === 1 ? 'layout' : 'layouts'}</span>
+function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
+  const byLayout = new Map<string, Result[]>();
+  for (const r of results) byLayout.set(r.layout, [...(byLayout.get(r.layout) ?? []), r]);
+
+  const sections = [...specs.values()]
+    .map((spec) => {
+      const producers = (byLayout.get(spec.layout) ?? []).sort((a, b) => a.producer.localeCompare(b.producer));
+      const previews = producers.length
+        ? producers
+            .map(
+              (r) => `<figure class="prod">
+                <figcaption>${esc(r.producer)}</figcaption>
+                <div class="frame"><iframe sandbox loading="lazy" srcdoc="${escAttr(preparePreview(r.inputHtml))}"></iframe></div>
+              </figure>`,
+            )
+            .join('\n')
+        : `<p class="missing">No producer inputs for this layout yet.</p>`;
+      return `<section class="layout">
+        <header class="layout__head">
+          <h2>${esc(humanize(spec.layout))}</h2>
+          ${spec.intent ? `<p class="intent">${esc(spec.intent)}</p>` : ''}
         </header>
-        ${items.map(renderFixture).join('\n')}
+        <div class="split">
+          <div class="ideal">
+            <p class="panel-label">Ideal end state</p>
+            <div class="tree"><ul>${renderTree(spec.display)}</ul></div>
+          </div>
+          <div class="renders">
+            <p class="panel-label">Producer renders</p>
+            <div class="prod-grid">${previews}</div>
+          </div>
+        </div>
       </section>`;
     })
     .join('\n');
 
+  const producerNames = [...new Set(results.map((r) => r.producer))].sort();
   return `<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8" />
 <meta name="viewport" content="width=device-width, initial-scale=1" />
-<title>Block Runner — ideal end states</title>
+<title>Block Runner — conversion benchmark</title>
 <style>
   :root {
     color-scheme: light dark;
@@ -428,7 +473,6 @@ function renderHtml(results: Result[]): string {
     --line: oklch(0.91 0.006 262); --line-soft: oklch(0.94 0.005 262);
     --accent: oklch(0.55 0.15 264); --accent-ink: oklch(0.42 0.13 264);
     --radius: 12px;
-    --s1: 4px; --s2: 8px; --s3: 12px; --s4: 16px; --s5: 24px; --s6: 32px; --s7: 48px; --s8: 72px;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -439,70 +483,26 @@ function renderHtml(results: Result[]): string {
     }
   }
   * { box-sizing: border-box; }
-  html { -webkit-text-size-adjust: 100%; }
-  body {
-    margin: 0; background: var(--bg); color: var(--ink);
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif;
-    font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased;
-    text-rendering: optimizeLegibility;
-  }
-  .wrap { max-width: 1400px; margin-inline: auto; padding: var(--s8) var(--s6); }
+  body { margin: 0; background: var(--bg); color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  .wrap { max-width: 1500px; margin-inline: auto; padding: 72px 32px; }
+  .masthead { margin-bottom: 64px; max-width: 70ch; }
+  .masthead h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 620; letter-spacing: -0.025em; margin: 0 0 0.25rem; text-wrap: balance; }
+  .masthead p { margin: 0; color: var(--muted); }
+  .producers-line { margin-top: 1rem; font-size: 0.85rem; color: var(--faint); }
+  .producers-line b { color: var(--muted); }
 
-  .masthead { margin-bottom: var(--s8); max-width: 70ch; }
-  .masthead h1 {
-    font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 620; letter-spacing: -0.025em;
-    line-height: 1.1; margin: 0 0 var(--s3); text-wrap: balance;
-  }
-  .masthead p { margin: 0; color: var(--muted); font-size: 1.02rem; text-wrap: pretty; }
-  .legend { display: flex; gap: var(--s5); margin-top: var(--s5); font-size: 0.85rem; color: var(--faint); flex-wrap: wrap; }
-  .legend b { color: var(--muted); font-weight: 600; }
+  .layout { margin-bottom: 72px; padding-top: 28px; border-top: 1px solid var(--line); }
+  .layout__head { margin-bottom: 24px; }
+  .layout__head h2 { font-size: 1.3rem; font-weight: 640; letter-spacing: -0.015em; margin: 0; }
+  .intent { margin: 0.4rem 0 0; color: var(--muted); font-style: italic; max-width: 80ch; text-wrap: pretty; }
 
-  .producer { margin-bottom: var(--s8); }
-  .producer__head {
-    display: flex; align-items: baseline; gap: var(--s3);
-    padding-bottom: var(--s3); margin-bottom: var(--s6);
-    border-bottom: 1px solid var(--line);
-  }
-  .producer__head h2 { font-size: 1.15rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
-  .count { font-size: 0.8rem; color: var(--faint); font-variant-numeric: tabular-nums; }
+  .split { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 40px; align-items: start; }
+  @media (max-width: 1024px) { .split { grid-template-columns: 1fr; gap: 28px; } }
+  .panel-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
 
-  .fixture { margin-bottom: var(--s8); }
-  .fixture:last-child { margin-bottom: 0; }
-  .fixture__head { margin-bottom: var(--s4); }
-  .fixture__title { display: flex; align-items: center; gap: var(--s3); }
-  .fixture__title h3 { font-size: 1.05rem; font-weight: 600; letter-spacing: -0.01em; margin: 0; }
-  .tag {
-    font-size: 0.7rem; font-weight: 600; letter-spacing: 0.02em; color: var(--accent-ink);
-    background: color-mix(in oklch, var(--accent) 12%, transparent);
-    padding: 2px 8px; border-radius: 999px; white-space: nowrap;
-  }
-  .intent { margin: var(--s2) 0 0; color: var(--muted); font-style: italic; max-width: 78ch; text-wrap: pretty; }
-
-  .body { display: grid; grid-template-columns: minmax(0, 1.55fr) minmax(300px, 1fr); gap: var(--s6); align-items: start; }
-  @media (max-width: 980px) { .body { grid-template-columns: 1fr; gap: var(--s5); } }
-
-  .panel-label {
-    font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase;
-    color: var(--faint); margin: 0 0 var(--s3);
-  }
-
-  .frame {
-    border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden;
-    background: var(--surface); box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 8px 24px -16px oklch(0 0 0 / 0.18);
-  }
-  .frame__bar {
-    display: flex; align-items: center; gap: 6px; padding: 9px 12px;
-    border-bottom: 1px solid var(--line-soft); background: var(--panel);
-  }
-  .frame__bar i { width: 9px; height: 9px; border-radius: 50%; background: var(--line); display: block; }
-  .frame__bar span { margin-left: var(--s2); font-size: 0.72rem; color: var(--faint); font-family: ui-monospace, monospace; }
-  iframe { display: block; width: 100%; height: clamp(360px, 46vh, 540px); border: 0; background: #fff; }
-
-  .tree { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.85; }
+  .tree { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.85; position: sticky; top: 24px; }
   .tree ul { list-style: none; margin: 0; padding: 0; }
-  .tree > ul { padding-left: 0; }
   .tree ul ul { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--line); }
-  .tree li { position: relative; }
   .ns { color: var(--faint); }
   .blk { color: var(--ink); font-weight: 600; }
   .blk--3p { color: var(--accent-ink); }
@@ -510,52 +510,26 @@ function renderHtml(results: Result[]): string {
   .note { color: var(--muted); font-weight: 400; }
   .note::before { content: "· "; color: var(--faint); }
 
-  @media (prefers-reduced-motion: no-preference) {
-    .frame { transition: box-shadow 0.4s cubic-bezier(0.22, 1, 0.36, 1); }
-    .frame:hover { box-shadow: 0 2px 4px oklch(0 0 0 / 0.05), 0 18px 40px -20px oklch(0 0 0 / 0.28); }
-  }
+  .prod-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px; }
+  .prod { margin: 0; }
+  .prod figcaption { font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: capitalize; }
+  .frame { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 8px 24px -16px oklch(0 0 0 / 0.18); }
+  iframe { display: block; width: 100%; height: clamp(320px, 38vh, 460px); border: 0; background: #fff; }
+  .missing { color: var(--faint); font-style: italic; }
 </style>
 </head>
 <body>
   <div class="wrap">
     <header class="masthead">
-      <h1>Ideal end states</h1>
-      <p>For each input design, the WordPress block tree the converter should produce. Review the nesting and block choices — this is the spec, not a scoreboard.</p>
-      <div class="legend">
-        <span><b>Left</b> — rendered input (the design as authored)</span>
-        <span><b>Right</b> — ideal native block tree</span>
-      </div>
+      <h1>Conversion benchmark</h1>
+      <p>One brief per layout, the ideal native block tree, and each producer's HTML answer. Compare how convertible different generators' output is — review the nesting against each render.</p>
+      <p class="producers-line"><b>Producers:</b> ${producerNames.length ? producerNames.map((p) => esc(p)).join(' · ') : '—'} · scores live in the scoreboard, not here.</p>
     </header>
     ${sections}
   </div>
 </body>
 </html>
 `;
-}
-
-function renderFixture(r: Result): string {
-  return `<article class="fixture">
-    <div class="fixture__head">
-      <div class="fixture__title">
-        <h3>${esc(humanize(r.layout))}</h3>
-        <span class="tag">${esc(r.source)}</span>
-      </div>
-      ${r.intent ? `<p class="intent">${esc(r.intent)}</p>` : ''}
-    </div>
-    <div class="body">
-      <div>
-        <p class="panel-label">Input</p>
-        <div class="frame">
-          <div class="frame__bar"><i></i><i></i><i></i><span>${esc(r.layout)}.html</span></div>
-          <iframe sandbox loading="lazy" srcdoc="${escAttr(preparePreview(r.inputHtml))}"></iframe>
-        </div>
-      </div>
-      <div>
-        <p class="panel-label">Ideal end state</p>
-        <div class="tree"><ul>${renderTree(r.expectedTree)}</ul></div>
-      </div>
-    </div>
-  </article>`;
 }
 
 function renderTree(node: DisplayNode): string {
@@ -574,10 +548,6 @@ function splitBlockName(name: string): [string, string] {
 
 function humanize(slug: string): string {
   return slug.replace(/[-_]/g, ' ').replace(/\b\w/g, (c) => c.toUpperCase());
-}
-
-function titleCase(value: string): string {
-  return value.replace(/\b\w/g, (c) => c.toUpperCase());
 }
 
 function esc(value: string): string {
@@ -622,8 +592,6 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
     )
     .join('\n');
 
-  // Δ baseline = the most recent recorded run that isn't this one (handles both
-  // `--record` runs, where current is already the last history entry, and plain runs).
   const lastIsCurrent = history.length > 0 && history[history.length - 1].runAt === current.runAt;
   const prev = lastIsCurrent ? history[history.length - 2] : history[history.length - 1];
   const fixtureRows = Object.entries(current.fixtures)
@@ -633,7 +601,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
       const delta = before === undefined ? '' : score - before;
       const deltaCell =
         delta === '' ? '<span class="faint">—</span>' : delta === 0 ? '<span class="faint">·</span>' : `<span style="color:${delta > 0 ? '#16a34a' : '#dc2626'}">${delta > 0 ? '+' : ''}${delta}</span>`;
-      return `<tr><td class="mono">${esc(label.replace('producers/', ''))}</td><td class="num"><b style="color:${scoreColor(score)}">${score}</b></td><td class="num">${deltaCell}</td></tr>`;
+      return `<tr><td class="mono">${esc(label)}</td><td class="num"><b style="color:${scoreColor(score)}">${score}</b></td><td class="num">${deltaCell}</td></tr>`;
     })
     .join('\n');
 
@@ -662,13 +630,13 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
   .wrap { max-width: 1100px; margin-inline: auto; padding: 72px 32px; }
   h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 620; letter-spacing: -0.025em; margin: 0 0 0.25rem; }
   .sub { color: var(--muted); margin: 0 0 2.5rem; }
-  h2 { font-size: 0.95rem; font-weight: 600; letter-spacing: 0.01em; margin: 2.5rem 0 1rem; }
+  h2 { font-size: 0.95rem; font-weight: 600; margin: 2.5rem 0 1rem; }
   .snapshot { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; padding: 1.25rem 1.5rem; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
   .big { font-size: 2.6rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
-  .big small { display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; letter-spacing: 0.08em; }
+  .big small { display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
   .chip { font-size: 0.8rem; font-weight: 600; color: #fff; background: var(--c); padding: 3px 10px; border-radius: 999px; }
-  .prov { color: var(--faint); font-size: 0.82rem; margin-left: auto; }
+  .prov { color: var(--faint); font-size: 0.82rem; margin-left: auto; text-align: right; }
   .prov .mono { font-family: ui-monospace, monospace; }
   .chart { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 20px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
@@ -681,7 +649,6 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
   .empty code { font-family: ui-monospace, monospace; background: var(--surface); padding: 1px 6px; border-radius: 6px; }
   .grids { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
   @media (max-width: 820px) { .grids { grid-template-columns: 1fr; } }
-  polyline, line { vector-effect: non-scaling-stroke; }
 </style>
 </head>
 <body>
@@ -701,7 +668,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
     <div class="grids">
       <div>
         <h2>Fixtures (latest${prev ? ', Δ vs previous run' : ''})</h2>
-        <table><thead><tr><th>Fixture</th><th class="num">Score</th><th class="num">Δ</th></tr></thead><tbody>${fixtureRows}</tbody></table>
+        <table><thead><tr><th>Producer / layout</th><th class="num">Score</th><th class="num">Δ</th></tr></thead><tbody>${fixtureRows}</tbody></table>
       </div>
       <div>
         <h2>Runs</h2>
@@ -714,7 +681,6 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
 `;
 }
 
-// Simple corpus-average + per-producer line chart over recorded runs.
 function trendChart(history: RunRecord[], producers: string[]): string {
   const W = 1000;
   const H = 240;
@@ -732,7 +698,7 @@ function trendChart(history: RunRecord[], producers: string[]): string {
     if (pts.length === 0) return '';
     const poly = pts.map((p) => `${x(p.i)},${y(p.v)}`).join(' ');
     const dots = pts.map((p) => `<circle cx="${x(p.i)}" cy="${y(p.v)}" r="3" fill="${color}"/>`).join('');
-    return `<polyline points="${poly}" fill="none" stroke="${color}" stroke-width="${width}"/>${dots}`;
+    return `<polyline points="${poly}" fill="none" stroke="${color}" stroke-width="${width}" vector-effect="non-scaling-stroke"/>${dots}`;
   };
 
   const palette = ['#7c7cf0', '#16a34a', '#d97706', '#dc2626', '#0ea5e9'];

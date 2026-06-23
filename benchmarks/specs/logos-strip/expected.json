@@ -1,0 +1,14 @@
+{
+  "intent": "A logo cloud: an eyebrow label, then a horizontal strip of client logos. There is no core logo block; idiomatic core is a group (flex, wrap, centered) holding an eyebrow paragraph and the logo images directly. CAPABILITY GAP: a flat row of images currently mis-detects as core/columns with empty columns (the image is consumed as the column cell and not emitted) — this fixture surfaces that bug. coblocks/logos is the cleaner third-party form.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/paragraph", "contains": "Trusted by teams at" },
+      { "block": "core/image", "contains": "logo-acme.svg" },
+      { "block": "core/image", "contains": "logo-globex.svg" },
+      { "block": "core/image", "contains": "logo-initech.svg" },
+      { "block": "core/image", "contains": "logo-umbrella.svg" },
+      { "block": "core/image", "contains": "logo-northwind.svg" }
+    ]
+  }
+}
