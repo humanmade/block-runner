@@ -107,6 +107,14 @@ interface Result {
   misses: string[];
 }
 
+interface ProducerMeta {
+  generator?: string;
+  provider?: string;
+  model?: string;
+  effort?: string;
+  note?: string;
+}
+
 interface RunRecord {
   runAt: string;
   commit: string;
@@ -120,6 +128,7 @@ interface RunRecord {
   corpusAvg: number;
   producers: Record<string, number>;
   fixtures: Record<string, number>;
+  producerMeta: Record<string, ProducerMeta>;
 }
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -142,9 +151,13 @@ async function main(): Promise<void> {
     ? readdirSync(PRODUCERS_DIR, { withFileTypes: true }).filter((e) => e.isDirectory()).map((e) => e.name).sort()
     : [];
 
+  const onlyProducer = engineArg('--producer');
+  const onlyLayouts = engineArg('--layouts')?.split(',').map((s) => s.trim());
   const results: Result[] = [];
   for (const producer of producers) {
+    if (onlyProducer && producer !== onlyProducer) continue;
     for (const [layout, spec] of specs) {
+      if (onlyLayouts && !onlyLayouts.includes(layout)) continue;
       if (existsSync(producerFile(producer, layout))) {
         results.push(await scoreFixture(producer, layout, spec));
       }
@@ -204,6 +217,19 @@ function baseFor(producer: string): string {
     baseCache.set(producer, existsSync(p) ? readFileSync(p, 'utf8') : '');
   }
   return baseCache.get(producer)!;
+}
+
+// Optional per-producer generation provenance: how that producer's HTML was made
+// (which tool / model / reasoning effort). Distinct from the run's engine model/effort
+// (the converter). Lives at producers/<producer>/producer.json.
+function producerMeta(producer: string): ProducerMeta {
+  const p = path.join(PRODUCERS_DIR, producer, 'producer.json');
+  if (!existsSync(p)) return {};
+  try {
+    return JSON.parse(readFileSync(p, 'utf8')) as ProducerMeta;
+  } catch {
+    return {};
+  }
 }
 
 function composeInput(producer: string, layout: string): string {
@@ -341,7 +367,9 @@ function printConsole(results: Result[]): void {
   const fallbacks = results.reduce((sum, r) => sum + r.fallbacks, 0);
   console.log(`corpus avg: ${avg}  ·  fixtures: ${results.length}  ·  invalid: ${invalid}  ·  fallbacks: ${fallbacks}`);
   for (const [source, avgScore, count] of bySource(results)) {
-    console.log(`  ${source.padEnd(20)} avg ${String(avgScore).padStart(3)}  (${count} layouts)`);
+    const m = producerMeta(source);
+    const tag = m.model ? `  [${m.model}${m.effort && m.effort !== 'n/a' ? `/${m.effort}` : ''}]` : '';
+    console.log(`  ${source.padEnd(20)} avg ${String(avgScore).padStart(3)}  (${count} layouts)${tag}`);
   }
 }
 
@@ -373,6 +401,11 @@ function buildRecord(results: Result[], specs: Map<string, Spec>): RunRecord {
     corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
     producers: Object.fromEntries(bySource(results).map(([source, avg]) => [source, avg])),
     fixtures: Object.fromEntries(results.map((r) => [r.label, r.score])),
+    producerMeta: Object.fromEntries(
+      [...new Set(results.map((r) => r.producer))]
+        .map((p): [string, ProducerMeta] => [p, producerMeta(p)])
+        .filter(([, m]) => Object.keys(m).length > 0),
+    ),
   };
 }
 

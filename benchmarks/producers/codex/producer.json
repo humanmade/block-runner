@@ -1,0 +1,7 @@
+{
+  "generator": "codex",
+  "provider": "openai",
+  "model": "gpt-5.5",
+  "effort": "low",
+  "note": "Generated from specs/<layout>/prompt.md via `codex exec -c model_reasoning_effort=low` (Tailwind output)."
+}
