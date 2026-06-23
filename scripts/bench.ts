@@ -56,6 +56,17 @@ async function loadEngine(): Promise<void> {
   convert = mod.convert;
 }
 
+// Model + reasoning effort behind the conversion. The current engine is
+// deterministic (rule-based), so these default to `deterministic` / `none`; once an
+// LLM translator is wired (Engine B/C), pass --model / --effort (or BLOCK_RUNNER_MODEL
+// / BLOCK_RUNNER_EFFORT) so each recorded run is attributable to the model that produced it.
+function modelLabel(): string {
+  return engineArg('--model') ?? process.env.BLOCK_RUNNER_MODEL ?? 'deterministic';
+}
+function effortLabel(): string {
+  return engineArg('--effort') ?? process.env.BLOCK_RUNNER_EFFORT ?? 'none';
+}
+
 interface ExpectedNode {
   block: string;
   contains?: string;
@@ -103,6 +114,8 @@ interface RunRecord {
   author: string;
   version: string;
   engine: string;
+  model: string;
+  effort: string;
   suiteHash: string;
   corpusAvg: number;
   producers: Record<string, number>;
@@ -354,6 +367,8 @@ function buildRecord(results: Result[], specs: Map<string, Spec>): RunRecord {
     ...gitInfo(),
     version: readPackageVersion(),
     engine: engineLabel(),
+    model: modelLabel(),
+    effort: effortLabel(),
     suiteHash: suiteHash(specs),
     corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
     producers: Object.fromEntries(bySource(results).map(([source, avg]) => [source, avg])),
@@ -687,7 +702,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
     <div class="snapshot">
       <div class="big"><small>Corpus avg${recorded ? '' : ' (current)'}</small>${latest.corpusAvg}</div>
       <div class="chips">${producerChips}</div>
-      <div class="prov">${esc(latest.runAt.slice(0, 10))} · <span class="mono">${esc(latest.commit)}</span> · ${esc(latest.author)} · v${esc(latest.version)}<br><span class="mono faint">${esc(latest.suiteHash)}</span></div>
+      <div class="prov">${esc(latest.runAt.slice(0, 10))} · <span class="mono">${esc(latest.commit)}</span> · ${esc(latest.author)} · v${esc(latest.version)}<br><span class="mono faint">${esc(latest.engine ?? 'local')} · ${esc(latest.model ?? '—')}/${esc(latest.effort ?? '—')} · ${esc(latest.suiteHash)}</span></div>
     </div>
 
     <h2>Trend</h2>
