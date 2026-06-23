@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import process from 'node:process';
 import { Command, CommanderError } from 'commander';
 import fg from 'fast-glob';
@@ -13,6 +14,7 @@ interface CliOptions extends CommonOptions {
   config?: string;
   json?: boolean;
   out?: string;
+  wpAppPasswordEnv?: string;
 }
 
 const program = new Command();
@@ -23,7 +25,9 @@ program
   .version('0.1.0')
   .exitOverride();
 
-addSharedOptions(program.command('validate <globOrStdin>').description('Validate Gutenberg block markup.'))
+addSharedOptions(program.command('validate <globOrStdin>').description('Validate Gutenberg block markup.'), {
+  output: false,
+})
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
     const inputs = await readInputs(globOrStdin);
@@ -55,7 +59,7 @@ addSharedOptions(program.command('fix <globOrStdin>').description('Canonicalize 
     );
     const report = aggregateReports('fix', reports);
     report.output = reports.map((item) => item.output ?? '').join('\n');
-    await emit(report, options);
+    await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
 
@@ -63,10 +67,10 @@ addSharedOptions(program.command('convert <htmlOrStdin>').description('Convert a
   .option('--resolver <kind>', 'media resolver: noop, map, wpcli, rest')
   .option('--wp-url <url>', 'WordPress URL for wpcli/rest media resolution')
   .option('--wp-user <user>', 'WordPress username for REST media resolution')
-  .option('--wp-app-password <password>', 'WordPress application password for REST media resolution')
+  .option('--wp-app-password-env <name>', 'environment variable containing a WordPress application password')
   .action(async (htmlOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
-    const inputs = await readInputs(htmlOrStdin);
+    const inputs = await readInputs(htmlOrStdin, { allowInline: true });
     ensureSingleOutputTarget(inputs, options);
     const reports = await Promise.all(
       inputs.map((input) =>
@@ -78,7 +82,7 @@ addSharedOptions(program.command('convert <htmlOrStdin>').description('Convert a
     );
     const report = aggregateReports('convert', reports);
     report.output = reports.map((item) => item.output ?? '').join('\n');
-    await emit(report, options);
+    await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
 
@@ -87,7 +91,7 @@ async function main(): Promise<void> {
     await program.parseAsync(process.argv);
   } catch (error) {
     if (error instanceof CommanderError) {
-      process.exitCode = 2;
+      process.exitCode = error.exitCode === 0 ? 0 : 2;
       return;
     }
 
@@ -102,24 +106,32 @@ async function main(): Promise<void> {
   }
 }
 
-function addSharedOptions(command: Command): Command {
-  return command
+function addSharedOptions(command: Command, options: { output?: boolean } = {}): Command {
+  const withCommon = command
     .option('--config <path>', 'path to block-runner config')
     .option('--json', 'emit JSON report')
-    .option('--out <path>', 'write converted/fixed markup to a file')
     .option('--strict', 'fail on strict warnings')
     .option('--explain', 'include converter rule attribution and near-misses');
+
+  return options.output === false
+    ? withCommon
+    : withCommon.option('--out <path>', 'write converted/fixed markup to a file');
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {
-  const { config, json, out, ...rest } = options;
+  const { config, json, out, wpAppPasswordEnv, ...rest } = options;
+  const wpAppPassword = wpAppPasswordEnv ? process.env[wpAppPasswordEnv] : rest.wpAppPassword;
   return {
     ...rest,
     configPath: config,
+    wpAppPassword,
   };
 }
 
-async function readInputs(target: string): Promise<Array<{ path?: string; content: string }>> {
+async function readInputs(
+  target: string,
+  options: { allowInline?: boolean } = {},
+): Promise<Array<{ path?: string; content: string }>> {
   if (target === '-') {
     return [{ path: '<stdin>', content: await readStdin() }];
   }
@@ -134,6 +146,9 @@ async function readInputs(target: string): Promise<Array<{ path?: string; conten
   });
 
   if (files.length === 0) {
+    if (options.allowInline && looksLikeInlineHtml(target)) {
+      return [{ path: '<inline>', content: target }];
+    }
     throw new Error(`No files matched: ${target}`);
   }
 
@@ -166,8 +181,13 @@ function aggregateReports(command: BlockRunnerReport['command'], reports: BlockR
   };
 }
 
-async function emit(report: BlockRunnerReport, options: CliOptions): Promise<void> {
+async function emit(
+  report: BlockRunnerReport,
+  options: CliOptions,
+  inputs: Array<{ path?: string; content: string }> = [],
+): Promise<void> {
   if (report.output && options.out) {
+    ensureSafeOutputTarget(report, options, inputs);
     await writeFile(options.out, report.output);
   }
 
@@ -208,6 +228,29 @@ function ensureSingleOutputTarget(inputs: Array<{ path?: string; content: string
   if (inputs.length > 1 && options.out) {
     throw new Error('--out can only be used with a single input file or stdin');
   }
+}
+
+function ensureSafeOutputTarget(
+  report: BlockRunnerReport,
+  options: CliOptions,
+  inputs: Array<{ path?: string; content: string }>,
+): void {
+  if (!options.out) {
+    return;
+  }
+
+  if (!report.ok) {
+    throw new Error('--out is only written when the command succeeds');
+  }
+
+  const inputPath = inputs.length === 1 ? inputs[0]?.path : undefined;
+  if (inputPath && inputPath !== '<stdin>' && inputPath !== '<inline>' && path.resolve(inputPath) === path.resolve(options.out)) {
+    throw new Error('--out must not overwrite the input file');
+  }
+}
+
+function looksLikeInlineHtml(value: string): boolean {
+  return /<([a-z][\w:-]*)(\s|>|\/>)/i.test(value) || /<!--\s+wp:/.test(value);
 }
 
 await main();
