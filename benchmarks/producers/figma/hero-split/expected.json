@@ -1,0 +1,34 @@
+{
+  "intent": "The same split hero, but as a raw Figma export: absolutely-positioned divs, hashed class names, px-everything, a button that is a div wrapping a span, and an image that is a background-image div. The ideal end state is identical to the authored hero — cover with a two-column split (text + image). CAPABILITY GAP: Figma soup carries no semantic/class signals, so the converter recovers almost none of this today. This fixture is the benchmark for the hardest producer.",
+  "source": "figma",
+  "tree": {
+    "block": "core/cover",
+    "children": [
+      {
+        "block": "core/columns",
+        "children": [
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/paragraph", "contains": "NEW IN 2026" },
+              { "block": "core/heading", "contains": "native blocks" },
+              { "block": "core/paragraph", "contains": "manual cleanup" },
+              {
+                "block": "core/buttons",
+                "children": [
+                  { "block": "core/button", "contains": "Get started" }
+                ]
+              }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/image", "contains": "product" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

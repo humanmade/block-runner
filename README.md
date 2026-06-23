@@ -106,6 +106,43 @@ export default {
 };
 ```
 
+## Styling fidelity
+
+Design HTML often carries custom CSS — and sometimes JavaScript — that doesn't match
+the target theme. The `styling` level controls how much of it Block Runner keeps. The
+levels run from safest (cleanest, most editable blocks) to most faithful (keeps the
+original look, but less editable):
+
+```
+strict ───────────────────────────────────────────────► source
+cleaner · more on-brand · more editable   ·   more faithful to the original
+```
+
+| Level | What it does |
+|---|---|
+| `strict` | Map to the theme only. Off-theme styles are dropped. Cleanest, fully on-brand, fully editable. |
+| `relaxed` | Keep exact off-theme values on the block (custom color, size, spacing). Still native and fully editable. |
+| `open` | Also keep CSS no block can express, by wrapping the element and shipping that CSS alongside. Look preserved, structure still editable. |
+| `source` | Keep the original markup as a Custom HTML block. Exact, but not editable. Last resort. |
+
+You set one ceiling. Per block, Block Runner uses the **strictest level that still
+captures the design**, and never goes past your ceiling.
+
+```js
+// block-runner.config.mjs
+export default { styling: 'relaxed' }; // default
+```
+
+```sh
+block-runner convert hero.html --styling open
+```
+
+Custom JavaScript is never inlined. A behavior maps to a native interactive block,
+comes from a block plugin, or is dropped — and every drop or escalation is reported.
+
+> Status: `relaxed` and `open` are in progress. Today the converter behaves like
+> `strict` (off-theme styling is dropped) with a `source` (Custom HTML) fallback.
+
 ## License
 
 GPL-2.0-or-later.

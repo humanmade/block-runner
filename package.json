@@ -27,6 +27,8 @@
     "build": "tsup",
     "clean": "rm -rf dist",
     "dev": "tsx src/cli.ts",
+    "bench": "tsx scripts/bench.ts",
+    "bench:record": "tsx scripts/bench.ts --record",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",

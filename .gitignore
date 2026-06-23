@@ -21,3 +21,8 @@ build/
 .vite/
 .idea/
 .vscode/
+.clawpatch/
+
+# generated benchmark reports
+report/
+.playwright-mcp/

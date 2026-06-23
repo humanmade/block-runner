@@ -1,0 +1,39 @@
+{
+  "intent": "A features section: an H2, then a three-column grid. Each column is an icon image, an H3, and a paragraph.",
+  "source": "impeccable",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Why teams choose us" },
+      {
+        "block": "core/columns",
+        "children": [
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/image", "contains": "icon-speed.svg" },
+              { "block": "core/heading", "contains": "Fast by default" },
+              { "block": "core/paragraph", "contains": "manual cleanup" }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/image", "contains": "icon-valid.svg" },
+              { "block": "core/heading", "contains": "Always valid" },
+              { "block": "core/paragraph", "contains": "validator" }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/image", "contains": "icon-open.svg" },
+              { "block": "core/heading", "contains": "Open and scriptable" },
+              { "block": "core/paragraph", "contains": "command line" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

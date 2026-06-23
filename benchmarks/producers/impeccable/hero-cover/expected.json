@@ -1,0 +1,33 @@
+{
+  "intent": "A full-width cover at the top. Inside it, two columns: the left column is an image; the right column is a heading, then a paragraph, then a button group containing one button.",
+  "source": "impeccable",
+  "tree": {
+    "block": "core/cover",
+    "children": [
+      {
+        "block": "core/columns",
+        "children": [
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/image", "contains": "founder.jpg" }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/heading", "contains": "Built for handoff" },
+              { "block": "core/paragraph", "contains": "canonicalize" },
+              {
+                "block": "core/buttons",
+                "children": [
+                  { "block": "core/button", "contains": "Start now" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

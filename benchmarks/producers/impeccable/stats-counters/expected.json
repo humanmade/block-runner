@@ -1,0 +1,43 @@
+{
+  "intent": "A stats band: an H2, then a four-column row of figures. Each column is the big number and a label. There is no core counter block; in static core the big number is a styled paragraph (NOT a heading — a stat number has no document-outline role), with the label as a second paragraph. The animated equivalent is coblocks/counter (third-party).",
+  "source": "impeccable",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "By the numbers" },
+      {
+        "block": "core/columns",
+        "children": [
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/paragraph", "contains": "100k+" },
+              { "block": "core/paragraph", "contains": "blocks converted" }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/paragraph", "contains": "99.9%" },
+              { "block": "core/paragraph", "contains": "validation pass rate" }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/paragraph", "contains": "12ms" },
+              { "block": "core/paragraph", "contains": "average per block" }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              { "block": "core/paragraph", "contains": "0" },
+              { "block": "core/paragraph", "contains": "API keys required" }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}
