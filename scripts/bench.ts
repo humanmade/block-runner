@@ -25,12 +25,36 @@
  */
 import { readFileSync, readdirSync, existsSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createHash } from 'node:crypto';
 import { execSync } from 'node:child_process';
-import { convert } from '../src/index.js';
 import { parseMarkup } from '../src/headless/wp.js';
-import type { WpBlock } from '../src/types.js';
+import type { WpBlock, ConvertOptions, BlockRunnerReport } from '../src/types.js';
+
+// The engine under test, loaded dynamically so it can be swapped for backtesting:
+// `--engine <path>` or BLOCK_RUNNER_ENGINE points at another version's built entry
+// (e.g. an old commit's dist/index.js in a git worktree). Default = this repo's source.
+// parseMarkup (above) stays current — it's a stable scoring utility, not the thing
+// under test. The suite is the constant; the engine is the variable.
+let convert: (input: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
+
+function engineArg(flag: string): string | undefined {
+  const i = process.argv.indexOf(flag);
+  return i >= 0 ? process.argv[i + 1] : undefined;
+}
+function enginePath(): string | undefined {
+  return engineArg('--engine') ?? process.env.BLOCK_RUNNER_ENGINE ?? undefined;
+}
+function engineLabel(): string {
+  const p = enginePath();
+  if (!p) return 'local';
+  return engineArg('--engine-label') ?? process.env.BLOCK_RUNNER_ENGINE_LABEL ?? path.basename(path.dirname(path.resolve(p)));
+}
+async function loadEngine(): Promise<void> {
+  const p = enginePath();
+  const mod = p ? await import(pathToFileURL(path.resolve(p)).href) : await import('../src/index.js');
+  convert = mod.convert;
+}
 
 interface ExpectedNode {
   block: string;
@@ -78,6 +102,7 @@ interface RunRecord {
   branch: string;
   author: string;
   version: string;
+  engine: string;
   suiteHash: string;
   corpusAvg: number;
   producers: Record<string, number>;
@@ -93,6 +118,8 @@ const SCOREBOARD_PATH = path.join(ROOT, 'report', 'scoreboard.html');
 const RESULTS_PATH = path.join(EVAL_DIR, 'results.jsonl');
 
 async function main(): Promise<void> {
+  await loadEngine();
+  if (engineLabel() !== 'local') console.log(`engine under test: ${engineLabel()} (${enginePath()})`);
   const specs = loadSpecs();
   if (specs.size === 0) {
     console.log('No specs found under benchmarks/specs/.');
@@ -326,6 +353,7 @@ function buildRecord(results: Result[], specs: Map<string, Spec>): RunRecord {
     runAt: new Date().toISOString(),
     ...gitInfo(),
     version: readPackageVersion(),
+    engine: engineLabel(),
     suiteHash: suiteHash(specs),
     corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
     producers: Object.fromEntries(bySource(results).map(([source, avg]) => [source, avg])),
@@ -583,7 +611,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
     .map(
       (r) => `<tr>
         <td>${esc(r.runAt.slice(0, 10))}</td>
-        <td class="mono">${esc(r.commit)}</td>
+        <td class="mono">${esc(r.commit)}${r.engine && r.engine !== 'local' ? ` <span class="faint">eng:${esc(r.engine)}</span>` : ''}</td>
         <td>${esc(r.author)}</td>
         <td class="num"><b style="color:${scoreColor(r.corpusAvg)}">${r.corpusAvg}</b></td>
         <td>${Object.entries(r.producers).sort().map(([p, v]) => `${esc(p)} ${v}`).join(' · ')}</td>
