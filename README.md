@@ -14,7 +14,9 @@ design tools spit out HTML, but the block editor only trusts blocks it recognize
 freezes everything else into a single "Custom HTML" blob, or breaks the block outright with
 "Attempt Block Recovery." Block Runner converts that output into real, nested, **native**
 Gutenberg blocks (`wp:cover > wp:columns > wp:buttons`) and proves every result is
-editor-valid. Built to sit in an agent loop, a content pipeline, or a CI gate.
+editor-valid. Built to sit in an agent loop, a content pipeline, or a CI gate, and
+deliberately a primitive rather than a platform: the blocks it emits are plain, native
+WordPress, editable in any editor with nothing proprietary to keep installed.
 
 | | Generated HTML reaches the editor as… |
 | --- | --- |
@@ -55,15 +57,15 @@ as a standalone validator in CI.
 
 ### Convert: generated HTML → native blocks
 
-- **Native blocks, not blobs.** Real `wp:cover > wp:columns > wp:buttons`, properly nested, with real media ids.
-- **Built for agents and pipelines.** Feed it whatever your LLM, agent, or design tool emits; get back blocks the editor trusts.
+- **Native blocks, never locked in.** Real `wp:cover > wp:columns > wp:buttons`, properly nested, with real media ids: plain core blocks anyone can edit in any WordPress, not a builder's proprietary block types you have to keep its plugin installed to touch.
+- **Any model, any agent.** Feed it whatever your LLM, agent, or design tool emits, from any vendor, and drop it into your own pipeline instead of adopting someone else's editor.
 - **Media resolution.** Resolve images to real attachment ids via a map, WP-CLI, or the REST API.
 - **Styling fidelity, your call.** Keep off-theme styles or map them to your theme, up to a ceiling you set.
 - **Extensible.** Built-in rules out of the box; add your own, or hand the hardest layouts to an LLM (experimental).
 
 ### Validate: prove it's editor-valid
 
-- **Valid means what the editor means.** Every result runs through a gate wired to headless Gutenberg, not a converter's wishful thinking.
+- **A seatbelt for generated blocks.** Models and builders will cheerfully emit markup that corrupts the editor; every result is held to a gate wired to headless Gutenberg first, so *valid* means what the editor means, not what a generator hoped.
 - **Reproducible gate.** Same markup, same verdict, every time. Safe to run on every request and in CI.
 - **Canonicalize.** Rewrite near-miss markup into the exact shape the editor expects.
 - **Never fails silently.** When something can't be expressed natively, it says so and points at the exact line.
