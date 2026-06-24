@@ -49,6 +49,15 @@ block-runner convert hero.html --out hero.blocks.html
 Every run is checked against headless Gutenberg, so what comes back is guaranteed
 editor-valid, or Block Runner tells you exactly what wasn't and points at the line.
 
+## Benchmark
+
+![Fidelity benchmark: raw Claude and Codex writing block markup themselves score 35 to 73, while Block Runner with the same models scores 93 to 99, across simple and complex blocks](assets/benchmark.png)
+
+Every conversion is scored from 0 to 100 against a fixed suite of design sections with a
+known ideal block tree, by how faithfully it reproduces the intended `wp:*` structure and
+content. The comparison is raw LLMs writing the block markup themselves versus Block Runner
+pairing the same model (GPT-5.5, Opus) with its validity gate, across simple and complex layouts.
+
 ## What it does
 
 Two jobs: **convert** generated HTML into native blocks, and **validate** that what you ship
@@ -230,7 +239,7 @@ comes from a block plugin, or is dropped, and every drop or escalation is report
 > Status: `relaxed` and `open` are in progress. Today the converter behaves like
 > `strict` (off-theme styling is dropped) with a `source` (Custom HTML) fallback.
 
-## Benchmark
+## Running the benchmark
 
 A conversion benchmark lives under `benchmarks/`: it measures how faithfully real generator
 output (Impeccable, Codex, Claude, and more) converts to native blocks, across swappable
