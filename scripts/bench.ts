@@ -103,6 +103,7 @@ interface Result {
   contentPct: number;
   valid: boolean;
   fallbacks: number;
+  coverage: number;
   score: number;
   misses: string[];
 }
@@ -126,6 +127,8 @@ interface RunRecord {
   effort: string;
   suiteHash: string;
   corpusAvg: number;
+  coverage: number;
+  confidence: number | null;
   producers: Record<string, number>;
   fixtures: Record<string, number>;
   producerMeta: Record<string, ProducerMeta>;
@@ -252,6 +255,7 @@ async function scoreFixture(producer: string, layout: string, spec: Spec): Promi
   const contentPct = tally.contentTotal === 0 ? 1 : tally.contentMatched / tally.contentTotal;
   const valid = report.summary.invalid === 0;
   const fallbacks = countByName(produced, 'core/html');
+  const cover = coverage(inputHtml, report.output ?? '');
 
   let score = 0.75 * structurePct + 0.25 * contentPct;
   if (!valid) score *= 0.5;
@@ -265,6 +269,7 @@ async function scoreFixture(producer: string, layout: string, spec: Spec): Promi
     contentPct,
     valid,
     fallbacks,
+    coverage: cover,
     score: Math.round(score * 100),
     misses: tally.misses,
   };
@@ -341,6 +346,26 @@ function countByName(blocks: WpBlock[], name: string): number {
   return total;
 }
 
+// Coverage = fraction of the input's visible text that survives into the output.
+// Catches *silent content loss* (text dropped entirely) — distinct from structure
+// (wrong blocks) and fallbacks (spaghetti that still preserves text). Nothing should
+// vanish without a trace.
+function visibleText(html: string): string {
+  return html
+    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
+    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
+    .replace(/<!--[\s\S]*?-->/g, ' ')
+    .replace(/<[^>]+>/g, ' ')
+    .replace(/&[a-z]+;/gi, ' ')
+    .toLowerCase();
+}
+function coverage(inputHtml: string, output: string): number {
+  const inputWords = [...new Set(visibleText(inputHtml).match(/[a-z0-9]{3,}/g) ?? [])];
+  if (inputWords.length === 0) return 1;
+  const outText = visibleText(output);
+  return inputWords.filter((w) => outText.includes(w)).length / inputWords.length;
+}
+
 function pct(matched: number, total: number): number {
   return total === 0 ? 1 : matched / total;
 }
@@ -352,20 +377,21 @@ function fmtPct(value: number): string {
 // ── Console scoreboard ───────────────────────────────────────────────────────
 
 function printConsole(results: Result[]): void {
-  console.log('\nFIXTURE                                STRUCT  CONTENT  VALID  FALLBKS  SCORE');
-  console.log('─'.repeat(78));
+  console.log('\nFIXTURE                                STRUCT  CONTENT   COVER  VALID  FALLBKS  SCORE');
+  console.log('─'.repeat(86));
   for (const r of results) {
     console.log(
       `${r.label.padEnd(38)} ${fmtPct(r.structurePct).padStart(6)} ${fmtPct(r.contentPct).padStart(8)} ` +
-        `${(r.valid ? '✓' : '✗').padStart(6)} ${String(r.fallbacks).padStart(8)} ${String(r.score).padStart(6)}`,
+        `${fmtPct(r.coverage).padStart(7)} ${(r.valid ? '✓' : '✗').padStart(6)} ${String(r.fallbacks).padStart(8)} ${String(r.score).padStart(6)}`,
     );
     for (const miss of r.misses) console.log(`  ↳ ${miss}`);
   }
-  console.log('─'.repeat(78));
+  console.log('─'.repeat(86));
   const avg = Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length);
+  const cov = Math.round((results.reduce((sum, r) => sum + r.coverage, 0) / results.length) * 100);
   const invalid = results.filter((r) => !r.valid).length;
   const fallbacks = results.reduce((sum, r) => sum + r.fallbacks, 0);
-  console.log(`corpus avg: ${avg}  ·  fixtures: ${results.length}  ·  invalid: ${invalid}  ·  fallbacks: ${fallbacks}`);
+  console.log(`corpus avg: ${avg}  ·  coverage: ${cov}%  ·  fixtures: ${results.length}  ·  invalid: ${invalid}  ·  fallbacks: ${fallbacks}`);
   for (const [source, avgScore, count] of bySource(results)) {
     const m = producerMeta(source);
     const tag = m.model ? `  [${m.model}${m.effort && m.effort !== 'n/a' ? `/${m.effort}` : ''}]` : '';
@@ -399,6 +425,11 @@ function buildRecord(results: Result[], specs: Map<string, Spec>): RunRecord {
     effort: effortLabel(),
     suiteHash: suiteHash(specs),
     corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
+    coverage: Math.round((results.reduce((sum, r) => sum + r.coverage, 0) / results.length) * 100),
+    // Per-conversion confidence is engine-emitted (calibrated: HIGH only when no judgment
+    // was involved). The deterministic engine doesn't emit it yet → null. Populated once an
+    // engine reports it on its report.summary.
+    confidence: null,
     producers: Object.fromEntries(bySource(results).map(([source, avg]) => [source, avg])),
     fixtures: Object.fromEntries(results.map((r) => [r.label, r.score])),
     producerMeta: Object.fromEntries(

@@ -124,6 +124,29 @@ make "did this generalize?" measurable (`08`). Coverage is the metric; rule-coun
 Orthogonality is the test: if a proposed capability overlaps an existing one, fold it in —
 the machine stays small because every addition is independent and composition does the rest.
 
+### C9. Account for every input, and say how sure you are
+
+Two disciplines that make `00`'s "nothing degrades in silence" *measurable*:
+
+- **Coverage — nothing vanishes.** Every input element is accounted for in the output:
+  converted to a block, captured in a fallback, or explicitly flagged — never dropped. The
+  benchmark measures this directly (the **`coverage` axis**: the fraction of the input's
+  visible text that survives into the output), so *silent content loss* — text gone
+  entirely, distinct from wrong structure (C3) or spaghetti (fallbacks) — shows up as a
+  number, not a surprise. An LLM that skips or hallucinates, or a rule that drops a node,
+  loses coverage.
+- **Confidence — calibrated, never a filter.** Each conversion (ideally each block) carries
+  a confidence the engine emits, calibrated hard: reserve HIGH for cases where *no judgment
+  was involved*; anything inferred from ambiguous input is MEDIUM at best; non-semantic
+  input (utility soup, positioned divs) carries a lower ceiling than clean semantic input.
+  Confidence is **informational, not a gate** — a LOW node is still emitted (or flagged),
+  never silently omitted (`00` #5). It makes the machine's uncertainty legible and points
+  human review exactly where it's needed.
+
+Together with the ladder (C6): coverage catches *loss*, confidence catches *guesses*, the
+ladder guarantees *validity*. "Did anything get quietly lost or guessed?" becomes three
+measured signals instead of a hope.
+
 ## What this means for the next build
 
 The deterministic rules (`src/convert/defaults.ts`) are the C1/C2 violation in the flesh.

@@ -123,3 +123,24 @@ keep in mind:
    test.
 4. **Self-contained only.** Inline CSS is honoured (the converter extracts `<style>`);
    external stylesheets/assets are not fetched. Keep each unit standalone.
+
+## Coverage axis
+
+Beyond structure/content/validity/fallbacks, the scorer reports **COVERAGE**: the fraction
+of the input's visible text that survives into the output. It catches *silent content loss*
+— text dropped entirely — which is distinct from wrong structure (it parsed to the wrong
+blocks) and from fallbacks (Custom HTML still preserves the text). An engine that skips or
+hallucinates loses coverage even when its structure score looks fine. It's the measurable
+half of "nothing degrades in silence" (`00` #5, `11` C9); confidence (engine-emitted) is
+the other half, recorded as `confidence` once an engine reports it.
+
+## Known gap: visual fidelity
+
+Structure, content, coverage, and validity together still do **not** prove the converted
+blocks *look* like the original design — validity ≠ fidelity (`00` #4). A conversion can
+pass every axis and render wrong (off colours, spacing, an order that reads differently).
+The missing axis is a **rendered before/after diff**: render the input and the produced
+blocks (the latter needs a WP/theme render), screenshot both, and diff. `report/review.html`
+already renders the input, so it's the natural place to grow this. Until then design
+fidelity stays an explicit human-eye check, kept separate from the scored axes so a green
+score never masquerades as "looks right."
