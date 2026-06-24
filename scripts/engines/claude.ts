@@ -15,10 +15,15 @@ import { validate } from '../../src/index.js';
 import { CONVERT_PROMPT as PROMPT, extractBlocks } from './prompt.js';
 import type { ConvertOptions, BlockRunnerReport } from '../../src/types.js';
 
+function modelName(): string {
+  const i = process.argv.indexOf('--model');
+  return (i >= 0 ? process.argv[i + 1] : process.env.BLOCK_RUNNER_MODEL) ?? 'opus';
+}
+
 export async function convert(html: string, _opts?: ConvertOptions): Promise<BlockRunnerReport> {
   let markup = '';
   try {
-    const out = execFileSync('claude', ['-p', '--model', 'opus', '--permission-mode', 'bypassPermissions'], {
+    const out = execFileSync('claude', ['-p', '--model', modelName(), '--permission-mode', 'bypassPermissions'], {
       input: PROMPT + html,
       encoding: 'utf8',
       maxBuffer: 16 * 1024 * 1024,

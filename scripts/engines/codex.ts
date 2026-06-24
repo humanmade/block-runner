@@ -21,12 +21,17 @@ function reasoningEffort(): string {
   return v && v !== 'none' && v !== 'n/a' ? v : 'low';
 }
 
+function modelName(): string {
+  const i = process.argv.indexOf('--model');
+  return (i >= 0 ? process.argv[i + 1] : process.env.BLOCK_RUNNER_MODEL) ?? 'gpt-5.5';
+}
+
 export async function convert(html: string, _opts?: ConvertOptions): Promise<BlockRunnerReport> {
   let markup = '';
   try {
     const out = execFileSync(
       'codex',
-      ['exec', '-c', `model_reasoning_effort=${reasoningEffort()}`, '--dangerously-bypass-approvals-and-sandbox', '-'],
+      ['exec', '-m', modelName(), '-c', `model_reasoning_effort=${reasoningEffort()}`, '--dangerously-bypass-approvals-and-sandbox', '-'],
       { input: PROMPT + html, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'], timeout: 240000, killSignal: 'SIGKILL' },
     );
     markup = extractBlocks(out);

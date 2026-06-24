@@ -31,3 +31,6 @@ build/
 # generated benchmark reports
 report/
 .playwright-mcp/
+
+# Raw research reference (local)
+WORDPRESS_BLOCK_PATTERNS_REFERENCE.md

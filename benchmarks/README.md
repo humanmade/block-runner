@@ -103,3 +103,59 @@ Per fixture, four axes:
 Composite `SCORE` = 75% structure + 25% content, halved if invalid. Misses print
 beneath each row, pointing at the exact expected node that wasn't satisfied — that's
 the signal for which rule to fix next.
+
+## Engines (the converter axis)
+
+The thing *doing* the HTML→blocks conversion is swappable. An **engine** is a module
+exporting `convert(html, options) => { output, summary }` (output = block-markup string).
+The default is the deterministic rules in `src/`. Experimental LLM translator engines live
+in `scripts/engines/` (Engine B — the LLM translates, the gate validates), all sharing
+`prompt.ts`:
+
+- `codex.ts` — Codex CLI (`codex exec`).
+- `claude.ts` — Claude Code CLI (`claude -p`, harness/OAuth — no API key).
+
+Run a non-default engine:
+
+```sh
+npm run bench -- --engine scripts/engines/codex.ts  --engine-label codex       --model gpt-5.5 --effort high --record
+npm run bench -- --engine scripts/engines/claude.ts --engine-label claude-code --model sonnet  --effort high --record
+```
+
+- `--engine <path>` (or `BLOCK_RUNNER_ENGINE`) — the engine module; omit for the local rules.
+- `--engine-label` / `--model` / `--effort` — recorded as the run's `engine` / `model` / `effort` provenance.
+- `--producer <name>` / `--layouts a,b` — scope a run to a subset (cheap iteration; don't `--record` a scoped run as a baseline).
+
+To add an engine: drop a module in `scripts/engines/` exporting `convert()`. For an LLM
+engine, translate then `validate()` through the gate, and parse the model's output with
+`extractBlocks()` from `prompt.ts` (tolerates missing markers / code fences). Give it a
+per-call timeout so an unattended run can't stall.
+
+## Backtesting
+
+Because the engine is swappable and every record carries a `suiteHash`, you can re-run the
+**current** suite against **older** engine versions for a true apples-to-apples curve
+(suite held constant, engine varied):
+
+```sh
+scripts/backtest.sh <commit> [<commit> …]
+```
+
+It worktrees each commit, builds it, and runs the current suite against its `dist/`,
+recording `engine=<commit>`. Load-bearing rule: keep `convert()`'s public API stable.
+Full methodology + caveats: `md/08-benchmark-system.md`.
+
+## Contributing
+
+Three additive extension points — none requires touching the core:
+
+1. **Producer** (an input source) — `producers/<name>/<layout>.html` (+ optional `producer.json`).
+2. **Engine** (a converter) — `scripts/engines/<name>.ts` exporting `convert()`.
+3. **Output target** (a block vocabulary, e.g. CoBlocks) — an adapter; directional, see `md/04` + `md/09`.
+
+Run `npm run bench` (prints the scorecard + writes `report/`); `npm run bench:record`
+appends a provenance-tagged run to `results.jsonl`. The golden rule (`md/11`): **be
+specific about the output (core blocks), neutral about the variable axes — never
+special-case one producer or one engine/model.** The `suiteHash` tells you when two runs
+are comparable; a change should move a *class* of fixtures across producers and engines,
+not a single cell.

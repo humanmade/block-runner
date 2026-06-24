@@ -143,6 +143,22 @@ comes from a block plugin, or is dropped — and every drop or escalation is rep
 > Status: `relaxed` and `open` are in progress. Today the converter behaves like
 > `strict` (off-theme styling is dropped) with a `source` (Custom HTML) fallback.
 
+## Benchmark
+
+A conversion benchmark lives under `benchmarks/`: it measures how faithfully real generator
+output (Impeccable, Codex, Claude, …) converts to native blocks, across swappable conversion
+engines (the deterministic rules; experimental LLM translators run via their CLIs — no API
+key).
+
+```sh
+npm run bench          # score the suite; write report/review.html + report/scoreboard.html
+npm run bench:record   # also append a provenance-tagged run to benchmarks/results.jsonl
+```
+
+Runs are recorded with `engine` / `model` / `effort` / `suiteHash`, so older engines stay
+backtestable against the current suite (`scripts/backtest.sh`). See `benchmarks/README.md`
+for adding producers and engines.
+
 ## License
 
 GPL-2.0-or-later.
