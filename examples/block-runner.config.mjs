@@ -2,7 +2,7 @@ export default {
   strict: false,
   media: {
     resolver: 'map',
-    mapFile: './examples/media-map.json',
+    mapFile: './media-map.json',
   },
   tokens: {
     colors: {

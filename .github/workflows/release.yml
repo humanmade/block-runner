@@ -1,0 +1,29 @@
+name: Release
+
+# Publishes to npm with provenance via Trusted Publishing (OIDC) — no long-lived
+# NPM_TOKEN in the repo. Triggered by publishing a GitHub Release, which acts as
+# the manual gate. One-time npm-side setup is required first: see RELEASING.md.
+
+on:
+  release:
+    types: [published]
+
+permissions:
+  contents: read
+  id-token: write # required for provenance attestation + trusted publishing
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          registry-url: https://registry.npmjs.org
+      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      - run: npm ci
+      - run: npm run verify
+      - run: npm publish --provenance --access public
+        # No NODE_AUTH_TOKEN: Trusted Publishing authenticates via OIDC.
+        # Provenance is generated automatically; --provenance makes intent explicit.

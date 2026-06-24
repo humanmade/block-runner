@@ -1,9 +1,29 @@
 {
   "name": "block-runner",
   "version": "0.1.0",
-  "description": "Deterministic CLI and library for converting design HTML into valid native Gutenberg block markup.",
+  "description": "The primitive between everything and WordPress blocks — a fast, deterministic CLI and library that turns any HTML into clean, valid, native Gutenberg blocks.",
   "type": "module",
   "license": "GPL-2.0-or-later",
+  "keywords": [
+    "wordpress",
+    "gutenberg",
+    "block-editor",
+    "blocks",
+    "wordpress-blocks",
+    "gutenberg-blocks",
+    "html-to-blocks",
+    "block-converter",
+    "headless-gutenberg",
+    "content-pipeline",
+    "cli",
+    "agent"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/humanmade/block-runner.git"
+  },
+  "homepage": "https://github.com/humanmade/block-runner#readme",
+  "bugs": "https://github.com/humanmade/block-runner/issues",
   "bin": {
     "block-runner": "./dist/cli.js"
   },
@@ -29,6 +49,8 @@
     "dev": "tsx src/cli.ts",
     "bench": "tsx scripts/bench.ts",
     "bench:record": "tsx scripts/bench.ts --record",
+    "tune": "tsx scripts/tune.ts",
+    "tune:t0": "tsx scripts/tune.ts --tier t0",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",

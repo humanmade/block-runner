@@ -1,13 +1,46 @@
 # Block Runner
 
-Block Runner is a deterministic Node CLI and library for turning design-intent
-HTML into native WordPress Gutenberg block markup. It targets clean, editable
-trees such as `wp:cover > wp:columns > wp:buttons` instead of opaque Custom HTML
-blocks.
+**The primitive between everything and WordPress blocks.**
 
-It also ships a validation and canonicalization gate powered by headless
-Gutenberg. The gate parses real block markup, validates it with registered core
-blocks, and rewrites near-miss markup through `serialize(parse(markup))`.
+![Block Runner converts messy design HTML into clean, nested, native Gutenberg blocks — wp:cover ▸ wp:columns ▸ wp:buttons](demo/demo.gif)
+
+Block Runner is a primitive. A small, fast CLI — and a library — built to sit in
+the one place nothing else does: the gap between everything that generates content
+and the blocks WordPress actually trusts. Drop it into a project, a pipeline, an
+agent loop, a CI job. It does one thing, with precision: turn raw HTML into clean,
+native, editable WordPress blocks — and prove they're valid.
+
+That gap is everywhere now. Content pours out of AI, agents, design tools,
+templates, plain HTML — faster than anyone can hand-build it. But the WordPress
+editor only trusts blocks it recognizes. The moment generated HTML reaches it, the
+magic dies at the door: your paragraphs and headings survive, then it surrenders —
+your cover, your columns, your buttons collapse into a single frozen "Custom HTML"
+blob. Beautiful design in, spaghetti out.
+
+**Block Runner ends that.**
+
+It translates design-intent HTML into the real thing — `wp:cover > wp:columns >
+wp:buttons`, properly nested, real media, exactly how you'd have built it by hand.
+Then it runs every result through a deterministic gate wired to headless Gutenberg,
+so *valid* means what the editor means — not what a converter hopes.
+
+```
+Design in  →  one frozen Custom HTML blob        ❌  today
+Design in  →  wp:cover > wp:columns > wp:buttons  ✅  with Block Runner
+              real · nested · editable · zero "attempt recovery" warnings
+```
+
+Fast, deterministic, offline — no API keys, runs anywhere Node does. And built to
+be built on: bring your own rules, your own blocks, your own media resolvers, and
+wire it into the workflows you already have. CLI, library, or CI check — your call.
+
+Nothing ever degrades in silence. The instant something can't be expressed
+natively, Block Runner tells you — and points at the exact line that caused it.
+
+This is the layer WordPress has been missing: the connective tissue between how
+content is made now, and how WordPress was built to render it.
+
+**Any content in. Real blocks out.**
 
 ## Install
 
@@ -22,7 +55,7 @@ Block Runner requires Node 18.12 or newer.
 ```sh
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
-block-runner convert hero.html --resolver map --config block-runner.config.mjs --out hero.blocks.html
+block-runner convert hero.html --out hero.blocks.html
 ```
 
 Use `-` to read from stdin:
@@ -81,6 +114,10 @@ Remote sideloading is off by default. Under `--strict`, unresolved media and
 fallback blocks cause exit code `1`.
 
 ## Configuration
+
+Block Runner auto-loads `block-runner.config.{mjs,js,json}` from the working
+directory, so most runs need no flags — the config sets the media resolver, tokens,
+and rules. Pass `--config <path>` only to point at a config elsewhere.
 
 `block-runner.config.mjs`:
 
