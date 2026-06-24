@@ -138,24 +138,23 @@ const fixed = await canonicalize(markup);
 const converted = await convert(html, { resolver: 'noop' });
 ```
 
-## Conversion Scope
+## Conversion
 
-The v1 converter uses ordered, deterministic rules, emitting block objects with
-`createBlock()` and serializing them with `serialize()` rather than the brittle WordPress
-paste pipeline. The rule walker is a seam: bring your own rules, or plug an LLM/agent engine
-in for harder cases (experimental).
-
-Built-in rules cover:
+Conversion runs on a pluggable engine. v1 ships a deterministic rule engine: an ordered
+walker that maps HTML straight to real block objects with `createBlock()` and serializes
+them with `serialize()`, skipping the brittle WordPress paste pipeline entirely. Fast, free,
+reproducible, and it already nails the composites the editor usually mangles:
 
 - Cover sections with inline or CSS background images
 - Columns and column-like rows
 - Buttons and button groups
 - Images, headings, paragraphs, and lists
-- Generic groups
-- Last-resort Custom HTML fallback with warnings
+- Generic groups, with a last-resort Custom HTML fallback that always warns
 
-Every `convert` run validates the final block markup. Warnings are part of the
-report and are never silently discarded.
+The rules are a seam, not a ceiling. When a layout outgrows them, drop in your own rules, or
+an LLM or agent engine, on the same interface (experimental). Deterministic rules for the
+common case, a model for the long tail, one contract for both. Whichever engine emits a
+block, every result is held to the same validity gate before it ships.
 
 ## Media Resolution
 
