@@ -7,23 +7,28 @@ validates). Data: the three `engine=` records in `benchmarks/results.jsonl` (202
 
 ## Headline
 
-| | corpus | invalid | fallbacks (`core/html`) |
-|---|---|---|---|
-| **local** (rules) | 36 | 1 | **50** |
-| **codex** gpt-5.5/high | **40** | 6 | **0** |
-| **claude-code** opus/high | 37 | 5 | **0** |
+| | corpus | invalid | fallbacks (`core/html`) | tier |
+|---|---|---|---|---|
+| **local** (rules) | 36 | 1 | **50** | baseline |
+| **codex** gpt-5.5/high | **40** | 6 | 0 | frontier |
+| **claude-code** opus/high | 37 | 5 | 0 | frontier |
+| **codex** gpt-5.4/high | 20 | 13 | 0 | workhorse |
+| **claude-code** sonnet/high | 22 | **22** | 0 | workhorse |
 
-Corpus is close — but that's an artifact of the suite mixing clean and messy inputs.
-The real story is in the **input × engine** matrix.
+Two stories: only **frontier** LLMs beat the rules (40/37 vs 36); the **workhorse** models
+land *well below* the rules (20/22). And the close frontier-vs-rules corpus is itself an
+artifact of the suite mixing clean and messy inputs — the real picture is the matrix.
 
 ## The matrix (producer input × engine converter)
 
-| input ↓ / engine → | local | codex | claude |
-|---|---|---|---|
-| **impeccable** (clean semantic) | **68** | 42 | 46 |
-| **claude** (semantic-ish) | 33 | 30 | **38** |
-| **codex** (Tailwind utility soup) | **7** | **49** | 25 |
-| **corpus** | 36 | 40 | 37 |
+| input ↓ / engine → | rules | codex 5.5 | opus | codex 5.4 | sonnet |
+|---|---|---|---|---|---|
+| **impeccable** (clean semantic) | **68** | 42 | 46 | 31 | 27 |
+| **claude** (semantic-ish) | 33 | 30 | **38** | 14 | 24 |
+| **codex** (Tailwind utility soup) | 7 | **49** | 25 | 16 | 16 |
+| **corpus** | 36 | 40 | 37 | 20 | 22 |
+
+*Columns 2–3 are frontier (gpt-5.5, opus); 4–5 are workhorse (gpt-5.4, sonnet).*
 
 ## Findings
 
@@ -62,6 +67,28 @@ The real story is in the **input × engine** matrix.
    LLM benchmarking needs forgiving parsing; see `extractBlocks()` in
    `scripts/engines/prompt.js`.
 
+## Frontier vs workhorse (the cost question)
+
+The cheaper "code workhorse" models — the ones users would actually run for cost — are **not
+viable as a raw LLM translator**: corpus **20** (gpt-5.4) / **22** (sonnet), *below the
+deterministic rules' 36*, and roughly **half** their frontier siblings (40 / 37).
+
+The collapse is overwhelmingly **validity, not structure**: invalid blocks jump from 5–6
+(frontier) to **13** (gpt-5.4) and **22 of 30** (sonnet) — most of sonnet's conversions are
+right-tree-but-invalid, then halved. The biggest frontier→workhorse drops (media-text
+100→0, faq, stats) are layouts where the frontier model emitted a valid bespoke block and
+the workhorse emitted an invalid one.
+
+Two consequences:
+- **The "LLM handles messy input" win is frontier-only.** On Tailwind soup the rules get 7
+  and frontier codex 49 — but the workhorses get 16/16, barely above the rules. Robustness
+  on non-semantic input needs a frontier model.
+- **Strongest case yet for Engine C.** Because the workhorses fail on *validity*, not
+  structure, assembling valid-by-construction markup from their structural decisions would
+  rescue them most. Engine C is what could make a *cheap* model viable (cheap structural
+  intuition + deterministic valid assembly). So "can we just use a cheaper model?" → not as
+  raw Engine B, but plausibly under Engine C.
+
 ## Implications
 
 - **Build Engine C next.** Validity is the proven bottleneck; assembling valid-by-
@@ -77,7 +104,7 @@ The real story is in the **input × engine** matrix.
 
 ## Provenance
 
-`benchmarks/results.jsonl`, three records, same `suiteHash` (suite constant, engine
+`benchmarks/results.jsonl`, five records (rules + gpt-5.5/opus frontier + gpt-5.4/sonnet workhorse), same `suiteHash` (suite constant, engine
 varied — the backtesting discipline from `08`). Engines: `scripts/engines/{codex,claude}.ts`
 (+ shared `prompt.ts`). Runs recorded with `engine` / `model` / `effort`. LLM scores are
 non-deterministic; treat ±a few points as noise, the matrix shape as the signal.
