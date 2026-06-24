@@ -1,9 +1,10 @@
 # Block Runner — engine findings (deterministic vs LLM translators)
 
-First head-to-head of three conversion **engines** over the same 30-fixture suite
-(`suiteHash 4f99b2aad212`): the deterministic rules, Codex (gpt-5.5, high), and Claude
-Code (opus, high). Both LLM engines are "Engine B" (LLM translate → Block Runner's gate
-validates). Data: the three `engine=` records in `benchmarks/results.jsonl` (2026-06-24).
+First head-to-head of five conversion **engines** over the same 30-fixture suite
+(`suiteHash 4f99b2aad212`): the deterministic rules, plus Codex (gpt-5.5 and gpt-5.4) and
+Claude Code (opus and sonnet), all at high effort — frontier *and* workhorse tiers. The LLM
+engines are "Engine B" (LLM translate → Block Runner's gate validates). Data: the five
+`engine=` records in `benchmarks/results.jsonl` (2026-06-24).
 
 ## Headline
 
