@@ -325,56 +325,75 @@ function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Block Runner — conversion benchmark</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: oklch(0.992 0.003 255); --surface: oklch(1 0 0); --panel: oklch(0.975 0.004 255);
-    --ink: oklch(0.24 0.02 262); --muted: oklch(0.52 0.018 262); --faint: oklch(0.66 0.012 262);
-    --line: oklch(0.91 0.006 262); --line-soft: oklch(0.94 0.005 262);
-    --accent: oklch(0.55 0.15 264); --accent-ink: oklch(0.42 0.13 264);
-    --radius: 12px;
+  @font-face {
+    font-family: 'Geist';
+    src: url('../benchmarks/visuals/fonts/Geist.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: oklch(0.19 0.012 262); --surface: oklch(0.225 0.014 262); --panel: oklch(0.25 0.015 262);
-      --ink: oklch(0.95 0.008 262); --muted: oklch(0.72 0.016 262); --faint: oklch(0.56 0.014 262);
-      --line: oklch(0.33 0.014 262); --line-soft: oklch(0.29 0.012 262);
-      --accent: oklch(0.74 0.13 264); --accent-ink: oklch(0.8 0.12 264);
-    }
+  @font-face {
+    font-family: 'Geist Mono';
+    src: url('../benchmarks/visuals/fonts/GeistMono.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
+  :root {
+    --font-sans: Geist, system-ui, -apple-system, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --bg: #f7f7f5;
+    --raised: #ffffff;
+    --band: #f0efec;
+    --ink: #14181f;
+    --body: #1f2430;
+    --muted: #4a5160;
+    --faint: #6b7280;
+    --line: rgba(20, 24, 31, 0.1);
+    --line-strong: rgba(20, 24, 31, 0.16);
+
+    --brand: #2b303b;
+    --brand-ink: #14181f;
+    --brand-soft: rgba(20, 24, 31, 0.05);
+
+    --shadow: 0 1px 2px rgba(20, 24, 31, 0.04), 0 8px 24px rgba(20, 24, 31, 0.05);
+    --radius: 16px;
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: var(--bg); color: var(--body); font-family: var(--font-sans); font-size: 15px; line-height: 1.5; letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
   .wrap { max-width: 1500px; margin-inline: auto; padding: 72px 32px; }
   .masthead { margin-bottom: 64px; max-width: 70ch; }
-  .masthead h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 620; letter-spacing: -0.025em; margin: 0 0 0.25rem; text-wrap: balance; }
+  .masthead h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 600; letter-spacing: -0.025em; color: var(--ink); margin: 0 0 0.25rem; text-wrap: balance; }
   .masthead p { margin: 0; color: var(--muted); }
-  .producers-line { margin-top: 1rem; font-size: 0.85rem; color: var(--faint); }
-  .producers-line b { color: var(--muted); }
+  .producers-line { margin-top: 1rem; font-family: var(--font-mono); font-size: 12px; color: var(--faint); }
+  .producers-line b { color: var(--ink); font-weight: 500; }
 
   .layout { margin-bottom: 72px; padding-top: 28px; border-top: 1px solid var(--line); }
   .layout__head { margin-bottom: 24px; }
-  .layout__head h2 { font-size: 1.3rem; font-weight: 640; letter-spacing: -0.015em; margin: 0; }
-  .intent { margin: 0.4rem 0 0; color: var(--muted); font-style: italic; max-width: 80ch; text-wrap: pretty; }
+  .layout__head h2 { font-size: 1.3rem; font-weight: 600; letter-spacing: -0.015em; color: var(--ink); margin: 0; }
+  .intent { margin: 0.4rem 0 0; color: var(--muted); max-width: 80ch; text-wrap: pretty; }
 
   .split { display: grid; grid-template-columns: minmax(280px, 360px) 1fr; gap: 40px; align-items: start; }
   @media (max-width: 1024px) { .split { grid-template-columns: 1fr; gap: 28px; } }
-  .panel-label { font-size: 0.72rem; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
+  .panel-label { font-family: var(--font-mono); font-size: 11.5px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); margin: 0 0 14px; }
 
-  .tree { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12.5px; line-height: 1.85; position: sticky; top: 24px; }
+  .tree { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.85; position: sticky; top: 24px; }
   .tree ul { list-style: none; margin: 0; padding: 0; }
   .tree ul ul { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--line); }
   .ns { color: var(--faint); }
   .blk { color: var(--ink); font-weight: 600; }
-  .blk--3p { color: var(--accent-ink); }
-  .blk--html { color: oklch(0.55 0.17 25); }
+  .blk--3p { color: var(--muted); }
+  .blk--html { color: var(--faint); }
   .note { color: var(--muted); font-weight: 400; }
   .note::before { content: "· "; color: var(--faint); }
 
   .prod-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(360px, 1fr)); gap: 24px; }
   .prod { margin: 0; }
-  .prod figcaption { font-size: 0.8rem; font-weight: 600; color: var(--muted); margin-bottom: 8px; text-transform: capitalize; }
-  .frame { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--surface); box-shadow: 0 1px 2px oklch(0 0 0 / 0.04), 0 8px 24px -16px oklch(0 0 0 / 0.18); }
+  .prod figcaption { font-family: var(--font-mono); font-size: 12px; font-weight: 500; color: var(--muted); margin-bottom: 8px; text-transform: capitalize; }
+  .frame { border: 1px solid var(--line); border-radius: var(--radius); overflow: hidden; background: var(--raised); box-shadow: var(--shadow); }
   iframe { display: block; width: 100%; height: clamp(320px, 38vh, 460px); border: 0; background: #fff; }
-  .missing { color: var(--faint); font-style: italic; }
+  .missing { color: var(--faint); }
 </style>
 </head>
 <body>
@@ -417,10 +436,12 @@ function escAttr(value: string): string {
   return esc(value).replaceAll('"', '&quot;');
 }
 
+// Monochrome score scale: low score = weak (light grey), high score = strong (dark slate).
 function scoreColor(score: number): string {
-  if (score >= 85) return '#16a34a';
-  if (score >= 50) return '#d97706';
-  return '#dc2626';
+  if (score >= 85) return '#2a2f3a'; // --c-eng-c
+  if (score >= 70) return '#5f6775'; // --c-eng-cgpt
+  if (score >= 50) return '#939aa6'; // --c-codex-alone
+  return '#cdd2d9'; // --c-eng-a
 }
 
 // ── Scoreboard (report/scoreboard.html) ──────────────────────────────────────
@@ -459,7 +480,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
       const before = prev?.fixtures[label];
       const delta = before === undefined ? '' : score - before;
       const deltaCell =
-        delta === '' ? '<span class="faint">—</span>' : delta === 0 ? '<span class="faint">·</span>' : `<span style="color:${delta > 0 ? '#16a34a' : '#dc2626'}">${delta > 0 ? '+' : ''}${delta}</span>`;
+        delta === '' ? '<span class="faint">—</span>' : delta === 0 ? '<span class="faint">·</span>' : `<span class="delta ${delta > 0 ? 'up' : 'down'}">${delta > 0 ? '+' : ''}${delta}</span>`;
       return `<tr><td class="mono">${esc(label)}</td><td class="num"><b style="color:${scoreColor(score)}">${score}</b></td><td class="num">${deltaCell}</td></tr>`;
     })
     .join('\n');
@@ -471,41 +492,64 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
 <meta name="viewport" content="width=device-width, initial-scale=1" />
 <title>Block Runner — benchmark scoreboard</title>
 <style>
-  :root {
-    color-scheme: light dark;
-    --bg: oklch(0.992 0.003 255); --surface: oklch(1 0 0); --panel: oklch(0.975 0.004 255);
-    --ink: oklch(0.24 0.02 262); --muted: oklch(0.52 0.018 262); --faint: oklch(0.66 0.012 262);
-    --line: oklch(0.91 0.006 262); --accent: oklch(0.55 0.15 264);
+  @font-face {
+    font-family: 'Geist';
+    src: url('../benchmarks/visuals/fonts/Geist.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
   }
-  @media (prefers-color-scheme: dark) {
-    :root {
-      --bg: oklch(0.19 0.012 262); --surface: oklch(0.225 0.014 262); --panel: oklch(0.25 0.015 262);
-      --ink: oklch(0.95 0.008 262); --muted: oklch(0.72 0.016 262); --faint: oklch(0.56 0.014 262);
-      --line: oklch(0.33 0.014 262); --accent: oklch(0.74 0.13 264);
-    }
+  @font-face {
+    font-family: 'Geist Mono';
+    src: url('../benchmarks/visuals/fonts/GeistMono.woff2') format('woff2');
+    font-weight: 100 900;
+    font-style: normal;
+    font-display: swap;
+  }
+  :root {
+    --font-sans: Geist, system-ui, -apple-system, sans-serif;
+    --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+    --bg: #f7f7f5;
+    --raised: #ffffff;
+    --band: #f0efec;
+    --ink: #14181f;
+    --body: #1f2430;
+    --muted: #4a5160;
+    --faint: #6b7280;
+    --line: rgba(20, 24, 31, 0.1);
+    --line-strong: rgba(20, 24, 31, 0.16);
+
+    --brand: #2b303b;
+    --brand-ink: #14181f;
+    --brand-soft: rgba(20, 24, 31, 0.05);
+    --grid: rgba(20, 24, 31, 0.07);
+    --shadow: 0 1px 2px rgba(20, 24, 31, 0.04), 0 8px 24px rgba(20, 24, 31, 0.05);
   }
   * { box-sizing: border-box; }
-  body { margin: 0; background: var(--bg); color: var(--ink); font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", sans-serif; font-size: 15px; line-height: 1.55; -webkit-font-smoothing: antialiased; }
+  body { margin: 0; background: var(--bg); color: var(--body); font-family: var(--font-sans); font-size: 15px; line-height: 1.5; letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
   .wrap { max-width: 1100px; margin-inline: auto; padding: 72px 32px; }
-  h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 620; letter-spacing: -0.025em; margin: 0 0 0.25rem; }
+  h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 600; letter-spacing: -0.025em; color: var(--ink); margin: 0 0 0.25rem; }
   .sub { color: var(--muted); margin: 0 0 2.5rem; }
-  h2 { font-size: 0.95rem; font-weight: 600; margin: 2.5rem 0 1rem; }
-  .snapshot { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; padding: 1.25rem 1.5rem; border: 1px solid var(--line); border-radius: 14px; background: var(--panel); }
-  .big { font-size: 2.6rem; font-weight: 800; letter-spacing: -0.03em; line-height: 1; }
-  .big small { display: block; font-size: 0.72rem; font-weight: 600; letter-spacing: 0.08em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
+  h2 { font-family: var(--font-mono); font-size: 11.5px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); margin: 2.5rem 0 1rem; }
+  .snapshot { display: flex; align-items: baseline; gap: 1.5rem; flex-wrap: wrap; padding: 1.25rem 1.5rem; border: 1px solid var(--line); border-radius: 16px; background: var(--raised); box-shadow: var(--shadow); }
+  .big { font-size: 2.6rem; font-weight: 600; letter-spacing: -0.03em; line-height: 1; color: var(--ink); }
+  .big small { display: block; font-family: var(--font-mono); font-size: 11px; font-weight: 400; letter-spacing: 0.12em; text-transform: uppercase; color: var(--faint); margin-bottom: 6px; }
   .chips { display: flex; gap: 8px; flex-wrap: wrap; }
-  .chip { font-size: 0.8rem; font-weight: 600; color: #fff; background: var(--c); padding: 3px 10px; border-radius: 999px; }
-  .prov { color: var(--faint); font-size: 0.82rem; margin-left: auto; text-align: right; }
-  .prov .mono { font-family: ui-monospace, monospace; }
-  .chart { border: 1px solid var(--line); border-radius: 14px; background: var(--panel); padding: 20px; }
+  .chip { font-family: var(--font-mono); font-size: 11.5px; font-weight: 500; color: var(--raised); background: var(--c, var(--brand)); padding: 3px 10px; border-radius: 999px; }
+  .prov { color: var(--faint); font-family: var(--font-mono); font-size: 11px; margin-left: auto; text-align: right; line-height: 1.6; }
+  .prov .mono { font-family: var(--font-mono); }
+  .chart { border: 1px solid var(--line); border-radius: 16px; background: var(--raised); box-shadow: var(--shadow); padding: 20px; }
   table { width: 100%; border-collapse: collapse; font-size: 0.88rem; }
-  th { text-align: left; font-weight: 600; color: var(--faint); font-size: 0.72rem; text-transform: uppercase; letter-spacing: 0.05em; padding: 0 12px 8px; border-bottom: 1px solid var(--line); }
-  td { padding: 9px 12px; border-bottom: 1px solid var(--line); }
+  th { text-align: left; font-family: var(--font-mono); font-weight: 400; color: var(--faint); font-size: 10.5px; text-transform: uppercase; letter-spacing: 0.1em; padding: 0 12px 8px; border-bottom: 1px solid var(--line); }
+  td { padding: 9px 12px; border-bottom: 1px solid var(--line); color: var(--body); }
   .num { text-align: right; font-variant-numeric: tabular-nums; }
-  .mono { font-family: ui-monospace, monospace; font-size: 0.82rem; }
+  .mono { font-family: var(--font-mono); font-size: 0.82rem; }
   .faint { color: var(--faint); }
-  .empty { color: var(--muted); background: var(--panel); border: 1px solid var(--line); border-radius: 14px; padding: 16px 20px; }
-  .empty code { font-family: ui-monospace, monospace; background: var(--surface); padding: 1px 6px; border-radius: 6px; }
+  .delta.up { color: var(--ink); }
+  .delta.down { color: var(--faint); }
+  .empty { color: var(--muted); background: var(--raised); border: 1px solid var(--line); border-radius: 16px; box-shadow: var(--shadow); padding: 16px 20px; }
+  .empty code { font-family: var(--font-mono); font-size: 11.5px; background: var(--band); padding: 1px 6px; border-radius: 4px; color: var(--body); }
   .grids { display: grid; grid-template-columns: 1fr 1fr; gap: 2rem; align-items: start; }
   @media (max-width: 820px) { .grids { grid-template-columns: 1fr; } }
 </style>
@@ -560,12 +604,13 @@ function trendChart(history: RunRecord[], producers: string[]): string {
     return `<polyline points="${poly}" fill="none" stroke="${color}" stroke-width="${width}" vector-effect="non-scaling-stroke"/>${dots}`;
   };
 
-  const palette = ['#7c7cf0', '#16a34a', '#d97706', '#dc2626', '#0ea5e9'];
-  const producerLines = producers.map((p, idx) => series((r) => r.producers[p], palette[(idx + 1) % palette.length], 1.5)).join('');
-  const corpusLine = series((r) => r.corpusAvg, 'var(--accent)', 2.5);
+  // Monochrome producer series — a grey→slate scale, distinct from the dark brand corpus line.
+  const palette = ['#cdd2d9', '#b6bcc5', '#939aa6', '#5f6775', '#2a2f3a'];
+  const producerLines = producers.map((p, idx) => series((r) => r.producers[p], palette[idx % palette.length], 1.5)).join('');
+  const corpusLine = series((r) => r.corpusAvg, 'var(--brand)', 2.5);
 
-  const legend = [`<span class="chip" style="--c:var(--accent)">corpus</span>`]
-    .concat(producers.map((p, idx) => `<span class="chip" style="--c:${palette[(idx + 1) % palette.length]}">${esc(p)}</span>`))
+  const legend = [`<span class="chip" style="--c:var(--brand)">corpus</span>`]
+    .concat(producers.map((p, idx) => `<span class="chip" style="--c:${palette[idx % palette.length]}">${esc(p)}</span>`))
     .join(' ');
 
   return `<div class="chart">
