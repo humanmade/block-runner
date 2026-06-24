@@ -41,6 +41,16 @@ block-runner convert hero.html --out hero.blocks.html
 Every run is checked against headless Gutenberg, so what comes back is guaranteed
 editor-valid, or Block Runner tells you exactly what wasn't and points at the line.
 
+## In an agent chat
+
+It's a CLI, so any coding agent (Claude Code, Codex) can run it for you. Just ask in plain
+English:
+
+> Use block-runner to convert this hero into a native Gutenberg block.
+
+The agent pipes your content through `block-runner convert --json`, reads the report, and
+fixes anything flagged before handing back valid blocks.
+
 ## What it does
 
 Two jobs: **convert** generated HTML into native blocks, and **validate** that what you ship
