@@ -659,7 +659,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
     .map(
       (r) => `<tr>
         <td>${esc(r.runAt.slice(0, 10))}</td>
-        <td class="mono">${esc(r.commit)}${r.engine && r.engine !== 'local' ? ` <span class="faint">eng:${esc(r.engine)}</span>` : ''}</td>
+        <td class="mono">${esc(r.commit)}${r.engine && r.engine !== 'local' ? ` <span class="faint">${esc(r.engine)}/${esc(r.model ?? '?')}/${esc(r.effort ?? '?')}</span>` : ''}</td>
         <td>${esc(r.author)}</td>
         <td class="num"><b style="color:${scoreColor(r.corpusAvg)}">${r.corpusAvg}</b></td>
         <td>${Object.entries(r.producers).sort().map(([p, v]) => `${esc(p)} ${v}`).join(' · ')}</td>
