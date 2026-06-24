@@ -6,6 +6,8 @@ md/02-architecture.md
 md/03-open-questions.md
 md/PRD.md
 md/dogfood-notes.md
+md/12-market-landscape.md
+md/handover.md
 
 # Internal agent context — private (may reference internal/dogfood projects).
 # Never committed; the public repo must read clean.
