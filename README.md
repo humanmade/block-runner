@@ -9,10 +9,12 @@
 
 ![Block Runner converts messy design HTML into clean, nested, native Gutenberg blocks — wp:cover ▸ wp:columns ▸ wp:buttons](demo/demo.gif)
 
-Block Runner turns any HTML — from AI, agents, design tools, or plain templates — into
-clean, valid, **native** WordPress Gutenberg blocks (`wp:cover > wp:columns > wp:buttons`),
-instead of the single frozen "Custom HTML" blob the editor falls back to. Deterministic,
-offline, no API keys. Use it as a CLI, a library, or a CI gate.
+Block Runner is the layer between **generated content and WordPress**. AI tools, agents, and
+design tools spit out HTML — but the block editor only trusts blocks it recognizes, so it
+freezes everything else into a single "Custom HTML" blob. Block Runner converts that output
+into real, nested, **native** Gutenberg blocks (`wp:cover > wp:columns > wp:buttons`) and
+proves every result is editor-valid. Built to sit in an agent loop, a content pipeline, or a
+CI gate.
 
 ```
 Design in  →  one frozen Custom HTML blob        ❌  today
@@ -34,26 +36,38 @@ block-runner convert hero.html --out hero.blocks.html
 Every run is checked against headless Gutenberg, so what comes back is guaranteed
 editor-valid — or Block Runner tells you exactly what wasn't, and points at the line.
 
-## Features
+## What it does
 
-- **Native blocks, not blobs** — emits real `wp:cover > wp:columns > wp:buttons`, properly nested, with real media ids.
-- **Valid by construction** — every result runs through a gate wired to headless Gutenberg; *valid* means what the editor means, not what a converter hopes.
-- **Deterministic & offline** — no LLM, no API keys; same input, same output, anywhere Node runs.
-- **CLI _and_ library** — drop it into a project, a pipeline, an agent loop, or a CI check.
-- **Bring your own** — rules, blocks, and media resolvers; wire it into the workflow you already have.
+Two jobs: **convert** generated HTML into native blocks, and **validate** that what you ship
+is editor-valid. Use either half on its own — convert in your agent pipeline, or run the gate
+as a standalone validator in CI.
+
+### Convert — generated HTML → native blocks
+
+- **Native blocks, not blobs** — real `wp:cover > wp:columns > wp:buttons`, properly nested, with real media ids.
+- **Built for agents & pipelines** — feed it whatever your LLM, agent, or design tool emits; get back blocks the editor trusts.
+- **Media resolution** — resolve images to real attachment ids via a map, WP-CLI, or the REST API.
+- **Styling fidelity, your call** — keep off-theme styles or map them to your theme, up to a ceiling you set.
+- **Pluggable engines** — deterministic rules out of the box; bring your own rules, or plug an LLM/agent engine into the same seam.
+
+### Validate — prove it's editor-valid
+
+- **Valid means what the editor means** — every result runs through a gate wired to headless Gutenberg, not a converter's wishful thinking.
+- **Deterministic gate** — reproducible: same markup, same verdict, no nondeterministic model in the loop. Safe to run on every request and in CI.
+- **Canonicalize** — rewrite near-miss markup into the exact shape the editor expects.
 - **Never fails silently** — when something can't be expressed natively, it says so and points at the exact line.
 
 ## Why Block Runner
 
-Content pours out of AI, agents, design tools, and templates faster than anyone can
-hand-build it — but the WordPress editor only trusts blocks it recognizes. The moment
-generated HTML reaches it, your cover, columns, and buttons collapse into a single frozen
-"Custom HTML" blob. Beautiful design in, spaghetti out.
+Content now pours out of AI and agents faster than anyone can hand-build it — but the
+WordPress editor only trusts blocks it recognizes. The moment that generated HTML reaches it,
+your cover, columns, and buttons collapse into a single frozen "Custom HTML" blob. Beautiful
+design in, spaghetti out.
 
-Block Runner is the missing layer: it translates design-intent HTML into the real thing —
-properly nested blocks, real media, exactly how you'd have built it by hand — then proves
-every result is valid against headless Gutenberg. The connective tissue between how content
-is made now and how WordPress was built to render it.
+Block Runner is the missing layer between the two: it turns whatever your agents and tools
+generate into the real thing — properly nested blocks, real media, exactly how you'd have
+built it by hand — then proves it's valid against headless Gutenberg before it reaches the
+editor. The connective tissue between how content is made now and how WordPress renders it.
 
 **Any content in. Real blocks out.**
 
@@ -90,10 +104,10 @@ const converted = await convert(html, { resolver: 'noop' });
 
 ## Conversion Scope
 
-The v1 converter is deterministic and offline. It uses ordered rules to emit
-Gutenberg block objects with `createBlock()` and serializes them with
-`serialize()`. It does not use language models, API keys, or the WordPress paste
-pipeline as a converter.
+The v1 converter uses ordered, deterministic rules — emitting block objects with
+`createBlock()` and serializing them with `serialize()`, rather than the brittle WordPress
+paste pipeline. The rule walker is a seam: bring your own rules, or plug an LLM/agent engine
+in for harder cases (experimental).
 
 Built-in rules cover:
 

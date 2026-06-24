@@ -1,7 +1,7 @@
 {
   "name": "block-runner",
   "version": "0.1.0",
-  "description": "The primitive between everything and WordPress blocks — a fast, deterministic CLI and library that turns any HTML into clean, valid, native Gutenberg blocks.",
+  "description": "The layer between generated content and WordPress — convert what AI, agents, and design tools emit into clean, valid, native Gutenberg blocks, and validate every result. CLI + library.",
   "type": "module",
   "license": "GPL-2.0-or-later",
   "keywords": [
