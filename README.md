@@ -11,16 +11,15 @@
 
 Block Runner is the layer between **generated content and WordPress**. AI tools, agents, and
 design tools spit out HTML — but the block editor only trusts blocks it recognizes, so it
-freezes everything else into a single "Custom HTML" blob. Block Runner converts that output
-into real, nested, **native** Gutenberg blocks (`wp:cover > wp:columns > wp:buttons`) and
-proves every result is editor-valid. Built to sit in an agent loop, a content pipeline, or a
+freezes everything else into a single "Custom HTML" blob, or breaks the block outright with
+"Attempt Block Recovery." Block Runner converts that output into real, nested, **native**
+Gutenberg blocks (`wp:cover > wp:columns > wp:buttons`) and proves every result is editor-valid. Built to sit in an agent loop, a content pipeline, or a
 CI gate.
 
-```
-Design in  →  one frozen Custom HTML blob        ❌  today
-Design in  →  wp:cover > wp:columns > wp:buttons  ✅  with Block Runner
-              real · nested · editable · zero "attempt recovery" warnings
-```
+| | Generated HTML reaches the editor as… |
+| --- | --- |
+| **Today** ❌ | one frozen `Custom HTML` blob — or a broken block and *"Attempt Block Recovery"* |
+| **With Block Runner** ✅ | `wp:cover > wp:columns > wp:buttons` — real, nested, editable, valid |
 
 ## Quickstart
 
