@@ -155,33 +155,20 @@ const fixed = await canonicalize(markup);
 const converted = await convert(html, { resolver: 'noop' });
 ```
 
-## Conversion
-
-Point Block Runner at whatever your model or design tool generates, and it returns real,
-nested blocks ready for the editor. It covers the composites that usually break:
-
-- Cover sections with inline or CSS background images
-- Columns and column-like rows
-- Buttons and button groups
-- Images, headings, paragraphs, and lists
-- Generic groups, with a last-resort Custom HTML fallback that always warns
-
-Hand the gnarliest, most ambiguous layouts to an LLM engine (experimental), with fast,
-deterministic rules as the dependable backbone for everything else and the fallback when a
-model drifts. Whichever path a block takes, it is held to the same validity gate before it ships.
-
 ## Media Resolution
 
-Cover and Image blocks can be resolved with:
+A `<img src="hero.jpg">` in generated HTML is just a URL, but WordPress image and cover blocks
+want a real media-library attachment with an ID (`wp-image-1234`). Media resolution is how
+Block Runner connects the two: matching or importing each image into the library and threading
+the right id into the block. Choose how it does that:
 
-- `noop`: keep URLs and warn when IDs are missing
-- `map`: read IDs and URLs from a JSON map
-- `wpcli`: use `wp media list` and `wp media import`
-- `rest`: use the WordPress REST media API when credentials are explicitly
-  supplied
+- `noop`: leave URLs as-is and warn when an ID is missing (good for a dry run).
+- `map`: look up IDs and URLs from a JSON map you provide.
+- `wpcli`: find or import media with `wp media list` and `wp media import`.
+- `rest`: find or import via the WordPress REST API, with credentials supplied explicitly.
 
-Remote sideloading is off by default. Under `--strict`, unresolved media and
-fallback blocks cause exit code `1`.
+Remote sideloading is off by default. Under `--strict`, unresolved media (and fallback blocks)
+cause exit code `1`.
 
 ## Configuration
 
