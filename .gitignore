@@ -34,5 +34,15 @@ build/
 report/
 .playwright-mcp/
 
+# tuner: cached propose artifacts + captured regressions (smoke.seed.json + baselines/ stay committed)
+benchmarks/.cache/
+benchmarks/regressions/
+
 # Raw research reference (local)
 WORDPRESS_BLOCK_PATTERNS_REFERENCE.md
+
+# Internal context docs — never shipped
+md/
+
+# Demo: keep the gif (README hero); regenerate the heavier mp4 from demo/demo.tape
+demo/*.mp4
