@@ -109,6 +109,13 @@ function defsArrow(svg, id, color) {
   m.appendChild(n('path', { d: 'M 0 1 L 9 5 L 0 9 z', fill: color }));
   const defs = n('defs'); defs.appendChild(m); svg.appendChild(defs);
 }
+// diagonal-hatch pattern (faded fill + purple stripes) for the "No LLM" series
+function defsHatch(svg, id, color) {
+  const p = n('pattern', { id, patternUnits: 'userSpaceOnUse', width: '7', height: '7', patternTransform: 'rotate(45)' });
+  p.appendChild(n('rect', { width: '7', height: '7', fill: color, 'fill-opacity': '0.1' }));
+  p.appendChild(n('line', { x1: '0', y1: '0', x2: '0', y2: '7', stroke: color, 'stroke-width': '2.5', 'stroke-opacity': '0.55' }));
+  const defs = n('defs'); defs.appendChild(p); svg.appendChild(defs);
+}
 
 /* ---------------- data ---------------- */
 // Bars ordered by score (lowest → highest) — monotonic in both groups.
@@ -117,7 +124,7 @@ const GROUPS = [
   { label: 'Complex blocks', a: 18, claude: 35, codex: 73, cgpt: 93, c: 94 },
 ];
 const SERIES = [
-  { key: 'a',      name: 'Block Runner', note: 'No LLM',          color: 'var(--c-eng-a)' },
+  { key: 'a',      name: 'Block Runner', note: 'No LLM',          color: 'var(--c-eng-a)', hatch: true },
   { key: 'claude', name: 'Claude alone', note: 'Opus 4.8 · high', color: 'var(--c-claude-alone)' },
   { key: 'codex',  name: 'Codex alone',  note: 'GPT-5.5 · high',  color: 'var(--c-codex-alone)' },
   { key: 'cgpt',   name: 'Block Runner', note: 'GPT-5.5 · high',  color: 'var(--c-eng-cgpt)' },
@@ -129,6 +136,7 @@ const SERIES = [
   const W = 1100, H = 460, m = { l: 52, r: 22, t: 30, b: 100 };
   const iw = W - m.l - m.r, ih = H - m.t - m.b, base = m.t + ih, y = v => m.t + ih * (1 - v / 100);
   svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  defsHatch(svg, 'hatch-a', '#973bfe');
   for (let t = 0; t <= 100; t += 25) {
     svg.appendChild(n('line', { class: 'grid-line', x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }));
     svg.appendChild(n('text', { class: 'tick-text', x: m.l - 8, y: y(t) + 3.5, 'text-anchor': 'end' }, String(t)));
@@ -142,7 +150,9 @@ const SERIES = [
     const x0 = cx - innerW / 2;
     SERIES.forEach((s, si) => {
       const v = g[s.key], bcx = x0 + si * (barW + gap) + barW / 2;
-      svg.appendChild(n('rect', { x: bcx - barW / 2, y: y(v), width: barW, height: base - y(v), rx: 4, fill: s.color }));
+      const barAttrs = { x: bcx - barW / 2, y: y(v), width: barW, height: base - y(v), rx: 4, fill: s.hatch ? 'url(#hatch-a)' : s.color };
+      if (s.hatch) { barAttrs.stroke = '#973bfe'; barAttrs['stroke-opacity'] = '0.5'; barAttrs['stroke-width'] = '1'; }
+      svg.appendChild(n('rect', barAttrs));
       svg.appendChild(n('text', { class: 'bar-label', x: bcx, y: y(v) - 7, 'text-anchor': 'middle', 'font-size': '12.5' }, String(v)));
       svg.appendChild(n('text', { x: bcx, y: base + 19, 'text-anchor': 'middle', 'font-family': 'var(--font-sans)', 'font-size': '10.5', 'font-weight': '500', fill: 'var(--body)' }, s.name));
       svg.appendChild(n('text', { x: bcx, y: base + 32, 'text-anchor': 'middle', 'font-family': 'var(--font-mono)', 'font-size': '9', fill: 'var(--faint)' }, '(' + s.note + ')'));
@@ -174,7 +184,7 @@ const DOTS = {"simple":{"a":[100,13,28,0,0,14,14,32,40,36,67,100,25,33,33,100,10
     SERIES.forEach((s, si) => {
       const scx = gx + subW * (si + 0.5), vals = DOTS[grp][s.key];
       vals.forEach((v, di) => {
-        svg.appendChild(n('circle', { cx: scx + jit(di + si * 53 + gi * 97) * subW * 0.5, cy: y(v), r: 3.2, fill: s.color, 'fill-opacity': '0.85', stroke: 'rgba(20,24,31,0.32)', 'stroke-width': '0.6' }));
+        svg.appendChild(n('circle', { cx: scx + jit(di + si * 53 + gi * 97) * subW * 0.5, cy: y(v), r: 3.2, fill: s.color, 'fill-opacity': s.hatch ? '0.32' : '0.85', stroke: 'rgba(20,24,31,0.32)', 'stroke-width': '0.6' }));
       });
       const mean = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
       svg.appendChild(n('line', { x1: scx - subW * 0.3, x2: scx + subW * 0.3, y1: y(mean), y2: y(mean), stroke: 'var(--ink)', 'stroke-width': '2.5' }));
