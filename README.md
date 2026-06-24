@@ -27,6 +27,12 @@ editor-valid. Built to sit in an agent loop, a content pipeline, or a CI gate.
 npm install block-runner          # requires Node 18.12+
 ```
 
+Then just ask your coding agent (Claude Code, Codex):
+
+> Use block-runner to convert this hero into a native Gutenberg block.
+
+Or run the CLI yourself:
+
 ```sh
 # native blocks stream to stdout by default; pipe them anywhere
 block-runner convert hero.html
@@ -36,9 +42,6 @@ generate-page | block-runner convert -
 
 # or write straight to a file
 block-runner convert hero.html --out hero.blocks.html
-
-# or just ask your coding agent (Claude Code, Codex):
-#   "Use block-runner to convert this hero into a native Gutenberg block"
 ```
 
 Every run is checked against headless Gutenberg, so what comes back is guaranteed
