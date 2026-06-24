@@ -25,17 +25,29 @@
  */
 import { readFileSync, readdirSync, existsSync, writeFileSync, appendFileSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
-import { createHash } from 'node:crypto';
+import { pathToFileURL } from 'node:url';
 import { execSync } from 'node:child_process';
-import { parseMarkup } from '../src/headless/wp.js';
-import type { WpBlock, ConvertOptions, BlockRunnerReport } from '../src/types.js';
+import type { ConvertOptions, BlockRunnerReport } from '../src/types.js';
+import {
+  ROOT,
+  PRODUCERS_DIR,
+  RESULTS_PATH,
+  loadSpecs,
+  producerFile,
+  producerMeta,
+  scoreFixture,
+  suiteHash,
+  type Spec,
+  type DisplayNode,
+  type Result,
+  type ProducerMeta,
+} from './tuner/score.js';
 
 // The engine under test, loaded dynamically so it can be swapped for backtesting:
 // `--engine <path>` or BLOCK_RUNNER_ENGINE points at another version's built entry
 // (e.g. an old commit's dist/index.js in a git worktree). Default = this repo's source.
-// parseMarkup (above) stays current — it's a stable scoring utility, not the thing
-// under test. The suite is the constant; the engine is the variable.
+// The scoring core (scripts/tuner/score.ts) stays current — it's a stable scoring
+// utility, not the thing under test. The suite is the constant; the engine is the variable.
 let convert: (input: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
 
 function engineArg(flag: string): string | undefined {
@@ -67,55 +79,6 @@ function effortLabel(): string {
   return engineArg('--effort') ?? process.env.BLOCK_RUNNER_EFFORT ?? 'none';
 }
 
-interface ExpectedNode {
-  block: string;
-  contains?: string;
-  children?: ExpectedNode[];
-}
-
-interface DisplayNode {
-  name: string;
-  note?: string;
-  children: DisplayNode[];
-}
-
-interface Spec {
-  layout: string;
-  intent: string;
-  tree: ExpectedNode;
-  display: DisplayNode;
-}
-
-interface Tally {
-  structureTotal: number;
-  structureMatched: number;
-  contentTotal: number;
-  contentMatched: number;
-  misses: string[];
-}
-
-interface Result {
-  producer: string;
-  layout: string;
-  label: string;
-  inputHtml: string;
-  structurePct: number;
-  contentPct: number;
-  valid: boolean;
-  fallbacks: number;
-  coverage: number;
-  score: number;
-  misses: string[];
-}
-
-interface ProducerMeta {
-  generator?: string;
-  provider?: string;
-  model?: string;
-  effort?: string;
-  note?: string;
-}
-
 interface RunRecord {
   runAt: string;
   commit: string;
@@ -134,13 +97,8 @@ interface RunRecord {
   producerMeta: Record<string, ProducerMeta>;
 }
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const EVAL_DIR = path.join(ROOT, 'benchmarks');
-const SPEC_DIR = path.join(EVAL_DIR, 'specs');
-const PRODUCERS_DIR = path.join(EVAL_DIR, 'producers');
 const REPORT_PATH = path.join(ROOT, 'report', 'review.html');
 const SCOREBOARD_PATH = path.join(ROOT, 'report', 'scoreboard.html');
-const RESULTS_PATH = path.join(EVAL_DIR, 'results.jsonl');
 
 async function main(): Promise<void> {
   await loadEngine();
@@ -162,7 +120,7 @@ async function main(): Promise<void> {
     for (const [layout, spec] of specs) {
       if (onlyLayouts && !onlyLayouts.includes(layout)) continue;
       if (existsSync(producerFile(producer, layout))) {
-        results.push(await scoreFixture(producer, layout, spec));
+        results.push(await scoreFixture(convert, producer, layout, spec));
       }
     }
   }
@@ -187,187 +145,6 @@ async function main(): Promise<void> {
   writeFileSync(SCOREBOARD_PATH, renderScoreboard(history, record), 'utf8');
   console.log(`\nreview page:  file://${REPORT_PATH}`);
   console.log(`scoreboard:   file://${SCOREBOARD_PATH}\n`);
-}
-
-function loadSpecs(): Map<string, Spec> {
-  const specs = new Map<string, Spec>();
-  if (!existsSync(SPEC_DIR)) return specs;
-  for (const entry of readdirSync(SPEC_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-    if (!entry.isDirectory()) continue;
-    const file = path.join(SPEC_DIR, entry.name, 'expected.json');
-    if (!existsSync(file)) continue;
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { intent?: string; tree: ExpectedNode };
-    specs.set(entry.name, {
-      layout: entry.name,
-      intent: parsed.intent ?? '',
-      tree: parsed.tree,
-      display: expectedToDisplay(parsed.tree),
-    });
-  }
-  return specs;
-}
-
-function producerFile(producer: string, layout: string): string {
-  return path.join(PRODUCERS_DIR, producer, `${layout}.html`);
-}
-
-// Per-producer base stylesheet, inlined into a producer's layout at run time so
-// the converter still sees styling inline and the input stays self-contained.
-const baseCache = new Map<string, string>();
-function baseFor(producer: string): string {
-  if (!baseCache.has(producer)) {
-    const p = path.join(EVAL_DIR, 'base', `${producer}.css`);
-    baseCache.set(producer, existsSync(p) ? readFileSync(p, 'utf8') : '');
-  }
-  return baseCache.get(producer)!;
-}
-
-// Optional per-producer generation provenance: how that producer's HTML was made
-// (which tool / model / reasoning effort). Distinct from the run's engine model/effort
-// (the converter). Lives at producers/<producer>/producer.json.
-function producerMeta(producer: string): ProducerMeta {
-  const p = path.join(PRODUCERS_DIR, producer, 'producer.json');
-  if (!existsSync(p)) return {};
-  try {
-    return JSON.parse(readFileSync(p, 'utf8')) as ProducerMeta;
-  } catch {
-    return {};
-  }
-}
-
-function composeInput(producer: string, layout: string): string {
-  const markup = readFileSync(producerFile(producer, layout), 'utf8');
-  const base = baseFor(producer);
-  return base ? `<style>\n${base}\n</style>\n${markup}` : markup;
-}
-
-async function scoreFixture(producer: string, layout: string, spec: Spec): Promise<Result> {
-  const label = `${producer}/${layout}`;
-  const inputHtml = composeInput(producer, layout);
-
-  const report = await convert(inputHtml, { sourcePath: `${label}.html`, config: { media: { resolver: 'noop' } } });
-  const produced = await parseMarkup(report.output ?? '');
-
-  const tally: Tally = { structureTotal: 0, structureMatched: 0, contentTotal: 0, contentMatched: 0, misses: [] };
-  matchNode(spec.tree, produced, tally, label);
-
-  const structurePct = pct(tally.structureMatched, tally.structureTotal);
-  const contentPct = tally.contentTotal === 0 ? 1 : tally.contentMatched / tally.contentTotal;
-  const valid = report.summary.invalid === 0;
-  const fallbacks = countByName(produced, 'core/html');
-  const cover = coverage(inputHtml, report.output ?? '');
-
-  let score = 0.75 * structurePct + 0.25 * contentPct;
-  if (!valid) score *= 0.5;
-
-  return {
-    producer,
-    layout,
-    label,
-    inputHtml,
-    structurePct,
-    contentPct,
-    valid,
-    fallbacks,
-    coverage: cover,
-    score: Math.round(score * 100),
-    misses: tally.misses,
-  };
-}
-
-/** Find the produced block matching `exp` among `candidates`, then recurse. */
-function matchNode(exp: ExpectedNode, candidates: WpBlock[], tally: Tally, pathLabel: string): WpBlock | undefined {
-  tally.structureTotal += 1;
-  const match = candidates.find((block) => block.name === exp.block);
-  const here = `${pathLabel} > ${exp.block}`;
-
-  if (!match) {
-    tally.misses.push(`expected ${exp.block} (${pathLabel}) — not found`);
-    countMissedSubtree(exp, tally);
-    return undefined;
-  }
-
-  tally.structureMatched += 1;
-
-  if (exp.contains !== undefined) {
-    tally.contentTotal += 1;
-    if (blockText(match).includes(exp.contains)) {
-      tally.contentMatched += 1;
-    } else {
-      tally.misses.push(`${here} — expected to contain "${exp.contains}"`);
-    }
-  }
-
-  if (exp.children?.length) {
-    let cursor = 0;
-    const kids = match.innerBlocks ?? [];
-    for (const child of exp.children) {
-      const window = kids.slice(cursor);
-      const found = matchNode(child, window, tally, here);
-      if (found) cursor += window.indexOf(found) + 1;
-    }
-  }
-
-  return match;
-}
-
-function countMissedSubtree(exp: ExpectedNode, tally: Tally): void {
-  if (exp.contains !== undefined) tally.contentTotal += 1;
-  for (const child of exp.children ?? []) {
-    tally.structureTotal += 1;
-    countMissedSubtree(child, tally);
-  }
-}
-
-function expectedToDisplay(node: ExpectedNode): DisplayNode {
-  return {
-    name: node.block,
-    note: node.contains ? `"${node.contains}"` : undefined,
-    children: (node.children ?? []).map(expectedToDisplay),
-  };
-}
-
-function blockText(block: WpBlock): string {
-  // Core blocks store text in attributes (paragraph/heading `content`, button
-  // `text`, image `url`/`alt`). For leaf blocks also consider raw inner markup,
-  // in case text lives in innerHTML; skip for containers so a `contains` on a
-  // parent doesn't match a descendant's text.
-  const attrs = JSON.stringify(block.attributes ?? {});
-  const inner = (block.innerBlocks?.length ?? 0) === 0 ? block.originalContent ?? '' : '';
-  return `${attrs} ${inner}`;
-}
-
-function countByName(blocks: WpBlock[], name: string): number {
-  let total = 0;
-  for (const block of blocks) {
-    if (block.name === name) total += 1;
-    total += countByName(block.innerBlocks ?? [], name);
-  }
-  return total;
-}
-
-// Coverage = fraction of the input's visible text that survives into the output.
-// Catches *silent content loss* (text dropped entirely) — distinct from structure
-// (wrong blocks) and fallbacks (spaghetti that still preserves text). Nothing should
-// vanish without a trace.
-function visibleText(html: string): string {
-  return html
-    .replace(/<style[\s\S]*?<\/style>/gi, ' ')
-    .replace(/<script[\s\S]*?<\/script>/gi, ' ')
-    .replace(/<!--[\s\S]*?-->/g, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/&[a-z]+;/gi, ' ')
-    .toLowerCase();
-}
-function coverage(inputHtml: string, output: string): number {
-  const inputWords = [...new Set(visibleText(inputHtml).match(/[a-z0-9]{3,}/g) ?? [])];
-  if (inputWords.length === 0) return 1;
-  const outText = visibleText(output);
-  return inputWords.filter((w) => outText.includes(w)).length / inputWords.length;
-}
-
-function pct(matched: number, total: number): number {
-  return total === 0 ? 1 : matched / total;
 }
 
 function fmtPct(value: number): string {
@@ -469,31 +246,6 @@ function readPackageVersion(): string {
   } catch {
     return '0.0.0';
   }
-}
-
-// Hash the spec set + producer inputs + base, so a score change is attributable
-// to the converter only when the suite is unchanged.
-function suiteHash(specs: Map<string, Spec>): string {
-  const h = createHash('sha256');
-  for (const layout of [...specs.keys()].sort()) {
-    h.update(`spec:${layout}`);
-    h.update(readFileSync(path.join(SPEC_DIR, layout, 'expected.json')));
-  }
-  if (existsSync(PRODUCERS_DIR)) {
-    for (const entry of readdirSync(PRODUCERS_DIR, { withFileTypes: true }).sort((a, b) => a.name.localeCompare(b.name))) {
-      if (!entry.isDirectory()) continue;
-      const dir = path.join(PRODUCERS_DIR, entry.name);
-      for (const file of readdirSync(dir).filter((f) => f.endsWith('.html')).sort()) {
-        h.update(`prod:${entry.name}/${file}`);
-        h.update(readFileSync(path.join(dir, file)));
-      }
-    }
-  }
-  const baseDir = path.join(EVAL_DIR, 'base');
-  if (existsSync(baseDir)) {
-    for (const file of readdirSync(baseDir).sort()) h.update(readFileSync(path.join(baseDir, file)));
-  }
-  return `sha256:${h.digest('hex').slice(0, 12)}`;
 }
 
 // ── Review page (report/review.html) — per layout, ideal vs each producer ─────

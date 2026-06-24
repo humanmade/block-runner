@@ -11,7 +11,10 @@ import {
 
 export async function validate(markup: string, options: ValidateOptions = {}): Promise<BlockRunnerReport> {
   const wp = await getWp();
-  const blocks = wp.parse(markup, { __unstableSkipMigrationLogs: true });
+  // parse() validates each block internally and Gutenberg logs verbose validation
+  // diffs to the console on invalid markup (the LLM-engine path). Mute it — the gate
+  // below reports invalidity properly; the raw dump is ~700 KB of run-log noise.
+  const blocks = withMutedWordPressConsole(() => wp.parse(markup, { __unstableSkipMigrationLogs: true }));
   const summary: ReportSummary = {
     blocks: 0,
     valid: 0,

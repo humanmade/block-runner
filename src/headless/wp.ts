@@ -17,7 +17,10 @@ export async function createBlock(
 
 export async function parseMarkup(markup: string): Promise<WpBlock[]> {
   const wp = await getWp();
-  return wp.parse(markup, { __unstableSkipMigrationLogs: true });
+  // parse() runs block validation internally; on invalid markup (the LLM-engine
+  // path) Gutenberg dumps verbose per-block validation diffs to the console
+  // (~700 KB of run-log noise). Mute it — invalidity is reported via the gate.
+  return withMutedWordPressConsole(() => wp.parse(markup, { __unstableSkipMigrationLogs: true }));
 }
 
 export async function serializeBlocks(blocks: WpBlock[] | WpBlock): Promise<string> {
