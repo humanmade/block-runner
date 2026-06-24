@@ -235,7 +235,7 @@ output (Impeccable, Codex, Claude, and more) converts to native blocks, across s
 converters (the built-in rules, plus experimental LLM translators run via their CLIs).
 
 ```sh
-npm run bench          # score the suite; write report/review.html + report/scoreboard.html
+npm run bench          # score the suite; write benchmarks/presentation/review.html + benchmarks/presentation/scoreboard.html
 npm run bench:record   # also append a provenance-tagged run to benchmarks/results.jsonl
 ```
 

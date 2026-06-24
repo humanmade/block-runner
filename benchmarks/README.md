@@ -12,11 +12,11 @@ npm run bench
 ```
 
 This prints a scorecard (overall + per-producer) and writes two generated pages (gitignored,
-segregated from the committed suite) under `report/`:
+segregated from the committed suite) under `benchmarks/presentation/`:
 
-- **`report/review.html`** — per layout: the ideal end state beside *each producer's* render
+- **`benchmarks/presentation/review.html`** — per layout: the ideal end state beside *each producer's* render
   (the cross-producer comparison matrix).
-- **`report/scoreboard.html`** — scores over time, built from the results log.
+- **`benchmarks/presentation/scoreboard.html`** — scores over time, built from the results log.
 
 ```sh
 npm run bench:record   # same run, but appends one record to benchmarks/results.jsonl
@@ -250,7 +250,7 @@ Three additive extension points — none requires touching the core:
 2. **Engine** (a converter) — `scripts/engines/<name>.ts` exporting `convert()`.
 3. **Output target** (a block vocabulary, e.g. CoBlocks) — an adapter; directional, see `md/04` + `md/09`.
 
-Run `npm run bench` (prints the scorecard + writes `report/`); `npm run bench:record`
+Run `npm run bench` (prints the scorecard + writes `benchmarks/presentation/`); `npm run bench:record`
 appends a provenance-tagged run to `results.jsonl`. The golden rule (`md/11`): **be
 specific about the output (core blocks), neutral about the variable axes — never
 special-case one producer or one engine/model.** The `suiteHash` tells you when two runs

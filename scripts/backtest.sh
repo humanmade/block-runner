@@ -34,4 +34,4 @@ for SHA in "$@"; do
   git worktree remove -f "$WT"
 done
 
-echo "=== done. See the scoreboard (report/scoreboard.html) for engine-tagged rows. ==="
+echo "=== done. See the scoreboard (benchmarks/presentation/scoreboard.html) for engine-tagged rows. ==="

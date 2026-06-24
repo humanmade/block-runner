@@ -31,7 +31,8 @@ build/
 .clawpatch/
 
 # generated benchmark reports
-report/
+benchmarks/presentation/review.html
+benchmarks/presentation/scoreboard.html
 .playwright-mcp/
 
 # tuner: cached propose artifacts + captured regressions (smoke.seed.json + baselines/ stay committed)

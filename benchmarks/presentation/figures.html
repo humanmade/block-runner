@@ -10,7 +10,6 @@
 <div class="wrap">
 
   <header class="page-head">
-    <p class="eyebrow">Block Runner · Conversion benchmark</p>
     <h1>How faithfully does HTML become native blocks?</h1>
     <p class="lede">Every conversion is scored against a fixed suite of design sections with a known ideal block
       tree. Higher means the output matched the intended <code style="font-family:var(--font-mono)">wp:*</code>
@@ -27,7 +26,6 @@
   <!-- HEADLINE: value by complexity -->
   <section class="figure">
     <div class="figure-head">
-      <p class="eyebrow">The result</p>
       <h2>Raw LLM vs Block Runner, by block complexity</h2>
       <p class="sub">The same conversion task scored five ways — two raw LLMs writing the markup themselves (no Block
         Runner), and three Block Runner paths: rules only, then a model (GPT-5.5 / Opus) proposing the structure
@@ -47,7 +45,6 @@
   <!-- DETAIL: per-block dots -->
   <section class="figure">
     <div class="figure-head">
-      <p class="eyebrow">The result · per block</p>
       <h2>Every block tested, as one dot</h2>
       <p class="sub">The same five paths and the same Simple / Complex split — but each dot is one block’s score,
         so you can see the spread the averages hide. The bar above each path is its mean.</p>
@@ -61,7 +58,6 @@
   <!-- FIGURE E -->
   <section class="figure">
     <div class="figure-head">
-      <p class="eyebrow">How it works</p>
       <h2>The path from any HTML to clean native blocks</h2>
       <p class="sub">What runs when an end user pipes HTML through the CLI. One pass: translate the structure,
         prove it against real Gutenberg, fill in real media — and surface anything it couldn’t express natively.</p>
@@ -75,7 +71,6 @@
   <!-- FIGURE F -->
   <section class="figure">
     <div class="figure-head">
-      <p class="eyebrow">How it’s measured</p>
       <h2>The benchmark loop</h2>
       <p class="sub">One ideal answer per layout; many producers supply HTML; the engine converts; a deterministic
         scorer grades the result against the ideal tree; every run is logged with provenance so progress is auditable.</p>

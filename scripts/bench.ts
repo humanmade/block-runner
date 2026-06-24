@@ -15,7 +15,7 @@
  * produced block tree against the SHARED spec on four axes — structure, content,
  * validity, fallbacks — printing a per-producer scorecard to the console.
  *
- * Generated pages (gitignored) under report/:
+ * Generated pages (gitignored) under benchmarks/presentation/:
  *   review.html      — per layout: the ideal end state + each producer's render.
  *   scoreboard.html  — scores over time from benchmarks/results.jsonl.
  *
@@ -97,8 +97,8 @@ interface RunRecord {
   producerMeta: Record<string, ProducerMeta>;
 }
 
-const REPORT_PATH = path.join(ROOT, 'report', 'review.html');
-const SCOREBOARD_PATH = path.join(ROOT, 'report', 'scoreboard.html');
+const REPORT_PATH = path.join(ROOT, 'benchmarks', 'presentation', 'review.html');
+const SCOREBOARD_PATH = path.join(ROOT, 'benchmarks', 'presentation', 'scoreboard.html');
 
 async function main(): Promise<void> {
   await loadEngine();
@@ -140,7 +140,7 @@ async function main(): Promise<void> {
   }
 
   const history = readHistory();
-  mkdirSync(path.dirname(REPORT_PATH), { recursive: true }); // report/ is gitignored — absent on a clean checkout
+  mkdirSync(path.dirname(REPORT_PATH), { recursive: true }); // benchmarks/presentation/ generated files are gitignored
   writeFileSync(REPORT_PATH, renderHtml(specs, results), 'utf8');
   writeFileSync(SCOREBOARD_PATH, renderScoreboard(history, record), 'utf8');
   console.log(`\nreview page:  file://${REPORT_PATH}`);
@@ -248,7 +248,7 @@ function readPackageVersion(): string {
   }
 }
 
-// ── Review page (report/review.html) — per layout, ideal vs each producer ─────
+// ── Review page (benchmarks/presentation/review.html) — per layout, ideal vs each producer ─────
 
 const IMG_PLACEHOLDER = svgDataUri(
   `<svg xmlns="http://www.w3.org/2000/svg" width="400" height="300" role="img">` +
@@ -327,14 +327,14 @@ function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
 <style>
   @font-face {
     font-family: 'Geist';
-    src: url('../benchmarks/visuals/fonts/Geist.woff2') format('woff2');
+    src: url('./fonts/Geist.woff2') format('woff2');
     font-weight: 100 900;
     font-style: normal;
     font-display: swap;
   }
   @font-face {
     font-family: 'Geist Mono';
-    src: url('../benchmarks/visuals/fonts/GeistMono.woff2') format('woff2');
+    src: url('./fonts/GeistMono.woff2') format('woff2');
     font-weight: 100 900;
     font-style: normal;
     font-display: swap;
@@ -444,7 +444,7 @@ function scoreColor(score: number): string {
   return '#cdd2d9'; // --c-eng-a
 }
 
-// ── Scoreboard (report/scoreboard.html) ──────────────────────────────────────
+// ── Scoreboard (benchmarks/presentation/scoreboard.html) ──────────────────────────────────────
 
 function renderScoreboard(history: RunRecord[], current: RunRecord): string {
   const recorded = history.length > 0;
@@ -494,14 +494,14 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
 <style>
   @font-face {
     font-family: 'Geist';
-    src: url('../benchmarks/visuals/fonts/Geist.woff2') format('woff2');
+    src: url('./fonts/Geist.woff2') format('woff2');
     font-weight: 100 900;
     font-style: normal;
     font-display: swap;
   }
   @font-face {
     font-family: 'Geist Mono';
-    src: url('../benchmarks/visuals/fonts/GeistMono.woff2') format('woff2');
+    src: url('./fonts/GeistMono.woff2') format('woff2');
     font-weight: 100 900;
     font-style: normal;
     font-display: swap;
@@ -528,7 +528,7 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
   }
   * { box-sizing: border-box; }
   body { margin: 0; background: var(--bg); color: var(--body); font-family: var(--font-sans); font-size: 15px; line-height: 1.5; letter-spacing: -0.006em; -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
-  .wrap { max-width: 1100px; margin-inline: auto; padding: 72px 32px; }
+  .wrap { max-width: 1280px; margin-inline: auto; padding: 72px 32px; }
   h1 { font-size: clamp(1.6rem, 1.2rem + 1.4vw, 2.2rem); font-weight: 600; letter-spacing: -0.025em; color: var(--ink); margin: 0 0 0.25rem; }
   .sub { color: var(--muted); margin: 0 0 2.5rem; }
   h2 { font-family: var(--font-mono); font-size: 11.5px; font-weight: 400; letter-spacing: 0.14em; text-transform: uppercase; color: var(--faint); margin: 2.5rem 0 1rem; }
