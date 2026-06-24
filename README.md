@@ -59,12 +59,12 @@ as a standalone validator in CI.
 - **Built for agents and pipelines.** Feed it whatever your LLM, agent, or design tool emits; get back blocks the editor trusts.
 - **Media resolution.** Resolve images to real attachment ids via a map, WP-CLI, or the REST API.
 - **Styling fidelity, your call.** Keep off-theme styles or map them to your theme, up to a ceiling you set.
-- **Pluggable engines.** Deterministic rules out of the box; bring your own rules, or plug an LLM/agent engine into the same seam.
+- **Extensible.** Built-in rules out of the box; add your own, or hand the hardest layouts to an LLM (experimental).
 
 ### Validate: prove it's editor-valid
 
 - **Valid means what the editor means.** Every result runs through a gate wired to headless Gutenberg, not a converter's wishful thinking.
-- **Deterministic gate.** Reproducible: same markup, same verdict, no nondeterministic model in the loop. Safe to run on every request and in CI.
+- **Reproducible gate.** Same markup, same verdict, every time. Safe to run on every request and in CI.
 - **Canonicalize.** Rewrite near-miss markup into the exact shape the editor expects.
 - **Never fails silently.** When something can't be expressed natively, it says so and points at the exact line.
 
@@ -140,10 +140,8 @@ const converted = await convert(html, { resolver: 'noop' });
 
 ## Conversion
 
-Conversion runs on a pluggable engine. v1 ships a deterministic rule engine: an ordered
-walker that maps HTML straight to real block objects with `createBlock()` and serializes
-them with `serialize()`, skipping the brittle WordPress paste pipeline entirely. Fast, free,
-reproducible, and it already nails the composites the editor usually mangles:
+Point Block Runner at whatever your model or design tool generates, and it returns real,
+nested blocks ready for the editor. It covers the composites that usually break:
 
 - Cover sections with inline or CSS background images
 - Columns and column-like rows
@@ -151,10 +149,8 @@ reproducible, and it already nails the composites the editor usually mangles:
 - Images, headings, paragraphs, and lists
 - Generic groups, with a last-resort Custom HTML fallback that always warns
 
-The rules are a seam, not a ceiling. When a layout outgrows them, drop in your own rules, or
-an LLM or agent engine, on the same interface (experimental). Deterministic rules for the
-common case, a model for the long tail, one contract for both. Whichever engine emits a
-block, every result is held to the same validity gate before it ships.
+Need more than the built-ins? Add your own rules, or hand the hardest layouts to an LLM
+(experimental). Every result is checked against the validity gate before it ships.
 
 ## Media Resolution
 
@@ -231,8 +227,7 @@ comes from a block plugin, or is dropped, and every drop or escalation is report
 
 A conversion benchmark lives under `benchmarks/`: it measures how faithfully real generator
 output (Impeccable, Codex, Claude, and more) converts to native blocks, across swappable
-conversion engines (the deterministic rules; experimental LLM translators run via their CLIs,
-no API key).
+converters (the built-in rules, plus experimental LLM translators run via their CLIs).
 
 ```sh
 npm run bench          # score the suite; write report/review.html + report/scoreboard.html
