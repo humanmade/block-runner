@@ -1,0 +1,32 @@
+{
+  "intent": "An FAQ where each answer is RICH — not just a paragraph, but multiple blocks inside the collapsible. Each Q is a core/details whose body holds a paragraph plus a list or a button. Tests core/details with multi-block bodies (group > details > {paragraph, list, buttons > button}).",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Questions" },
+      {
+        "block": "core/details",
+        "contains": "convert",
+        "children": [
+          { "block": "core/paragraph", "contains": "rule-walker" },
+          { "block": "core/list" }
+        ]
+      },
+      {
+        "block": "core/details",
+        "contains": "self-host",
+        "children": [
+          { "block": "core/paragraph", "contains": "offline" },
+          { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "Read the guide" } ] }
+        ]
+      },
+      {
+        "block": "core/details",
+        "contains": "support",
+        "children": [
+          { "block": "core/paragraph", "contains": "Community" }
+        ]
+      }
+    ]
+  }
+}

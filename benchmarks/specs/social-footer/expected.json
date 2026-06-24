@@ -1,0 +1,17 @@
+{
+  "intent": "A footer social bar: a tagline paragraph, then a row of social icon links. Idiomatic core is core/social-links holding one core/social-link per network (each with a service + url) — NOT a list of linked images.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/paragraph", "contains": "Built in the open" },
+      {
+        "block": "core/social-links",
+        "children": [
+          { "block": "core/social-link", "contains": "github" },
+          { "block": "core/social-link" },
+          { "block": "core/social-link", "contains": "linkedin" }
+        ]
+      }
+    ]
+  }
+}

@@ -1,0 +1,186 @@
+/* Block Runner — benchmark visuals. Single lightweight stylesheet.
+   Geist + a restrained, scientific palette. Light surface, one accent. */
+
+@font-face {
+  font-family: 'Geist';
+  src: url('./fonts/Geist.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+@font-face {
+  font-family: 'Geist Mono';
+  src: url('./fonts/GeistMono.woff2') format('woff2');
+  font-weight: 100 900;
+  font-style: normal;
+  font-display: swap;
+}
+
+:root {
+  --font-sans: Geist, system-ui, -apple-system, sans-serif;
+  --font-mono: 'Geist Mono', ui-monospace, SFMono-Regular, Menlo, monospace;
+
+  --bg: #f7f7f5;
+  --raised: #ffffff;
+  --band: #f0efec;
+  --ink: #14181f;
+  --body: #1f2430;
+  --muted: #4a5160;
+  --faint: #6b7280;
+  --line: rgba(20, 24, 31, 0.1);
+  --line-strong: rgba(20, 24, 31, 0.16);
+
+  --brand: #2b303b;
+  --brand-ink: #14181f;
+  --brand-soft: rgba(20, 24, 31, 0.05);
+
+  /* engine comparison — monochrome; light → dark follows weak → strong score */
+  --c-eng-a: #cdd2d9;
+  --c-claude-alone: #b6bcc5;
+  --c-codex-alone: #939aa6;
+  --c-eng-cgpt: #5f6775;
+  --c-eng-c: #2a2f3a;
+
+  --grid: rgba(20, 24, 31, 0.07);
+  --shadow: 0 1px 2px rgba(20, 24, 31, 0.04), 0 8px 24px rgba(20, 24, 31, 0.05);
+}
+
+* { box-sizing: border-box; }
+
+html { -webkit-font-smoothing: antialiased; text-rendering: optimizeLegibility; }
+
+body {
+  margin: 0;
+  background: var(--bg);
+  color: var(--body);
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.5;
+  letter-spacing: -0.006em;
+}
+
+.wrap {
+  max-width: 980px;
+  margin: 0 auto;
+  padding: 56px 28px 80px;
+}
+
+/* ---- header ---- */
+.eyebrow {
+  font-family: var(--font-mono);
+  font-size: 11.5px;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
+  color: var(--faint);
+  margin: 0 0 12px;
+}
+.page-head h1 {
+  font-size: 34px;
+  line-height: 1.1;
+  letter-spacing: -0.025em;
+  color: var(--ink);
+  font-weight: 600;
+  margin: 0 0 12px;
+}
+.page-head .lede {
+  font-size: 17px;
+  color: var(--muted);
+  max-width: 64ch;
+  margin: 0 0 22px;
+}
+.meta-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px 18px;
+  padding: 14px 0 0;
+  border-top: 1px solid var(--line);
+  font-family: var(--font-mono);
+  font-size: 12px;
+  color: var(--faint);
+}
+.meta-row b { color: var(--ink); font-weight: 500; }
+
+/* ---- figure cards ---- */
+.figure {
+  background: var(--raised);
+  border: 1px solid var(--line);
+  border-radius: 16px;
+  box-shadow: var(--shadow);
+  padding: 26px 28px 22px;
+  margin: 28px 0;
+}
+.figure-head { margin-bottom: 8px; }
+.figure-head h2 {
+  font-size: 20px;
+  letter-spacing: -0.02em;
+  color: var(--ink);
+  font-weight: 600;
+  margin: 4px 0 4px;
+}
+.figure-head .sub { color: var(--muted); font-size: 14.5px; margin: 0; max-width: 70ch; }
+
+.figure svg { display: block; width: 100%; height: auto; overflow: visible; }
+
+.legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 18px;
+  margin: 14px 0 0;
+  font-size: 12.5px;
+  color: var(--muted);
+}
+.legend .key { display: inline-flex; align-items: center; gap: 7px; }
+.legend .swatch { width: 11px; height: 11px; border-radius: 3px; flex: none; }
+.legend .swatch.line { height: 0; border-top: 2px solid var(--brand); border-radius: 0; width: 16px; }
+
+.caption {
+  margin: 16px 0 0;
+  padding-top: 14px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.55;
+}
+.caption b { color: var(--muted); font-weight: 500; }
+
+.callout {
+  margin: 14px 0 0;
+  padding: 12px 14px;
+  background: var(--brand-soft);
+  border-radius: 10px;
+  font-size: 13.5px;
+  color: var(--brand-ink);
+}
+.callout b { font-weight: 600; }
+
+/* ---- svg primitives ---- */
+.ax-line { stroke: var(--line-strong); stroke-width: 1; }
+.grid-line { stroke: var(--grid); stroke-width: 1; }
+.tick-text { font-family: var(--font-mono); font-size: 11px; fill: var(--faint); }
+.axis-title { font-family: var(--font-mono); font-size: 10.5px; fill: var(--faint); letter-spacing: 0.08em; text-transform: uppercase; }
+.bar-label { font-family: var(--font-mono); font-size: 11px; fill: var(--ink); font-weight: 500; }
+.group-label { font-family: var(--font-sans); font-size: 12.5px; fill: var(--body); font-weight: 500; }
+.group-sub { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); }
+
+/* ---- flow diagrams ---- */
+.flow-node { fill: var(--raised); stroke: var(--line-strong); stroke-width: 1.25; }
+.flow-node.accent { stroke: var(--brand); stroke-width: 1.75; }
+.flow-node.soft { fill: var(--band); }
+.flow-title { font-family: var(--font-sans); font-size: 13.5px; font-weight: 600; fill: var(--ink); }
+.flow-sub { font-family: var(--font-mono); font-size: 10.5px; fill: var(--muted); }
+.flow-edge { stroke: var(--line-strong); stroke-width: 1.5; fill: none; }
+.flow-edge.accent { stroke: var(--brand); }
+.flow-edge.dashed { stroke-dasharray: 4 4; stroke: var(--faint); }
+.flow-handle { fill: var(--brand); }
+.flow-stage { font-family: var(--font-mono); font-size: 10px; fill: var(--faint); letter-spacing: 0.1em; text-transform: uppercase; }
+
+.foot {
+  margin-top: 36px;
+  padding-top: 20px;
+  border-top: 1px solid var(--line);
+  font-size: 12.5px;
+  color: var(--faint);
+  line-height: 1.6;
+}
+.foot b { color: var(--muted); font-weight: 500; }
+.foot code { font-family: var(--font-mono); font-size: 11.5px; background: var(--band); padding: 1px 5px; border-radius: 4px; color: var(--body); }

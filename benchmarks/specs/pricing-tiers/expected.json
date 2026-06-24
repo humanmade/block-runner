@@ -1,9 +1,9 @@
 {
-  "intent": "A pricing section: an H2, then a three-column grid of plan cards. Each column holds a card (core/group) with an H3 plan name, a price paragraph, a feature list, and a button — the card is a real container, consistent with pricing-tiers/feature-grid. The Pro card also carries a 'Most popular' badge.",
+  "intent": "A pricing section with three feature-rich plan cards. Each card is its own core/group (so the card is a real container, not bare blocks in a column): heading, price paragraph, feature list, and a button. Tests group > columns > column > group > buttons > button (6 levels), repeated three times.",
   "tree": {
     "block": "core/group",
     "children": [
-      { "block": "core/heading", "contains": "honest pricing" },
+      { "block": "core/heading", "contains": "Simple pricing" },
       {
         "block": "core/columns",
         "children": [
@@ -42,7 +42,7 @@
               {
                 "block": "core/group",
                 "children": [
-                  { "block": "core/heading", "contains": "Enterprise" },
+                  { "block": "core/heading", "contains": "Scale" },
                   { "block": "core/paragraph", "contains": "Custom" },
                   { "block": "core/list" },
                   { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "Contact sales" } ] }

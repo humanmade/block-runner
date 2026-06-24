@@ -1,5 +1,5 @@
 {
-  "intent": "A features section: an H2, then a three-column grid. Each column is an icon image, an H3, and a paragraph.",
+  "intent": "A features section: an H2, then a three-column grid of cards. Each column holds a card (core/group) of an icon image, an H3, and a paragraph — the card is a real container, consistent with pricing-tiers/bento-grid.",
   "tree": {
     "block": "core/group",
     "children": [
@@ -10,25 +10,40 @@
           {
             "block": "core/column",
             "children": [
-              { "block": "core/image", "contains": "icon-speed.svg" },
-              { "block": "core/heading", "contains": "Fast by default" },
-              { "block": "core/paragraph", "contains": "manual cleanup" }
+              {
+                "block": "core/group",
+                "children": [
+                  { "block": "core/image", "contains": "icon-speed.svg" },
+                  { "block": "core/heading", "contains": "Fast by default" },
+                  { "block": "core/paragraph", "contains": "manual cleanup" }
+                ]
+              }
             ]
           },
           {
             "block": "core/column",
             "children": [
-              { "block": "core/image", "contains": "icon-valid.svg" },
-              { "block": "core/heading", "contains": "Always valid" },
-              { "block": "core/paragraph", "contains": "validator" }
+              {
+                "block": "core/group",
+                "children": [
+                  { "block": "core/image", "contains": "icon-valid.svg" },
+                  { "block": "core/heading", "contains": "Always valid" },
+                  { "block": "core/paragraph", "contains": "validator" }
+                ]
+              }
             ]
           },
           {
             "block": "core/column",
             "children": [
-              { "block": "core/image", "contains": "icon-open.svg" },
-              { "block": "core/heading", "contains": "Open and scriptable" },
-              { "block": "core/paragraph", "contains": "command line" }
+              {
+                "block": "core/group",
+                "children": [
+                  { "block": "core/image", "contains": "icon-open.svg" },
+                  { "block": "core/heading", "contains": "Open and scriptable" },
+                  { "block": "core/paragraph", "contains": "command line" }
+                ]
+              }
             ]
           }
         ]

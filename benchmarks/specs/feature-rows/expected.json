@@ -1,0 +1,36 @@
+{
+  "intent": "Three alternating image-beside-text feature rows (image left / right / left). Each row is a core/media-text whose text side is rich: heading + paragraph + (list or buttons). Tests repeated core/media-text with alternating mediaPosition and multi-block text sides.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Built for the handoff" },
+      {
+        "block": "core/media-text",
+        "contains": "capture.png",
+        "children": [
+          { "block": "core/heading", "contains": "Paste anything" },
+          { "block": "core/paragraph", "contains": "Figma" },
+          { "block": "core/list" }
+        ]
+      },
+      {
+        "block": "core/media-text",
+        "contains": "tree.png",
+        "children": [
+          { "block": "core/heading", "contains": "Real nesting" },
+          { "block": "core/paragraph", "contains": "cover" },
+          { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "See an example" } ] }
+        ]
+      },
+      {
+        "block": "core/media-text",
+        "contains": "gate.png",
+        "children": [
+          { "block": "core/heading", "contains": "Always valid" },
+          { "block": "core/paragraph", "contains": "validator" },
+          { "block": "core/list" }
+        ]
+      }
+    ]
+  }
+}

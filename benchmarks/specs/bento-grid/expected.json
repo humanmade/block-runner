@@ -1,0 +1,53 @@
+{
+  "intent": "A heterogeneous 'bento' feature grid: a row of columns where each column holds a DIFFERENT compound block — one a core/media-text, one a core/cover with a CTA, one a core/group with an image + list. Tests the model discriminating distinct nested block types as siblings (group > columns > column > {media-text | cover | group} > …, up to 6 levels).",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "One toolkit" },
+      {
+        "block": "core/columns",
+        "children": [
+          {
+            "block": "core/column",
+            "children": [
+              {
+                "block": "core/media-text",
+                "contains": "panel.png",
+                "children": [
+                  { "block": "core/heading", "contains": "Deterministic" },
+                  { "block": "core/paragraph", "contains": "same input" }
+                ]
+              }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              {
+                "block": "core/cover",
+                "children": [
+                  { "block": "core/heading", "contains": "Editor-valid" },
+                  { "block": "core/paragraph", "contains": "gate" },
+                  { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "See the gate" } ] }
+                ]
+              }
+            ]
+          },
+          {
+            "block": "core/column",
+            "children": [
+              {
+                "block": "core/group",
+                "children": [
+                  { "block": "core/image", "contains": "open.svg" },
+                  { "block": "core/heading", "contains": "Open" },
+                  { "block": "core/list" }
+                ]
+              }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

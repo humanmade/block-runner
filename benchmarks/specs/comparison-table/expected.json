@@ -1,0 +1,10 @@
+{
+  "intent": "A plan-comparison section: an H2, then a comparison table. Tabular data is idiomatically a core/table (header row + body rows), NOT core/columns.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Compare plans" },
+      { "block": "core/table", "contains": "Unlimited" }
+    ]
+  }
+}

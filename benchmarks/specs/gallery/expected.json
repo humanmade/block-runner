@@ -1,0 +1,17 @@
+{
+  "intent": "A gallery section: an H2, then a grid of screenshots. The idiomatic core is core/gallery holding core/image children (NOT core/columns, and NOT a bare row of images in a group).",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "See it in action" },
+      {
+        "block": "core/gallery",
+        "children": [
+          { "block": "core/image", "contains": "shot-dashboard.png" },
+          { "block": "core/image", "contains": "shot-editor.png" },
+          { "block": "core/image", "contains": "shot-report.png" }
+        ]
+      }
+    ]
+  }
+}

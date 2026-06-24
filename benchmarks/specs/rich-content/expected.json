@@ -1,0 +1,21 @@
+{
+  "intent": "A long-form content section exercising the content primitives: an H2, an intro paragraph, an ordered (numbered) list of steps, a standout pull quote, a thematic divider, and a code snippet. Each maps to its own core block (core/list ordered, core/pullquote, core/separator, core/code) — none should fall back to core/html.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "How it works" },
+      { "block": "core/paragraph", "contains": "three steps" },
+      {
+        "block": "core/list",
+        "children": [
+          { "block": "core/list-item", "contains": "Paste" },
+          { "block": "core/list-item", "contains": "Run" },
+          { "block": "core/list-item", "contains": "blocks" }
+        ]
+      },
+      { "block": "core/pullquote", "contains": "valid by construction" },
+      { "block": "core/separator" },
+      { "block": "core/code", "contains": "block-runner" }
+    ]
+  }
+}

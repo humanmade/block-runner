@@ -1,0 +1,262 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>Block Runner — Benchmark visuals</title>
+<link rel="stylesheet" href="./style.css" />
+</head>
+<body>
+<div class="wrap">
+
+  <header class="page-head">
+    <p class="eyebrow">Block Runner · Conversion benchmark</p>
+    <h1>How faithfully does HTML become native blocks?</h1>
+    <p class="lede">Every conversion is scored against a fixed suite of design sections with a known ideal block
+      tree. Higher means the output matched the intended <code style="font-family:var(--font-mono)">wp:*</code>
+      structure and content more closely — not just that it was valid.</p>
+    <div class="meta-row">
+      <span>Suite: <b>53 fixtures</b> · 19 layouts · 3 producers</span>
+      <span>Score: <b>0–100</b> fidelity</span>
+      <span>Models: <b>Opus · GPT-5.5</b> (high)</span>
+      <span>As of <b>2026-06-24</b></span>
+      <span>Source: <b>benchmarks/results.jsonl</b></span>
+    </div>
+  </header>
+
+  <!-- HEADLINE: value by complexity -->
+  <section class="figure">
+    <div class="figure-head">
+      <p class="eyebrow">The result</p>
+      <h2>Raw LLM vs Block Runner, by block complexity</h2>
+      <p class="sub">The same conversion task scored five ways — two raw LLMs writing the markup themselves (no Block
+        Runner), and three Block Runner paths: rules only, then a model (GPT-5.5 / Opus) proposing the structure
+        while deterministic code assembles valid markup. Simple blocks on the left, complex on the right.</p>
+    </div>
+    <svg id="c-complexity" role="img" aria-label="Grouped bar chart of fidelity by block complexity and path"></svg>
+    <div class="callout"><b>The result:</b> only Block Runner with a model is strong <b>and</b> valid everywhere
+      (93–99). The raw paths are erratic — raw Codex is decent on clean input but bimodal and invalid on ~14 of 53;
+      raw Claude and the no-LLM rules collapse as blocks nest deeper.</div>
+    <p class="caption"><b>Method.</b> Mean fidelity — <b>Simple</b> = 14 layouts (38 fixtures), <b>Complex</b> = 5
+      compound deeply-nested layouts (15 fixtures) — both across the <b>same 3 producers</b> (full parity). The
+      raw-LLM paths (Claude/Codex alone) are <b>single, non-deterministic runs</b> — the <code>codex</code> CLI is
+      especially noisy — while Block Runner’s LLM scores are best-ever baselines. Raw markup is invalid on ~12–15 of
+      53 (the gate halves those); Block Runner is valid by construction (0 invalid, 0 fallbacks).</p>
+  </section>
+
+  <!-- DETAIL: per-block dots -->
+  <section class="figure">
+    <div class="figure-head">
+      <p class="eyebrow">The result · per block</p>
+      <h2>Every block tested, as one dot</h2>
+      <p class="sub">The same five paths and the same Simple / Complex split — but each dot is one block’s score,
+        so you can see the spread the averages hide. The bar above each path is its mean.</p>
+    </div>
+    <svg id="c-dots" role="img" aria-label="Strip plot of every fixture score by path and complexity"></svg>
+    <p class="caption"><b>Method.</b> One dot per fixture (jittered for legibility) — 38 Simple, 15 Complex per path.
+      Block Runner clusters tightly near the top; the raw-LLM paths are <b>bimodal</b> — many 100s and many 0s (the
+      right-tree-but-invalid conversions the gate halves) — and the no-LLM rules sit low. Same data as the bars above.</p>
+  </section>
+
+  <!-- FIGURE E -->
+  <section class="figure">
+    <div class="figure-head">
+      <p class="eyebrow">How it works</p>
+      <h2>The path from any HTML to clean native blocks</h2>
+      <p class="sub">What runs when an end user pipes HTML through the CLI. One pass: translate the structure,
+        prove it against real Gutenberg, fill in real media — and surface anything it couldn’t express natively.</p>
+    </div>
+    <svg id="flow-cli" viewBox="0 0 900 276" role="img" aria-label="Flow diagram of the conversion pipeline"></svg>
+    <p class="caption"><b>Read it left to right.</b> The gate runs on every conversion, so “valid” means what the
+      editor means. Nothing degrades quietly: each fallback or deviation is reported with the exact input line
+      that caused it.</p>
+  </section>
+
+  <!-- FIGURE F -->
+  <section class="figure">
+    <div class="figure-head">
+      <p class="eyebrow">How it’s measured</p>
+      <h2>The benchmark loop</h2>
+      <p class="sub">One ideal answer per layout; many producers supply HTML; the engine converts; a deterministic
+        scorer grades the result against the ideal tree; every run is logged with provenance so progress is auditable.</p>
+    </div>
+    <svg id="flow-bench" viewBox="0 0 900 348" role="img" aria-label="Flow diagram of the benchmark system"></svg>
+    <p class="caption"><b>Why it’s trustworthy.</b> The scorer is deterministic (no LLM judge), scores are graduated
+      (partial credit per axis), and a <code>suiteHash</code> ties each result to the exact suite — so a score change
+      is attributable to the engine only when the suite is unchanged. The dashed <b>backtest loop</b> re-runs older
+      engine versions against today’s fixed suite, producing a true apples-to-apples progress curve.</p>
+  </section>
+
+  <footer class="foot">
+    <p><b>How a score is built.</b> Per fixture, five axes: <b>STRUCT</b> (right blocks, right nesting, right order)
+      · <b>CONTENT</b> (right text/media in the right block) · <b>VALID</b> (passes the headless-Gutenberg gate;
+      invalid halves the score) · <b>FALLBACKS</b> (every <code>core/html</code> blob is a miss) · <b>COVERAGE</b>
+      (input text that survived). Composite = 0.75·STRUCT + 0.25·CONTENT, halved if invalid.</p>
+    <p><b>Honest caveats.</b> The raw-LLM paths (“Claude alone”, “Codex alone”) write the markup themselves, no Block
+      Runner assembly — strong structurally but capped by validity (right tree, invalid save-markup → the gate halves
+      it). They’re single non-deterministic runs; Block Runner’s LLM numbers are best-ever baselines. Engine A (rules)
+      is free, offline, deterministic but brittle. Block Runner’s LLM path needs a model but is valid by construction.
+      Source of truth: <code>benchmarks/results.jsonl</code>.</p>
+  </footer>
+
+</div>
+
+<script>
+const SVGNS = 'http://www.w3.org/2000/svg';
+function n(tag, attrs = {}, ...kids) {
+  const e = document.createElementNS(SVGNS, tag);
+  for (const k in attrs) e.setAttribute(k, attrs[k]);
+  for (const c of kids) e.appendChild(typeof c === 'string' ? document.createTextNode(c) : c);
+  return e;
+}
+function defsArrow(svg, id, color) {
+  const m = n('marker', { id, viewBox: '0 0 10 10', refX: '8.5', refY: '5', markerWidth: '7', markerHeight: '7', orient: 'auto-start-reverse' });
+  m.appendChild(n('path', { d: 'M 0 1 L 9 5 L 0 9 z', fill: color }));
+  const defs = n('defs'); defs.appendChild(m); svg.appendChild(defs);
+}
+
+/* ---------------- data ---------------- */
+// Bars ordered by score (lowest → highest) — monotonic in both groups.
+const GROUPS = [
+  { label: 'Simple blocks',  a: 32, claude: 35, codex: 54, cgpt: 95, c: 99 },
+  { label: 'Complex blocks', a: 18, claude: 35, codex: 73, cgpt: 93, c: 94 },
+];
+const SERIES = [
+  { key: 'a',      name: 'Block Runner', note: 'No LLM',          color: 'var(--c-eng-a)' },
+  { key: 'claude', name: 'Claude alone', note: 'Opus 4.8 · high', color: 'var(--c-claude-alone)' },
+  { key: 'codex',  name: 'Codex alone',  note: 'GPT-5.5 · high',  color: 'var(--c-codex-alone)' },
+  { key: 'cgpt',   name: 'Block Runner', note: 'GPT-5.5 · high',  color: 'var(--c-eng-cgpt)' },
+  { key: 'c',      name: 'Block Runner', note: 'Opus 4.8 · high', color: 'var(--c-eng-c)' },
+];
+
+(function () {
+  const svg = document.getElementById('c-complexity');
+  const W = 1100, H = 460, m = { l: 52, r: 22, t: 30, b: 100 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, base = m.t + ih, y = v => m.t + ih * (1 - v / 100);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  for (let t = 0; t <= 100; t += 25) {
+    svg.appendChild(n('line', { class: 'grid-line', x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }));
+    svg.appendChild(n('text', { class: 'tick-text', x: m.l - 8, y: y(t) + 3.5, 'text-anchor': 'end' }, String(t)));
+  }
+  svg.appendChild(n('line', { class: 'ax-line', x1: m.l, x2: m.l, y1: m.t, y2: base }));
+  svg.appendChild(n('text', { class: 'axis-title', x: 16, y: m.t + ih / 2, 'text-anchor': 'middle', transform: `rotate(-90 16 ${m.t + ih / 2})` }, 'Fidelity score'));
+  const groupW = iw / GROUPS.length, gap = 14;
+  GROUPS.forEach((g, gi) => {
+    const cx = m.l + groupW * gi + groupW / 2;
+    const innerW = Math.min(groupW * 0.9, 476), barW = (innerW - gap * (SERIES.length - 1)) / SERIES.length;
+    const x0 = cx - innerW / 2;
+    SERIES.forEach((s, si) => {
+      const v = g[s.key], bcx = x0 + si * (barW + gap) + barW / 2;
+      svg.appendChild(n('rect', { x: bcx - barW / 2, y: y(v), width: barW, height: base - y(v), rx: 4, fill: s.color }));
+      svg.appendChild(n('text', { class: 'bar-label', x: bcx, y: y(v) - 7, 'text-anchor': 'middle', 'font-size': '12.5' }, String(v)));
+      svg.appendChild(n('text', { x: bcx, y: base + 19, 'text-anchor': 'middle', 'font-family': 'var(--font-sans)', 'font-size': '10.5', 'font-weight': '500', fill: 'var(--body)' }, s.name));
+      svg.appendChild(n('text', { x: bcx, y: base + 32, 'text-anchor': 'middle', 'font-family': 'var(--font-mono)', 'font-size': '9', fill: 'var(--faint)' }, '(' + s.note + ')'));
+    });
+    svg.appendChild(n('text', { x: cx, y: base + 62, 'text-anchor': 'middle', 'font-family': 'var(--font-sans)', 'font-size': '15', 'font-weight': '600', fill: 'var(--ink)' }, g.label));
+  });
+})();
+
+/* ---------------- detail: per-block dots ---------------- */
+const DOTS = {"simple":{"a":[100,13,28,0,0,14,14,32,40,36,67,100,25,33,33,100,100,29,14,24,70,33,100,45,33,20,25,6,17,0,0,14,14,4,10,17,7,9],"claude":[100,100,28,0,0,29,0,20,73,64,100,0,0,0,0,11,100,29,0,0,70,33,100,45,0,20,100,33,0,11,0,29,0,0,90,33,73,45],"codex":[100,100,6,100,0,29,0,96,7,36,100,0,100,33,100,11,100,29,0,24,70,33,100,45,67,20,25,100,100,100,0,29,100,100,70,33,47,45],"cgpt":[100,100,100,100,100,100,100,100,100,38,100,100,100,100,100,100,100,100,100,100,100,100,100,38,100,100,100,100,100,100,100,100,100,100,89,100,100,38],"c":[100,100,100,100,100,100,100,95,100,93,100,100,100,100,100,100,100,100,100,100,100,100,100,86,100,100,100,100,100,100,100,100,100,100,89,100,100,93]},"complex":{"a":[6,9,7,71,32,11,18,13,50,24,6,9,7,0,4],"claude":[50,100,93,14,96,0,0,0,7,24,61,0,0,86,0],"codex":[6,100,7,100,4,100,100,100,100,100,83,18,100,71,100],"cgpt":[100,100,100,100,100,100,100,100,50,100,79,100,100,66,100],"c":[72,100,100,100,100,100,100,100,100,100,79,100,100,66,100]}};
+
+(function () {
+  const svg = document.getElementById('c-dots');
+  const W = 1100, H = 504, m = { l: 52, r: 22, t: 30, b: 100 };
+  const iw = W - m.l - m.r, ih = H - m.t - m.b, base = m.t + ih, y = v => m.t + ih * (1 - v / 100);
+  svg.setAttribute('viewBox', `0 0 ${W} ${H}`);
+  for (let t = 0; t <= 100; t += 25) {
+    svg.appendChild(n('line', { class: 'grid-line', x1: m.l, x2: W - m.r, y1: y(t), y2: y(t) }));
+    svg.appendChild(n('text', { class: 'tick-text', x: m.l - 8, y: y(t) + 3.5, 'text-anchor': 'end' }, String(t)));
+  }
+  svg.appendChild(n('line', { class: 'ax-line', x1: m.l, x2: m.l, y1: m.t, y2: base }));
+  svg.appendChild(n('text', { class: 'axis-title', x: 16, y: m.t + ih / 2, 'text-anchor': 'middle', transform: `rotate(-90 16 ${m.t + ih / 2})` }, 'Fidelity score'));
+  const jit = i => { const s = Math.sin(i * 43.21) * 1000; return (s - Math.floor(s)) - 0.5; };
+  const GRP = [['simple', 'Simple blocks'], ['complex', 'Complex blocks']];
+  const groupW = iw / GRP.length;
+  GRP.forEach(([grp, glabel], gi) => {
+    const cx0 = m.l + groupW * gi;
+    const innerW = Math.min(groupW * 0.92, 492), gx = cx0 + (groupW - innerW) / 2, subW = innerW / SERIES.length;
+    SERIES.forEach((s, si) => {
+      const scx = gx + subW * (si + 0.5), vals = DOTS[grp][s.key];
+      vals.forEach((v, di) => {
+        svg.appendChild(n('circle', { cx: scx + jit(di + si * 53 + gi * 97) * subW * 0.5, cy: y(v), r: 3.2, fill: s.color, 'fill-opacity': '0.85', stroke: 'rgba(20,24,31,0.32)', 'stroke-width': '0.6' }));
+      });
+      const mean = Math.round(vals.reduce((a, b) => a + b, 0) / vals.length);
+      svg.appendChild(n('line', { x1: scx - subW * 0.3, x2: scx + subW * 0.3, y1: y(mean), y2: y(mean), stroke: 'var(--ink)', 'stroke-width': '2.5' }));
+      svg.appendChild(n('text', { x: scx + subW * 0.3 + 4, y: y(mean) + 3.5, 'font-family': 'var(--font-mono)', 'font-size': '10', 'font-weight': '600', fill: 'var(--ink)' }, String(mean)));
+      svg.appendChild(n('text', { x: scx, y: base + 19, 'text-anchor': 'middle', 'font-family': 'var(--font-sans)', 'font-size': '10.5', 'font-weight': '500', fill: 'var(--body)' }, s.name));
+      svg.appendChild(n('text', { x: scx, y: base + 32, 'text-anchor': 'middle', 'font-family': 'var(--font-mono)', 'font-size': '9', fill: 'var(--faint)' }, '(' + s.note + ')'));
+    });
+    svg.appendChild(n('text', { x: cx0 + groupW / 2, y: base + 62, 'text-anchor': 'middle', 'font-family': 'var(--font-sans)', 'font-size': '15', 'font-weight': '600', fill: 'var(--ink)' }, glabel));
+  });
+})();
+
+/* ---------------- flow renderer ---------------- */
+function renderFlow(svg, nodes, edges) {
+  defsArrow(svg, svg.id + '-arr', '#4a5160');
+  defsArrow(svg, svg.id + '-arrA', '#2b303b');
+  const byId = Object.fromEntries(nodes.map(d => [d.id, d]));
+  const anchor = (d, side) => ({
+    l: { x: d.x, y: d.y + d.h / 2 }, r: { x: d.x + d.w, y: d.y + d.h / 2 },
+    t: { x: d.x + d.w / 2, y: d.y }, b: { x: d.x + d.w / 2, y: d.y + d.h },
+  }[side]);
+  edges.forEach(e => {
+    const a = anchor(byId[e.from], e.fs || 'r'), b = anchor(byId[e.to], e.ts || 'l');
+    const K = e.k || 46;
+    const off = (p, side, kk) => ({
+      l: { x: p.x - kk, y: p.y }, r: { x: p.x + kk, y: p.y },
+      t: { x: p.x, y: p.y - kk }, b: { x: p.x, y: p.y + kk },
+    }[side]);
+    const c1 = off(a, e.fs || 'r', K), c2 = off(b, e.ts || 'l', K);
+    const cls = 'flow-edge' + (e.accent ? ' accent' : '') + (e.dashed ? ' dashed' : '');
+    const marker = e.accent ? svg.id + '-arrA' : svg.id + '-arr';
+    svg.appendChild(n('path', { class: cls, d: `M ${a.x} ${a.y} C ${c1.x} ${c1.y} ${c2.x} ${c2.y} ${b.x} ${b.y}`, 'marker-end': `url(#${marker})` }));
+    if (e.label) {
+      const mx = (a.x + b.x) / 2, my = (a.y + b.y) / 2 + (e.ly || -8);
+      svg.appendChild(n('text', { class: 'flow-stage', x: mx, y: my, 'text-anchor': 'middle' }, e.label));
+    }
+  });
+  nodes.forEach(d => {
+    if (d.stage) svg.appendChild(n('text', { class: 'flow-stage', x: d.x + d.w / 2, y: d.y - 12, 'text-anchor': 'middle' }, d.stage));
+    const cls = 'flow-node' + (d.accent ? ' accent' : '') + (d.soft ? ' soft' : '');
+    svg.appendChild(n('rect', { class: cls, x: d.x, y: d.y, width: d.w, height: d.h, rx: 12 }));
+    svg.appendChild(n('text', { class: 'flow-title', x: d.x + d.w / 2, y: d.y + (d.sub ? d.h / 2 - 3 : d.h / 2 + 4), 'text-anchor': 'middle' }, d.title));
+    if (d.sub) (Array.isArray(d.sub) ? d.sub : [d.sub]).forEach((s, i) =>
+      svg.appendChild(n('text', { class: 'flow-sub', x: d.x + d.w / 2, y: d.y + d.h / 2 + 15 + i * 13, 'text-anchor': 'middle' }, s)));
+  });
+}
+
+/* Figure E: CLI pipeline */
+renderFlow(document.getElementById('flow-cli'), [
+  { id: 'in', x: 12, y: 64, w: 156, h: 78, stage: 'Input', title: 'Any HTML', sub: ['AI · design tools', 'templates · hand-written'] },
+  { id: 'tr', x: 192, y: 64, w: 150, h: 78, stage: 'Translate', title: 'Translate', sub: ['ordered rules →', 'block tree'] },
+  { id: 'ga', x: 366, y: 64, w: 156, h: 78, stage: 'Validate', title: 'Gate', accent: true, sub: ['headless Gutenberg:', 'validate + canonicalize'] },
+  { id: 'me', x: 546, y: 64, w: 150, h: 78, stage: 'Resolve', title: 'Resolve media', sub: ['real attachment', 'IDs'] },
+  { id: 'out', x: 720, y: 64, w: 168, h: 78, stage: 'Output', title: 'Native blocks', accent: true, sub: ['wp:cover › columns', '› buttons — editable'] },
+  { id: 'rep', x: 366, y: 196, w: 156, h: 64, soft: true, title: 'Deviation report', sub: ['warnings, source-located'] },
+], [
+  { from: 'in', to: 'tr' }, { from: 'tr', to: 'ga' }, { from: 'ga', to: 'me', accent: true }, { from: 'me', to: 'out', accent: true },
+  { from: 'ga', to: 'rep', fs: 'b', ts: 't', dashed: true, k: 30, label: 'nothing degrades silently', ly: 4 },
+]);
+
+/* Figure F: benchmark loop */
+renderFlow(document.getElementById('flow-bench'), [
+  { id: 'spec', x: 14, y: 64, w: 122, h: 76, stage: 'Brief', title: 'Spec', sub: ['prompt +', 'ideal block tree'] },
+  { id: 'p1', x: 168, y: 8, w: 156, h: 48, title: 'claude-design', soft: true },
+  { id: 'p2', x: 168, y: 86, w: 156, h: 48, title: 'codex-tailwind', soft: true },
+  { id: 'p3', x: 168, y: 164, w: 156, h: 48, title: 'claude-impeccable', soft: true },
+  { id: 'eng', x: 362, y: 64, w: 140, h: 76, title: 'Engine', accent: true, sub: ['deterministic', 'or model'] },
+  { id: 'score', x: 556, y: 64, w: 150, h: 76, title: 'Scorer', sub: ['struct · content', 'valid · coverage'] },
+  { id: 'res', x: 556, y: 252, w: 150, h: 80, title: 'results.jsonl', sub: ['commit · version', 'suiteHash'] },
+  { id: 'rpt', x: 360, y: 252, w: 140, h: 80, title: 'Reports', sub: ['review +', 'scoreboard'] },
+], [
+  { from: 'spec', to: 'p1', k: 38 }, { from: 'spec', to: 'p2' }, { from: 'spec', to: 'p3', k: 38 },
+  { from: 'p1', to: 'eng', k: 38 }, { from: 'p2', to: 'eng' }, { from: 'p3', to: 'eng', k: 38 },
+  { from: 'eng', to: 'score', accent: true },
+  { from: 'score', to: 'res', fs: 'b', ts: 't', k: 34 },
+  { from: 'res', to: 'rpt' },
+  { from: 'res', to: 'eng', fs: 'l', ts: 'b', dashed: true, k: 54, label: 'backtest loop', ly: -10 },
+]);
+</script>
+</body>
+</html>

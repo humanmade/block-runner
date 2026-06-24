@@ -1,0 +1,9 @@
+{
+  "_comment": "Archetype probes for the T1 smoke set — each spans a known failure mode (md/13). The tuner augments this from results.jsonl history (highest variance + most-recently-regressed, ≥1 per producer) and prints why each fixture was selected. Edit deliberately: a fixture earns a seat by representing a class, not by annoying you.",
+  "fixtures": [
+    { "label": "claude-impeccable/hero-cover", "reason": "validity-halving archetype — perfect tree, invalid markup halves the score (50)" },
+    { "label": "codex-tailwind/media-text", "reason": "structure archetype — image-beside-text → core/media-text (the idiom converters most often miss)" },
+    { "label": "claude-design/media-text", "reason": "structure archetype — same brief, different producer markup (the producer spread is the point)" },
+    { "label": "codex-tailwind/feature-grid", "reason": "messy-input archetype — Tailwind-soup; rules collapse where frontier holds" }
+  ]
+}
