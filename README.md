@@ -70,15 +70,32 @@ as a standalone validator in CI.
 
 ## Why Block Runner
 
-Content now pours out of AI and agents faster than anyone can hand-build it, but the
-WordPress editor only trusts blocks it recognizes. The moment that generated HTML reaches it,
-your cover, columns, and buttons collapse into a single frozen "Custom HTML" blob. Beautiful
-design in, spaghetti out.
+Content pours out of AI and agents faster than anyone can hand-build it, but "a block the
+editor actually accepts" is a brutally exact bar. To land one valid block, every one of these
+has to be right:
 
-Block Runner is the missing layer between the two: it turns whatever your agents and tools
-generate into the real thing (properly nested blocks, real media, exactly how you'd have
-built it by hand), then proves it's valid against headless Gutenberg before it reaches the
-editor. The connective tissue between how content is made now and how WordPress renders it.
+- **Markup is validated against what the block's `save()` would output.** Attribute order,
+  class names, whitespace, a stray self-closing slash: one mismatch and the editor throws
+  *"This block contains unexpected or invalid content"* and offers Attempt Block Recovery.
+- **Attributes live in a typed HTML-comment schema** (`<!-- wp:cover {"dimRatio":50,...} -->`),
+  order-sensitive, with defaults that must or must not appear depending on the block.
+- **Nesting is enforced.** `wp:columns` accepts only `wp:column`, `wp:buttons` only `wp:button`,
+  `wp:cover` wraps a specific inner container. Put the wrong child inside and the block is invalid.
+- **Each block expects its exact generated classes** (`wp-block-cover`, `wp-element-button`,
+  `has-background-dim`, `wp-image-1234`). Miss one and it breaks or renders wrong.
+- **Images need a real attachment ID**, not just a URL, so you also have to resolve and import
+  media into the library and thread the id through the markup.
+- **Colors, spacing, and fonts have to map to your theme presets** (`var:preset|spacing|40`,
+  `has-accent-color`), not raw hex and pixels, or the result is off-brand or rejected outright.
+- **Blocks carry deprecations.** Markup that validated against last year's `save()` may not
+  validate against this year's.
+- **Anything it can't place collapses into one frozen "Custom HTML" blob**, and the structure,
+  nesting, and editability are gone.
+
+Get any of it wrong and you ship invalid blocks, broken layouts, or one giant uneditable blob.
+Block Runner gets all of it right: it turns whatever your agents and tools generate into real,
+nested, editable blocks with resolved media, then proves every result against headless
+Gutenberg before it reaches the editor.
 
 **Any content in. Real blocks out.**
 
@@ -149,8 +166,9 @@ nested blocks ready for the editor. It covers the composites that usually break:
 - Images, headings, paragraphs, and lists
 - Generic groups, with a last-resort Custom HTML fallback that always warns
 
-Need more than the built-ins? Add your own rules, or hand the hardest layouts to an LLM
-(experimental). Every result is checked against the validity gate before it ships.
+Hand the gnarliest, most ambiguous layouts to an LLM engine (experimental), with fast,
+deterministic rules as the dependable backbone for everything else and the fallback when a
+model drifts. Whichever path a block takes, it is held to the same validity gate before it ships.
 
 ## Media Resolution
 
