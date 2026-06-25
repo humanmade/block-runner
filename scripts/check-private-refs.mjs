@@ -1,7 +1,11 @@
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 
-const output = execFileSync('npm', ['pack', '--dry-run', '--json'], {
+// `--ignore-scripts`: `npm pack` would otherwise run the `prepare` build, whose
+// tsup banner prints to stdout and corrupts the `--json` payload we parse below.
+// The packed file list is read from the filesystem (dist/ already built by the
+// prior verify step), so skipping lifecycle scripts yields the same result.
+const output = execFileSync('npm', ['pack', '--dry-run', '--json', '--ignore-scripts'], {
   encoding: 'utf8',
   stdio: ['ignore', 'pipe', 'pipe'],
 });
