@@ -156,6 +156,30 @@ All commands:
 - `2`: usage or I/O error
 - `3`: headless Gutenberg boot failure
 
+## Run it anywhere
+
+It's a Node CLI, so it drops into whatever you already use: your shell, a pre-commit hook,
+GitHub Actions, or any other CI (GitLab, CircleCI, and friends all run Node). And it's
+model-agnostic: it works on the output of any model, from any vendor.
+
+**pre-commit** (add to `.pre-commit-config.yaml`):
+
+```yaml
+- repo: https://github.com/humanmade/block-runner
+  rev: v0.1.0
+  hooks:
+    - id: block-runner
+      args: ['content/**/*.html']   # glob of files that contain block markup
+```
+
+**GitHub Actions** (or any CI) validate blocks on every push:
+
+```yaml
+- uses: actions/setup-node@v4
+  with: { node-version: 22 }
+- run: npx block-runner validate "content/**/*.html" --strict
+```
+
 ## Library
 
 ```ts

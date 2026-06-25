@@ -1,0 +1,15 @@
+# Pre-commit hook for Block Runner: fail the commit if Gutenberg block markup
+# isn't editor-valid. Add to your .pre-commit-config.yaml:
+#
+#   - repo: https://github.com/humanmade/block-runner
+#     rev: v0.1.0
+#     hooks:
+#       - id: block-runner
+#         args: ['content/**/*.html']   # glob of files that contain block markup
+- id: block-runner
+  name: block-runner (validate Gutenberg blocks)
+  description: Validate that Gutenberg block markup is editor-valid.
+  entry: block-runner validate
+  language: node
+  pass_filenames: false
+  files: \.html$
