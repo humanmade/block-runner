@@ -1,3 +1,4 @@
+import { formatWithOptions } from 'node:util';
 import { getWp } from '../headless/wp.js';
 import { withMutedWordPressConsole } from '../headless/env.js';
 import {
@@ -75,17 +76,39 @@ export function formatValidationIssues(issues: unknown[] | undefined): string {
     return 'invalid block markup';
   }
 
-  return issues
-    .map((issue) => {
-      if (typeof issue === 'string') {
-        return issue;
+  const messages = issues
+    .map(formatValidationIssue)
+    .filter((message): message is string => Boolean(message));
+
+  return messages.length > 0 ? messages.join('; ') : 'invalid block markup';
+}
+
+// Gutenberg's `validateBlock` returns `LoggerItem`s of the shape
+// `{ log, args }`, where `args` is a printf-style format string followed by its
+// substitution values (e.g. `['Expected attributes %o, instead saw %o.', a, b]`).
+// Render them with `util.format` to recover the human-readable message; skip the
+// catch-all "Block validation failed for …" item, which only restates that the
+// block is invalid while dumping the entire block type definition.
+function formatValidationIssue(issue: unknown): string {
+  if (typeof issue === 'string') {
+    return issue;
+  }
+  if (issue && typeof issue === 'object') {
+    const { args, message } = issue as { args?: unknown[]; message?: unknown };
+    if (Array.isArray(args) && args.length > 0) {
+      if (typeof args[0] === 'string' && args[0].startsWith('Block validation failed for')) {
+        return '';
       }
-      if (issue && typeof issue === 'object' && 'message' in issue) {
-        return String((issue as { message: unknown }).message);
-      }
-      return String(issue);
-    })
-    .join('; ');
+      // `%o` (lower-case) renders with `showHidden`, leaking `[length]: N`
+      // artifacts into otherwise plain arrays/objects; `%O` inspects cleanly.
+      const format = typeof args[0] === 'string' ? args[0].replace(/%o/g, '%O') : args[0];
+      return formatWithOptions({ depth: 2, breakLength: Infinity }, format, ...args.slice(1)).trim();
+    }
+    if (message != null) {
+      return String(message);
+    }
+  }
+  return String(issue);
 }
 
 function locateBlock(markup: string, block: WpBlock, fromOffset: number, path?: string): SourceLocation {
