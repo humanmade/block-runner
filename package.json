@@ -55,7 +55,8 @@
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run",
     "check:private": "node scripts/check-private-refs.mjs",
-    "verify": "npm run typecheck && npm test && npm run build && npm run check:private && npm run pack:check"
+    "verify": "npm run typecheck && npm test && npm run build && npm run check:private && npm run pack:check",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "@wordpress/block-library": "9.26.0",
@@ -67,8 +68,8 @@
   "devDependencies": {
     "@types/jsdom": "21.1.7",
     "@types/node": "22.10.2",
-    "tsx": "4.19.2",
     "tsup": "8.3.5",
+    "tsx": "4.19.2",
     "typescript": "5.7.2",
     "vitest": "2.1.8"
   },
