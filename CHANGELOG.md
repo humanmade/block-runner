@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.3
+
+- README hero + benchmark images use jsDelivr (`cdn.jsdelivr.net/gh/...`) so they
+  render on npmjs.com (raw.githubusercontent.com was returning 429).
+
 ## 0.3.2
 
 - `check:private` supports both npm ≤11 and npm ≥12 `pack --json` shapes.
