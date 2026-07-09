@@ -5,8 +5,11 @@ import { readFileSync } from 'node:fs';
 // banner can land on stdout and corrupt `--json` (observed on stock GHA npm).
 // The packed file list is read from the filesystem (dist/ already built by the
 // prior verify step), so skipping lifecycle scripts yields the same result.
-// We extract the first complete JSON array so residual stdout / notices never
-// break the gate (npm 11 can append text after the array).
+//
+// npm pack --json shapes differ by major:
+//   npm ≤11: [ { name, files: [...] } ]
+//   npm ≥12: { "<pkg>": { name, files: [...] } }
+// Always extract the first complete JSON value, then normalise to a files list.
 const output = execFileSync(
   'npm',
   ['pack', '--dry-run', '--json', '--ignore-scripts'],
@@ -17,8 +20,7 @@ const output = execFileSync(
   },
 );
 
-const [pack] = parsePackJson(output);
-const files = pack.files.map((file) => file.path);
+const files = packFilePaths(output);
 const forbiddenPaths = [/^md\//, /^AGENTS\.md$/, /^CLAUDE\.md$/, /^\.env/];
 const forbiddenTerms = [
   'dogfood',
@@ -55,17 +57,49 @@ if (hits.length > 0) {
   process.exit(1);
 }
 
-/**
- * Extract and parse the first top-level JSON array from npm pack --json stdout.
- * Bracket-balanced so trailing notices or a second payload cannot poison parse.
- */
-function parsePackJson(stdout) {
-  const start = stdout.indexOf('[');
-  if (start === -1) {
+/** File paths that npm pack would include. */
+function packFilePaths(stdout) {
+  const value = parseFirstJsonValue(stdout);
+  const pack = normalisePack(value);
+  if (!pack?.files || !Array.isArray(pack.files)) {
     throw new Error(
-      `npm pack --json produced no JSON array.\n--- stdout (first 500 chars) ---\n${stdout.slice(0, 500)}`,
+      `npm pack --json did not include a files list.\n--- stdout (first 500 chars) ---\n${stdout.slice(0, 500)}`,
     );
   }
+  return pack.files.map((file) => file.path);
+}
+
+/** npm ≤11 array form or npm ≥12 name-keyed object → one pack entry. */
+function normalisePack(value) {
+  if (Array.isArray(value)) {
+    return value[0];
+  }
+  if (value && typeof value === 'object') {
+    // Single pack object with files, or map of package-name → pack object.
+    if (Array.isArray(value.files)) {
+      return value;
+    }
+    const first = Object.values(value)[0];
+    if (first && typeof first === 'object') {
+      return first;
+    }
+  }
+  return undefined;
+}
+
+/** Extract and parse the first complete JSON value (`{...}` or `[...]`) from stdout. */
+function parseFirstJsonValue(stdout) {
+  const objectStart = stdout.indexOf('{');
+  const arrayStart = stdout.indexOf('[');
+  const candidates = [objectStart, arrayStart].filter((index) => index >= 0);
+  if (candidates.length === 0) {
+    throw new Error(
+      `npm pack --json produced no JSON.\n--- stdout (first 500 chars) ---\n${stdout.slice(0, 500)}`,
+    );
+  }
+  const start = Math.min(...candidates);
+  const open = stdout[start];
+  const close = open === '{' ? '}' : ']';
 
   let depth = 0;
   let inString = false;
@@ -84,9 +118,9 @@ function parsePackJson(stdout) {
     }
     if (char === '"') {
       inString = true;
-    } else if (char === '[') {
+    } else if (char === open) {
       depth += 1;
-    } else if (char === ']') {
+    } else if (char === close) {
       depth -= 1;
       if (depth === 0) {
         return JSON.parse(stdout.slice(start, i + 1));
@@ -95,7 +129,7 @@ function parsePackJson(stdout) {
   }
 
   throw new Error(
-    `npm pack --json produced an unclosed JSON array.\n--- stdout (first 500 chars) ---\n${stdout.slice(0, 500)}`,
+    `npm pack --json produced unclosed JSON.\n--- stdout (first 500 chars) ---\n${stdout.slice(0, 500)}`,
   );
 }
 

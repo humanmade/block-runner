@@ -19,7 +19,9 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # Keep lockfile installs consistent across Node matrix (npm 10 vs 11 peer graphs).
-      - run: npm install -g npm@latest
+      # Pin npm 11: lockfile is npm-10/11 compatible; npm 12 needs newer Node
+      # and changed `npm pack --json` shape (handled in check-private-refs, but
+      # avoid `npm@latest` floating across majors on the matrix).
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm run verify

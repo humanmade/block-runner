@@ -21,7 +21,9 @@ jobs:
         with:
           node-version: 22
           registry-url: https://registry.npmjs.org
-      - run: npm install -g npm@latest # trusted publishing needs npm >= 11.5.1
+      # Trusted publishing needs npm >= 11.5.1; pin 11.x (npm 12 needs Node ≥22.22
+      # and changes pack --json shape — we support both, but stay on the proven line).
+      - run: npm install -g npm@11
       - run: npm ci
       - run: npm run verify
       - run: npm publish --provenance --access public

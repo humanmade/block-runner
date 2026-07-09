@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.3.2
+
+- `check:private` supports both npm ≤11 and npm ≥12 `pack --json` shapes.
+- CI/release pin `npm@11` (not floating `latest` / npm 12 engine cliff).
+
 ## 0.3.1
 
 - Fix package-lock sync so `npm ci` works in CI (missing optional peer entries).
