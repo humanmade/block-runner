@@ -47,7 +47,8 @@
     "README.md",
     "LICENSE",
     "CHANGELOG.md",
-    "examples"
+    "examples",
+    "scripts/prune-wp-vips.mjs"
   ],
   "engines": {
     "node": ">=20"
@@ -65,7 +66,8 @@
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "check:private": "node scripts/check-private-refs.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run check:private && npm run pack:check",
-    "prepare": "npm run build"
+    "prepare": "npm run build",
+    "postinstall": "node scripts/prune-wp-vips.mjs"
   },
   "dependencies": {
     "@wordpress/block-library": "10.1.0",
@@ -85,6 +87,8 @@
   },
   "overrides": {
     "uuid": "11.1.1",
-    "esbuild": "0.28.1"
+    "esbuild": "0.28.1",
+    "@wordpress/vips": "npm:empty-npm-package@1.0.0",
+    "wasm-vips": "npm:empty-npm-package@1.0.0"
   }
 }

@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.4.1
+
+- Strip unused Gutenberg media WASM from installs: override
+  `@wordpress/vips` + `wasm-vips` to empty stubs, and prune them in
+  `postinstall` when this package is a nested dependency (~155MB).
+  Headless convert/validate never calls that pipeline.
+
 ## 0.4.0
 
 ### Dependencies
