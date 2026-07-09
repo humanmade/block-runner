@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.4.0
+
+### Dependencies
+
+- `@wordpress/blocks` **14.15 → 15.23**, `@wordpress/block-library` **9.26 → 10.1**
+  (current Gutenberg headless stack).
+- `jsdom` 24 → 29, `commander` 12 → 15.
+- Dev: `vitest` 2 → 4, `tsup` 8.5, `tsx` 4.23, `typescript` 5.9, types updated.
+- Overrides: `uuid@11.1.1`, `esbuild@0.28.1` (clear remaining audit findings).
+
+### Security
+
+- `npm audit` reports **0 vulnerabilities** (was 18: 1 critical, 1 high, 16 moderate).
+
 ## 0.3.3
 
 - README hero + benchmark images use jsDelivr (`cdn.jsdelivr.net/gh/...`) so they
