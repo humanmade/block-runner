@@ -19,5 +19,7 @@ jobs:
         with:
           node-version: ${{ matrix.node }}
           cache: npm
+      # Keep lockfile installs consistent across Node matrix (npm 10 vs 11 peer graphs).
+      - run: npm install -g npm@latest
       - run: npm ci
       - run: npm run verify

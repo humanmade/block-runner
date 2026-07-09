@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.3.1
+
+- Fix package-lock sync so `npm ci` works in CI (missing optional peer entries).
+- Harden `check:private` JSON extraction for npm 11 (bracket-balanced parse;
+  release workflow was failing after green tests).
+
 ## 0.3.0
 
 ### Features
