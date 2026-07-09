@@ -4,6 +4,15 @@
   "description": "The layer between generated content and WordPress — convert what AI, agents, and design tools emit into clean, valid, native Gutenberg blocks, and validate every result. CLI + library.",
   "type": "module",
   "license": "GPL-2.0-or-later",
+  "author": {
+    "name": "Human Made",
+    "url": "https://humanmade.com"
+  },
+  "publishConfig": {
+    "access": "public",
+    "provenance": true
+  },
+  "types": "./dist/index.d.ts",
   "keywords": [
     "wordpress",
     "gutenberg",
@@ -41,7 +50,7 @@
     "examples"
   ],
   "engines": {
-    "node": ">=18.12.0"
+    "node": ">=20"
   },
   "scripts": {
     "build": "tsup",
@@ -53,7 +62,7 @@
     "tune:t0": "tsx scripts/tune.ts --tier t0",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
-    "pack:check": "npm pack --dry-run",
+    "pack:check": "npm pack --dry-run --ignore-scripts",
     "check:private": "node scripts/check-private-refs.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run check:private && npm run pack:check",
     "prepare": "npm run build"
@@ -63,7 +72,8 @@
     "@wordpress/blocks": "14.15.0",
     "commander": "12.1.0",
     "fast-glob": "3.3.3",
-    "jsdom": "24.1.3"
+    "jsdom": "24.1.3",
+    "wesper": "0.0.2"
   },
   "devDependencies": {
     "@types/jsdom": "21.1.7",

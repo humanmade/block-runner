@@ -3,6 +3,7 @@ import { getWp } from '../headless/wp.js';
 import { validate } from '../gate/validate.js';
 import { applyMedia } from '../media/apply.js';
 import { createMediaResolver } from '../media/resolver.js';
+import { repairTokens } from '../tokens/apply.js';
 import { BlockRunnerReport, ConvertOptions, ReportItem, Rule, RuleContext, WpBlock } from '../types.js';
 import { contextHtml, contextText, makeContextWarning, prepareDom, sourceForNode } from './dom.js';
 import { defaultRules } from './defaults.js';
@@ -55,7 +56,10 @@ export async function convert(input: string, options: ConvertOptions = {}): Prom
   const mediaWarnings = await applyMedia(blocks, createMediaResolver(config, options), config);
   warnings.push(...mediaWarnings);
 
-  const output = wp.serialize(blocks);
+  const tokenRepair = await repairTokens(blocks, config, options);
+  warnings.push(...tokenRepair.items);
+
+  const output = wp.serialize(tokenRepair.blocks);
   const gate = await validate(output, {
     ...options,
     strict: config.strict,

@@ -20,16 +20,18 @@ Set Width 1100
 Set Height 600
 Set Padding 24
 Set Margin 28
-Set MarginFill "#181825"
+Set MarginFill "#07080d"
 Set BorderRadius 12
 Set WindowBar Colorful
-Set Theme "Catppuccin Mocha"
+# Custom theme matched to the README screenshot: deep-navy canvas, violet
+# prompt/command (foreground), soft-white content, muted-grey logs, soft green.
+Set Theme { "background": "#0e1018", "foreground": "#a78bfa", "cursor": "#a78bfa", "selection": "#2a2f44", "black": "#0e1018", "red": "#e06c75", "green": "#5fd38d", "yellow": "#d6b27c", "blue": "#7aa2f7", "magenta": "#a78bfa", "cyan": "#56b6c2", "white": "#c6cdd5", "brightBlack": "#646b7a", "brightRed": "#e06c75", "brightGreen": "#5fd38d", "brightYellow": "#d6b27c", "brightBlue": "#7aa2f7", "brightMagenta": "#a78bfa", "brightCyan": "#56b6c2", "brightWhite": "#e6ebf2" }
 Set TypingSpeed 45ms
 Set CursorBlink true
 
 # --- off-camera setup: clean prompt + a soft line-streamer + the curated view ---
 Hide
-Type `export PS1='$ '`
+Type `export PS1='❯ '`
 Enter
 Type `roll(){ while IFS= read -r l; do printf '%s\n' "$l"; sleep 0.06; done; }`
 Enter

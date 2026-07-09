@@ -70,10 +70,30 @@ export interface MediaResolver {
   resolve(input: MediaResolveInput): Promise<MediaResult>;
 }
 
+export type TokenMatchMode = 'exact' | 'nearest';
+export type TokenResolverKind = 'noop' | 'file' | 'wpcli' | 'rest' | 'context';
+
 export interface TokenConfig {
   colors?: Record<string, string>;
   fonts?: Record<string, string>;
-  spacing?: string[];
+  fontSizes?: Record<string, string>;
+  spacing?: string[] | Record<string, string>;
+  match?: TokenMatchMode;
+  resolver?: TokenResolverKind;
+  themeJson?: string;
+  context?: string;
+}
+
+export interface ResolvedTokens {
+  colors: Record<string, string>;
+  fonts: Record<string, string>;
+  fontSizes: Record<string, string>;
+  spacing: Record<string, string>;
+}
+
+export interface TokenResolver {
+  kind: TokenResolverKind;
+  resolve(): Promise<ResolvedTokens>;
 }
 
 export interface RuleConfig {
@@ -98,6 +118,10 @@ export interface CommonOptions {
   wpUrl?: string;
   wpUser?: string;
   wpAppPassword?: string;
+  tokenResolver?: TokenResolverKind;
+  themeJson?: string;
+  tokenMatch?: TokenMatchMode;
+  context?: string;
 }
 
 export interface ConvertOptions extends CommonOptions {

@@ -45,5 +45,6 @@ WORDPRESS_BLOCK_PATTERNS_REFERENCE.md
 # Internal context docs — never shipped
 md/
 
-# Demo: keep the gif (README hero); regenerate the heavier mp4 from demo/demo.tape
+# Demo: keep demo.gif (README hero); regenerate the heavier mp4 + hi-res gif from demo/demo.tape
 demo/*.mp4
+demo/demo.hq.gif

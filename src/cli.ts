@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
 import { readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,7 +9,12 @@ import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
 import { convert } from './convert/assemble.js';
+import { collectSiteContext } from './context/run.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
+
+const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
+  version: string;
+};
 
 interface CliOptions extends CommonOptions {
   config?: string;
@@ -17,17 +23,30 @@ interface CliOptions extends CommonOptions {
   wpAppPasswordEnv?: string;
 }
 
+interface ContextCliOptions {
+  wpUrl?: string;
+  wpPath?: string;
+  ssh?: string;
+  wpBinary?: string;
+  strict?: boolean;
+  out?: string;
+}
+
 const program = new Command();
 
 program
   .name('block-runner')
   .description('Convert design HTML into valid native Gutenberg block markup.')
-  .version('0.1.0')
+  .version(packageVersion)
   .exitOverride();
 
-addSharedOptions(program.command('validate <globOrStdin>').description('Validate Gutenberg block markup.'), {
-  output: false,
-})
+addTokenOptions(
+  addWpCredentialOptions(
+    addSharedOptions(program.command('validate <globOrStdin>').description('Validate Gutenberg block markup.'), {
+      output: false,
+    }),
+  ),
+)
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
     const inputs = await readInputs(globOrStdin);
@@ -44,7 +63,11 @@ addSharedOptions(program.command('validate <globOrStdin>').description('Validate
     process.exitCode = report.ok ? 0 : 1;
   });
 
-addSharedOptions(program.command('fix <globOrStdin>').description('Canonicalize Gutenberg block markup.'))
+addTokenOptions(
+  addWpCredentialOptions(
+    addSharedOptions(program.command('fix <globOrStdin>').description('Canonicalize Gutenberg block markup.')),
+  ),
+)
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
     const inputs = await readInputs(globOrStdin);
@@ -63,11 +86,11 @@ addSharedOptions(program.command('fix <globOrStdin>').description('Canonicalize 
     process.exitCode = report.ok ? 0 : 1;
   });
 
-addSharedOptions(program.command('convert <htmlOrStdin>').description('Convert authored HTML to native block markup.'))
-  .option('--resolver <kind>', 'media resolver: noop, map, wpcli, rest')
-  .option('--wp-url <url>', 'WordPress URL for wpcli/rest media resolution')
-  .option('--wp-user <user>', 'WordPress username for REST media resolution')
-  .option('--wp-app-password-env <name>', 'environment variable containing a WordPress application password')
+addTokenOptions(
+  addWpCredentialOptions(
+    addSharedOptions(program.command('convert <htmlOrStdin>').description('Convert authored HTML to native block markup.')),
+  ).option('--resolver <kind>', 'media resolver: noop, map, wpcli, rest'),
+)
   .action(async (htmlOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
     const inputs = await readInputs(htmlOrStdin, { allowInline: true });
@@ -84,6 +107,35 @@ addSharedOptions(program.command('convert <htmlOrStdin>').description('Convert a
     report.output = reports.map((item) => item.output ?? '').join('\n');
     await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
+  });
+
+program
+  .command('context')
+  .description('Read a WordPress site into a wesper site.context.json manifest (WP-CLI).')
+  .option('--wp-url <url>', 'WordPress site URL recorded in the manifest')
+  .option('--wp-path <path>', 'WordPress install path for WP-CLI collection')
+  .option('--ssh <target>', 'SSH target for remote WP-CLI collection')
+  .option('--wp-binary <path>', 'wp-cli binary name or path (default: wp)')
+  .option('--strict', 'fail when the collector reports partial data')
+  .option('--out <path>', 'write the manifest to a file')
+  .action(async (options: ContextCliOptions) => {
+    const manifest = await collectSiteContext({
+      wpUrl: options.wpUrl,
+      wpPath: options.wpPath,
+      ssh: options.ssh,
+      wpBinary: options.wpBinary,
+      strict: options.strict,
+    });
+
+    if (options.out) {
+      await writeFile(options.out, manifest);
+      return;
+    }
+
+    process.stdout.write(manifest);
+    if (!manifest.endsWith('\n')) {
+      process.stdout.write('\n');
+    }
   });
 
 async function main(): Promise<void> {
@@ -116,6 +168,21 @@ function addSharedOptions(command: Command, options: { output?: boolean } = {}):
   return options.output === false
     ? withCommon
     : withCommon.option('--out <path>', 'write converted/fixed markup to a file');
+}
+
+function addWpCredentialOptions(command: Command): Command {
+  return command
+    .option('--wp-url <url>', 'WordPress URL for wpcli/rest resolution')
+    .option('--wp-user <user>', 'WordPress username for REST resolution')
+    .option('--wp-app-password-env <name>', 'environment variable containing a WordPress application password');
+}
+
+function addTokenOptions(command: Command): Command {
+  return command
+    .option('--token-resolver <kind>', 'token resolver: noop, file, wpcli, rest, context')
+    .option('--theme-json <path>', 'path to a theme.json for the file token resolver')
+    .option('--context <path>', 'path to a wesper site.context.json manifest (token source)')
+    .option('--token-match <mode>', 'token match mode: exact, nearest');
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {

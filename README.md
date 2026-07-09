@@ -7,7 +7,7 @@
 [![CI](https://github.com/humanmade/block-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/humanmade/block-runner/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/humanmade/block-runner.svg)](./LICENSE)
 
-![Block Runner converts messy design HTML into clean, nested, native Gutenberg blocks: wp:cover ▸ wp:columns ▸ wp:buttons](demo/demo.gif)
+![Block Runner converts messy design HTML into clean, nested, native Gutenberg blocks: wp:cover ▸ wp:columns ▸ wp:buttons](https://raw.githubusercontent.com/humanmade/block-runner/main/demo/demo.gif)
 
 Block Runner is the layer between **generated content and WordPress**. AI tools, agents, and
 design tools spit out HTML, but the block editor only trusts blocks it recognizes, so it
@@ -26,7 +26,7 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 ## Quickstart
 
 ```sh
-npm install block-runner          # requires Node 18.12+
+npm install block-runner          # requires Node 20+
 ```
 
 Then just ask your coding agent (Claude Code, Codex):
@@ -51,7 +51,7 @@ editor-valid, or Block Runner tells you exactly what wasn't and points at the li
 
 ## Benchmark
 
-![Fidelity benchmark: raw Claude and Codex writing block markup themselves score 35 to 73, while Block Runner with the same models scores 93 to 99, across simple and complex blocks](assets/benchmark.png)
+![Fidelity benchmark: raw Claude and Codex writing block markup themselves score 35 to 73, while Block Runner with the same models scores 93 to 99, across simple and complex blocks](https://raw.githubusercontent.com/humanmade/block-runner/main/assets/benchmark.png)
 
 Every conversion is scored from 0 to 100 against a fixed suite of design sections with a
 known ideal block tree, by how faithfully it reproduces the intended `wp:*` structure and

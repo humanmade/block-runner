@@ -10,7 +10,10 @@ export const DEFAULT_CONFIG: Required<Pick<BlockRunnerConfig, 'strict'>> & Block
   tokens: {
     colors: {},
     fonts: {},
+    fontSizes: {},
     spacing: [],
+    match: 'exact',
+    resolver: 'noop',
   },
   rules: {
     disabledDefaults: [],
@@ -42,7 +45,18 @@ export function mergeConfig(config: BlockRunnerConfig = {}, options: CommonOptio
         ...DEFAULT_CONFIG.tokens?.fonts,
         ...config.tokens?.fonts,
       },
+      fontSizes: {
+        ...DEFAULT_CONFIG.tokens?.fontSizes,
+        ...config.tokens?.fontSizes,
+      },
       spacing: config.tokens?.spacing ?? DEFAULT_CONFIG.tokens?.spacing,
+      match: options.tokenMatch ?? config.tokens?.match ?? 'exact',
+      resolver:
+        options.tokenResolver ??
+        config.tokens?.resolver ??
+        ((options.context ?? config.tokens?.context) ? 'context' : 'noop'),
+      themeJson: options.themeJson ?? config.tokens?.themeJson,
+      context: options.context ?? config.tokens?.context,
     },
     rules: normalizeRules(config.rules),
   };

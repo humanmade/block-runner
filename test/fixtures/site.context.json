@@ -1,0 +1,12 @@
+{
+  "theme": {
+    "settings": {
+      "color": { "palette": [{ "slug": "primary", "color": "#0073aa" }] },
+      "typography": {
+        "fontFamilies": [{ "slug": "body", "fontFamily": "Inter, sans-serif" }],
+        "fontSizes": [{ "slug": "large", "size": "2rem" }]
+      },
+      "spacing": { "spacingSizes": [{ "slug": "40", "size": "1.5rem" }] }
+    }
+  }
+}

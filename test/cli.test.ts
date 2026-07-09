@@ -43,11 +43,14 @@ describe('CLI', () => {
   it('prints help and version with exit code 0', async () => {
     const help = await runCli(['--help']);
     const version = await runCli(['--version']);
+    const { version: packageVersion } = JSON.parse(
+      await import('node:fs/promises').then((fs) => fs.readFile(new URL('../package.json', import.meta.url), 'utf8')),
+    ) as { version: string };
 
     expect(help.code).toBe(0);
     expect(help.stdout).toContain('Usage:');
     expect(version.code).toBe(0);
-    expect(version.stdout.trim()).toBe('0.1.0');
+    expect(version.stdout.trim()).toBe(packageVersion);
   });
 
   it('converts inline HTML positionals', async () => {
