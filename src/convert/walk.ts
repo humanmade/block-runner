@@ -1,5 +1,5 @@
 import { RuleContext, WpBlock } from '../types.js';
-import { contextText, isCommentNode, isElementNode, isWhitespaceText } from './dom.js';
+import { contextText, isCommentNode, isElementNode, isForeignElement, isWhitespaceText } from './dom.js';
 
 export async function walkChildren(parent: Node, context: RuleContext, skip = new Set<Node>()): Promise<WpBlock[]> {
   const blocks: WpBlock[] = [];
@@ -29,18 +29,37 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
     return [paragraph];
   }
 
+  // Foreign elements (SVG, MathML) match no HTML rule and would crash rules that read a
+  // string `className`. Route them straight to Custom HTML so nothing degrades in silence.
+  if (isForeignElement(node)) {
+    return [emitCustomHtml(node, context, 'foreign element emitted as Custom HTML fallback')];
+  }
+
   for (const rule of context.rules) {
-    const result = rule.match(node, context);
-    const matched = typeof result === 'boolean' ? result : result.matched;
+    let matched: boolean;
+    let reason: string | undefined;
+    try {
+      const result = rule.match(node, context);
+      matched = typeof result === 'boolean' ? result : result.matched;
+      reason = typeof result === 'boolean' ? undefined : result.reason;
+    } catch (error) {
+      // A throwing rule must never abort the whole run; contain this node atomically.
+      return [emitConversionError(node, context, rule.id, error)];
+    }
 
     if (!matched) {
-      if (context.explain && typeof result !== 'boolean' && result.reason) {
-        context.explainRule(node, rule.id, result.reason);
+      if (context.explain && reason) {
+        context.explainRule(node, rule.id, reason);
       }
       continue;
     }
 
-    const emitted = await rule.emit(node, context);
+    let emitted: WpBlock | WpBlock[] | null;
+    try {
+      emitted = await rule.emit(node, context);
+    } catch (error) {
+      return [emitConversionError(node, context, rule.id, error)];
+    }
     if (!emitted) {
       return [];
     }
@@ -56,6 +75,21 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
   }
 
   return [];
+}
+
+function emitCustomHtml(node: Element, context: RuleContext, reason: string): WpBlock {
+  context.warn(reason, node, 'core/html', 'html');
+  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  block.__blockRunnerSource = context.sourceFor(node);
+  return block;
+}
+
+function emitConversionError(node: Element, context: RuleContext, ruleId: string, error: unknown): WpBlock {
+  const message = error instanceof Error ? error.message : String(error);
+  context.warn('conversion error emitted as Custom HTML fallback', node, 'core/html', ruleId, { error: message });
+  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  block.__blockRunnerSource = context.sourceFor(node);
+  return block;
 }
 
 function escapeHtml(value: string): string {

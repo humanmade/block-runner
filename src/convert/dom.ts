@@ -51,11 +51,23 @@ export function sanitizeDocument(dom: JSDOM, warnings: ReportItem[], sourcePath?
         element.removeAttribute(attribute.name);
       }
 
-      if ((name === 'href' || name === 'src') && /^javascript:/i.test(value)) {
+      if ((name === 'href' || name === 'src') && isDangerousUrl(value)) {
         warnings.push({
           block: 'input',
           status: 'warning',
           reason: `unsafe ${attribute.name} URL stripped`,
+          source: sourceForNode(dom, element, sourcePath),
+        });
+        element.removeAttribute(attribute.name);
+      }
+
+      // An <iframe srcdoc> carries an inline, executable document; if the iframe isn't a
+      // recognised embed it lands verbatim in a Custom HTML block, so strip it up front.
+      if (name === 'srcdoc' && element.tagName.toLowerCase() === 'iframe') {
+        warnings.push({
+          block: 'input',
+          status: 'warning',
+          reason: 'iframe srcdoc stripped',
           source: sourceForNode(dom, element, sourcePath),
         });
         element.removeAttribute(attribute.name);
@@ -139,6 +151,41 @@ export function getCssBackgroundUrl(element: Element, backgrounds: Map<string, s
 
 export function isElementNode(node: Node): node is Element {
   return node.nodeType === 1;
+}
+
+// Browsers strip ASCII whitespace/control characters out of a URL before resolving its scheme,
+// so `java\nscript:alert(1)` still executes. Normalise the same way before matching a scheme.
+export function stripUrlControlChars(value: string): string {
+  let out = '';
+  for (const ch of value) {
+    const code = ch.codePointAt(0)!;
+    // Drop ASCII control chars and spaces (0x00-0x20) and DEL (0x7f).
+    if (code > 0x20 && code !== 0x7f) {
+      out += ch;
+    }
+  }
+  return out;
+}
+
+// Executable/script-bearing URL schemes that must never survive into output.
+export function isDangerousUrl(value: string): boolean {
+  return /^(?:javascript|vbscript):/i.test(stripUrlControlChars(value));
+}
+
+const XHTML_NAMESPACE = 'http://www.w3.org/1999/xhtml';
+
+// SVG and MathML elements expose `className` as a namespaced object (SVGAnimatedString),
+// not a string, and match none of the HTML rules. Detect them so the walker can route
+// them straight to Custom HTML before any rule that assumes an HTMLElement runs.
+export function isForeignElement(element: Element): boolean {
+  const ns = element.namespaceURI;
+  return ns != null && ns !== XHTML_NAMESPACE;
+}
+
+// Safe class-attribute read that works for HTML, SVG, and MathML elements alike
+// (`element.className` is a string only on HTMLElement).
+export function classOf(element: Element): string {
+  return element.getAttribute('class') ?? '';
 }
 
 export function isWhitespaceText(node: Node): boolean {

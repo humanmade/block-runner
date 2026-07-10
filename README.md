@@ -67,6 +67,7 @@ as a standalone validator in CI.
 ### Convert: generated HTML → native blocks
 
 - **Native blocks, never locked in.** Real `wp:cover > wp:columns > wp:buttons`, properly nested, with real media ids: plain core blocks anyone can edit in any WordPress, not a builder's proprietary block types you have to keep its plugin installed to touch.
+- **Broad element coverage.** Tables, quotes, code, separators, video/audio, `<details>`, YouTube/Vimeo embeds, and image galleries all map to their native core blocks — not just the hero primitives. What genuinely has no native home (inline SVG icons, definition lists, arbitrary iframes) is preserved as Custom HTML with a warning pointed at the line, never dropped and never crashing the run.
 - **Any model, any agent.** Feed it whatever your LLM, agent, or design tool emits, from any vendor, and drop it into your own pipeline instead of adopting someone else's editor.
 - **Media resolution.** Resolve images to real attachment ids via a map, WP-CLI, or the REST API.
 - **Styling fidelity, your call.** Keep off-theme styles or map them to your theme, up to a ceiling you set.

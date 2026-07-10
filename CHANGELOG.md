@@ -1,5 +1,39 @@
 # Changelog
 
+## 0.5.0
+
+### Fixed
+
+- **Inline SVG (and any foreign element) no longer crashes conversion.** An `<svg>`
+  or MathML node anywhere in the input threw `className.split is not a function`
+  and aborted the whole run with no output. Foreign elements now route straight to
+  Custom HTML, and a per-rule error boundary guarantees no single node can abort a
+  run.
+
+### Added
+
+- **Native-block coverage for traditional content.** New rules map `<table>` →
+  `core/table` (colspan/rowspan/scope + `<caption>`), `<blockquote>` → `core/quote`,
+  `<pre><code>`/`<pre>` → `core/code`/`core/preformatted`, `<hr>` → `core/separator`,
+  `<video>`/`<audio>` → `core/video`/`core/audio` (with `<track>`), `<details>` →
+  `core/details`, YouTube/Vimeo `<iframe>` → `core/embed`, and multi-image `<figure>`
+  → `core/gallery`. A `<figure>` dispatcher carries `<figcaption>` onto the right block.
+- **Atomic enclosing-unit fallback.** When a block's rich text contains content the
+  editor can't hold (inline SVG/iframe, block-level markup), the whole enclosing block
+  falls back to Custom HTML with a warning at the offending node — output, render, and
+  editor-load state always agree. Empty decorative inline hooks (e.g. a CSS chevron
+  `<span>`) are stripped so the block stays native; empty *semantic* elements
+  (`id`/`href`/`datetime`/`aria-*`) fall back instead of being lost.
+
+### Security
+
+- **Hardened URL sanitization.** `javascript:`/`vbscript:` schemes obfuscated with
+  control characters or whitespace (`java\nscript:`) are now stripped, and executable
+  `<iframe srcdoc>` is removed before it can reach a Custom HTML block.
+- **Exact-hostname embed matching.** Provider detection parses the URL and matches exact
+  hostnames over HTTPS with anchored path shapes, so lookalike domains
+  (`notyoutube.com`) can no longer be rewritten into a trusted `core/embed`.
+
 ## 0.4.1
 
 - Strip unused Gutenberg media WASM from installs: override

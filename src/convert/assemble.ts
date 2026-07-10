@@ -4,7 +4,7 @@ import { validate } from '../gate/validate.js';
 import { applyMedia } from '../media/apply.js';
 import { createMediaResolver } from '../media/resolver.js';
 import { repairTokens } from '../tokens/apply.js';
-import { BlockRunnerReport, ConvertOptions, ReportItem, Rule, RuleContext, WpBlock } from '../types.js';
+import { BlockRunnerReport, ConvertOptions, HeadlessBootError, ReportItem, Rule, RuleContext, WpBlock } from '../types.js';
 import { contextHtml, contextText, makeContextWarning, prepareDom, sourceForNode } from './dom.js';
 import { defaultRules } from './defaults.js';
 import { walkChildren } from './walk.js';
@@ -12,6 +12,39 @@ import { walkChildren } from './walk.js';
 export async function convert(input: string, options: ConvertOptions = {}): Promise<BlockRunnerReport> {
   const config = await loadConfig(options);
   const wp = await getWp();
+  try {
+    return await runConvert(input, options, config, wp);
+  } catch (error) {
+    // The per-node walker contains rule throws already; this is the last-resort guard so a
+    // failure in assembly/serialize/parse/validate is a reported error, never an unhandled
+    // throw with zero output. Boot failures keep their own exit path.
+    if (error instanceof HeadlessBootError || (error instanceof Error && error.name === 'HeadlessBootError')) {
+      throw error;
+    }
+    const message = error instanceof Error ? error.message : String(error);
+    return {
+      ok: false,
+      command: 'convert',
+      summary: { blocks: 0, valid: 0, invalid: 0, warnings: 1 },
+      items: [
+        {
+          block: 'input',
+          status: 'invalid',
+          reason: `conversion failed: ${message}`,
+          source: options.sourcePath ? { path: options.sourcePath } : undefined,
+        },
+      ],
+      output: '',
+    };
+  }
+}
+
+async function runConvert(
+  input: string,
+  options: ConvertOptions,
+  config: Awaited<ReturnType<typeof loadConfig>>,
+  wp: Awaited<ReturnType<typeof getWp>>,
+): Promise<BlockRunnerReport> {
   const prepared = prepareDom(input, options.sourcePath);
   const warnings: ReportItem[] = [...prepared.warnings];
   const explainItems: ReportItem[] = [];
