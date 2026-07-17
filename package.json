@@ -1,6 +1,6 @@
 {
   "name": "block-runner",
-  "version": "0.5.0",
+  "version": "0.5.1",
   "description": "The layer between generated content and WordPress — convert what AI, agents, and design tools emit into clean, valid, native Gutenberg blocks, and validate every result. CLI + library.",
   "type": "module",
   "license": "GPL-2.0-or-later",
