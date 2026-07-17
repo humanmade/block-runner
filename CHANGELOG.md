@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.5.1
+
+### Changed
+
+- **Stop shipping sourcemaps.** `dist/*.js.map` were ~340KB of the published
+  tarball and served no purpose for consumers. Dropping them roughly halves the
+  package (unpacked 542KB → 202KB) and avoids leaking local build paths.
+
 ## 0.5.0
 
 ### Fixed
