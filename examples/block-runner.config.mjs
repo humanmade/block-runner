@@ -1,5 +1,9 @@
 export default {
   strict: false,
+  // How much off-theme CSS to keep: 'strict' (theme presets only), 'relaxed' (default —
+  // exact values on the block), or 'open' (also emit CSS no block can express as a
+  // stylesheet, which needs --css-out or --json to receive it).
+  styling: 'relaxed',
   media: {
     resolver: 'map',
     mapFile: './media-map.json',
