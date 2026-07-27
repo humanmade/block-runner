@@ -1,3 +1,5 @@
+import type { Declaration } from './styles/parse.js';
+
 export type CommandName = 'validate' | 'fix' | 'convert';
 
 export type ReportStatus = 'valid' | 'invalid' | 'warning';
@@ -32,6 +34,12 @@ export interface BlockRunnerReport {
   summary: ReportSummary;
   items: ReportItem[];
   output?: string;
+  /**
+   * CSS the block model cannot express, emitted by the `open` styling rung. Present only when that
+   * rung rescued something. The caller must ship this alongside the content — the rung is only
+   * honest if it does, which is why `open` requires an explicit sink.
+   */
+  sidecarCss?: string;
 }
 
 export type ResolverKind = 'noop' | 'map' | 'wpcli' | 'rest';
@@ -102,8 +110,22 @@ export interface RuleConfig {
   custom?: unknown[];
 }
 
+/**
+ * The styling ceiling, from safest (cleanest, most editable) to most faithful. Per element the
+ * converter uses the strictest rung that still captures the design, never exceeding this ceiling.
+ *
+ * - `strict` — the theme's vocabulary only; off-system values are dropped and reported.
+ * - `relaxed` — keep exact values on the block's `style` attribute. The default.
+ * - `open` — also keep CSS no block attribute can express, as sidecar CSS the caller must ship.
+ *
+ * A `source` rung (keep the original markup as Custom HTML) is designed but not built, and is
+ * deliberately absent here rather than exported as an option every runtime path rejects.
+ */
+export type StylingRung = 'strict' | 'relaxed' | 'open';
+
 export interface BlockRunnerConfig {
   strict?: boolean;
+  styling?: StylingRung;
   media?: MediaConfig;
   tokens?: TokenConfig;
   rules?: RuleConfig | unknown[];
@@ -122,6 +144,7 @@ export interface CommonOptions {
   themeJson?: string;
   tokenMatch?: TokenMatchMode;
   context?: string;
+  styling?: StylingRung;
 }
 
 export interface ConvertOptions extends CommonOptions {
@@ -158,6 +181,21 @@ export interface RuleContext {
   sourcePath?: string;
   explain: boolean;
   cssBackgrounds: Map<string, string>;
+  /**
+   * Single-class `<style>` rules in document order. Rules that need an element's *effective* CSS
+   * should resolve it from these plus the inline attribute, never from either alone.
+   */
+  cssClassRules: Array<{ className: string; declarations: Declaration[]; problems: string[] }>;
+  /**
+   * Carry an element's inline CSS onto the block a rule just claimed. Called by the walker for
+   * every claimed node; rules never need to invoke it.
+   */
+  applyStyles: (node: Node, blocks: WpBlock[]) => void;
+  /**
+   * Account for inline CSS on elements inside a block's rich text. Those descendants never pass
+   * through the walker, so without this their style attributes reach the output unledgered.
+   */
+  noteRichTextStyles: (node: Node, block?: string, rule?: string) => void;
   warn: (reason: string, node: Node, block?: string, rule?: string, details?: unknown) => void;
   explainRule: (node: Node, rule: string, reason: string, details?: unknown) => void;
   sourceFor: (node: Node) => SourceLocation;

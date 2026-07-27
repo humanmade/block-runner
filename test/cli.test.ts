@@ -21,6 +21,72 @@ describe('CLI', () => {
     expect(result.stdout).toContain('problems found');
   });
 
+  it('forwards --styling through to the converter', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const configPath = path.join(dir, 'block-runner.config.mjs');
+    await writeFile(configPath, `export default { tokens: { colors: { base: '#f5f5f5' } } };`);
+    const html = '<div style="background:#f5f5f5;letter-spacing:2px"><p>Hi</p></div>';
+
+    // relaxed (the default) keeps the off-system value; strict drops it. If the flag were not
+    // forwarded, both runs would produce identical output.
+    const relaxed = await runCli(['convert', '-', '--config', configPath, '--json'], html);
+    const strict = await runCli(['convert', '-', '--config', configPath, '--styling', 'strict', '--json'], html);
+
+    const relaxedReport = JSON.parse(relaxed.stdout) as { output: string };
+    const strictReport = JSON.parse(strict.stdout) as { output: string };
+
+    expect(relaxedReport.output).toContain('letterSpacing');
+    expect(strictReport.output).not.toContain('letterSpacing');
+    // Both snap the on-system colour to its preset.
+    expect(strictReport.output).toContain('"backgroundColor":"base"');
+  });
+
+  it('rejects an unimplemented --styling rung instead of silently downgrading', async () => {
+    const result = await runCli(['convert', '-', '--styling', 'source'], '<div style="padding:8px">Hi</div>');
+
+    // 2, not 1: an invalid flag value is a usage error, per the documented exit codes.
+    expect(result.code).toBe(2);
+    expect(`${result.stdout}${result.stderr}`).toContain('not implemented yet');
+  });
+
+  it('refuses --styling open without a sink for the sidecar CSS', async () => {
+    // The rung preserves CSS by emitting a stylesheet the caller must ship; with nowhere to put it,
+    // that CSS would be silently lost, so this is an error rather than a warning.
+    const result = await runCli(['convert', '-', '--styling', 'open'], '<div style="max-width:600px">Hi</div>');
+
+    expect(result.code).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain('--css-out');
+  });
+
+  it('refuses config-set styling: open without a sink, not just the flag', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const configPath = path.join(dir, 'block-runner.config.mjs');
+    await writeFile(configPath, `export default { styling: 'open' };`);
+
+    const result = await runCli(
+      ['convert', '-', '--config', configPath],
+      '<div style="max-width:600px"><p>Hi</p></div>',
+    );
+
+    expect(result.code).not.toBe(0);
+    expect(`${result.stdout}${result.stderr}`).toContain('--css-out');
+  });
+
+  it('writes sidecar CSS to --css-out', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const cssPath = path.join(dir, 'sidecar.css');
+    const result = await runCli(
+      ['convert', '-', '--styling', 'open', '--css-out', cssPath],
+      '<div style="max-width:600px"><p>Hi</p></div>',
+    );
+
+    expect(result.code).toBe(0);
+    expect(await readFile(cssPath, 'utf8')).toContain('max-width:600px');
+    // The class the rule selects must actually be on the block, or the CSS selects nothing.
+    const className = /\.(br-[0-9a-f]+)/.exec(await readFile(cssPath, 'utf8'))?.[1];
+    expect(result.stdout).toContain(className!);
+  });
+
   it('loads --config for conversion options', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
     const configPath = path.join(dir, 'block-runner.config.mjs');

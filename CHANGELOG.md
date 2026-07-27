@@ -1,5 +1,46 @@
 # Changelog
 
+## 0.6.0
+
+### Added
+
+- **CSS is now carried onto blocks as native, editable styling.** Previously only
+  `background-image` was read and every other declaration was discarded in silence — a
+  `<div style="padding:64px;background:#f5f5f5">` produced a correct block tree with none of
+  its design. Declarations from inline `style` attributes and from single-class `<style>`
+  rules (`.hero { … }`) now map onto the block's own attributes, so padding lands in the
+  spacing control and colours in the colour picker. Inline styles outrank class rules, and
+  `!important` and shorthand resets are honoured as CSS defines them.
+- **A `styling` ceiling: `strict` · `relaxed` · `open`.** `strict` keeps only values that
+  snap onto theme presets; `relaxed` (the default) keeps exact values on the block;
+  `open` additionally preserves CSS no block attribute can express, by putting a class on
+  the block and emitting a stylesheet. Set it in config or per run with `--styling`.
+- **`--css-out` and `report.sidecarCss`** for the stylesheet `open` produces. `--styling open`
+  without one of them is an error: a level that quietly discarded the CSS it promised to keep
+  would be worse than not offering it.
+- **Every declaration is accounted for.** Each one is reported as mapped, consumed by the
+  structural rules, or dropped — with the input line, the selector, and the rule that authored
+  it. Warnings name the class (`max-width: 600px in .hero`) so the fix lands upstream.
+- **`text-align` support**, mapped through `style.typography.textAlign`.
+- **WordPress 7.1 `minWidth`**, gated on the block opting in, and recognised-but-refused
+  `text-shadow` (Global-Styles-only in 7.1, so a per-block value would render CSS the editor
+  gives no control over — the warning points at `theme.json`).
+- **Capability gating against the real target site.** With a wesper `--context` manifest,
+  styling is admitted only where the pinned block library *and* the target site's own block
+  registry agree, so degradation across WordPress versions is measured rather than hardcoded.
+
+### Fixed
+
+- **Background images are chosen by the CSS cascade, not by first match.** A background that a
+  later declaration replaced or removed no longer becomes cover media — the structural rules
+  and the styling ledger now read a style attribute through the same parser.
+
+### Changed
+
+- `@wordpress/block-editor` is now a direct pinned dependency. It was already present
+  transitively and governs the emitted markup, so it belongs in the pin rather than resolved
+  by chance.
+
 ## 0.5.1
 
 ### Changed

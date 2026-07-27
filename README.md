@@ -141,6 +141,13 @@ All commands:
 
 `convert` and `fix` also take `--out <path>` to write the result to a file instead of stdout.
 
+`convert` adds styling flags:
+
+| Flag | Description |
+| --- | --- |
+| `--styling <level>` | Styling ceiling: `strict`, `relaxed` (default), `open`. See [Styling fidelity](#styling-fidelity). |
+| `--css-out <path>` | Write the sidecar CSS emitted by `--styling open` to a file. |
+
 `convert` adds media-resolution flags:
 
 | Flag | Description |
@@ -247,22 +254,33 @@ original look, but less editable):
 |---|---|
 | `strict` | Map to the theme only. Off-theme styles are dropped. Cleanest, fully on-brand, fully editable. |
 | `relaxed` | Keep exact off-theme values on the block (custom color, size, spacing). Still native and fully editable. |
-| `open` | Also keep CSS no block can express, by wrapping the element and shipping that CSS alongside. Look preserved, structure still editable. |
+| `open` | Also keep CSS no block can express, by putting a class on the block and emitting that CSS as a stylesheet you ship alongside. Look preserved, structure still editable. |
 | `source` | Keep the original markup as a Custom HTML block. Exact, but not editable. Last resort. |
 
 You set one ceiling. Per block, Block Runner uses the **strictest level that still
-captures the design**, and never goes past your ceiling. It's configured in
-`block-runner.config.mjs`:
+captures the design**, and never goes past your ceiling. Configure it in
+`block-runner.config.mjs`, or per run with `--styling`:
 
 ```js
-export default { styling: 'relaxed' }; // default (a per-run --styling flag is planned)
+export default { styling: 'relaxed' }; // the default
 ```
+
+Styling is read from inline `style` attributes and from single-class `<style>` rules
+(`.hero { … }`). An inline style outranks a class rule, matching CSS. Every declaration
+is accounted for: mapped onto the block, recognised as consumed by the structure, or
+reported with the input line and the rule that authored it — nothing is dropped silently.
+
+`open` emits a stylesheet, so it needs somewhere to put it. `--styling open` requires
+either `--css-out <path>` or `--json` (where it arrives as `sidecarCss`) and is an error
+otherwise — a level that quietly discarded the CSS it promised to keep would be worse
+than not offering it.
 
 Custom JavaScript is never inlined. A behavior maps to a native interactive block,
 comes from a block plugin, or is dropped, and every drop or escalation is reported.
 
-> Status: `relaxed` and `open` are in progress. Today the converter behaves like
-> `strict` (off-theme styling is dropped) with a `source` (Custom HTML) fallback.
+> Status: `strict`, `relaxed` and `open` are implemented. `source` is not built yet and is
+> rejected rather than silently downgraded — though the converter already falls back to a
+> Custom HTML block for structure it cannot convert.
 
 ## Running the benchmark
 

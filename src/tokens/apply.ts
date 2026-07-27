@@ -21,8 +21,11 @@ export async function repairTokens(
   blocks: WpBlock[],
   config: BlockRunnerConfig,
   options: CommonOptions,
+  /** Precomputed tokens, when the caller already resolved them (the styling layer needs them
+   * before the walk, and resolving twice would hit WP-CLI/REST twice). */
+  precomputed?: TokenConfig,
 ): Promise<TokenRepairResult> {
-  const effective = await effectiveTokens(config, options);
+  const effective = precomputed ?? (await effectiveTokens(config, options));
   const invMap = buildTokenInverseMap(effective);
   if (invMap.isEmpty) {
     return { items: [], blocks };
@@ -45,7 +48,7 @@ function rebuild(block: WpBlock, wp: Awaited<ReturnType<typeof getWp>>): WpBlock
   );
 }
 
-async function effectiveTokens(config: BlockRunnerConfig, options: CommonOptions): Promise<TokenConfig> {
+export async function effectiveTokens(config: BlockRunnerConfig, options: CommonOptions): Promise<TokenConfig> {
   const tokens = config.tokens ?? {};
   const resolverKind = options.tokenResolver ?? tokens.resolver ?? 'noop';
   if (resolverKind === 'noop') {

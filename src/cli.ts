@@ -9,6 +9,7 @@ import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
 import { convert } from './convert/assemble.js';
+import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 
@@ -20,6 +21,7 @@ interface CliOptions extends CommonOptions {
   config?: string;
   json?: boolean;
   out?: string;
+  cssOut?: string;
   wpAppPasswordEnv?: string;
 }
 
@@ -93,6 +95,23 @@ addTokenOptions(
 )
   .action(async (htmlOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
+    // The `open` rung preserves CSS no block attribute can hold by emitting a stylesheet the caller
+    // must ship. Without somewhere to put it that CSS is silently lost, so require a sink up front
+    // rather than warning after the fact. Checked against the RESOLVED config, not just the flag —
+    // `styling: 'open'` in block-runner.config.mjs must not slip past it.
+    let resolvedStyling: string | undefined;
+    try {
+      resolvedStyling = (await loadConfig(apiOptions)).styling;
+    } catch (error) {
+      // A rejected rung or unreadable config is a usage error: report it as one (exit 1) rather than
+      // letting it surface as an unhandled throw.
+      program.error(`error: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    if (resolvedStyling === 'open' && !options.cssOut && !options.json) {
+      program.error(
+        'error: --styling open emits sidecar CSS that must go somewhere — pass --css-out <path> to write it, or --json to receive it as sidecarCss',
+      );
+    }
     const inputs = await readInputs(htmlOrStdin, { allowInline: true });
     ensureSingleOutputTarget(inputs, options);
     const reports = await Promise.all(
@@ -105,6 +124,14 @@ addTokenOptions(
     );
     const report = aggregateReports('convert', reports);
     report.output = reports.map((item) => item.output ?? '').join('\n');
+    const sidecarCss = reports.map((item) => item.sidecarCss ?? '').filter(Boolean).join('');
+    if (sidecarCss) {
+      report.sidecarCss = sidecarCss;
+    }
+    if (options.cssOut) {
+      // Written even when empty, so a build step can depend on the file existing.
+      await writeFile(options.cssOut, sidecarCss, 'utf8');
+    }
     await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
@@ -182,7 +209,9 @@ function addTokenOptions(command: Command): Command {
     .option('--token-resolver <kind>', 'token resolver: noop, file, wpcli, rest, context')
     .option('--theme-json <path>', 'path to a theme.json for the file token resolver')
     .option('--context <path>', 'path to a wesper site.context.json manifest (token source)')
-    .option('--token-match <mode>', 'token match mode: exact, nearest');
+    .option('--token-match <mode>', 'token match mode: exact, nearest')
+    .option('--styling <rung>', 'styling ceiling: strict, relaxed (default), open')
+    .option('--css-out <path>', 'write sidecar CSS emitted by --styling open to a file');
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {

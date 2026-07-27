@@ -1,9 +1,9 @@
 import { BlockRunnerConfig, Rule, RuleContext, WpBlock } from '../types.js';
+import { recordConsumedBackground } from '../styles/provenance.js';
 import {
   classOf,
   contextText,
-  getCssBackgroundUrl,
-  getInlineBackgroundUrl,
+  getEffectiveBackgroundUrl,
   isContainerElement,
   isForeignElement,
 } from './dom.js';
@@ -85,6 +85,13 @@ const coverRule: Rule = {
 
     const block = context.wp.createBlock('core/cover', attrs, await context.recurse(node, skip));
     block.__blockRunnerSource = context.sourceFor(node);
+    // Tell the styling ledger this declaration was read, so it is reported as consumed rather than as
+    // a silent loss — and so a background it did NOT read still gets warned about. Recorded for
+    // class-authored declarations too: otherwise `open` would re-emit the image as sidecar CSS and
+    // apply it twice.
+    if (background.from === 'declaration' && background.node) {
+      recordConsumedBackground(block, background.node, background.url);
+    }
     return block;
   },
 };
@@ -106,6 +113,9 @@ const columnsRule: Rule = {
       columnCells(node).map(async (cell) => {
         const block = context.wp.createBlock('core/column', {}, await context.recurse(cell));
         block.__blockRunnerSource = context.sourceFor(cell);
+        // Cells are turned into columns directly, bypassing walkNode — so the walker's styling hook
+        // never runs on them. Ledger the cell's own CSS here, after the structural decision.
+        context.applyStyles(cell, [block]);
         return block;
       }),
     );
@@ -596,34 +606,32 @@ const htmlFallbackRule: Rule = {
   },
 };
 
-function findBackground(node: Element, context?: RuleContext): { url: string; node?: Element } | undefined {
-  const inline = getInlineBackgroundUrl(node);
-  if (inline) {
-    return { url: inline, node };
-  }
+interface FoundBackground {
+  url: string;
+  node?: Element;
+  /**
+   * `declaration` means it came from CSS the element declares — inline or a class rule, resolved as
+   * one cascade — and so the styling ledger may report it consumed. An `<img src>` is not a
+   * declaration, so it must not silence a ledger entry.
+   */
+  from: 'declaration' | 'img-src';
+}
 
-  if (context) {
-    const css = getCssBackgroundUrl(node, context.cssBackgrounds);
-    if (css) {
-      return { url: css, node };
-    }
+function findBackground(node: Element, context?: RuleContext): FoundBackground | undefined {
+  const own = getEffectiveBackgroundUrl(node, context?.cssClassRules);
+  if (own) {
+    return { url: own, node, from: 'declaration' };
   }
 
   for (const child of [...node.children]) {
-    const childInline = getInlineBackgroundUrl(child);
-    if (childInline) {
-      return { url: childInline, node: child };
-    }
-    if (context) {
-      const childCss = getCssBackgroundUrl(child, context.cssBackgrounds);
-      if (childCss) {
-        return { url: childCss, node: child };
-      }
+    const childUrl = getEffectiveBackgroundUrl(child, context?.cssClassRules);
+    if (childUrl) {
+      return { url: childUrl, node: child, from: 'declaration' };
     }
     if (child.tagName.toLowerCase() === 'img' && likelyDecorativeImage(child)) {
       const src = child.getAttribute('src');
       if (src) {
-        return { url: src, node: child };
+        return { url: src, node: child, from: 'img-src' };
       }
     }
   }
@@ -666,6 +674,9 @@ function emitButton(anchor: HTMLAnchorElement, context: RuleContext): WpBlock {
   removeUndefined(attrs);
   const block = context.wp.createBlock('core/button', attrs, []);
   block.__blockRunnerSource = context.sourceFor(anchor);
+  // An anchor claimed by a button rule never passes through walkNode, so the walker's styling hook
+  // never sees it. Without this call its inline CSS vanishes unledgered.
+  context.applyStyles(anchor, [block]);
   warnShortcode(anchor, context, 'core/button', 'button');
   return block;
 }
@@ -716,10 +727,15 @@ function customHtmlFallback(node: Element, context: RuleContext, check: Extract<
 // Extract an element's inner markup as RichText content, stripping the empty decorative inline
 // elements Gutenberg would drop on save (see cleanRichText). Warns once when it strips anything.
 function richTextContent(element: Element, context: RuleContext, block: string, rule: string): string {
-  const { html, stripped } = cleanRichText(element);
+  const styling = context.config.styling ?? 'relaxed';
+  const strict = styling === 'strict';
+  const { html, stripped } = cleanRichText(element, { stripInlineStyles: strict });
   if (stripped) {
     context.warn('empty decorative inline element stripped from rich text', element, block, rule);
   }
+  // Descendants of a block's rich text never pass through walkNode, so their inline CSS would
+  // otherwise ride into the RichText attribute with no ledger entry at all.
+  context.noteRichTextStyles(element, block, rule);
   return html;
 }
 

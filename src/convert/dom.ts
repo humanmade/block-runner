@@ -1,9 +1,13 @@
 import { JSDOM } from 'jsdom';
 import { ReportItem, RuleContext, SourceLocation } from '../types.js';
+import { effectiveDeclarations } from '../styles/apply.js';
+import { extractUrl } from '../styles/declarations.js';
+import { Declaration, parseDeclarationBlock, parseInlineStyle, resolvePrecedence } from '../styles/parse.js';
 
 export interface PreparedDom {
   dom: JSDOM;
   cssBackgrounds: Map<string, string>;
+  cssClassRules: CssClassRule[];
   warnings: ReportItem[];
 }
 
@@ -13,13 +17,16 @@ export function prepareDom(input: string, sourcePath?: string): PreparedDom {
     includeNodeLocations: true,
   });
   const warnings: ReportItem[] = [];
-  const cssBackgrounds = extractCssBackgrounds(dom.window.document);
+  // Harvested before sanitizeDocument strips the <style> elements.
+  const cssClassRules = extractCssClassRules(dom.window.document);
+  const cssBackgrounds = cssBackgroundsFromRules(cssClassRules);
 
   sanitizeDocument(dom, warnings, sourcePath);
 
   return {
     dom,
     cssBackgrounds,
+    cssClassRules,
     warnings,
   };
 }
@@ -76,20 +83,118 @@ export function sanitizeDocument(dom: JSDOM, warnings: ReportItem[], sourcePath?
   }
 }
 
-export function extractCssBackgrounds(document: Document): Map<string, string> {
-  const backgrounds = new Map<string, string>();
+export interface CssClassRule {
+  /** The class the rule selects, without the leading dot. */
+  className: string;
+  /** Raw declarations, precedence unresolved — the caller merges them with inline styles first. */
+  declarations: Declaration[];
+  /** Unparseable chunks in the rule body, reported rather than dropped. */
+  problems: string[];
+}
+
+/**
+ * Extract single-class rules (`.hero { … }`) from `<style>` elements, in document order.
+ *
+ * Single-class only, deliberately: those are the rules a design-HTML generator emits, and they are
+ * the only ones whose declarations map onto exactly one element with no specificity reasoning.
+ * Anything else in the stylesheet is not consumed — the `<style> stripped from input` warning
+ * already says the sheet is not carried wholesale.
+ */
+export function extractCssClassRules(document: Document): CssClassRule[] {
+  const rules: CssClassRule[] = [];
 
   for (const style of [...document.querySelectorAll('style')]) {
-    const css = style.textContent ?? '';
-    const rulePattern = /\.([_a-zA-Z][\w-]*)\s*\{([^}]*)\}/g;
+    // At-rule blocks are dropped whole. Their inner rules are conditional (`@media print`,
+    // `@supports`) and applying them unconditionally would style every render with CSS meant for
+    // one — and a flat rule scan happily matches rules nested inside them.
+    const css = stripAtRuleBlocks(style.textContent ?? '');
+    // Split into selector/body pairs, then keep only the ones whose selector is exactly one class.
+    // Matching `.name{…}` directly cannot handle consecutive rules (the previous rule's `}` is
+    // already consumed) and would also match the `.b` inside a compound selector like `div.a .b`.
+    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
     let ruleMatch: RegExpExecArray | null;
 
     while ((ruleMatch = rulePattern.exec(css))) {
-      const [, className, body] = ruleMatch;
-      const bgMatch = /background(?:-image)?\s*:[^;{}]*url\((['"]?)(.*?)\1\)/i.exec(body);
-      if (bgMatch?.[2]) {
-        backgrounds.set(className, bgMatch[2].trim());
+      const [, selector, body] = ruleMatch;
+      const single = /^\s*\.([_a-zA-Z][\w-]*)\s*$/.exec(selector);
+      if (!single) {
+        continue;
       }
+      const className = single[1];
+      // The index is the rule's position across all stylesheets, so the sidecar can keep two rules
+      // sharing a selector as separate rules in their authored positions.
+      const { declarations, problems } = parseDeclarationBlock(body, `.${className}`, rules.length);
+      if (declarations.length > 0 || problems.length > 0) {
+        rules.push({ className, declarations, problems });
+      }
+    }
+  }
+
+  return rules;
+}
+
+/**
+ * Remove `@media`/`@supports`/`@layer` blocks, brace-balanced so nested rules go with them.
+ */
+function stripAtRuleBlocks(css: string): string {
+  let out = '';
+  let index = 0;
+
+  while (index < css.length) {
+    if (css[index] !== '@') {
+      out += css[index];
+      index += 1;
+      continue;
+    }
+
+    // Skip to the end of the at-rule: either a `;` (e.g. @import) or a balanced block.
+    let cursor = index;
+    while (cursor < css.length && css[cursor] !== '{' && css[cursor] !== ';') {
+      cursor += 1;
+    }
+    if (cursor >= css.length || css[cursor] === ';') {
+      index = cursor + 1;
+      continue;
+    }
+
+    let depth = 0;
+    while (cursor < css.length) {
+      if (css[cursor] === '{') {
+        depth += 1;
+      } else if (css[cursor] === '}') {
+        depth -= 1;
+        if (depth === 0) {
+          cursor += 1;
+          break;
+        }
+      }
+      cursor += 1;
+    }
+    index = cursor;
+  }
+
+  return out;
+}
+
+/**
+ * Background image per class, after resolving the cascade across *every* rule for that class — so
+ * the structural rules pick the same image the ledger does.
+ *
+ * Declarations are concatenated in document order and settled in one pass, matching how the styles
+ * layer merges them. Resolving rule-by-rule was wrong: a later, unrelated `.hero { color:red }` has
+ * nothing to say about `background-image` and must not clear one set earlier.
+ */
+export function cssBackgroundsFromRules(rules: CssClassRule[]): Map<string, string> {
+  const byClass = new Map<string, Declaration[]>();
+  for (const rule of rules) {
+    byClass.set(rule.className, [...(byClass.get(rule.className) ?? []), ...rule.declarations]);
+  }
+
+  const backgrounds = new Map<string, string>();
+  for (const [className, declarations] of byClass) {
+    const url = decisiveBackgroundUrl(resolvePrecedence(declarations).declarations);
+    if (url) {
+      backgrounds.set(className, url);
     }
   }
 
@@ -132,10 +237,52 @@ export function contextHtml(element: Element): string {
   return element.innerHTML.trim();
 }
 
+/**
+ * The background image an inline style actually declares, after precedence.
+ *
+ * Parsed rather than regex-matched so the structural rules and the styling ledger agree on what the
+ * attribute says. A regex scan takes the first `url(...)` it sees, which builds a Cover from
+ * `background-image:url(a.jpg);background:#fff` even though the later shorthand removed that image.
+ */
 export function getInlineBackgroundUrl(element: Element): string | undefined {
-  const style = element.getAttribute('style') ?? '';
-  const match = /background(?:-image)?\s*:[^;{}]*url\((['"]?)(.*?)\1\)/i.exec(style);
-  return match?.[2]?.trim();
+  const style = element.getAttribute('style');
+  if (!style?.trim()) {
+    return undefined;
+  }
+
+  return decisiveBackgroundUrl(parseInlineStyle(style).declarations);
+}
+
+/**
+ * The background image an element actually ends up with, across **every** source we read.
+ *
+ * One lookup, not two: resolving inline and class rules separately meant an inline
+ * `background-image:none` returned "no image", which then fell through to the class rule and built a
+ * Cover from an image the author had removed. It also picked between multiple classes by `classList`
+ * order rather than stylesheet order. Merging first and resolving once is the same rule S12 applies
+ * within a single attribute, extended across sources.
+ */
+export function getEffectiveBackgroundUrl(element: Element, classRules?: CssClassRule[]): string | undefined {
+  return decisiveBackgroundUrl(effectiveDeclarations(element, classRules).declarations);
+}
+
+/**
+ * The background image a resolved declaration list actually yields.
+ *
+ * Both `background` and `background-image` can survive precedence — a longhand does not reset the
+ * shorthand — and the one declared LAST owns the background-image component. Taking the first
+ * `url()` found would build a Cover from `a.jpg` for
+ * `background:url(a.jpg);background-image:url(b.jpg)`, where CSS uses b.jpg. Reading the last
+ * relevant declaration also handles `background:url(a.jpg);background-image:none`, which removes the
+ * image entirely. Importance outranks source order; among equals, last declared wins.
+ */
+export function decisiveBackgroundUrl(declarations: Declaration[]): string | undefined {
+  const relevant = declarations.filter(
+    (declaration) => declaration.property === 'background' || declaration.property === 'background-image',
+  );
+
+  const decisive = relevant.filter((declaration) => declaration.important).at(-1) ?? relevant.at(-1);
+  return decisive ? extractUrl(decisive.value) : undefined;
 }
 
 export function getCssBackgroundUrl(element: Element, backgrounds: Map<string, string>): string | undefined {

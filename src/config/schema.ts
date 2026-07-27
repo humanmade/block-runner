@@ -1,7 +1,9 @@
-import { BlockRunnerConfig, CommonOptions, ResolverKind } from '../types.js';
+import { BlockRunnerConfig, CommonOptions, ResolverKind, StylingRung } from '../types.js';
 
 export const DEFAULT_CONFIG: Required<Pick<BlockRunnerConfig, 'strict'>> & BlockRunnerConfig = {
   strict: false,
+  // S3: faithful where it matters (exact values survive) but output stays 100% native.
+  styling: 'relaxed',
   media: {
     resolver: 'noop',
     allowRemote: false,
@@ -28,6 +30,7 @@ export function mergeConfig(config: BlockRunnerConfig = {}, options: CommonOptio
 
   return {
     strict: options.strict ?? config.strict ?? DEFAULT_CONFIG.strict,
+    styling: normalizeStyling(options.styling ?? config.styling),
     media: {
       ...DEFAULT_CONFIG.media,
       ...config.media,
@@ -76,6 +79,30 @@ export function normalizeRules(rules: BlockRunnerConfig['rules']): Exclude<Block
     order: rules?.order ?? [],
     custom: rules?.custom ?? [],
   };
+}
+
+// `source` (stop converting, keep the original markup as Custom HTML) is designed but not built;
+// accepting it while behaving as `relaxed` would be a false API contract, so it is rejected until it
+// exists. Note the converter already falls back to `core/html` for unconvertible *structure* — the
+// `source` rung is the explicit, whole-element form of that.
+const IMPLEMENTED_RUNGS: StylingRung[] = ['strict', 'relaxed', 'open'];
+const PLANNED_RUNGS = ['source'];
+
+function normalizeStyling(value: unknown): StylingRung {
+  if (value === undefined || value === null) {
+    return DEFAULT_CONFIG.styling as StylingRung;
+  }
+  if (IMPLEMENTED_RUNGS.includes(value as StylingRung)) {
+    return value as StylingRung;
+  }
+  if (typeof value === 'string' && PLANNED_RUNGS.includes(value)) {
+    throw new Error(
+      `styling ceiling "${value}" is not implemented yet — use ${IMPLEMENTED_RUNGS.join(' or ')}`,
+    );
+  }
+  throw new Error(
+    `unknown styling ceiling ${JSON.stringify(value)} — expected ${IMPLEMENTED_RUNGS.join(' or ')}`,
+  );
 }
 
 function isResolverKind(value: unknown): value is ResolverKind {

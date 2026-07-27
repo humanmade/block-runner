@@ -203,7 +203,7 @@ function repairSpacing(
   }
 }
 
-function matchColor(value: string, invMap: TokenInverseMap): string | undefined {
+export function matchColor(value: string, invMap: TokenInverseMap): string | undefined {
   const normalized = normalizeHex(value);
   if (!normalized) {
     return undefined;
@@ -240,38 +240,37 @@ function repairItem(block: WpBlock, from: string, to: string, attribute: string,
   };
 }
 
+// Repair moves values out of `style` and onto preset attributes, which can leave empty branches
+// behind; an empty `style` object serializes as noise in the block comment. Pruning recursively
+// (rather than naming color/typography/spacing) means new style branches — border, dimensions,
+// and whatever a later WordPress adds — are covered without editing this function.
 function pruneStyle(attributes: Record<string, unknown>): void {
-  const style = attributes.style as Record<string, unknown> | undefined;
-  if (!style || typeof style !== 'object') {
+  const style = attributes.style;
+  if (!isPlainObject(style)) {
     return;
   }
 
-  const color = style.color as Record<string, unknown> | undefined;
-  if (color && typeof color === 'object' && Object.keys(color).length === 0) {
-    delete style.color;
-  }
-
-  const typography = style.typography as Record<string, unknown> | undefined;
-  if (typography && typeof typography === 'object' && Object.keys(typography).length === 0) {
-    delete style.typography;
-  }
-
-  const spacing = style.spacing as Record<string, unknown> | undefined;
-  if (spacing && typeof spacing === 'object') {
-    for (const group of ['padding', 'margin']) {
-      const box = spacing[group] as Record<string, unknown> | undefined;
-      if (box && typeof box === 'object' && Object.keys(box).length === 0) {
-        delete spacing[group];
-      }
-    }
-    if (Object.keys(spacing).length === 0) {
-      delete style.spacing;
-    }
-  }
+  pruneEmptyBranches(style);
 
   if (Object.keys(style).length === 0) {
     delete attributes.style;
   }
+}
+
+function pruneEmptyBranches(node: Record<string, unknown>): void {
+  for (const [key, value] of Object.entries(node)) {
+    if (!isPlainObject(value)) {
+      continue;
+    }
+    pruneEmptyBranches(value);
+    if (Object.keys(value).length === 0) {
+      delete node[key];
+    }
+  }
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function normalizeHex(value: string): string | undefined {

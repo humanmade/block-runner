@@ -22,6 +22,7 @@ export type {
   Rule,
   RuleContext,
   SourceLocation,
+  StylingRung,
   TokenConfig,
   TokenMatchMode,
   TokenResolver,

@@ -39,10 +39,23 @@ function hasSemanticAttrs(element: Element): boolean {
  * those empty, non-void inline elements up front so the block is valid by construction. The
  * removed nodes render nothing, but the caller still reports the strip (nothing silent).
  */
-export function cleanRichText(element: Element): { html: string; stripped: boolean } {
+export function cleanRichText(
+  element: Element,
+  options: { stripInlineStyles?: boolean } = {},
+): { html: string; stripped: boolean } {
   const clone = element.cloneNode(true) as Element;
   let stripped = false;
   let changed = true;
+
+  // The `strict` styling rung promises output in the theme's vocabulary only. A descendant's raw
+  // `style` attribute riding into RichText verbatim would break that, so it is removed here and
+  // reported by the caller. Other rungs keep it — the CSS survives inline, which is faithful even
+  // though it is not a block style.
+  if (options.stripInlineStyles) {
+    for (const el of clone.querySelectorAll('[style]')) {
+      el.removeAttribute('style');
+    }
+  }
   while (changed) {
     changed = false;
     for (const el of [...clone.querySelectorAll('*')]) {

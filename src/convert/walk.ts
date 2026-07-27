@@ -68,6 +68,9 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
     for (const block of blocks) {
       block.__blockRunnerSource ??= context.sourceFor(node);
     }
+    // Styling runs after the structural decision, never before it: the rule owns what this node
+    // becomes, and the mapper only carries the element's own CSS onto what it became.
+    context.applyStyles(node, blocks);
     if (context.explain) {
       context.explainRule(node, rule.id, 'matched');
     }
