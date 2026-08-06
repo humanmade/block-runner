@@ -49,6 +49,20 @@ block-runner convert hero.html --out hero.blocks.html
 Every run is checked against headless Gutenberg, so what comes back is guaranteed
 editor-valid, or Block Runner tells you exactly what wasn't and points at the line.
 
+## Using this from an AI agent?
+
+If you are the one deciding the structure, don't write HTML and convert it. Describe the
+structure as an intent tree and pipe it to `block-runner assemble` — deterministic code builds
+the markup, so it cannot come out invalid.
+
+There is a guide covering that path, the block mappings, and how to check markup before saving
+it to a site:
+
+```sh
+npx block-runner skill              # print the guide — nothing is installed or written
+npx block-runner skill --install    # install it as a skill (ask the user first)
+```
+
 ## Benchmark
 
 ![Fidelity benchmark: raw Claude and Codex writing block markup themselves score 35 to 73, while Block Runner with the same models scores 93 to 99, across simple and complex blocks](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/assets/benchmark.png)
@@ -113,11 +127,18 @@ Gutenberg before it reaches the editor.
 
 ## CLI
 
-Three commands: `convert` (HTML to blocks), `validate` (check block markup), and `fix`
-(canonicalize block markup).
+| Command | What it does |
+| --- | --- |
+| `convert` | Authored HTML to native blocks. The only path that carries CSS. |
+| `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
+| `validate` | Check block markup against headless Gutenberg. |
+| `fix` | Canonicalize near-miss block markup. |
+| `context` | Read a WordPress site into a `site.context.json` manifest (read-only). |
+| `skill` | Print or install the agent guide. |
 
 ```sh
 block-runner convert hero.html                    # blocks to stdout
+block-runner assemble intent.json                 # structure in, blocks out
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
 ```

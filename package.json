@@ -48,6 +48,7 @@
     "LICENSE",
     "CHANGELOG.md",
     "examples",
+    "skill",
     "scripts/prune-wp-vips.mjs"
   ],
   "engines": {

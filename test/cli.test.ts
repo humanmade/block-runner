@@ -5,6 +5,68 @@ import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 
 describe('CLI', () => {
+  it('prints the agent guide with skill', async () => {
+    const result = await runCli(['skill']);
+    const guide = await readFile(new URL('../skill/GUIDE.md', import.meta.url), 'utf8');
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toBe(guide);
+  });
+
+  it('installs both agent skill files', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const destination = path.join(dir, 'block-runner');
+    const result = await runCli(['skill', '--install', '--dir', dir]);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`installed ${path.join(destination, 'SKILL.md')}`);
+    expect(result.stdout).toContain(`installed ${path.join(destination, 'GUIDE.md')}`);
+    expect(await readFile(path.join(destination, 'SKILL.md'), 'utf8')).toBe(
+      await readFile(new URL('../skill/SKILL.md', import.meta.url), 'utf8'),
+    );
+    expect(await readFile(path.join(destination, 'GUIDE.md'), 'utf8')).toBe(
+      await readFile(new URL('../skill/GUIDE.md', import.meta.url), 'utf8'),
+    );
+
+    const updated = await runCli(['skill', '--install', '--dir', dir]);
+    expect(updated.stdout).toContain(`updated ${path.join(destination, 'SKILL.md')}`);
+    expect(updated.stdout).toContain(`updated ${path.join(destination, 'GUIDE.md')}`);
+  });
+
+  it('installs the agent skill under a --dir override', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const destination = path.join(dir, 'cursor', 'rules', 'block-runner');
+    const result = await runCli(['skill', '--install', '--dir', path.join(dir, 'cursor', 'rules')]);
+
+    expect(result.code).toBe(0);
+    expect(await stat(path.join(destination, 'SKILL.md'))).toBeTruthy();
+    expect(await stat(path.join(destination, 'GUIDE.md'))).toBeTruthy();
+  });
+
+  it('adds a convert hint for Custom HTML fallbacks without changing warning counts', async () => {
+    const result = await runCli(['convert', '-', '--json'], '<iframe src="https://example.test/embed"></iframe>');
+    const report = JSON.parse(result.stdout) as {
+      hint?: string;
+      summary: { warnings: number };
+      items: Array<{ reason: string }>;
+    };
+
+    expect(result.code).toBe(0);
+    expect(report.hint).toBe(
+      '1 block fell back to Custom HTML — describing the structure as an intent tree usually converts cleanly: npx block-runner skill',
+    );
+    expect(report.summary.warnings).toBe(1);
+    expect(report.items.some((item) => item.reason === report.hint)).toBe(false);
+  });
+
+  it('does not add a convert hint when there is no fallback', async () => {
+    const result = await runCli(['convert', '-', '--json'], '<p>Hello</p>');
+    const report = JSON.parse(result.stdout) as { hint?: string };
+
+    expect(result.code).toBe(0);
+    expect(report.hint).toBeUndefined();
+  });
+
   it('validates stdin and emits JSON', async () => {
     const result = await runCli(['validate', '-', '--json'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->');
     const report = JSON.parse(result.stdout) as { ok: boolean; command: string };
@@ -106,6 +168,76 @@ describe('CLI', () => {
     expect(report.summary.warnings).toBe(0);
   });
 
+  it('assembles intent from stdin and repairs tokens through CLI resolver options', async () => {
+    const themeJson = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'theme.json');
+    const intent = JSON.stringify({
+      blocks: [
+        {
+          block: 'core/group',
+          attrs: { style: { color: { background: '#0073aa' } } },
+          children: [{ block: 'core/paragraph', text: 'Brand block' }],
+        },
+      ],
+    });
+    const result = await runCli(
+      ['assemble', '-', '--token-resolver', 'file', '--theme-json', themeJson, '--json'],
+      intent,
+    );
+    const report = JSON.parse(result.stdout) as { ok: boolean; command: string; output: string };
+
+    expect(result.code).toBe(0);
+    expect(report.ok).toBe(true);
+    expect(report.command).toBe('assemble');
+    expect(report.output).toContain('"backgroundColor":"primary"');
+    expect(report.output).toContain('has-primary-background-color');
+  });
+
+  it('returns exit code 1 for malformed inline intent', async () => {
+    const result = await runCli(['assemble', 'not-json', '--json']);
+    const report = JSON.parse(result.stdout) as { ok: boolean; items: Array<{ reason: string }> };
+
+    expect(result.code).toBe(1);
+    expect(report.ok).toBe(false);
+    expect(report.items[0]?.reason).toBe('could not parse intent JSON');
+  });
+
+  it('rejects styling flags on assemble and points callers to convert', async () => {
+    for (const args of [
+      ['assemble', '-', '--styling', 'strict'],
+      ['assemble', '-', '--css-out', 'sidecar.css'],
+    ]) {
+      const result = await runCli(args, '{"blocks":[]}');
+      const output = `${result.stdout}${result.stderr}`;
+
+      expect(result.code).toBe(2);
+      expect(output).toContain('does not apply to intent trees');
+      expect(output).toContain('block-runner convert');
+    }
+  });
+
+  it('warns instead of failing when assemble config sets a non-default styling rung', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const configPath = path.join(dir, 'block-runner.config.mjs');
+    await writeFile(configPath, `export default { styling: 'open' };`);
+    const result = await runCli(
+      ['assemble', '-', '--config', configPath, '--json'],
+      '{"blocks":[{"block":"core/paragraph","text":"Hi"}]}',
+    );
+    const report = JSON.parse(result.stdout) as {
+      ok: boolean;
+      items: Array<{ status: string; reason: string }>;
+    };
+
+    expect(result.code).toBe(0);
+    expect(report.ok).toBe(true);
+    expect(report.items).toContainEqual(
+      expect.objectContaining({
+        status: 'warning',
+        reason: expect.stringContaining('does not apply to intent trees'),
+      }),
+    );
+  });
+
   it('prints help and version with exit code 0', async () => {
     const help = await runCli(['--help']);
     const version = await runCli(['--version']);
@@ -180,7 +312,7 @@ function runCli(
   env: Record<string, string> = {},
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn('npx', ['tsx', 'src/cli.ts', ...args], {
+    const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
       env: {
         ...process.env,

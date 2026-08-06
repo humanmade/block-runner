@@ -1,5 +1,38 @@
 # Changelog
 
+## 0.7.0
+
+### Added
+
+- **`assemble` — build blocks from a described structure, not from markup.** Give it an
+  intent tree (JSON naming which blocks go where) and it builds the result with
+  `createBlock`, so the output cannot be invalid. This is the path for anything generating
+  content: describing a structure is a far better fit for a model than authoring block
+  markup, which is where invalid output comes from. Available as a CLI command and as
+  `assemble` / `extractIntent` / `realize` library exports.
+- **An agent guide, shipped in the package.** `npx block-runner skill` prints it; nothing is
+  installed or written. `npx block-runner skill --install` installs it as a skill, with
+  `--dir` for harnesses that keep skills elsewhere. It covers which command to reach for, the
+  block mappings per section type, the validate/fix loop, and how to fail safely — written to
+  be read by any agent, not one particular tool.
+- **A hint when a conversion falls back.** A `convert` run that drops to Custom HTML now says
+  so on stderr and in `report.hint`, pointing at the path that usually handles that input
+  cleanly. It is advisory: it never affects the exit code, the summary counts, or `--strict`.
+
+### Changed
+
+- **Media resolution and brand-token repair are shared by every path.** `convert` and
+  `assemble` now run the same finalization, so a tree built from intent resolves images and
+  maps colours onto theme presets exactly as a converted one does.
+
+### Notes
+
+- `--styling` and `--css-out` do not apply to `assemble` and are rejected with an explanation:
+  an intent tree carries structure and content, never the source CSS. Use `convert` when the
+  styling matters.
+- Malformed or empty intent input is a hard failure (exit `1`) naming what went wrong, rather
+  than a successful run that produced nothing.
+
 ## 0.6.0
 
 ### Added
