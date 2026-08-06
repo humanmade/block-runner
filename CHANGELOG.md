@@ -2,19 +2,31 @@
 
 ## 0.7.0
 
+**Block Runner now ships a skill.** Agents get markedly better conversions when told how to
+use the tool, so the instructions travel with the package instead of being rediscovered by
+every consumer.
+
+```sh
+npx block-runner skill              # print the guide — nothing installed or written
+npx block-runner skill --install    # install it as a skill
+```
+
+Measured on the project's own 53-fixture benchmark, the guide takes the corpus from **28 to
+97**, with 0 invalid and 0 fallbacks. Those figures come from a controlled harness rather than
+a live session, so treat them as a ceiling.
+
 ### Added
 
-- **`assemble` — build blocks from a described structure, not from markup.** Give it an
-  intent tree (JSON naming which blocks go where) and it builds the result with
-  `createBlock`, so the output cannot be invalid. This is the path for anything generating
-  content: describing a structure is a far better fit for a model than authoring block
-  markup, which is where invalid output comes from. Available as a CLI command and as
-  `assemble` / `extractIntent` / `realize` library exports.
-- **An agent guide, shipped in the package.** `npx block-runner skill` prints it; nothing is
-  installed or written. `npx block-runner skill --install` installs it as a skill, with
-  `--dir` for harnesses that keep skills elsewhere. It covers which command to reach for, the
-  block mappings per section type, the validate/fix loop, and how to fail safely — written to
-  be read by any agent, not one particular tool.
+- **The skill, shipped in the package and readable by any harness.** `skill/GUIDE.md` is the
+  content; `skill/SKILL.md` is a thin wrapper over it. `skill --install` writes both into
+  `.claude/skills/block-runner/`, with `--dir` for harnesses that keep skills elsewhere. The
+  guide covers which command to reach for, the block mappings per section type, the
+  validate/fix loop, and how to fail safely without stranding the user.
+- **`assemble` — build blocks from a described structure, not from markup.** The command the
+  skill drives. Give it an intent tree (JSON naming which blocks go where) and it builds the
+  result with `createBlock`, so the output cannot be invalid. Describing a structure suits a
+  model far better than authoring block markup, which is where invalid output comes from.
+  Also available as `assemble` / `extractIntent` / `realize` library exports.
 - **A hint when a conversion falls back.** A `convert` run that drops to Custom HTML now says
   so on stderr and in `report.hint`, pointing at the path that usually handles that input
   cleanly. It is advisory: it never affects the exit code, the summary counts, or `--strict`.
@@ -32,6 +44,8 @@
   styling matters.
 - Malformed or empty intent input is a hard failure (exit `1`) naming what went wrong, rather
   than a successful run that produced nothing.
+- `convert`, `validate`, and `fix` are unchanged. Verified by running the benchmark at the
+  previous release and at this one: identical scores across all 53 fixtures.
 
 ## 0.6.0
 
