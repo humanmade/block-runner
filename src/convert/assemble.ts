@@ -1,9 +1,6 @@
 import { loadConfig } from '../config/load.js';
 import { getWp } from '../headless/wp.js';
-import { validate } from '../gate/validate.js';
-import { applyMedia } from '../media/apply.js';
-import { createMediaResolver } from '../media/resolver.js';
-import { effectiveTokens, repairTokens } from '../tokens/apply.js';
+import { effectiveTokens } from '../tokens/apply.js';
 import { buildTokenInverseMap } from '../tokens/repair.js';
 import {
   StyleLedgerEntry,
@@ -26,6 +23,7 @@ import {
 } from '../types.js';
 import { contextHtml, contextText, isElementNode, makeContextWarning, prepareDom, sourceForNode } from './dom.js';
 import { defaultRules } from './defaults.js';
+import { finalizeBlocks } from './finalize.js';
 import { walkChildren } from './walk.js';
 
 export async function convert(input: string, options: ConvertOptions = {}): Promise<BlockRunnerReport> {
@@ -252,32 +250,15 @@ async function runConvert(
   }
 
   const blocks = await walkChildren(prepared.dom.window.document.body, context);
-  const mediaWarnings = await applyMedia(blocks, createMediaResolver(config, options), config);
-  warnings.push(...mediaWarnings);
-
-  const tokenRepair = await repairTokens(blocks, config, options, tokens);
-  warnings.push(...tokenRepair.items);
-
-  const output = wp.serialize(tokenRepair.blocks);
-  const gate = await validate(output, {
-    ...options,
-    strict: config.strict,
+  const report = await finalizeBlocks(blocks, options, config, wp, {
+    command: 'convert',
+    warnings,
+    tokens,
   });
 
-  const hardWarnings = warnings.filter((item) => isStrictFailureWarning(item));
-  const ok = gate.summary.invalid === 0 && !(config.strict && hardWarnings.length > 0);
-
   return {
-    ok,
-    command: 'convert',
-    summary: {
-      blocks: gate.summary.blocks,
-      valid: gate.summary.valid,
-      invalid: gate.summary.invalid,
-      warnings: warnings.length,
-    },
-    items: [...warnings, ...gate.items, ...explainItems],
-    output,
+    ...report,
+    items: [...report.items, ...explainItems],
     ...(sidecar.empty ? {} : { sidecarCss: sidecar.css() }),
   };
 }
@@ -295,12 +276,6 @@ function isRule(value: unknown): value is Rule {
     typeof (value as Rule).id === 'string' &&
     typeof (value as Rule).match === 'function' &&
     typeof (value as Rule).emit === 'function'
-  );
-}
-
-function isStrictFailureWarning(item: ReportItem): boolean {
-  return /Custom HTML fallback|unresolved media|no ID|media map has no ID|sideload is disabled|file not found/i.test(
-    item.reason,
   );
 }
 

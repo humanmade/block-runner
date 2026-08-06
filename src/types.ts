@@ -1,6 +1,6 @@
 import type { Declaration } from './styles/parse.js';
 
-export type CommandName = 'validate' | 'fix' | 'convert';
+export type CommandName = 'validate' | 'fix' | 'convert' | 'assemble';
 
 export type ReportStatus = 'valid' | 'invalid' | 'warning';
 
@@ -33,6 +33,8 @@ export interface BlockRunnerReport {
   command: CommandName;
   summary: ReportSummary;
   items: ReportItem[];
+  /** Advisory guidance only; never affects `ok` or summary counts. */
+  hint?: string;
   output?: string;
   /**
    * CSS the block model cannot express, emitted by the `open` styling rung. Present only when that
@@ -151,12 +153,38 @@ export interface ConvertOptions extends CommonOptions {
   config?: BlockRunnerConfig;
 }
 
+export interface AssembleOptions extends CommonOptions {
+  config?: BlockRunnerConfig;
+}
+
 export interface ValidateOptions extends CommonOptions {
   config?: BlockRunnerConfig;
 }
 
 export interface CanonicalizeOptions extends CommonOptions {
   config?: BlockRunnerConfig;
+}
+
+/**
+ * A deliberately permissive block-intent node. The small field set gives producers a stable
+ * envelope while `attrs` passes block-specific attributes through to Gutenberg. Unknown
+ * attribute keys are intentionally accepted and left for the registered block type to sanitize.
+ */
+export interface IntentNode {
+  block: string;
+  text?: string;
+  url?: string;
+  alt?: string;
+  level?: number;
+  citation?: string;
+  items?: string[];
+  rows?: string[][];
+  attrs?: Record<string, unknown>;
+  children?: IntentNode[];
+}
+
+export interface IntentTree {
+  blocks: IntentNode[];
 }
 
 export type WpBlock = {

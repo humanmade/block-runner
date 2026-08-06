@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { Command, CommanderError } from 'commander';
@@ -9,6 +9,7 @@ import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
 import { convert } from './convert/assemble.js';
+import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
@@ -32,6 +33,11 @@ interface ContextCliOptions {
   wpBinary?: string;
   strict?: boolean;
   out?: string;
+}
+
+interface SkillCliOptions {
+  install?: boolean;
+  dir?: string;
 }
 
 const program = new Command();
@@ -62,6 +68,30 @@ addTokenOptions(
     );
     const report = aggregateReports('validate', reports);
     await emit(report, options);
+    process.exitCode = report.ok ? 0 : 1;
+  });
+
+addTokenOptions(
+  addWpCredentialOptions(
+    addSharedOptions(program.command('assemble <jsonOrStdin>').description('Assemble an intent tree into native block markup.')),
+  ).option('--resolver <kind>', 'media resolver: noop, map, wpcli, rest'),
+  { styling: false },
+)
+  .action(async (jsonOrStdin: string, options: CliOptions) => {
+    const apiOptions = normalizeOptions(options);
+    const inputs = await readInputs(jsonOrStdin, { allowRawInline: true });
+    ensureSingleOutputTarget(inputs, options);
+    const reports = await Promise.all(
+      inputs.map((input) =>
+        realize(input.content, {
+          ...apiOptions,
+          sourcePath: input.path,
+        }),
+      ),
+    );
+    const report = aggregateReports('assemble', reports);
+    report.output = reports.map((item) => item.output ?? '').join('\n');
+    await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
 
@@ -124,6 +154,12 @@ addTokenOptions(
     );
     const report = aggregateReports('convert', reports);
     report.output = reports.map((item) => item.output ?? '').join('\n');
+    const fallbackCount = reports
+      .flatMap((item) => item.items)
+      .filter((item) => /Custom HTML fallback/i.test(item.reason)).length;
+    if (fallbackCount > 0) {
+      report.hint = `${fallbackCount} block${fallbackCount === 1 ? '' : 's'} fell back to Custom HTML — describing the structure as an intent tree usually converts cleanly: npx block-runner skill`;
+    }
     const sidecarCss = reports.map((item) => item.sidecarCss ?? '').filter(Boolean).join('');
     if (sidecarCss) {
       report.sidecarCss = sidecarCss;
@@ -165,8 +201,36 @@ program
     }
   });
 
+program
+  .command('skill')
+  .description('Print or install the agent guide.')
+  .option('--install', 'install the agent skill files')
+  .option('--dir <path>', 'install root (default: .claude/skills)')
+  .action(async (options: SkillCliOptions) => {
+    if (!options.install) {
+      process.stdout.write(await readSkillSource('GUIDE.md'));
+      return;
+    }
+
+    const skill = await readSkillSource('SKILL.md');
+    const guide = await readSkillSource('GUIDE.md');
+    const destination = path.resolve(options.dir ?? '.claude/skills', 'block-runner');
+    await mkdir(destination, { recursive: true });
+
+    for (const [filename, content] of [
+      ['SKILL.md', skill],
+      ['GUIDE.md', guide],
+    ] as const) {
+      const target = path.join(destination, filename);
+      const status = existsSync(target) ? 'updated' : 'installed';
+      await writeFile(target, content, 'utf8');
+      console.log(`${status} ${target}`);
+    }
+  });
+
 async function main(): Promise<void> {
   try {
+    rejectAssembleStylingOptions(process.argv);
     await program.parseAsync(process.argv);
   } catch (error) {
     if (error instanceof CommanderError) {
@@ -204,14 +268,18 @@ function addWpCredentialOptions(command: Command): Command {
     .option('--wp-app-password-env <name>', 'environment variable containing a WordPress application password');
 }
 
-function addTokenOptions(command: Command): Command {
-  return command
+function addTokenOptions(command: Command, options: { styling?: boolean } = {}): Command {
+  const withTokens = command
     .option('--token-resolver <kind>', 'token resolver: noop, file, wpcli, rest, context')
     .option('--theme-json <path>', 'path to a theme.json for the file token resolver')
     .option('--context <path>', 'path to a wesper site.context.json manifest (token source)')
-    .option('--token-match <mode>', 'token match mode: exact, nearest')
-    .option('--styling <rung>', 'styling ceiling: strict, relaxed (default), open')
-    .option('--css-out <path>', 'write sidecar CSS emitted by --styling open to a file');
+    .option('--token-match <mode>', 'token match mode: exact, nearest');
+
+  return options.styling === false
+    ? withTokens
+    : withTokens
+        .option('--styling <rung>', 'styling ceiling: strict, relaxed (default), open')
+        .option('--css-out <path>', 'write sidecar CSS emitted by --styling open to a file');
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {
@@ -226,7 +294,7 @@ function normalizeOptions(options: CliOptions): CommonOptions {
 
 async function readInputs(
   target: string,
-  options: { allowInline?: boolean } = {},
+  options: { allowInline?: boolean; allowRawInline?: boolean } = {},
 ): Promise<Array<{ path?: string; content: string }>> {
   if (target === '-') {
     return [{ path: '<stdin>', content: await readStdin() }];
@@ -242,6 +310,9 @@ async function readInputs(
   });
 
   if (files.length === 0) {
+    if (options.allowRawInline) {
+      return [{ path: '<inline>', content: target }];
+    }
     if (options.allowInline && looksLikeInlineHtml(target)) {
       return [{ path: '<inline>', content: target }];
     }
@@ -249,6 +320,24 @@ async function readInputs(
   }
 
   return Promise.all(files.map(async (file) => ({ path: file, content: await readFile(file, 'utf8') })));
+}
+
+function rejectAssembleStylingOptions(argv: string[]): void {
+  const commandIndex = argv.indexOf('assemble');
+  if (commandIndex === -1) {
+    return;
+  }
+  const assembleArgs = argv.slice(commandIndex + 1);
+  if (assembleArgs.some((arg) => arg === '--styling' || arg.startsWith('--styling='))) {
+    program.error(
+      'error: --styling does not apply to intent trees because they carry no source CSS; use block-runner convert for authored HTML styling',
+    );
+  }
+  if (assembleArgs.some((arg) => arg === '--css-out' || arg.startsWith('--css-out='))) {
+    program.error(
+      'error: --css-out does not apply to intent trees because they carry no source CSS; use block-runner convert for authored HTML styling',
+    );
+  }
 }
 
 function readStdin(): Promise<string> {
@@ -297,10 +386,29 @@ async function emit(
     if (!report.output.endsWith('\n')) {
       process.stdout.write('\n');
     }
+    emitHint(report);
     return;
   }
 
   console.log(formatTextReport(report));
+  emitHint(report);
+}
+
+function emitHint(report: BlockRunnerReport): void {
+  if (report.hint) {
+    console.error(`hint: ${report.hint}`);
+  }
+}
+
+async function readSkillSource(filename: 'SKILL.md' | 'GUIDE.md'): Promise<string> {
+  const source = filename === 'GUIDE.md'
+    ? new URL('../skill/GUIDE.md', import.meta.url)
+    : new URL('../skill/SKILL.md', import.meta.url);
+  try {
+    return await readFile(source, 'utf8');
+  } catch {
+    throw new Error(`skill source file is missing: ${source.pathname}`);
+  }
 }
 
 function formatTextReport(report: BlockRunnerReport): string {
