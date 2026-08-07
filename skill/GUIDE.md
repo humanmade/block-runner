@@ -211,7 +211,37 @@ Read `.ok` and `.summary.invalid` for the verdict, `.items[].source.htmlLine` fo
 
 ---
 
-## 5. Matching the user's site
+## 5. Where the blocks go
+
+Producing valid markup is not the end of the job. Every run ends in one of three places, and
+you pick based on what is available — never leave the markup sitting in a temp file or scroll
+past in your own output.
+
+**The user named a destination** (a file, a page, a post) → put it there. If they named an
+existing page and it already has content, ask before replacing it. Overwriting someone's page
+is not yours to assume.
+
+**A WordPress connection is available** — an MCP server, WP-CLI, REST credentials already in
+the environment → offer to write it. Say which page or post you would write to and get a yes
+first, unless they already told you. Block markup goes in the post content field as-is; it
+does not need escaping or wrapping.
+
+**No connection and no destination** → show the user the markup and tell them how to use it:
+
+> Open the page in the WordPress editor, switch to the Code editor
+> (**Options ⋮ → Code editor**, or `Ctrl+Shift+Alt+M`), paste, then switch back to the
+> visual editor. The blocks will appear as normal, editable blocks.
+
+That last instruction matters. Pasting block markup into the *visual* editor produces a mess;
+into the Code editor it becomes real blocks. A user who does not know this will conclude the
+tool is broken.
+
+**Always say what you did** — where it went, how many blocks, and anything that fell back to
+Custom HTML. A silent success is indistinguishable from a silent failure.
+
+---
+
+## 6. Matching the user's site
 
 Optional, and worth it when you know the target site.
 
@@ -226,7 +256,7 @@ Optional, and worth it when you know the target site.
 
 ---
 
-## 6. Failure posture
+## 7. Failure posture
 
 Block Runner is an assist, not a gate that can strand the user.
 
@@ -243,7 +273,7 @@ harmless. Read results from stdout or `--json`. Users who run this often can
 
 ---
 
-## 7. Installing this as a skill
+## 8. Installing this as a skill
 
 If your harness supports skills, this guide can be installed as one:
 

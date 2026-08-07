@@ -30,6 +30,10 @@ Three paths. Pick by what you have:
 
 ## Rules that are easy to get wrong
 
+- **Finish the job — the markup has to land somewhere.** Write it where the user asked; or
+  offer to write it through a WordPress connection if one is available; or show it to them
+  with the paste instruction (**Options ⋮ → Code editor**, or `Ctrl+Shift+Alt+M` — pasting
+  into the *visual* editor produces a mess). Never leave it in a temp file. See `GUIDE.md` §5.
 - **Always pass `--json`.** Without it the report items are dropped and you will miss
   fallbacks, warnings, and source locations.
 - **Never hand-write `<!-- wp:... -->` markup.** That is how invalid output happens. Describe

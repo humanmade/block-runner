@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.7.1
+
+### Fixed
+
+- **The guide now says where the blocks go.** It stopped at "here is valid markup", leaving an
+  agent holding correct output with no instruction on what to do with it — so a request like
+  "add a pricing section to my site" ended in improvisation. `GUIDE.md` §5 covers the three
+  endings: write it where the user asked, offer to write it through an available WordPress
+  connection, or show it with the paste instruction. Including the one users get wrong —
+  block markup must go into the **Code editor** (`Ctrl+Shift+Alt+M`), not the visual editor,
+  which turns it into a mess and reads as the tool being broken.
+
+No code changes; the CLI and library are identical to 0.7.0.
+
 ## 0.7.0
 
 **Block Runner now ships a skill.** Agents get markedly better conversions when told how to
