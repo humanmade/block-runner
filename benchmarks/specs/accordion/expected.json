@@ -1,0 +1,35 @@
+{
+  "intent": "A set of collapsible panels: an H2, then a native accordion. Core gained a real accordion in WordPress 7.1 — a SET of disclosures is core/accordion with one core/accordion-item each, NOT a series of core/details (which remains correct for a single standalone disclosure). Each item is a heading plus a panel; the heading's text lives in its `title` attribute (NOT `content`, unlike every other text block — passing `content` yields a valid accordion with a blank heading), and the panel's body is a child paragraph.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "How it works" },
+      {
+        "block": "core/accordion",
+        "children": [
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "Read the design" } },
+              { "block": "core/accordion-panel", "children": [ { "block": "core/paragraph", "contains": "works out what each section means" } ] }
+            ]
+          },
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "Assemble the blocks" } },
+              { "block": "core/accordion-panel", "children": [ { "block": "core/paragraph", "contains": "verified primitives" } ] }
+            ]
+          },
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "Prove it in the editor" } },
+              { "block": "core/accordion-panel", "children": [ { "block": "core/paragraph", "contains": "real WordPress" } ] }
+            ]
+          }
+        ]
+      }
+    ]
+  }
+}

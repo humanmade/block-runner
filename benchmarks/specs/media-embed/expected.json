@@ -1,0 +1,18 @@
+{
+  "intent": "A third-party video embed: an H2, a paragraph, then the embed. The idiomatic core is core/embed carrying the provider URL (NOT core/video, which is for self-hosted files, and NOT an iframe in core/html).",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Watch the walkthrough" },
+      { "block": "core/paragraph", "contains": "narrated end to end" },
+      {
+        "block": "core/embed",
+        "attrs": {
+          "url": "https://www.youtube.com/watch?v=dQw4w9WgXcQ",
+          "caption": "Full walkthrough, 12 minutes.",
+          "allowResponsive": true
+        }
+      }
+    ]
+  }
+}

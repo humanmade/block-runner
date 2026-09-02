@@ -3,5 +3,5 @@
   "provider": "openai",
   "model": "gpt-5.5",
   "effort": "low",
-  "note": "Generated from specs/<layout>/prompt.md via `codex exec -c model_reasoning_effort=low` (Tailwind output)."
+  "note": "Generated from specs/<layout>/prompt.md via `codex exec -c model_reasoning_effort=low` (Tailwind output). MIXED PROVENANCE, recorded rather than smoothed over: the original 19 layouts were generated 2026-06 with gpt-5.5/low; media-video, media-audio, media-embed, file-download and accordion were generated 2026-09-02 with gpt-5.6-sol/low, because those layouts did not exist in June. Both are genuine Tailwind generator output from the same brief; neither is hand-written. The older 19 were left as they are rather than regenerated, so the existing scores stay comparable."
 }

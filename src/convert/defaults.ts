@@ -8,6 +8,7 @@ import {
   isForeignElement,
 } from './dom.js';
 import { RichTextCheck, cleanRichText, richTextSafe } from './richtext.js';
+import { createHtmlFallback } from './fallback.js';
 
 const LIST_STRUCTURAL = new Set(['ul', 'ol', 'li']);
 
@@ -442,7 +443,7 @@ const videoRule: Rule = {
     if (!src) {
       // Multi-<source> or blob video — core/video can't represent it; keep it verbatim.
       context.warn('video without a direct src emitted as Custom HTML fallback', node, 'core/html', 'video');
-      const html = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+      const html = createHtmlFallback(context.wp, node.outerHTML);
       html.__blockRunnerSource = context.sourceFor(node);
       return html;
     }
@@ -476,7 +477,7 @@ const audioRule: Rule = {
     const src = directMediaSrc(node);
     if (!src) {
       context.warn('audio without a direct src emitted as Custom HTML fallback', node, 'core/html', 'audio');
-      const html = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+      const html = createHtmlFallback(context.wp, node.outerHTML);
       html.__blockRunnerSource = context.sourceFor(node);
       return html;
     }
@@ -600,7 +601,7 @@ const htmlFallbackRule: Rule = {
         ? 'unsupported iframe emitted as Custom HTML fallback'
         : 'unmapped element — no native block, preserved as Custom HTML fallback';
     context.warn(reason, node, 'core/html', 'html');
-    const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+    const block = createHtmlFallback(context.wp, node.outerHTML);
     block.__blockRunnerSource = context.sourceFor(node);
     return block;
   },
@@ -719,7 +720,7 @@ function customHtmlFallback(node: Element, context: RuleContext, check: Extract<
     'core/html',
     'richtext',
   );
-  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  const block = createHtmlFallback(context.wp, node.outerHTML);
   block.__blockRunnerSource = context.sourceFor(node);
   return block;
 }

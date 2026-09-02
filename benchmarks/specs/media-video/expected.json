@@ -1,0 +1,19 @@
+{
+  "intent": "A video section: an H2, a paragraph, then a self-hosted video. The idiomatic core is core/video (NOT core/embed, which is for third-party providers, and NOT core/html). The caption is the video block's own caption attribute, not a sibling paragraph.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "See it in motion" },
+      { "block": "core/paragraph", "contains": "Ninety seconds" },
+      {
+        "block": "core/video",
+        "attrs": {
+          "src": "product-demo.mp4",
+          "poster": "demo-poster.jpg",
+          "controls": true,
+          "caption": "Converting a hero section, start to finish."
+        }
+      }
+    ]
+  }
+}

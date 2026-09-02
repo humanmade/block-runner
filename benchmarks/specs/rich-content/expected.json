@@ -7,6 +7,7 @@
       { "block": "core/paragraph", "contains": "three steps" },
       {
         "block": "core/list",
+        "attrs": { "ordered": true },
         "children": [
           { "block": "core/list-item", "contains": "Paste" },
           { "block": "core/list-item", "contains": "Run" },

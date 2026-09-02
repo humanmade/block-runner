@@ -71,9 +71,9 @@
     "postinstall": "node scripts/prune-wp-vips.mjs"
   },
   "dependencies": {
-    "@wordpress/block-editor": "15.23.0",
-    "@wordpress/block-library": "10.1.0",
-    "@wordpress/blocks": "15.23.0",
+    "@wordpress/block-editor": "17.0.0",
+    "@wordpress/block-library": "10.5.0",
+    "@wordpress/blocks": "15.27.0",
     "commander": "15.0.0",
     "fast-glob": "3.3.3",
     "jsdom": "29.1.1",

@@ -13,6 +13,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
+import { isDeepStrictEqual } from 'node:util';
 import { parseMarkup } from '../../src/headless/wp.js';
 import type { WpBlock, ConvertOptions, BlockRunnerReport } from '../../src/types.js';
 
@@ -21,6 +22,8 @@ export type ConvertFn = (input: string, options?: ConvertOptions) => Promise<Blo
 export interface ExpectedNode {
   block: string;
   contains?: string;
+  /** Exact top-level Gutenberg attributes that carry required semantics. */
+  attrs?: Record<string, unknown>;
   children?: ExpectedNode[];
 }
 
@@ -34,7 +37,10 @@ export interface Spec {
   layout: string;
   intent: string;
   tree: ExpectedNode;
+  /** Explicit, producer-neutral whole-tree equivalents accepted by the contract. */
+  acceptedTrees: ExpectedNode[];
   display: DisplayNode;
+  acceptedDisplays: DisplayNode[];
 }
 
 export interface Tally {
@@ -72,6 +78,22 @@ export const EVAL_DIR = path.join(ROOT, 'benchmarks');
 export const SPEC_DIR = path.join(EVAL_DIR, 'specs');
 export const PRODUCERS_DIR = path.join(EVAL_DIR, 'producers');
 export const RESULTS_PATH = path.join(EVAL_DIR, 'results.jsonl');
+export const WORDPRESS_TARGET = '7.1';
+
+export function gutenbergVersion(): string {
+  try {
+    const file = path.join(ROOT, 'node_modules', '@wordpress', 'block-library', 'package.json');
+    return (JSON.parse(readFileSync(file, 'utf8')) as { version?: string }).version ?? 'unknown';
+  } catch {
+    return 'unknown';
+  }
+}
+
+/** Hash the scoring implementation so scores from different formulas are never compared. */
+export function scorerHash(): string {
+  const source = readFileSync(fileURLToPath(import.meta.url));
+  return `sha256:${createHash('sha256').update(source).digest('hex').slice(0, 12)}`;
+}
 
 export function loadSpecs(): Map<string, Spec> {
   const specs = new Map<string, Spec>();
@@ -80,12 +102,19 @@ export function loadSpecs(): Map<string, Spec> {
     if (!entry.isDirectory()) continue;
     const file = path.join(SPEC_DIR, entry.name, 'expected.json');
     if (!existsSync(file)) continue;
-    const parsed = JSON.parse(readFileSync(file, 'utf8')) as { intent?: string; tree: ExpectedNode };
+    const parsed = JSON.parse(readFileSync(file, 'utf8')) as {
+      intent?: string;
+      tree: ExpectedNode;
+      acceptedTrees?: ExpectedNode[];
+    };
+    const acceptedTrees = parsed.acceptedTrees ?? [];
     specs.set(entry.name, {
       layout: entry.name,
       intent: parsed.intent ?? '',
       tree: parsed.tree,
+      acceptedTrees,
       display: expectedToDisplay(parsed.tree),
+      acceptedDisplays: acceptedTrees.map(expectedToDisplay),
     });
   }
   return specs;
@@ -146,8 +175,17 @@ export async function scoreReport(
   const label = `${producer}/${layout}`;
   const produced = await parseMarkup(report.output ?? '');
 
-  const tally: Tally = { structureTotal: 0, structureMatched: 0, contentTotal: 0, contentMatched: 0, misses: [] };
-  matchNode(spec.tree, produced, tally, label);
+  // Some authored designs permit more than one equally idiomatic native tree. Score every
+  // explicitly reviewed whole-tree alternative and keep the best match. The alternatives are
+  // shared by every producer/engine; this never becomes producer-specific forgiveness.
+  const tallies = [spec.tree, ...spec.acceptedTrees].map((tree) => {
+    const tally: Tally = { structureTotal: 0, structureMatched: 0, contentTotal: 0, contentMatched: 0, misses: [] };
+    matchNode(tree, produced, tally, label);
+    return tally;
+  });
+  const tally = tallies.reduce((best, candidate) =>
+    weightedTallyScore(candidate) > weightedTallyScore(best) ? candidate : best,
+  );
 
   const structurePct = pct(tally.structureMatched, tally.structureTotal);
   const contentPct = tally.contentTotal === 0 ? 1 : tally.contentMatched / tally.contentTotal;
@@ -202,6 +240,16 @@ export function matchNode(exp: ExpectedNode, candidates: WpBlock[], tally: Tally
     }
   }
 
+  for (const [key, expected] of Object.entries(exp.attrs ?? {})) {
+    tally.contentTotal += 1;
+    const actual = match.attributes?.[key];
+    if (attributeValuesEqual(actual, expected)) {
+      tally.contentMatched += 1;
+    } else {
+      tally.misses.push(`${here} — expected attr ${key}=${JSON.stringify(expected)}, got ${JSON.stringify(actual)}`);
+    }
+  }
+
   if (exp.children?.length) {
     let cursor = 0;
     const kids = match.innerBlocks ?? [];
@@ -215,8 +263,37 @@ export function matchNode(exp: ExpectedNode, candidates: WpBlock[], tally: Tally
   return match;
 }
 
+// Gutenberg rich-text attributes are RichTextData objects after parse(), even though their
+// public JSON value is a string. Compare the serializable block-attribute contract so
+// `"Caption"` and RichTextData("Caption") agree, while arrays/objects remain deep-exact.
+function attributeValuesEqual(actual: unknown, expected: unknown): boolean {
+  if (isAttributeOneOf(expected)) {
+    return expected.$oneOf.some((candidate) => attributeValuesEqual(actual, candidate));
+  }
+  return isDeepStrictEqual(toAttributeJson(actual), toAttributeJson(expected));
+}
+
+function isAttributeOneOf(value: unknown): value is { $oneOf: unknown[] } {
+  return (
+    typeof value === 'object' &&
+    value !== null &&
+    Object.keys(value).length === 1 &&
+    Array.isArray((value as { $oneOf?: unknown }).$oneOf)
+  );
+}
+
+function toAttributeJson(value: unknown): unknown {
+  if (value === undefined) return undefined;
+  try {
+    return JSON.parse(JSON.stringify(value)) as unknown;
+  } catch {
+    return value;
+  }
+}
+
 function countMissedSubtree(exp: ExpectedNode, tally: Tally): void {
   if (exp.contains !== undefined) tally.contentTotal += 1;
+  tally.contentTotal += Object.keys(exp.attrs ?? {}).length;
   for (const child of exp.children ?? []) {
     tally.structureTotal += 1;
     countMissedSubtree(child, tally);
@@ -224,9 +301,13 @@ function countMissedSubtree(exp: ExpectedNode, tally: Tally): void {
 }
 
 export function expectedToDisplay(node: ExpectedNode): DisplayNode {
+  const notes = [
+    node.contains ? `"${node.contains}"` : '',
+    ...Object.entries(node.attrs ?? {}).map(([key, value]) => `${key}=${JSON.stringify(value)}`),
+  ].filter(Boolean);
   return {
     name: node.block,
-    note: node.contains ? `"${node.contains}"` : undefined,
+    note: notes.length ? notes.join(' · ') : undefined,
     children: (node.children ?? []).map(expectedToDisplay),
   };
 }
@@ -288,6 +369,12 @@ function coverage(inputHtml: string, output: string): number {
 
 export function pct(matched: number, total: number): number {
   return total === 0 ? 1 : matched / total;
+}
+
+function weightedTallyScore(tally: Tally): number {
+  const structure = pct(tally.structureMatched, tally.structureTotal);
+  const content = tally.contentTotal === 0 ? 1 : tally.contentMatched / tally.contentTotal;
+  return 0.75 * structure + 0.25 * content;
 }
 
 // Hash the spec set + producer inputs + base, so a score change is attributable

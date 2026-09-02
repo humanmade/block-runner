@@ -1,5 +1,6 @@
 import { RuleContext, WpBlock } from '../types.js';
 import { contextText, isCommentNode, isElementNode, isForeignElement, isWhitespaceText } from './dom.js';
+import { createHtmlFallback } from './fallback.js';
 
 export async function walkChildren(parent: Node, context: RuleContext, skip = new Set<Node>()): Promise<WpBlock[]> {
   const blocks: WpBlock[] = [];
@@ -82,7 +83,7 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
 
 function emitCustomHtml(node: Element, context: RuleContext, reason: string): WpBlock {
   context.warn(reason, node, 'core/html', 'html');
-  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  const block = createHtmlFallback(context.wp, node.outerHTML);
   block.__blockRunnerSource = context.sourceFor(node);
   return block;
 }
@@ -90,7 +91,7 @@ function emitCustomHtml(node: Element, context: RuleContext, reason: string): Wp
 function emitConversionError(node: Element, context: RuleContext, ruleId: string, error: unknown): WpBlock {
   const message = error instanceof Error ? error.message : String(error);
   context.warn('conversion error emitted as Custom HTML fallback', node, 'core/html', ruleId, { error: message });
-  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  const block = createHtmlFallback(context.wp, node.outerHTML);
   block.__blockRunnerSource = context.sourceFor(node);
   return block;
 }

@@ -70,7 +70,9 @@ are harmless; a block ignores what it does not recognise.
 `core/cover`, `core/columns`, `core/column`, `core/media-text`, `core/group`, `core/heading`,
 `core/paragraph`, `core/list`, `core/list-item`, `core/buttons`, `core/button`, `core/image`,
 `core/quote`, `core/pullquote`, `core/details`, `core/gallery`, `core/table`, `core/code`,
-`core/separator`, `core/social-links`, `core/social-link`.
+`core/separator`, `core/social-links`, `core/social-link`, `core/video`, `core/audio`,
+`core/embed`, `core/file`, `core/accordion`, `core/accordion-item`,
+`core/accordion-heading`, `core/accordion-panel`.
 
 ### Structural rules
 
@@ -97,7 +99,11 @@ the parent:
 
 - pricing/feature card → `core/column > core/group > [heading, price, list, buttons]`
 - hero overlay card → `core/cover > core/group > [...]`
-- bento grid → `core/columns` whose columns each hold ONE compound block per tile
+- bento grid → `core/columns` whose columns each hold ONE compound block per tile. **Keep each
+  tile's own idiomatic block rather than flattening it**: a tile that is text over a background
+  image is a `core/cover`; a tile that is an image beside text is a `core/media-text`; a tile
+  that is a plain bordered box of copy is a `core/group`. A bento grid is a grid OF compound
+  blocks — dropping loose headings and paragraphs straight into the column loses the tile
 
 Keep every real nesting level.
 
@@ -111,19 +117,44 @@ Keep every real nesting level.
   side, heading/paragraph/list/buttons on the text side). Never `core/columns` for this. Where
   several such rows alternate down the page, they are sibling `core/media-text` blocks sharing
   the one section group — do not give each row a group of its own.
-- **FAQ / accordion** → `core/group` of a heading then one `core/details` per question
-  (`text` = the question, a `core/paragraph` child = the answer).
+- **FAQ / accordion (a SET of collapsible panels)** → `core/group` of a heading then ONE
+  `core/accordion`, holding one `core/accordion-item` per question. Each item is a
+  `core/accordion-heading` plus a `core/accordion-panel` whose answer is a `core/paragraph`
+  child. **The heading's text goes in `attrs {"title": "..."}`, NOT `text` or `content`** —
+  it is the one text block in core that does not use `content`, and getting it wrong produces
+  a perfectly valid accordion with blank headings, which nothing will warn you about.
+  A SINGLE standalone disclosure (one lone expandable item, not a set) stays `core/details`
+  (`text` = the summary, a `core/paragraph` child = the body).
 - **Logo / brand strip** → `core/group` holding an eyebrow `core/paragraph` then the logo
   `core/image` elements directly. A flat row of logos is images in a group, not columns.
 - **CTA band** → `core/group` of the heading/paragraph and `core/buttons > core/button`.
-- **Feature or pricing cards** → `core/group` of `core/columns > core/column`; each column
-  holds its heading, paragraphs, optional `core/list`, and `core/buttons`.
+- **Feature or pricing cards** → `core/group` of `core/columns > core/column > core/group`;
+  the inner group holds the card heading, paragraphs, optional `core/list`, and
+  `core/buttons`. The visible card boundary is a real container.
 - **Stats / figures row** → `core/group` of `core/columns > core/column`; each column is TWO
   `core/paragraph` — the big number as a paragraph (a stat figure has no document-outline
-  role, so it is not a heading), then its label.
+  role, so it is not a heading), then its label. If each stat has its own visible border,
+  shadow, or fill, preserve it as `core/column > core/group >` the two paragraphs.
 - **Testimonials grid** → `core/group` of `core/columns > core/column`; each column holds a
   `core/quote` (the testimonial), a `core/image` (avatar), and a `core/paragraph` (name/role)
   directly — no group around them, even when the testimonial reads as a card.
+- **Self-hosted video** (a `<video>` with a file source) → `core/video`, preserving
+  `attrs {"src": "...", "poster": "...", "controls": true, "caption": "..."}` as the
+  source requires. A caption belongs on the block's own `caption` attribute, not a sibling
+  paragraph.
+- **Third-party video / social embed** (YouTube, Vimeo, X, Spotify — an `<iframe>` or a bare
+  provider URL) → `core/embed`, with the WATCH-PAGE URL and caption in
+  `attrs {"url": "...", "caption": "...", "allowResponsive": true}` when responsive output
+  is requested. Do not reach for `core/video`: that is for self-hosted files only, and never
+  leave an `<iframe>` to fall through to Custom HTML.
+- **Audio / podcast player** → `core/audio`, preserving the file and caption in
+  `attrs {"src": "...", "caption": "..."}`.
+- **Downloadable file** (a link to a PDF or similar, often with a download button) →
+  `core/file`, with `attrs {"href": "...", "fileName": "...", "showDownloadButton": true,
+  "downloadButtonText": "<the visible source label>"}` when the source shows that button
+  (`"Download"` when that is the label). The block can render its own button, but its label is
+  not automatic—never emit an empty download link. Do not
+  add a `core/button` beside it, and do not settle for a link in a paragraph.
 - **Gallery / photo grid** → `core/group` of a heading then a `core/gallery` of `core/image`.
 - **Comparison / data / pricing matrix** → `core/group` of a heading then a `core/table` with
   its `rows` (first row is the header). Use a real table for tabular data, not columns.

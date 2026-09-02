@@ -1,30 +1,50 @@
 {
-  "intent": "An FAQ where each answer is RICH — not just a paragraph, but multiple blocks inside the collapsible. Each Q is a core/details whose body holds a paragraph plus a list or a button. Tests core/details with multi-block bodies (group > details > {paragraph, list, buttons > button}).",
+  "intent": "An FAQ where each answer is rich: one WordPress 7.1 core/accordion containing three items whose panels may hold multiple blocks. Tests accordion-item > accordion-heading + accordion-panel and rich panel bodies.",
   "tree": {
     "block": "core/group",
     "children": [
       { "block": "core/heading", "contains": "Questions" },
       {
-        "block": "core/details",
-        "contains": "convert",
+        "block": "core/accordion",
         "children": [
-          { "block": "core/paragraph", "contains": "rule-walker" },
-          { "block": "core/list" }
-        ]
-      },
-      {
-        "block": "core/details",
-        "contains": "self-host",
-        "children": [
-          { "block": "core/paragraph", "contains": "offline" },
-          { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "Read the guide" } ] }
-        ]
-      },
-      {
-        "block": "core/details",
-        "contains": "support",
-        "children": [
-          { "block": "core/paragraph", "contains": "Community" }
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "How does it convert?" } },
+              {
+                "block": "core/accordion-panel",
+                "children": [
+                  { "block": "core/paragraph", "contains": "rule-walker" },
+                  { "block": "core/list" }
+                ]
+              }
+            ]
+          },
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "Can I self-host?" } },
+              {
+                "block": "core/accordion-panel",
+                "children": [
+                  { "block": "core/paragraph", "contains": "offline" },
+                  { "block": "core/buttons", "children": [ { "block": "core/button", "contains": "Read the guide" } ] }
+                ]
+              }
+            ]
+          },
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "What about support?" } },
+              {
+                "block": "core/accordion-panel",
+                "children": [
+                  { "block": "core/paragraph", "contains": "Community" }
+                ]
+              }
+            ]
+          }
         ]
       }
     ]
