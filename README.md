@@ -80,12 +80,12 @@ between harnesses, so use `--dir` when a client documents a different global roo
 
 ## Benchmark
 
-![Fidelity benchmark: raw Claude and Codex writing block markup themselves score 35 to 73, while Block Runner with the same models scores 93 to 99, across simple and complex blocks](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/assets/benchmark.png)
+![Benchmark results across Opus 5, Fable 5.1, Luna, Terra, and Sol: direct markup scores 17 to 48, while the same models using Block Runner score 97 to 99](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/assets/benchmark.jpg)
 
-Every conversion is scored from 0 to 100 against a fixed suite of design sections with a
-known ideal block tree, by how faithfully it reproduces the intended `wp:*` structure and
-content. The comparison is raw LLMs writing the block markup themselves versus Block Runner
-pairing the same model (GPT-5.5, Opus) with its validity gate, across simple and complex layouts.
+The benchmark runs 63 fixed HTML fixtures. Each model gets the same fixture in two lanes:
+**Direct** writes Gutenberg markup itself; **Block Runner** returns an intent tree that the
+package assembles and validates. The dashed line is the deterministic rules converter running
+without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
 
 ## What it does
 

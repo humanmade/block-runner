@@ -1,6 +1,6 @@
 {
   "name": "block-runner",
-  "version": "0.7.1",
+  "version": "0.8.0",
   "description": "The layer between generated content and WordPress — convert what AI, agents, and design tools emit into clean, valid, native Gutenberg blocks, and validate every result. CLI + library.",
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -34,13 +34,15 @@
   "homepage": "https://github.com/humanmade/block-runner#readme",
   "bugs": "https://github.com/humanmade/block-runner/issues",
   "bin": {
-    "block-runner": "./dist/cli.js"
+    "block-runner": "dist/cli.js"
   },
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "import": "./dist/index.js"
-    }
+      "import": "./dist/index.js",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
   },
   "files": [
     "dist",

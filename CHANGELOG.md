@@ -1,9 +1,10 @@
 # Changelog
 
-## Unreleased
+## 0.8.0 — 2026-09-02
 
 ### Changed
 
+- Updated the bundled Gutenberg runtime to the WordPress 7.1 package releases.
 - **The bundled agent skill is now canonical and cross-harness.** Its source lives at
   `skills/block-runner/`, where the directory matches the frontmatter name, with the detailed
   guide under `references/`. `skill --install` copies the complete bundle to both
@@ -16,6 +17,10 @@
 
 ### Fixed
 
+- Custom HTML fallbacks retain their source markup after the WordPress 7.1 `core/html`
+  serialization change; unsupported input no longer collapses to an empty block.
+- Validation no longer rejects a working Custom HTML fallback because `core/html` has no
+  canonical saved output. The fallback warning and count remain unchanged.
 - The skill metadata now states its Node/shell/registry requirements, and the guide no longer
   describes an uncached `npx` run as fully offline or treats frontend-scraped HTML as supported
   authored input.

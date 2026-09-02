@@ -1,14 +1,3 @@
-# Design docs: the numbered series (00, 04–11) + references/ ARE committed (public design record).
-# These remain local — they reference internal projects, or are planning/input notes:
-md/README.md
-md/01-research-brief.md
-md/02-architecture.md
-md/03-open-questions.md
-md/PRD.md
-md/dogfood-notes.md
-md/12-market-landscape.md
-md/handover.md
-
 # Internal agent context — private (may reference internal/dogfood projects).
 # Never committed; the public repo must read clean.
 AGENTS.md
