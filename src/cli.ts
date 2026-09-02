@@ -1,10 +1,11 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { readFile, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { Command, CommanderError } from 'commander';
+import { Command, CommanderError, Option } from 'commander';
 import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
@@ -12,6 +13,7 @@ import { convert } from './convert/assemble.js';
 import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
+import { installCanonicalSkill, readCanonicalSkillGuide, SkillScope, SkillTarget } from './skill.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
@@ -38,6 +40,10 @@ interface ContextCliOptions {
 interface SkillCliOptions {
   install?: boolean;
   dir?: string;
+  scope?: SkillScope;
+  target?: SkillTarget;
+  dryRun?: boolean;
+  force?: boolean;
 }
 
 const program = new Command();
@@ -205,26 +211,38 @@ program
   .command('skill')
   .description('Print or install the agent guide.')
   .option('--install', 'install the agent skill files')
-  .option('--dir <path>', 'install root (default: .claude/skills)')
+  .addOption(new Option('--scope <scope>', 'installation scope (default: project)').choices(['project', 'user']))
+  .addOption(new Option('--target <target>', 'skill discovery target (default: all)').choices(['all', 'agents', 'claude']))
+  .option('--dir <path>', 'install under an explicit skills directory')
+  .option('--dry-run', 'show destinations without writing files')
+  .option('--force', 'replace locally changed or unmanaged skill files')
   .action(async (options: SkillCliOptions) => {
     if (!options.install) {
-      process.stdout.write(await readSkillSource('GUIDE.md'));
+      if (options.dir || options.scope || options.target || options.dryRun || options.force) {
+        program.error('error: --dir, --scope, --target, --dry-run, and --force require --install');
+      }
+      process.stdout.write(await readCanonicalSkillGuide());
       return;
     }
 
-    const skill = await readSkillSource('SKILL.md');
-    const guide = await readSkillSource('GUIDE.md');
-    const destination = path.resolve(options.dir ?? '.claude/skills', 'block-runner');
-    await mkdir(destination, { recursive: true });
-
-    for (const [filename, content] of [
-      ['SKILL.md', skill],
-      ['GUIDE.md', guide],
-    ] as const) {
-      const target = path.join(destination, filename);
-      const status = existsSync(target) ? 'updated' : 'installed';
-      await writeFile(target, content, 'utf8');
-      console.log(`${status} ${target}`);
+    const results = await installCanonicalSkill({
+      cwd: process.cwd(),
+      home: process.env.HOME || homedir(),
+      packageVersion,
+      directory: options.dir,
+      scope: options.scope,
+      target: options.target,
+      dryRun: options.dryRun,
+      force: options.force,
+    });
+    for (const result of results) {
+      const status = result.dryRun && result.status !== 'unchanged'
+        ? `would ${result.status === 'installed' ? 'install' : 'update'}`
+        : result.status;
+      console.log(`${status} ${result.destination}`);
+      for (const warning of result.warnings) {
+        console.error(`warning: ${warning}`);
+      }
     }
   });
 
@@ -397,17 +415,6 @@ async function emit(
 function emitHint(report: BlockRunnerReport): void {
   if (report.hint) {
     console.error(`hint: ${report.hint}`);
-  }
-}
-
-async function readSkillSource(filename: 'SKILL.md' | 'GUIDE.md'): Promise<string> {
-  const source = filename === 'GUIDE.md'
-    ? new URL('../skill/GUIDE.md', import.meta.url)
-    : new URL('../skill/SKILL.md', import.meta.url);
-  try {
-    return await readFile(source, 'utf8');
-  } catch {
-    throw new Error(`skill source file is missing: ${source.pathname}`);
   }
 }
 

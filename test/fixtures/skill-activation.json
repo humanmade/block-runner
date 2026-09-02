@@ -1,0 +1,22 @@
+{
+  "shouldTrigger": [
+    "Build a native Gutenberg hero with a heading, copy, and two buttons.",
+    "Convert this authored landing-page HTML into editable WordPress blocks.",
+    "Turn this Figma HTML export into a correctly nested Gutenberg block tree.",
+    "Validate this WordPress block-comment markup before I save the post.",
+    "Repair the unexpected or invalid content errors in this Gutenberg markup.",
+    "Create an editable pricing section for a WordPress page without Custom HTML.",
+    "Check that these Gutenberg wp:cover and wp:columns comments are editor-valid.",
+    "Write this generated block markup to WordPress, but verify it first."
+  ],
+  "shouldNotTrigger": [
+    "Create a WordPress administrator account.",
+    "Write PHP for a custom WordPress plugin.",
+    "Change the CSS in my WordPress theme.",
+    "Build a plain HTML landing page that will not use WordPress.",
+    "Scrape the rendered frontend HTML from this website.",
+    "Update WordPress core and all installed plugins.",
+    "Back up the WordPress database.",
+    "Configure redirects in the WordPress admin."
+  ]
+}

@@ -1,7 +1,7 @@
 /**
  * Engine Skill — measures the SHIPPED guide, not the tuned prompt.
  *
- * Engine C sends the tuner-owned `INTENT_PROMPT`. This engine sends `skill/GUIDE.md` — the
+ * Engine C sends the tuner-owned `INTENT_PROMPT`. This engine sends the canonical skill guide — the
  * text we actually publish — plus the minimal task framing a real agent would supply. Same
  * `realize()` on the other side, so the only variable is the instructions.
  *
@@ -20,7 +20,7 @@ import type { ConvertOptions, BlockRunnerReport } from '../../src/types.js';
 import { realize } from './intent.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const GUIDE = readFileSync(path.join(ROOT, 'skill', 'GUIDE.md'), 'utf8');
+const GUIDE = readFileSync(path.join(ROOT, 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
 
 // The framing an agent supplies around the guide when it has been handed a design to convert.
 // Deliberately thin: any lifting here is lifting the guide is not doing.

@@ -21,6 +21,15 @@ const output = execFileSync(
 );
 
 const files = packFilePaths(output);
+const requiredPaths = [
+  'skills/block-runner/SKILL.md',
+  'skills/block-runner/references/GUIDE.md',
+];
+const missingPaths = requiredPaths.filter((file) => !files.includes(file));
+if (missingPaths.length > 0) {
+  console.error(`Required public files are missing from the package:\n${missingPaths.join('\n')}`);
+  process.exit(1);
+}
 const forbiddenPaths = [/^md\//, /^AGENTS\.md$/, /^CLAUDE\.md$/, /^\.env/];
 const forbiddenTerms = [
   'dogfood',

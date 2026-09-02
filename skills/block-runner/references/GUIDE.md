@@ -6,8 +6,9 @@ gets it into the editor as real, native, editable blocks instead of one frozen H
 This guide is harness-neutral. Read it and act on it directly, or install it as a skill —
 see the end.
 
-Everything runs offline and deterministically. Block Runner never calls a model and never
-needs an API key. **You** are the model in this pipeline.
+Conversion, assembly, and validation run locally and deterministically. Block Runner never
+calls a model and never needs an API key. An uncached `npx` invocation still needs npm registry
+access to fetch the package. **You** are the model in this pipeline.
 
 ---
 
@@ -16,7 +17,7 @@ needs an API key. **You** are the model in this pipeline.
 | You have | Use | Why |
 |---|---|---|
 | A design in your head, or HTML you are about to write | **`assemble`** | You describe the structure; Block Runner builds valid blocks from it. Best structural results. |
-| Someone else's HTML — a design tool export, a paste, scraped markup | **`convert`** | Rule-based translation of existing markup, and the only path that carries CSS. |
+| Authored source HTML — a design tool export, source file, or paste | **`convert`** | Rule-based translation of existing markup, and the only path that carries CSS. Do not use frontend-scraped render output. |
 | Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Proves the editor will accept it. |
 
 The single most common mistake is reaching for `convert` when you were about to author the
@@ -275,11 +276,27 @@ harmless. Read results from stdout or `--json`. Users who run this often can
 
 ## 8. Installing this as a skill
 
-If your harness supports skills, this guide can be installed as one:
+If your harness supports skills, install the canonical skill into the current project:
 
 ```bash
 npx -y block-runner@latest skill --install
 ```
+
+That writes the same skill to the cross-agent `.agents/skills/block-runner` location and to
+Claude Code's `.claude/skills/block-runner` compatibility location. Narrow it when needed:
+
+```bash
+npx -y block-runner@latest skill --install --target agents
+npx -y block-runner@latest skill --install --target claude
+npx -y block-runner@latest skill --install --scope user
+npx -y block-runner@latest skill --install --dir .another-agent/skills
+npx -y block-runner@latest skill --install --dry-run
+```
+
+Project discovery is the most portable choice. User-wide discovery paths still vary between
+harnesses, so use `--dir` when a client documents a different global skills root.
+The installer pins runtime examples to its own package version so the guide and CLI contract
+stay aligned. To update later, rerun `npx -y block-runner@latest skill --install`.
 
 **Ask the user first.** This writes files into their project, which is their call, not yours.
 If they decline, or their harness has no skill system, nothing is lost — reading this guide is

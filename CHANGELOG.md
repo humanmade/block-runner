@@ -1,5 +1,29 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **The bundled agent skill is now canonical and cross-harness.** Its source lives at
+  `skills/block-runner/`, where the directory matches the frontmatter name, with the detailed
+  guide under `references/`. `skill --install` copies the complete bundle to both
+  `.agents/skills/block-runner/` and `.claude/skills/block-runner/` by default; `--scope`,
+  `--target`, and `--dir` cover user-wide, single-harness, and arbitrary roots.
+- **Skill installation is inspectable and guarded.** `--dry-run` resolves destinations without
+  writes, repeat installs are idempotent, managed files carry hashes, local changes are refused
+  unless `--force` is explicit, and installed runtime commands are pinned to the installing
+  package version while the explicit update command stays on `@latest`.
+
+### Fixed
+
+- The skill metadata now states its Node/shell/registry requirements, and the guide no longer
+  describes an uncached `npx` run as fully offline or treats frontend-scraped HTML as supported
+  authored input.
+- Pre-manifest 0.7.x installations now fail closed on their first upgrade. After review, rerun
+  with `--force`; the obsolete root-level `GUIDE.md` is preserved rather than deleted.
+- Skill installs reject symlinked discovery roots, and default dual-target installs preflight
+  ordinary write permissions across both destinations before changing either one.
+
 ## 0.7.1
 
 ### Fixed

@@ -29,7 +29,7 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 npm install block-runner          # requires Node 20+
 ```
 
-Then just ask your coding agent (Claude Code, Codex):
+Then just ask your coding agent:
 
 > Use block-runner to convert this hero into a native Gutenberg block.
 
@@ -49,19 +49,34 @@ block-runner convert hero.html --out hero.blocks.html
 Every run is checked against headless Gutenberg, so what comes back is guaranteed
 editor-valid, or Block Runner tells you exactly what wasn't and points at the line.
 
-## Using this from an AI agent?
+## Using Block Runner from an AI agent
 
 If you are the one deciding the structure, don't write HTML and convert it. Describe the
 structure as an intent tree and pipe it to `block-runner assemble` — deterministic code builds
 the markup, so it cannot come out invalid.
 
-There is a guide covering that path, the block mappings, and how to check markup before saving
-it to a site:
+Block Runner ships a canonical skill in the open Agent Skills layout. Install it into the
+current project (ask the user before writing files):
 
 ```sh
-npx block-runner skill              # print the guide — nothing is installed or written
-npx block-runner skill --install    # install it as a skill (ask the user first)
+npx block-runner skill --install
 ```
+
+That installs the same skill to the cross-agent `.agents/skills/block-runner` location and
+Claude Code's `.claude/skills/block-runner` compatibility location. Project scope is the
+default so the instructions can travel with a repository. Use user scope or one target when
+that is what you want:
+
+```sh
+npx block-runner skill --install --scope user
+npx block-runner skill --install --target agents
+npx block-runner skill --install --target claude
+```
+
+For a harness with another skills directory, use `--dir <skills-directory>`. With no skill
+system, `npx block-runner skill` prints the complete harness-neutral guide to stdout and writes
+nothing. Project discovery is the most portable choice; user-wide discovery paths still vary
+between harnesses, so use `--dir` when a client documents a different global root.
 
 ## Benchmark
 
@@ -177,6 +192,25 @@ All commands:
 | `--wp-url <url>` | WordPress URL for `wpcli` or `rest` resolution. |
 | `--wp-user <user>` | WordPress username for `rest` resolution. |
 | `--wp-app-password-env <name>` | Env var holding a WordPress application password. |
+
+`skill --install` adds installation flags:
+
+| Flag | Description |
+| --- | --- |
+| `--scope project\|user` | Install for the current project (default) or the current user. |
+| `--target all\|agents\|claude` | Install both discovery copies (default), only `.agents/skills`, or only `.claude/skills`. |
+| `--dir <path>` | Install under one explicit skills directory; cannot be combined with `--scope` or `--target`. |
+| `--dry-run` | Show resolved destinations without writing files. |
+| `--force` | Replace locally changed or unmanaged files at canonical bundle paths. |
+
+Installed instructions pin runtime commands to the package version that installed them, while
+their explicit update command stays on `@latest`. Re-run
+`npx block-runner@latest skill --install` to update them. Existing local edits are refused
+unless `--force` is explicit.
+
+An installation made by 0.7.x predates the managed manifest, so the first upgrade is
+deliberately refused as unmanaged. Review that copy, rerun once with `--force`, and remove the
+preserved root-level `GUIDE.md` after confirming the new `references/GUIDE.md` copy.
 
 ### Exit codes
 

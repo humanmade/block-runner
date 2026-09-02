@@ -1,46 +1,276 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, readdir, realpath, stat, symlink, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+
+const sourceSkill = new URL('../skills/block-runner/', import.meta.url);
+const tsxImport = import.meta.resolve('tsx');
+const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 describe('CLI', () => {
   it('prints the agent guide with skill', async () => {
     const result = await runCli(['skill']);
-    const guide = await readFile(new URL('../skill/GUIDE.md', import.meta.url), 'utf8');
+    const guide = await readFile(new URL('references/GUIDE.md', sourceSkill), 'utf8');
 
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(guide);
   });
 
-  it('installs both agent skill files', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
-    const destination = path.join(dir, 'block-runner');
-    const result = await runCli(['skill', '--install', '--dir', dir]);
+  it('installs the canonical skill to both project locations by default', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const resolvedProject = await realpath(project);
+    const agentsDestination = path.join(resolvedProject, '.agents', 'skills', 'block-runner');
+    const claudeDestination = path.join(resolvedProject, '.claude', 'skills', 'block-runner');
+    const result = await runCli(['skill', '--install'], '', {}, project);
 
     expect(result.code).toBe(0);
-    expect(result.stdout).toContain(`installed ${path.join(destination, 'SKILL.md')}`);
-    expect(result.stdout).toContain(`installed ${path.join(destination, 'GUIDE.md')}`);
-    expect(await readFile(path.join(destination, 'SKILL.md'), 'utf8')).toBe(
-      await readFile(new URL('../skill/SKILL.md', import.meta.url), 'utf8'),
-    );
-    expect(await readFile(path.join(destination, 'GUIDE.md'), 'utf8')).toBe(
-      await readFile(new URL('../skill/GUIDE.md', import.meta.url), 'utf8'),
-    );
+    expect(result.stdout).toContain(`installed ${agentsDestination}`);
+    expect(result.stdout).toContain(`installed ${claudeDestination}`);
+    for (const destination of [agentsDestination, claudeDestination]) {
+      const skill = await readFile(path.join(destination, 'SKILL.md'), 'utf8');
+      const guide = await readFile(path.join(destination, 'references', 'GUIDE.md'), 'utf8');
+      expect(skill).toContain('name: block-runner');
+      expect(skill).toContain(`block-runner@${packageVersion}`);
+      expect(guide).toContain(`block-runner@${packageVersion}`);
+      expect(skill).not.toContain('block-runner@latest');
+      expect(guide).toContain('block-runner@latest skill --install');
+      expect(guide).not.toMatch(/block-runner@latest (?:assemble|convert|validate|fix)/);
+      expect(JSON.parse(await readFile(path.join(destination, '.block-runner-install.json'), 'utf8'))).toMatchObject({
+        schemaVersion: 1,
+        skill: 'block-runner',
+        source: 'skills/block-runner',
+        packageVersion,
+        scope: 'project',
+        target: destination === agentsDestination ? 'agents' : 'claude',
+        files: {
+          'SKILL.md': { sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), mode: expect.any(Number) },
+          'references/GUIDE.md': { sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), mode: expect.any(Number) },
+        },
+      });
+    }
 
-    const updated = await runCli(['skill', '--install', '--dir', dir]);
-    expect(updated.stdout).toContain(`updated ${path.join(destination, 'SKILL.md')}`);
-    expect(updated.stdout).toContain(`updated ${path.join(destination, 'GUIDE.md')}`);
+    const unchanged = await runCli(['skill', '--install'], '', {}, project);
+    expect(unchanged.stdout).toContain(`unchanged ${agentsDestination}`);
+    expect(unchanged.stdout).toContain(`unchanged ${claudeDestination}`);
   });
 
-  it('installs the agent skill under a --dir override', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
-    const destination = path.join(dir, 'cursor', 'rules', 'block-runner');
-    const result = await runCli(['skill', '--install', '--dir', path.join(dir, 'cursor', 'rules')]);
+  it('narrows installation with --target agents or --target claude', async () => {
+    const agentsProject = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const claudeProject = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const agents = await runCli(['skill', '--install', '--target', 'agents'], '', {}, agentsProject);
+    const claude = await runCli(['skill', '--install', '--target', 'claude'], '', {}, claudeProject);
+
+    expect(agents.code).toBe(0);
+    expect(await stat(path.join(agentsProject, '.agents', 'skills', 'block-runner', 'SKILL.md'))).toBeTruthy();
+    await expect(stat(path.join(agentsProject, '.claude'))).rejects.toThrow();
+    expect(claude.code).toBe(0);
+    expect(await stat(path.join(claudeProject, '.claude', 'skills', 'block-runner', 'SKILL.md'))).toBeTruthy();
+    await expect(stat(path.join(claudeProject, '.agents'))).rejects.toThrow();
+  });
+
+  it('installs under the user home with --scope user', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const home = await mkdtemp(path.join(tmpdir(), 'block-runner-home-'));
+    const result = await runCli(['skill', '--install', '--scope', 'user', '--target', 'agents'], '', { HOME: home }, project);
+
+    expect(result.code).toBe(0);
+    expect(await stat(path.join(home, '.agents', 'skills', 'block-runner', 'SKILL.md'))).toBeTruthy();
+    await expect(stat(path.join(project, '.agents'))).rejects.toThrow();
+  });
+
+  it('installs every canonical file under a --dir override', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const root = path.join(project, 'another-agent', 'skills');
+    const destination = path.join(root, 'block-runner');
+    const result = await runCli(['skill', '--install', '--dir', root], '', {}, project);
 
     expect(result.code).toBe(0);
     expect(await stat(path.join(destination, 'SKILL.md'))).toBeTruthy();
-    expect(await stat(path.join(destination, 'GUIDE.md'))).toBeTruthy();
+    expect(await stat(path.join(destination, 'references', 'GUIDE.md'))).toBeTruthy();
+    expect((await stat(path.join(destination, 'SKILL.md'))).mode & 0o777).toBe(
+      (await stat(fileURLToPath(new URL('SKILL.md', sourceSkill)))).mode & 0o777,
+    );
+    expect((await listFiles(destination)).filter((file) => file !== '.block-runner-install.json')).toEqual(
+      await listFiles(fileURLToPath(sourceSkill)),
+    );
+  });
+
+  it('reports both default destinations without writing in a dry run', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const resolvedProject = await realpath(project);
+    const result = await runCli(['skill', '--install', '--dry-run'], '', {}, project);
+
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`would install ${path.join(resolvedProject, '.agents', 'skills', 'block-runner')}`);
+    expect(result.stdout).toContain(`would install ${path.join(resolvedProject, '.claude', 'skills', 'block-runner')}`);
+    await expect(stat(path.join(project, '.agents'))).rejects.toThrow();
+    await expect(stat(path.join(project, '.claude'))).rejects.toThrow();
+  });
+
+  it('refuses local changes unless --force is explicit', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const root = path.join(project, 'skills');
+    const skillPath = path.join(root, 'block-runner', 'SKILL.md');
+    expect((await runCli(['skill', '--install', '--dir', root], '', {}, project)).code).toBe(0);
+    await writeFile(skillPath, 'local changes\n');
+
+    const refused = await runCli(['skill', '--install', '--dir', root], '', {}, project);
+    expect(refused.code).toBe(2);
+    expect(refused.stderr).toContain('has local or unmanaged changes');
+    expect(await readFile(skillPath, 'utf8')).toBe('local changes\n');
+
+    const forced = await runCli(['skill', '--install', '--dir', root, '--force'], '', {}, project);
+    expect(forced.code).toBe(0);
+    expect(forced.stdout).toContain(`updated ${path.join(root, 'block-runner')}`);
+    expect(await readFile(skillPath, 'utf8')).toContain('name: block-runner');
+  });
+
+  it('preserves files it does not manage', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const root = path.join(project, 'skills');
+    const destination = path.join(root, 'block-runner');
+    expect((await runCli(['skill', '--install', '--dir', root], '', {}, project)).code).toBe(0);
+    await writeFile(path.join(destination, 'LOCAL-NOTES.md'), 'keep me\n');
+
+    const result = await runCli(['skill', '--install', '--dir', root], '', {}, project);
+    expect(result.code).toBe(0);
+    expect(result.stdout).toContain(`unchanged ${destination}`);
+    expect(await readFile(path.join(destination, 'LOCAL-NOTES.md'), 'utf8')).toBe('keep me\n');
+  });
+
+  it('fails closed then preserves the root guide when migrating a pre-manifest install', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const root = path.join(project, 'skills');
+    const destination = path.join(root, 'block-runner');
+    await mkdir(destination, { recursive: true });
+    await writeFile(path.join(destination, 'SKILL.md'), 'legacy skill\n');
+    await writeFile(path.join(destination, 'GUIDE.md'), 'legacy guide\n');
+
+    const refused = await runCli(['skill', '--install', '--dir', root], '', {}, project);
+    expect(refused.code).toBe(2);
+    expect(refused.stderr).toContain('unmanaged changes');
+
+    const forced = await runCli(['skill', '--install', '--dir', root, '--force'], '', {}, project);
+    expect(forced.code).toBe(0);
+    expect(forced.stderr).toContain('preserved unmanaged file');
+    expect(await readFile(path.join(destination, 'GUIDE.md'), 'utf8')).toBe('legacy guide\n');
+    expect(await readFile(path.join(destination, 'references', 'GUIDE.md'), 'utf8')).toContain(
+      '# Block Runner — agent guide',
+    );
+  });
+
+  it('rejects ambiguous installer options and install-only flags', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const ambiguous = await runCli(
+      ['skill', '--install', '--dir', path.join(project, 'skills'), '--target', 'claude'],
+      '',
+      {},
+      project,
+    );
+    const noInstall = await runCli(['skill', '--dry-run'], '', {}, project);
+
+    expect(ambiguous.code).toBe(2);
+    expect(ambiguous.stderr).toContain('--dir cannot be combined with --scope or --target');
+    expect(noInstall.code).toBe(2);
+    expect(noInstall.stderr).toContain('require --install');
+  });
+
+  it('refuses to install over the canonical source directory', async () => {
+    const sourceRoot = path.dirname(fileURLToPath(sourceSkill));
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const sourceAlias = path.join(project, 'source-alias');
+    await symlink(sourceRoot, sourceAlias);
+    const result = await runCli(['skill', '--install', '--dir', sourceRoot]);
+    const throughParentLink = await runCli(['skill', '--install', '--dir', sourceAlias]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('refusing to install over the canonical source skill');
+    expect(throughParentLink.code).toBe(2);
+    expect(throughParentLink.stderr).toContain('refusing to install over the canonical source skill');
+  });
+
+  it('rejects wrong-type and symbolic-link destinations', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const fileRoot = path.join(project, 'file-root');
+    const linkRoot = path.join(project, 'link-root');
+    const linkedDestination = path.join(project, 'linked-skill');
+    await mkdir(fileRoot);
+    await mkdir(linkRoot);
+    await writeFile(path.join(fileRoot, 'block-runner'), 'not a directory\n');
+    await writeFile(linkedDestination, 'not a skill directory\n');
+    await symlink(linkedDestination, path.join(linkRoot, 'block-runner'));
+
+    const wrongType = await runCli(['skill', '--install', '--dir', fileRoot], '', {}, project);
+    const symbolicLink = await runCli(['skill', '--install', '--dir', linkRoot], '', {}, project);
+
+    expect(wrongType.code).toBe(2);
+    expect(wrongType.stderr).toContain('skill destination is not a directory');
+    expect(symbolicLink.code).toBe(2);
+    expect(symbolicLink.stderr).toContain('symbolic-link destination');
+  });
+
+  it('rejects a symbolic-link skills root before it can redirect the install', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const outside = path.join(project, 'outside-skills');
+    const linkedRoot = path.join(project, 'linked-skills');
+    await mkdir(outside);
+    await symlink(outside, linkedRoot);
+
+    const result = await runCli(['skill', '--install', '--dir', linkedRoot], '', {}, project);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('symbolic-link path');
+    await expect(stat(path.join(outside, 'block-runner'))).rejects.toThrow();
+  });
+
+  it.skipIf(process.platform === 'win32')(
+    'preflights both default destinations before changing either one',
+    async () => {
+      const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+      const claudeRoot = path.join(project, '.claude');
+      await mkdir(claudeRoot);
+      await chmod(claudeRoot, 0o555);
+
+      try {
+        const result = await runCli(['skill', '--install'], '', {}, project);
+
+        expect(result.code).toBe(2);
+        expect(result.stderr).toContain('skill install path is not writable');
+        await expect(stat(path.join(project, '.agents'))).rejects.toThrow();
+      } finally {
+        await chmod(claudeRoot, 0o755);
+      }
+    },
+  );
+
+  it('rejects nested symlink escapes and manifest symlinks even with --force', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const nestedRoot = path.join(project, 'nested-root');
+    const nestedDestination = path.join(nestedRoot, 'block-runner');
+    const manifestRoot = path.join(project, 'manifest-root');
+    const manifestDestination = path.join(manifestRoot, 'block-runner');
+    const outside = path.join(project, 'outside');
+    const outsideManifest = path.join(project, 'outside-manifest.json');
+    await mkdir(nestedDestination, { recursive: true });
+    await mkdir(manifestDestination, { recursive: true });
+    await mkdir(outside);
+    await symlink(outside, path.join(nestedDestination, 'references'));
+    await writeFile(outsideManifest, '{}\n');
+    await symlink(outsideManifest, path.join(manifestDestination, '.block-runner-install.json'));
+
+    const nested = await runCli(['skill', '--install', '--dir', nestedRoot, '--force'], '', {}, project);
+    const manifest = await runCli(['skill', '--install', '--dir', manifestRoot, '--force'], '', {}, project);
+
+    expect(nested.code).toBe(2);
+    expect(nested.stderr).toContain('resolves outside the skill destination');
+    await expect(stat(path.join(outside, 'GUIDE.md'))).rejects.toThrow();
+    await expect(stat(path.join(nestedDestination, 'SKILL.md'))).rejects.toThrow();
+    expect(manifest.code).toBe(2);
+    expect(manifest.stderr).toContain('manifest is not a regular file');
+    expect(await readFile(outsideManifest, 'utf8')).toBe('{}\n');
   });
 
   it('adds a convert hint for Custom HTML fallbacks without changing warning counts', async () => {
@@ -310,10 +540,12 @@ function runCli(
   args: string[],
   input = '',
   env: Record<string, string> = {},
+  cwd = process.cwd(),
 ): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {
-    const child = spawn(process.execPath, ['--import', 'tsx', 'src/cli.ts', ...args], {
+    const child = spawn(process.execPath, ['--import', tsxImport, new URL('../src/cli.ts', import.meta.url).pathname, ...args], {
       stdio: ['pipe', 'pipe', 'pipe'],
+      cwd,
       env: {
         ...process.env,
         ...env,
@@ -333,4 +565,18 @@ function runCli(
     child.on('close', (code) => resolve({ code, stdout, stderr }));
     child.stdin.end(input);
   });
+}
+
+async function listFiles(directory: string, prefix = ''): Promise<string[]> {
+  const files: string[] = [];
+  const entries = (await readdir(directory, { withFileTypes: true })).sort((a, b) => a.name.localeCompare(b.name));
+  for (const entry of entries) {
+    const relativePath = prefix ? `${prefix}/${entry.name}` : entry.name;
+    if (entry.isDirectory()) {
+      files.push(...await listFiles(path.join(directory, entry.name), relativePath));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files;
 }
