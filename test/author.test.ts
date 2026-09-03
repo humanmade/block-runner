@@ -4,7 +4,13 @@ import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { classifyCssUrlReference, rewriteCssAssets, scanCssUrlReferences } from '../src/author/assets.js';
 import { author } from '../src/author/index.js';
-import { scanStylesheet, scopeStylesheet, validateCssBuildGraph } from '../src/author/styles.js';
+import {
+  compileTailwindBuildGraph,
+  createSelectorDependencyTransport,
+  scanStylesheet,
+  scopeStylesheet,
+  validateCssBuildGraph,
+} from '../src/author/styles.js';
 
 const scratch: string[] = [];
 
@@ -74,7 +80,7 @@ describe('registered-block stylesheet graph', () => {
   });
 
   it('requires the complete explicit Tailwind graph before fidelity can be claimed', () => {
-    const missing = validateCssBuildGraph(undefined, { css: '@tailwind utilities;' });
+    const missing = validateCssBuildGraph(undefined, { css: '@tailwind utilities;', tailwindDetected: true });
     expect(missing.blocked).toBe(true);
     expect(missing.missing).toEqual([
       'cssEntries',
@@ -85,6 +91,7 @@ describe('registered-block stylesheet graph', () => {
       'plugins',
       'environment',
       'browserTarget',
+      'compiler',
     ]);
 
     const complete = validateCssBuildGraph(
@@ -97,12 +104,14 @@ describe('registered-block stylesheet graph', () => {
         plugins: [],
         environment: {},
         browserTarget: 'defaults',
+        compiler: { name: 'tailwindcss', version: '3.4.0', compile: () => '' },
       },
       { css: '.utility { --tw-translate-x: 0; transform: translateX(var(--tw-translate-x)); }' },
     );
     expect(complete.complete).toBe(true);
     expect(complete.compiled).toBe(true);
-    expect(complete.blocked).toBe(false);
+    expect(complete.blocked).toBe(true);
+    expect(complete.provenanceVerified).toBe(false);
 
     const incompleteOutput = validateCssBuildGraph(
       {
@@ -114,6 +123,7 @@ describe('registered-block stylesheet graph', () => {
         plugins: [],
         environment: {},
         browserTarget: 'defaults',
+        compiler: { name: 'tailwindcss', version: '3.4.0', compile: () => '' },
       },
       { css: '.utility { transform: translateX(var(--tw-translate-x)); }' },
     );
@@ -122,9 +132,111 @@ describe('registered-block stylesheet graph', () => {
 
     const selfContainedOutput = validateCssBuildGraph(undefined, {
       css: '.utility { --tw-translate-x: 0; transform: translateX(var(--tw-translate-x)); }',
+      tailwindDetected: true,
     });
     expect(selfContainedOutput.compiled).toBe(true);
-    expect(selfContainedOutput.blocked).toBe(false);
+    expect(selfContainedOutput.blocked).toBe(true);
+  });
+
+  it('uses the supplied pinned compiler and rejects CSS that is not its output', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    await writeFile(path.join(directory, 'design.html'), '');
+    await writeFile(path.join(directory, 'style.css'), '@tailwind utilities;');
+    const compiler = {
+      name: 'tailwindcss',
+      version: '3.4.0',
+      compile: (input: { cssEntries: ReadonlyArray<{ path: string; css: string }> }) => {
+        expect(input.cssEntries[0]?.css).toBe('@tailwind utilities;');
+        return '.notice { color: red; }';
+      },
+    };
+    const graph = {
+      cssEntries: ['style.css'],
+      imports: [],
+      directives: ['@tailwind utilities'],
+      sources: ['design.html'],
+      safelist: [],
+      plugins: [],
+      environment: {},
+      browserTarget: 'defaults',
+      compiler,
+    };
+
+    const compiled = await compileTailwindBuildGraph(graph, { sourcePath: path.join(directory, 'design.html') });
+    expect(compiled).toMatchObject({ css: '.notice { color: red; }', verified: true, issues: [] });
+
+    const authoredFromSource = await author('<style>@tailwind utilities;</style><p class="notice">Hello</p>', {
+      sourcePath: path.join(directory, 'design.html'),
+      author: { name: 'acme/notice', styles: { mode: 'tailwind', tailwind: graph } },
+    });
+    expect(authoredFromSource.ok).toBe(true);
+    expect(authoredFromSource.package?.files['index.js']).toContain('"text": "red"');
+
+    const rejected = await author('<p class="notice">Hello</p>', {
+      sourcePath: path.join(directory, 'design.html'),
+      author: { name: 'acme/notice', styles: { mode: 'tailwind', css: '.notice { color: blue; }', tailwind: graph } },
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.items.map((item) => item.reason).join('\n')).toMatch(/does not match output from pinned Tailwind compiler/i);
+  });
+
+  it('reports undeclared custom variants and plugins from the materialized source graph', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    await writeFile(
+      path.join(directory, 'style.css'),
+      '@tailwind utilities; @custom-variant night (&:where(.night, .night *)); @plugin "tailwind-motion";',
+    );
+    const result = await compileTailwindBuildGraph({
+      cssEntries: ['style.css'],
+      imports: [],
+      directives: ['@tailwind utilities'],
+      sources: ['design.html'],
+      safelist: [],
+      plugins: [],
+      environment: {},
+      browserTarget: 'defaults',
+      compiler: { name: 'tailwindcss', version: '4.0.0', compile: () => '.x {}' },
+    }, { sourcePath: path.join(directory, 'design.html') });
+
+    expect(result.verified).toBe(false);
+    expect(result.issues.map((issue) => issue.reason).join('\n')).toMatch(/custom-variant night|Tailwind plugin tailwind-motion/i);
+  });
+
+  it('requires an explicit stylesheet mode before accepting compiled CSS without Tailwind tokens', async () => {
+    const anonymous = await author('<style>.p-4 { padding: 1rem; }</style><p class="p-4">Hello</p>', {
+      author: { name: 'acme/padding' },
+    });
+    expect(anonymous.ok).toBe(false);
+    expect(anonymous.items.map((item) => item.reason).join('\n')).toMatch(/styles\.mode.*css.*tailwind/i);
+
+    const unprovenTailwind = await author('<style>.p-4 { padding: 1rem; }</style><p class="p-4">Hello</p>', {
+      author: { name: 'acme/padding', styles: { mode: 'tailwind' } },
+    });
+    expect(unprovenTailwind.ok).toBe(false);
+    expect(unprovenTailwind.items.map((item) => item.reason).join('\n')).toMatch(/pinned Tailwind compiler/i);
+  });
+
+  it('requires every local, package, and remote CSS import to be materialized', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    await writeFile(path.join(directory, 'style.css'), '@import "tailwindcss"; @import url("https://cdn.example/theme.css");');
+
+    const result = await compileTailwindBuildGraph({
+      cssEntries: ['style.css'],
+      imports: [],
+      directives: [],
+      sources: ['design.html'],
+      safelist: [],
+      plugins: [],
+      environment: {},
+      browserTarget: 'defaults',
+      compiler: { name: 'tailwindcss', version: '4.0.0', compile: () => '.p-4 { padding: 1rem; }' },
+    }, { sourcePath: path.join(directory, 'design.html') });
+
+    expect(result.verified).toBe(false);
+    expect(result.issues.map((issue) => issue.reason).join('\n')).toMatch(/tailwindcss.*not materialized|https:\/\/cdn\.example.*not materialized/i);
   });
 });
 
@@ -178,12 +290,19 @@ describe('registered-block CSS assets', () => {
     const reference = scanCssUrlReferences('x{background:url(../.env)}', design)[0]!;
     expect(classifyCssUrlReference(reference, { sourcePath: design })).toMatchObject({ outcome: 'blocked' });
   });
+
+  it('reads only image positions from image-set(), not quoted type descriptors', () => {
+    const refs = scanCssUrlReferences(
+      'x { background-image: image-set("photo.avif" 1x type("image/avif"), url("photo.png") 2x type("image/png")); }',
+    );
+    expect(refs.map((reference) => reference.url)).toEqual(['photo.avif', 'photo.png']);
+  });
 });
 
 describe('registered-block authoring parity ledger', () => {
   it('maps a stylesheet declaration once to a supported native destination without duplicate CSS', async () => {
     const report = await author('<style>.notice { color: red; }</style><p class="notice">Hello</p>', {
-      author: { name: 'acme/notice' },
+      author: { name: 'acme/notice', styles: { mode: 'css' } },
     });
 
     expect(report.ok).toBe(true);
@@ -199,7 +318,7 @@ describe('registered-block authoring parity ledger', () => {
 
     const report = await author('<style>body { color: red; }</style><p>Hello</p>', {
       outDir,
-      author: { name: 'acme/notice' },
+      author: { name: 'acme/notice', styles: { mode: 'css' } },
     });
 
     expect(report.ok).toBe(false);
@@ -209,13 +328,79 @@ describe('registered-block authoring parity ledger', () => {
   it('retains escaped class, ID, and attribute selector dependencies through native conversion', async () => {
     const report = await author(
       '<style>@media (min-width: 40rem) { .\\32xl\\:open#hero[data-state="open"] { color: red; } }</style><p id="hero" data-state="open" class="2xl:open">Hello</p>',
-      { author: { name: 'acme/notice' } },
+      { author: { name: 'acme/notice', styles: { mode: 'css' } } },
     );
 
     expect(report.ok).toBe(true);
-    expect(report.package?.files['style.css']).toContain('.\\32xl\\:open.block-runner-selector-id-');
+    expect(report.package?.files['style.css']).toContain('.\\32xl\\:open:is(#hero, .block-runner-selector-id-');
     expect(report.package?.files['index.js']).toContain('"className": "2xl:open block-runner-selector-id-');
     expect(report.package?.files['index.js']).toContain('block-runner-selector-attribute-');
+  });
+
+  it('preserves stylesheet ownership when one selector maps natively for only some matching elements', async () => {
+    const report = await author(
+      '<style>.notice { color: red; }</style><p class="notice">Outer <span class="notice">inner</span></p>',
+      { author: { name: 'acme/notice', styles: { mode: 'css' } } },
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.styleLedger?.filter((entry) => entry.property === 'color')).toEqual([
+      expect.objectContaining({ outcome: 'scoped-css' }),
+    ]);
+    expect(report.package?.files['style.css']).toContain('.wp-block-acme-notice .notice { color: red; }');
+    expect(report.package?.files['index.js']).not.toContain('"color": "red"');
+  });
+
+  it('keeps an identical conditional declaration in residual CSS instead of aliasing a native top-level rule', async () => {
+    const report = await author(
+      '<style>.notice { color: red; } @media (min-width: 40rem) { .notice { color: red; } }</style><p class="notice">Hello</p>',
+      { author: { name: 'acme/notice', styles: { mode: 'css' } } },
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.styleLedger).toEqual(expect.arrayContaining([
+      expect.objectContaining({ property: 'color', outcome: 'native', atRules: [] }),
+      expect.objectContaining({ property: 'color', outcome: 'scoped-css', atRules: ['@media (min-width: 40rem)'] }),
+    ]));
+    expect(report.package?.files['style.css']).toContain('@media (min-width: 40rem)');
+    expect(report.package?.files['style.css']).toContain('.wp-block-acme-notice .notice { color: red; }');
+  });
+
+  it('suppresses rewritten mixed declarations with the same identity used by final conversion', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    const design = path.join(directory, 'design.html');
+    const outDir = path.join(directory, 'package');
+    await writeFile(design, '');
+    await writeFile(path.join(directory, 'photo.png'), 'photo');
+
+    const report = await author(
+      '<style>.notice { background-image: url("photo.png"); }</style><div class="notice"><p>Hero</p></div><span class="notice">Fallback</span>',
+      { sourcePath: design, outDir, author: { name: 'acme/notice', styles: { mode: 'css' } } },
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.styleLedger).toContainEqual(expect.objectContaining({ property: 'background-image', outcome: 'scoped-css' }));
+    expect(report.package?.files['style.css']).toContain('./assets/');
+    expect(report.package?.files['index.js']).not.toContain('"url": "./assets/');
+  });
+
+  it('blocks invalid attribute selectors before emitting a marker dependency and retains ID specificity', () => {
+    const transport = createSelectorDependencyTransport();
+    const idScoped = scopeStylesheet(scanStylesheet('#hero { color: red; }'), {
+      root: '.wp-block-acme-notice',
+      selectorTransform: transport.rewrite,
+    });
+    expect(idScoped.css).toContain(':is(#hero, .block-runner-selector-id-');
+
+    const invalidTransport = createSelectorDependencyTransport();
+    const invalid = scopeStylesheet(scanStylesheet('[data-state=] { color: red; }'), {
+      root: '.wp-block-acme-notice',
+      selectorTransform: invalidTransport.rewrite,
+    });
+    expect(invalid.css).toBe('');
+    expect(invalid.ledger).toContainEqual(expect.objectContaining({ outcome: 'blocked', reason: expect.stringMatching(/invalid attribute selector/i) }));
+    expect(invalidTransport.dependencies).toEqual([]);
   });
 
   it('accounts for inline CSS and rewrites srcset assets retained in Custom HTML', async () => {
@@ -243,5 +428,45 @@ describe('registered-block authoring parity ledger', () => {
     expect(report.package?.files['index.js']).toContain('srcset=');
     expect(report.package?.files['index.js']).toContain('image-set(');
     expect(await readFile(path.join(outDir, 'block.json'), 'utf8')).toContain('acme/notice');
+  });
+
+  it('accounts for object data and SVG href asset forms', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    const design = path.join(directory, 'design.html');
+    const source = path.join(directory, 'photo.png');
+    await writeFile(design, '');
+    await writeFile(source, 'photo');
+
+    const report = await author(
+      '<object data="photo.png"></object><svg><image href="photo.png" /><use xlink:href="photo.png#symbol" /></svg>',
+      { sourcePath: design, outDir: path.join(directory, 'package'), author: { name: 'acme/assets' } },
+    );
+
+    expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png'))).toHaveLength(3);
+    expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png')).every((asset) => asset.outcome === 'copied')).toBe(true);
+  });
+
+  it('accounts for SVG presentation URLs, SVG href variants, and link href asset forms', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    const design = path.join(directory, 'design.html');
+    await writeFile(design, '');
+    await writeFile(path.join(directory, 'photo.png'), 'photo');
+
+    const report = await author(
+      '<link rel="icon" href="photo.png"><link rel="preload" as="image" href="photo.png"><link rel="manifest" href="photo.png"><link rel="stylesheet" href="photo.png"><svg><path fill="url(photo.png#paint)" filter="url(photo.png#filter)"/><mpath href="photo.png#motion"/><textPath href="photo.png#text">Text</textPath></svg>',
+      {
+        sourcePath: design,
+        outDir: path.join(directory, 'package'),
+        author: { name: 'acme/assets', styles: { mode: 'css', css: ' ' } },
+      },
+    );
+
+    expect(report.ok).toBe(true);
+    const assetReferences = report.assets?.filter((asset) => asset.reference.startsWith('photo.png')) ?? [];
+    expect(assetReferences).toHaveLength(8);
+    expect(assetReferences.every((asset) => asset.outcome === 'copied')).toBe(true);
+    expect(assetReferences.map((asset) => asset.kind)).toEqual(expect.arrayContaining(['image', 'stylesheet', 'other']));
   });
 });

@@ -16,21 +16,23 @@ import {
 } from '../types.js';
 import { classifyCssUrlReference, rewriteCssAssets, scanCssUrlReferences } from './assets.js';
 import {
+  compileTailwindBuildGraph,
   createSelectorDependencyTransport,
+  hasTailwindSignal,
   referencedCssClasses,
   scanStylesheet,
   scopeStylesheet,
   validateCssBuildGraph,
 } from './styles.js';
-import type { StyleLedgerEntry } from '../styles/apply.js';
+import { sourceDeclarationKey, type StyleLedgerEntry } from '../styles/apply.js';
 
 /**
  * Produce the small, static source package for one registered block.
  *
  * This is deliberately an authoring path rather than a variation on `convert`: conversion emits
  * post content, while this function creates a block root which owns its CSS/assets.  It accepts
- * compiled CSS only.  It never runs Tailwind, guesses utility classes, downloads a remote asset,
- * or manufactures a media ID.
+ * plain CSS directly, or Tailwind only through the caller's pinned compiler. It never guesses
+ * utility classes, downloads a remote asset, or manufactures a media ID.
  */
 export async function author(input: string, options: AuthorOptions = {}): Promise<BlockRunnerReport> {
   const config = await loadConfig(options);
@@ -50,11 +52,61 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   }
 
   const rootSelector = `.wp-block-${name.replace('/', '-')}`;
-  const styleInput = definition.styles?.css ?? stylesFromHtml(input);
-  const buildGraph = validateCssBuildGraph(definition.styles?.tailwind, { css: styleInput });
-  const stylesheet = scanStylesheet(styleInput);
+  let styleInput = definition.styles?.css ?? stylesFromHtml(input);
+  const styleMode = definition.styles?.mode;
+  if (styleInput.trim() && styleMode !== 'css' && styleMode !== 'tailwind') {
+    return authorFailure(
+      'author.styles.mode must explicitly be "css" or "tailwind" whenever stylesheet input is supplied',
+    );
+  }
+  if (styleMode !== undefined && styleMode !== 'css' && styleMode !== 'tailwind') {
+    return authorFailure('author.styles.mode must be "css" or "tailwind"');
+  }
+  if (styleMode === 'css' && definition.styles?.tailwind) {
+    return authorFailure('author.styles.tailwind requires author.styles.mode to be "tailwind"');
+  }
+  if (styleMode === 'css' && (hasTailwindSignal(styleInput) || hasTailwindRuntimeSignal(styleInput))) {
+    return authorFailure('Tailwind source or runtime CSS requires author.styles.mode to be "tailwind"');
+  }
+  let buildGraph = validateCssBuildGraph(definition.styles?.tailwind, {
+    css: styleInput,
+    tailwindDetected: styleMode === 'tailwind',
+  });
+  let compilerIssues: ReportItem[] = [];
+
+  if (buildGraph.tailwindDetected) {
+    // Do not treat a field-complete graph as proof. First materialize and run its own pinned
+    // compiler, then either use that result (Tailwind source in the design) or compare it with
+    // separately supplied output.
+    if (buildGraph.missing.length === 0 && definition.styles?.tailwind) {
+      const expectedCss = definition.styles?.css !== undefined || (buildGraph.compiled && styleInput.trim())
+        ? styleInput
+        : undefined;
+      const compiled = await compileTailwindBuildGraph(definition.styles.tailwind, {
+        sourcePath: options.sourcePath,
+        expectedCss,
+      });
+      compilerIssues = compiled.issues.map((issue) => ({
+        block: name,
+        status: 'warning' as const,
+        reason: issue.reason,
+        details: { outcome: issue.status, field: issue.field },
+      }));
+      if (compiled.css) {
+        // In source mode this is the CSS that is scanned, scoped, and made available to the
+        // converter. In output mode the equality check above proves it is the same CSS.
+        styleInput = compiled.css;
+      }
+      buildGraph = validateCssBuildGraph(definition.styles.tailwind, {
+        css: styleInput,
+        tailwindDetected: true,
+        provenanceVerified: compiled.verified,
+      });
+    }
+  }
+  const safetyStylesheet = scanStylesheet(styleInput);
   const selectorTransport = createSelectorDependencyTransport();
-  const safetyScopedStyles = scopeStylesheet(stylesheet, {
+  const safetyScopedStyles = scopeStylesheet(safetyStylesheet, {
     root: rootSelector,
     disposition: (declaration) => unsafeResidualDeclaration(declaration.property, declaration.value),
     selectorTransform: selectorTransport.rewrite,
@@ -69,6 +121,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       reason: issue.reason,
       details: { outcome: issue.status, field: issue.field },
     })),
+    ...compilerIssues,
     ...safetyScopedStyles.ledger
       .filter((entry) => entry.outcome === 'warned' || entry.outcome === 'blocked')
       .map<ReportItem>((entry) => ({
@@ -115,7 +168,36 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       styleLedger: safetyLedger,
     };
   }
-  const nativeSource = await collectNativeSourceDeclarations(input, options, config);
+  const sourceAssets = scanCssUrlReferences(styleInput, options.sourcePath).map((reference) =>
+    toAssetLedgerEntry(
+      classifyCssUrlReference(reference, {
+        sourcePath: options.sourcePath,
+        allowFontLicense: false,
+      }),
+    ),
+  );
+  const destinationAssetDir = options.outDir
+    ? path.join(options.outDir, 'assets')
+    : path.join(process.cwd(), '.block-runner-unwritten-assets');
+  // Rewriting is part of source identity: the native probe, declaration suppression, residual
+  // stylesheet, and final conversion must all read the same values. Probing the original source
+  // but emitting rewritten `url()` values makes a mixed native/scoped declaration miss its
+  // suppression key and land twice.
+  const processedSource = await rewriteCssAssets({
+    sourceCss: styleInput,
+    sourcePath: options.outDir ? options.sourcePath : undefined,
+    destinationAssetDir,
+    allowFontLicense: false,
+  });
+  let assets: AssetLedgerEntry[] = mergeAssetLedgers(sourceAssets, processedSource.assets.map(toAssetLedgerEntry));
+  styleInput = processedSource.css;
+  const stylesheet = scanStylesheet(styleInput);
+  // The converter's native-mapping probe must see the same compiled stylesheet as the CSS
+  // scanner, including the final local-asset rewrites. A configured stylesheet otherwise has no
+  // `<style>` node for its class rules, and Tailwind source would be incorrectly treated as an
+  // empty stylesheet.
+  const sourceStyledInput = withAuthorStyles(input, styleInput);
+  const nativeSource = await collectNativeSourceDeclarations(sourceStyledInput, options, config);
   const preflightStyleLedger = [...safetyLedger, ...nativeSource.inlineLedger];
   const preflightInlineFailure = nativeSource.inlineLedger.some(
     (entry) => entry.outcome === 'blocked' || entry.outcome === 'warned',
@@ -138,7 +220,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     selectorTransform: selectorTransport.rewrite,
     disposition: (declaration, rule) =>
       unsafeResidualDeclaration(declaration.property, declaration.value)
-      ?? (nativeSource.declarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value))
+      ?? (nativeSource.declarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id))
         ? {
             outcome: 'native' as const,
             reason: 'mapped through the destination block support; omitted from residual CSS',
@@ -149,39 +231,6 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const hardStyleFailure = scopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || scopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
   let css = scopedStyles.css;
-  // The source ledger includes URLs from rules we intentionally block (notably @font-face and
-  // Preflight). Those assets still need a terminal outcome even though their declarations will
-  // not reach style.css.
-  const sourceAssets = scanCssUrlReferences(styleInput, options.sourcePath).map((reference) =>
-    toAssetLedgerEntry(
-      classifyCssUrlReference(reference, {
-        sourcePath: options.sourcePath,
-        allowFontLicense: false,
-      }),
-    ),
-  );
-  const destinationAssetDir = options.outDir
-    ? path.join(options.outDir, 'assets')
-    : path.join(process.cwd(), '.block-runner-unwritten-assets');
-  // Copy/account from the complete source stylesheet, not merely residual CSS. A declaration can
-  // quite correctly become native (for example a class background becoming a Cover) while its URL
-  // still needs a package asset and a terminal ledger outcome.
-  const processedSource = await rewriteCssAssets({
-    sourceCss: styleInput,
-    sourcePath: options.outDir ? options.sourcePath : undefined,
-    destinationAssetDir,
-    allowFontLicense: false,
-  });
-  let assets: AssetLedgerEntry[] = mergeAssetLedgers(sourceAssets, processedSource.assets.map(toAssetLedgerEntry));
-  if (css) {
-    const processed = await rewriteCssAssets({
-      sourceCss: css,
-      sourcePath: options.outDir ? options.sourcePath : undefined,
-      destinationAssetDir,
-      allowFontLicense: false,
-    });
-    css = processed.css;
-  }
 
   // Rewrite every concrete source asset before conversion. That makes assets inside Custom HTML
   // fallbacks just as accountable as assets that happen to map to a native media block.
@@ -194,7 +243,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   assets = [...assets, ...rewrittenMarkup.assets];
 
   const inlineStyleLedger: AuthoredStyleLedgerEntry[] = [];
-  const conversion = await convert(rewrittenMarkup.input, {
+  const conversion = await convert(withAuthorStyles(rewrittenMarkup.input, processedSource.css), {
     ...options,
     // The author package carries any unsupported authored selector/property in style.css; the
     // legacy open sidecar would duplicate it as a global post stylesheet.
@@ -202,6 +251,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     config,
     preserveSourceClasses: referencedCssClasses(scopedStyles.css),
     preserveSourceSelectorDependencies: selectorTransport.dependencies,
+    suppressSourceDeclarations: [...nativeSource.suppressedDeclarations],
     preserveAssetForms: true,
     styleLedgerObserver(entries, source) {
       for (const entry of entries) {
@@ -272,6 +322,8 @@ function mergeAuthorConfig(configured: AuthorConfig | undefined, explicit: Autho
  */
 interface NativeSourceCollection {
   declarations: Set<string>;
+  /** Observed stylesheet declarations that must stay in parity CSS for at least one match. */
+  suppressedDeclarations: Set<string>;
   inlineLedger: AuthoredStyleLedgerEntry[];
   conversion: BlockRunnerReport;
 }
@@ -294,7 +346,7 @@ async function collectNativeSourceDeclarations(
           inlineLedger.push(toInlineStyleLedgerEntry(entry, source));
           continue;
         }
-        const key = sourceDeclarationKey(entry.origin, entry.property, entry.value);
+        const key = sourceDeclarationKey(entry.origin, entry.property, entry.value, entry.originId);
         const state = outcomes.get(key) ?? { native: false, other: false };
         if (entry.outcome === 'mapped' || (entry.outcome === 'consumed' && entry.reason === 'read by the structural rules')) {
           state.native = true;
@@ -307,13 +359,12 @@ async function collectNativeSourceDeclarations(
   });
   return {
     declarations: new Set([...outcomes].filter(([, state]) => state.native && !state.other).map(([key]) => key)),
+    suppressedDeclarations: new Set(
+      [...outcomes].filter(([, state]) => !state.native || state.other).map(([key]) => key),
+    ),
     inlineLedger,
     conversion,
   };
-}
-
-function sourceDeclarationKey(selector: string, property: string, value: string): string {
-  return `${selector.trim()}\u0000${property.trim().toLowerCase()}\u0000${value.trim()}`;
 }
 
 function authorFailure(reason: string): BlockRunnerReport {
@@ -333,6 +384,29 @@ function stylesFromHtml(input: string): string {
   // The style compiler does its own CSS parsing.  This small extractor only joins the actual style
   // graph supplied with an HTML design; it does not infer CSS from Tailwind class names.
   return [...input.matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)].map((match) => match[1]).join('\n');
+}
+
+function hasTailwindRuntimeSignal(css: string): boolean {
+  return /--tw-[\w-]+\s*:|var\(\s*--tw-[\w-]+/i.test(css);
+}
+
+/**
+ * Conversion reads class rules from `<style>` nodes before it sanitizes the design. Keep exactly
+ * one node containing the stylesheet that authoring actually vetted, rather than allowing stale
+ * source directives or an independently supplied stylesheet to influence native mapping.
+ */
+function withAuthorStyles(input: string, css: string): string {
+  const dom = new JSDOM(input, { contentType: 'text/html' });
+  const document = dom.window.document;
+  for (const style of [...document.querySelectorAll('style')]) {
+    style.remove();
+  }
+  if (css.trim()) {
+    const style = document.createElement('style');
+    style.textContent = css;
+    (document.head ?? document.documentElement).append(style);
+  }
+  return dom.serialize();
 }
 
 function linkedStylesheets(input: string): string[] {
@@ -434,6 +508,27 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     return entry.outcome === 'copied' ? entry.rewrittenUrl : undefined;
   };
 
+  const processCssValue = async (
+    value: string,
+    kind: AssetLedgerEntry['kind'],
+  ): Promise<string> => {
+    // The CSS asset lexer deliberately works on source fragments too. That lets SVG presentation
+    // attributes such as `fill="url(texture.svg#paint)"` retain their full value while every
+    // concrete URL gets the same copy/classification/ledger treatment as a stylesheet value.
+    const processed = await rewriteCssAssets({
+      sourceCss: value,
+      sourcePath: options.write ? options.sourcePath : undefined,
+      destinationAssetDir: options.destinationAssetDir,
+      allowFontLicense: false,
+    });
+    for (const asset of processed.assets) {
+      const record = toAssetLedgerEntry(asset);
+      record.kind = kind;
+      assets.push(record);
+    }
+    return processed.css;
+  };
+
   for (const element of [...document.querySelectorAll('*')]) {
     if (element.tagName.toLowerCase() === 'style') {
       // Keep the rewritten stylesheet in the conversion DOM as well: a declaration that maps to
@@ -469,12 +564,28 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       }
     }
 
-    for (const attribute of ['src', 'poster'] as const) {
+    for (const { name: attribute, kind } of assetAttributesFor(element)) {
       const value = element.getAttribute(attribute);
       if (!value?.trim()) continue;
-      const rewritten = await processReference(value, assetKindFor(element, attribute));
+      const rewritten = await processReference(value, kind);
       if (rewritten) {
         element.setAttribute(attribute, rewritten);
+      }
+    }
+
+    if (element.namespaceURI === 'http://www.w3.org/2000/svg') {
+      for (const attribute of [...element.attributes]) {
+        const name = attribute.name.toLowerCase();
+        // `style` above and concrete href forms above each have their own handling. Any other
+        // SVG presentation value can legally contain `url()`, including fill, filter, clip-path,
+        // mask, marker, and cursor; account for the URL rather than maintaining a lossy list.
+        if (name === 'style' || name === 'href' || name === 'xlink:href' || !/\burl\s*\(/i.test(attribute.value)) {
+          continue;
+        }
+        const rewritten = await processCssValue(attribute.value, 'image');
+        if (rewritten !== attribute.value) {
+          element.setAttribute(attribute.name, rewritten);
+        }
       }
     }
 
@@ -498,10 +609,68 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   return { input: dom.serialize(), assets };
 }
 
-function assetKindFor(element: Element, attribute: 'src' | 'poster'): AssetLedgerEntry['kind'] {
-  if (attribute === 'poster' || element.tagName.toLowerCase() === 'img') return 'image';
-  if (/^(audio|video|track|source)$/i.test(element.tagName)) return 'media';
-  return 'other';
+interface AssetAttribute {
+  name: string;
+  kind: AssetLedgerEntry['kind'];
+}
+
+/**
+ * Asset-bearing attributes are not interchangeable: HTML anchors use `href` for navigation while
+ * SVG `<image href>` is a concrete image dependency. Keep the table element/namespace-aware so
+ * every actual asset form reaches the same copy/classify ledger without turning ordinary links
+ * into package assets.
+ */
+function assetAttributesFor(element: Element): AssetAttribute[] {
+  const tag = element.localName.toLowerCase();
+  if (element.namespaceURI === 'http://www.w3.org/2000/svg') {
+    if (tag === 'image' || tag === 'feimage') {
+      return [{ name: 'href', kind: 'image' }, { name: 'xlink:href', kind: 'image' }];
+    }
+    if (tag === 'use' || tag === 'mpath' || tag === 'textpath') {
+      return [{ name: 'href', kind: 'other' }, { name: 'xlink:href', kind: 'other' }];
+    }
+    return [];
+  }
+
+  switch (tag) {
+    case 'img':
+      return [{ name: 'src', kind: 'image' }];
+    case 'video':
+      return [{ name: 'src', kind: 'media' }, { name: 'poster', kind: 'image' }];
+    case 'audio':
+    case 'track':
+    case 'embed':
+      return [{ name: 'src', kind: 'media' }];
+    case 'source':
+      // A source nested in picture is an image; audio/video source remains media.
+      return [{ name: 'src', kind: element.parentElement?.localName.toLowerCase() === 'picture' ? 'image' : 'media' }];
+    case 'object':
+      return [{ name: 'data', kind: 'other' }];
+    case 'iframe':
+      return [{ name: 'src', kind: 'other' }];
+    case 'input':
+      return [{ name: 'src', kind: 'image' }];
+    case 'link': {
+      const rel = (element.getAttribute('rel') ?? '').toLowerCase().split(/\s+/);
+      if (rel.includes('icon') || rel.includes('apple-touch-icon') || rel.includes('mask-icon')) {
+        return [{ name: 'href', kind: 'image' }];
+      }
+      if (rel.includes('stylesheet')) return [{ name: 'href', kind: 'stylesheet' }];
+      if (rel.includes('manifest') || rel.includes('modulepreload')) return [{ name: 'href', kind: 'other' }];
+      if (rel.includes('preload')) {
+        const as = (element.getAttribute('as') ?? '').toLowerCase();
+        if (as === 'font') return [{ name: 'href', kind: 'font' }];
+        if (as === 'image') return [{ name: 'href', kind: 'image' }];
+        if (as === 'video' || as === 'audio') return [{ name: 'href', kind: 'media' }];
+        if (as === 'style') return [{ name: 'href', kind: 'stylesheet' }];
+        return [{ name: 'href', kind: 'other' }];
+      }
+      if (rel.includes('prefetch')) return [{ name: 'href', kind: 'other' }];
+      return [];
+    }
+    default:
+      return [];
+  }
 }
 
 /** Extract URL tokens only; descriptors are retained byte-for-byte when a candidate is rewritten. */

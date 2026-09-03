@@ -1,10 +1,15 @@
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import type { TailwindBuildGraph, TailwindCompilerInput } from '../types.js';
+
 /**
  * Source-style graph utilities for generated blocks.
  *
- * This module intentionally does not compile Tailwind. A Tailwind class is not CSS, and guessing
- * its declaration from a token would make the generated block depend on an unknown version,
- * configuration, plugin set, source set, and browser target. Callers may give us compiled CSS, but
- * must first prove the build graph that produced it is complete.
+ * Tailwind is compiled only by the project's explicitly supplied, pinned compiler. A Tailwind
+ * class is not CSS, and guessing its declaration from a token would make the generated block
+ * depend on an unknown version, configuration, plugin set, source set, and browser target. The
+ * compiler receives the complete materialized graph and its result is the only Tailwind CSS this
+ * module will author.
  *
  * The scanner is deliberately small and conservative. It preserves the conditional constructs that
  * can safely remain in a block stylesheet (`@media`, `@supports`, and `@container`) and records all
@@ -19,14 +24,15 @@ export type BuildGraphField =
   | 'safelist'
   | 'plugins'
   | 'environment'
-  | 'browserTarget';
+  | 'browserTarget'
+  | 'compiler';
 
 /**
  * The inputs that determine a Tailwind (or Tailwind-like) generated stylesheet. Empty arrays are
  * meaningful: they say that the author explicitly has no imports, safelist, or plugins. Omitted
  * fields are not meaningful and therefore cannot support a fidelity claim.
  */
-export interface CssBuildGraph {
+export interface CssBuildGraph extends TailwindBuildGraph {
   cssEntries?: readonly string[];
   imports?: readonly string[];
   directives?: readonly string[];
@@ -44,12 +50,14 @@ export interface BuildGraphIssue {
 }
 
 export interface BuildGraphValidation {
-  /** All eight graph inputs were supplied and entry/source values are non-empty. */
+  /** All required graph inputs were supplied and entry/source values are non-empty. */
   complete: boolean;
-  /** A Tailwind source directive/import or an explicit caller signal was found. */
+  /** Tailwind mode was explicitly declared by the caller or by supplying a graph. */
   tailwindDetected: boolean;
   /** The supplied CSS is a compiled, self-contained stylesheet rather than Tailwind source. */
   compiled: boolean;
+  /** A pinned compiler actually generated and, when supplied, matched this CSS. */
+  provenanceVerified: boolean;
   /** `--tw-*` variables referenced by the CSS but not defined anywhere in that CSS. */
   unresolvedVariables: string[];
   /** Tailwind fidelity is blocked for an incomplete graph or an uncompiled/incomplete CSS result. */
@@ -61,8 +69,10 @@ export interface BuildGraphValidation {
 export interface BuildGraphValidationOptions {
   /** Compiled or source CSS to inspect for Tailwind directives/variables. */
   css?: string;
-  /** Use when the caller detected Tailwind outside the stylesheet, for example from a config file. */
+  /** Explicitly declare Tailwind mode when the compiled CSS has no recognizable source token. */
   tailwindDetected?: boolean;
+  /** Set only after `compileTailwindBuildGraph()` produced the CSS being validated. */
+  provenanceVerified?: boolean;
 }
 
 const BUILD_GRAPH_FIELDS: readonly BuildGraphField[] = [
@@ -74,6 +84,7 @@ const BUILD_GRAPH_FIELDS: readonly BuildGraphField[] = [
   'plugins',
   'environment',
   'browserTarget',
+  'compiler',
 ];
 
 const BUILD_GRAPH_LABELS: Record<BuildGraphField, string> = {
@@ -85,27 +96,29 @@ const BUILD_GRAPH_LABELS: Record<BuildGraphField, string> = {
   plugins: 'plugin list',
   environment: 'build environment',
   browserTarget: 'browser target',
+  compiler: 'pinned Tailwind compiler',
 };
 
 /**
- * Validate the source inputs needed to make a Tailwind fidelity statement. This is validation, not
- * compilation: callers can use it before invoking their own approved compiler and pass the
- * resulting CSS into `scanStylesheet`.
+ * Validate the source inputs needed to make a Tailwind fidelity statement. Tailwind mode is not
+ * considered usable until a caller has also run `compileTailwindBuildGraph()` and marked the exact
+ * output as verified. Keeping this synchronous utility strict prevents a complete-looking graph
+ * plus independently supplied CSS from being mistaken for compiler provenance.
  */
 export function validateCssBuildGraph(
   graph: CssBuildGraph | undefined,
   options: BuildGraphValidationOptions = {},
 ): BuildGraphValidation {
   const css = options.css ?? '';
-  // Passing a graph is an explicit Tailwind/build-graph signal. A static stylesheet that has no
-  // directive/import is also a valid compiler result even if it no longer contains a recognisable
-  // Tailwind token — there is no safe way (or need) to reverse-engineer its original toolchain.
   const unresolvedVariables = unresolvedTailwindVariables(css);
-  const tailwindDetected =
-    options.tailwindDetected === true || graph !== undefined || hasTailwindSourceSignal(css) || unresolvedVariables.length > 0;
+  // Compiled CSS is not a trustworthy provenance signal: a one-rule Tailwind build can look
+  // exactly like hand-written CSS. Tailwind mode therefore comes only from the caller's explicit
+  // declaration (or from the presence of the graph itself), never from utility-shaped output.
+  const tailwindDetected = options.tailwindDetected === true || graph !== undefined;
   const missing = BUILD_GRAPH_FIELDS.filter((field) => graphFieldMissing(graph, field));
   const compiled = !hasTailwindSourceSignal(css) && unresolvedVariables.length === 0;
-  const blocked = tailwindDetected && (missing.length > 0 || !compiled);
+  const provenanceVerified = tailwindDetected ? options.provenanceVerified === true : true;
+  const blocked = tailwindDetected && (missing.length > 0 || !compiled || !provenanceVerified);
   const issues = missing.map<BuildGraphIssue>((field) => ({
     field,
     status: blocked ? 'blocked' : 'warning',
@@ -126,7 +139,24 @@ export function validateCssBuildGraph(
     });
   }
 
-  return { complete: missing.length === 0, tailwindDetected, compiled, unresolvedVariables, blocked, missing, issues };
+  if (tailwindDetected && missing.length === 0 && !provenanceVerified) {
+    issues.push({
+      field: 'compiler',
+      status: 'blocked',
+      reason: 'Tailwind graph has not been compiled by its pinned compiler, so this CSS has no verified provenance',
+    });
+  }
+
+  return {
+    complete: missing.length === 0,
+    tailwindDetected,
+    compiled,
+    provenanceVerified,
+    unresolvedVariables,
+    blocked,
+    missing,
+    issues,
+  };
 }
 
 /** True only for Tailwind *source* that still needs a compiler, never for compiled declarations. */
@@ -159,6 +189,15 @@ function graphFieldMissing(graph: CssBuildGraph | undefined, field: BuildGraphFi
   }
 
   const value = graph[field];
+  if (field === 'compiler') {
+    const compiler = graph.compiler;
+    return !compiler
+      || typeof compiler.name !== 'string'
+      || !compiler.name.trim()
+      || typeof compiler.version !== 'string'
+      || !compiler.version.trim()
+      || typeof compiler.compile !== 'function';
+  }
   if (field === 'cssEntries' || field === 'sources') {
     return !Array.isArray(value) || value.length === 0 || value.some((entry) => typeof entry !== 'string' || !entry.trim());
   }
@@ -176,6 +215,269 @@ function graphFieldMissing(graph: CssBuildGraph | undefined, field: BuildGraphFi
   // The field's presence is intentional for imports/directives/safelist/plugins: [] is a complete
   // assertion that there are none, while `undefined` is not.
   return !Array.isArray(value);
+}
+
+export interface TailwindCompilationOptions {
+  /** Design HTML path, used as the base for graph paths when available. */
+  sourcePath?: string;
+  /** CSS supplied as purported compiler output. It must exactly match when present. */
+  expectedCss?: string;
+}
+
+export interface TailwindCompilation {
+  css?: string;
+  issues: BuildGraphIssue[];
+  /** True only when the compiler ran and its output matched the supplied output (if any). */
+  verified: boolean;
+}
+
+/**
+ * Materialize and compile the declared Tailwind graph. This intentionally has no fallback that
+ * infers a utility from class names or accepts a prebuilt stylesheet on trust: the supplied
+ * compiler is the project's pin for Tailwind, plugins, custom variants, and browser targeting.
+ */
+export async function compileTailwindBuildGraph(
+  graph: CssBuildGraph,
+  options: TailwindCompilationOptions = {},
+): Promise<TailwindCompilation> {
+  const missing = BUILD_GRAPH_FIELDS.filter((field) => graphFieldMissing(graph, field));
+  if (missing.length > 0) {
+    return {
+      issues: missing.map((field) => ({
+        field,
+        status: 'blocked',
+        reason: `${BUILD_GRAPH_LABELS[field]} were not supplied — Tailwind cannot be compiled from an incomplete graph`,
+      })),
+      verified: false,
+    };
+  }
+
+  const base = graphBaseDirectory(options.sourcePath);
+  const entries = await materializeGraphFiles(graph.cssEntries!, base, 'cssEntries');
+  const imports = await materializeGraphFiles(graph.imports!, base, 'imports');
+  const issues = [...entries.issues, ...imports.issues];
+  issues.push(...declaredTailwindInputIssues([...entries.files, ...imports.files], graph));
+  if (issues.length > 0) {
+    return { issues, verified: false };
+  }
+
+  const declaredImports = new Set(imports.files.map((file) => file.path));
+  for (const entry of [...entries.files, ...imports.files]) {
+    for (const specifier of cssImportSpecifiers(entry.css)) {
+      const resolved = path.resolve(path.dirname(entry.path), specifier);
+      if (!declaredImports.has(resolved)) {
+        issues.push({
+          field: 'imports',
+          status: 'blocked',
+          reason: `CSS entry ${entry.path} imports ${specifier}, but that import was not materialized in tailwind.imports`,
+        });
+      }
+    }
+  }
+  if (issues.length > 0) {
+    return { issues, verified: false };
+  }
+
+  const input: TailwindCompilerInput = {
+    cssEntries: entries.files,
+    imports: imports.files,
+    directives: [...graph.directives!],
+    sources: [...graph.sources!],
+    safelist: [...graph.safelist!],
+    plugins: [...graph.plugins!],
+    environment: graph.environment!,
+    browserTarget: graph.browserTarget!,
+  };
+
+  let css: string;
+  try {
+    css = await graph.compiler!.compile(input);
+  } catch (error) {
+    return {
+      issues: [{
+        field: 'compiler',
+        status: 'blocked',
+        reason: `pinned Tailwind compiler ${graph.compiler!.name}@${graph.compiler!.version} failed: ${errorMessage(error)}`,
+      }],
+      verified: false,
+    };
+  }
+  if (typeof css !== 'string') {
+    return {
+      issues: [{
+        field: 'compiler',
+        status: 'blocked',
+        reason: `pinned Tailwind compiler ${graph.compiler!.name}@${graph.compiler!.version} did not return CSS text`,
+      }],
+      verified: false,
+    };
+  }
+  if (options.expectedCss !== undefined && canonicalCompilerCss(options.expectedCss) !== canonicalCompilerCss(css)) {
+    return {
+      css,
+      issues: [{
+        field: 'compiler',
+        status: 'blocked',
+        reason: `supplied CSS does not match output from pinned Tailwind compiler ${graph.compiler!.name}@${graph.compiler!.version}`,
+      }],
+      verified: false,
+    };
+  }
+  return { css, issues: [], verified: true };
+}
+
+function graphBaseDirectory(sourcePath: string | undefined): string {
+  if (!sourcePath || sourcePath === '-' || /^<.*>$/.test(sourcePath)) {
+    return process.cwd();
+  }
+  return path.dirname(path.resolve(sourcePath));
+}
+
+async function materializeGraphFiles(
+  values: readonly string[],
+  base: string,
+  field: 'cssEntries' | 'imports',
+): Promise<{ files: Array<{ path: string; css: string }>; issues: BuildGraphIssue[] }> {
+  const files: Array<{ path: string; css: string }> = [];
+  const issues: BuildGraphIssue[] = [];
+  for (const value of values) {
+    const file = path.resolve(base, value);
+    try {
+      files.push({ path: file, css: await readFile(file, 'utf8') });
+    } catch (error) {
+      issues.push({
+        field,
+        status: 'blocked',
+        reason: `declared ${field === 'cssEntries' ? 'CSS entry' : 'CSS import'} ${value} could not be read: ${errorMessage(error)}`,
+      });
+    }
+  }
+  return { files, issues };
+}
+
+function cssImportSpecifiers(css: string): string[] {
+  const imports: string[] = [];
+  const expression = /@import\s+(?:url\(\s*)?(?:["']([^"']+)["']|([^\s;)]+))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = expression.exec(css))) {
+    const specifier = (match[1] ?? match[2] ?? '').trim();
+    if (specifier) imports.push(specifier);
+  }
+  return imports;
+}
+
+/**
+ * The graph must describe the material we actually hand to the compiler. In particular, an empty
+ * `directives` or `plugins` field is an explicit assertion that source entries contain none; do
+ * not accept a custom variant/plugin merely because the field happened to be present.
+ */
+function declaredTailwindInputIssues(
+  files: ReadonlyArray<{ path: string; css: string }>,
+  graph: CssBuildGraph,
+): BuildGraphIssue[] {
+  const issues: BuildGraphIssue[] = [];
+  const directives = graph.directives!.map(normalizeGraphDirective);
+  const plugins = new Set(graph.plugins!.map((plugin) => plugin.trim()));
+  const sources = new Set(graph.sources!.map((source) => source.trim()));
+  const safelist = new Set(graph.safelist!.map((entry) => entry.trim()));
+
+  for (const entry of files) {
+    for (const directive of tailwindDirectives(entry.css)) {
+      const normalized = normalizeGraphDirective(directive);
+      if (!directives.includes(normalized)) {
+        issues.push({
+          field: 'directives',
+          status: 'blocked',
+          reason: `CSS entry ${entry.path} contains ${directive}, but it was not supplied in tailwind.directives`,
+        });
+      }
+    }
+    for (const plugin of tailwindPluginSpecifiers(entry.css)) {
+      if (!plugins.has(plugin)) {
+        issues.push({
+          field: 'plugins',
+          status: 'blocked',
+          reason: `CSS entry ${entry.path} loads Tailwind plugin ${plugin}, but it was not supplied in tailwind.plugins`,
+        });
+      }
+    }
+    for (const source of tailwindSourceSpecifiers(entry.css)) {
+      if (!sources.has(source)) {
+        issues.push({
+          field: 'sources',
+          status: 'blocked',
+          reason: `CSS entry ${entry.path} declares Tailwind source ${source}, but it was not supplied in tailwind.sources`,
+        });
+      }
+    }
+    for (const candidate of tailwindInlineSafelist(entry.css)) {
+      if (!safelist.has(candidate)) {
+        issues.push({
+          field: 'safelist',
+          status: 'blocked',
+          reason: `CSS entry ${entry.path} declares inline Tailwind source ${candidate}, but it was not supplied in tailwind.safelist`,
+        });
+      }
+    }
+  }
+  return issues;
+}
+
+function tailwindDirectives(css: string): string[] {
+  const directives: string[] = [];
+  const expression = /@(tailwind|apply|config|theme|utility|variant|custom-variant)\b[^;{}]*(?:;|\{)?/gi;
+  let match: RegExpExecArray | null;
+  while ((match = expression.exec(css))) {
+    directives.push(match[0].replace(/[;{]\s*$/, '').trim());
+  }
+  return directives;
+}
+
+function tailwindPluginSpecifiers(css: string): string[] {
+  const plugins: string[] = [];
+  const expression = /@plugin\s+(?:["']([^"']+)["']|([^\s;{}]+))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = expression.exec(css))) {
+    const plugin = (match[1] ?? match[2] ?? '').trim();
+    if (plugin) plugins.push(plugin);
+  }
+  return plugins;
+}
+
+function tailwindSourceSpecifiers(css: string): string[] {
+  const sources: string[] = [];
+  const expression = /@source\s+(?:["']([^"']+)["']|([^\s;{}]+))/gi;
+  let match: RegExpExecArray | null;
+  while ((match = expression.exec(css))) {
+    const source = (match[1] ?? match[2] ?? '').trim();
+    if (source && !/^inline\(/i.test(source)) sources.push(source);
+  }
+  return sources;
+}
+
+function tailwindInlineSafelist(css: string): string[] {
+  const candidates: string[] = [];
+  const expression = /@source\s+inline\(\s*(["'])(.*?)\1\s*\)/gi;
+  let match: RegExpExecArray | null;
+  while ((match = expression.exec(css))) {
+    const candidate = (match[2] ?? '').trim();
+    if (candidate) candidates.push(candidate);
+  }
+  return candidates;
+}
+
+function normalizeGraphDirective(value: string): string {
+  return value.replace(/\s+/g, ' ').replace(/[;{]\s*$/, '').trim();
+}
+
+function canonicalCompilerCss(css: string): string {
+  // Compilers may vary only in final newlines. Any other byte change has not been proven to be the
+  // declared compiler output, so preserve the stronger provenance contract rather than guessing.
+  return css.replace(/\r\n?/g, '\n').replace(/\n+$/, '');
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 export interface CssPosition {
@@ -353,7 +655,14 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
       return undefined;
     }
 
-    const scoped = scopeLocalSelectorList(options.selectorTransform?.(rule.selector, rule) ?? rule.selector, options.root);
+    let transformedSelector = rule.selector;
+    try {
+      transformedSelector = options.selectorTransform?.(rule.selector, rule) ?? rule.selector;
+    } catch (error) {
+      blockRule(rule, errorMessage(error));
+      return undefined;
+    }
+    const scoped = scopeLocalSelectorList(transformedSelector, options.root);
     if (!scoped.ok) {
       blockRule(rule, scoped.reason);
       return undefined;
@@ -437,9 +746,10 @@ export interface SelectorDependencyTransport {
 
 /**
  * Preserve selector semantics across native conversion without blindly copying arbitrary source
- * attributes onto block attributes (which Gutenberg would silently discard). Each `#id` and
- * `[attribute]` atom becomes a deterministic class that is attached only to source elements that
- * actually match it. The scoped stylesheet then selects that transport class instead.
+ * attributes onto block attributes (which Gutenberg would silently discard). Attribute atoms
+ * become deterministic marker classes attached only to matching source elements. ID atoms keep an
+ * ID-specific `:is()` branch as well as their marker, preserving cascade specificity after the
+ * raw ID disappears from a native block.
  */
 export function createSelectorDependencyTransport(): SelectorDependencyTransport {
   const dependencies: SourceSelectorDependency[] = [];
@@ -496,18 +806,22 @@ export function createSelectorDependencyTransport(): SelectorDependencyTransport
         if (char === '#') {
           const identifier = readCssIdentifier(selector, index + 1);
           if (identifier) {
-            output += `.${markerFor('id', identifier.value)}`;
+            // :is() takes the specificity of its most specific argument. Keep the exact raw ID
+            // branch (which also remains correct inside a Custom HTML fallback) while the marker
+            // branch makes the selector survive native conversion.
+            output += `:is(${selector.slice(index, identifier.end)}, .${markerFor('id', identifier.value)})`;
             index = identifier.end;
             continue;
           }
         }
         if (char === '[') {
           const attribute = readAttributeSelector(selector, index);
-          if (attribute) {
-            output += `.${markerFor('attribute', attribute.value)}`;
-            index = attribute.end;
-            continue;
+          if (!attribute || !isValidAttributeSelector(attribute.value)) {
+            throw new Error(`invalid attribute selector ${attribute?.value ?? selector.slice(index)} cannot be transported into generated block CSS`);
           }
+          output += `.${markerFor('attribute', attribute.value)}`;
+          index = attribute.end;
+          continue;
         }
         output += char;
         index += 1;
@@ -515,6 +829,78 @@ export function createSelectorDependencyTransport(): SelectorDependencyTransport
       return output;
     },
   };
+}
+
+/**
+ * Accept the portable attribute-selector subset the DOM matcher handles in HTML. Deliberately
+ * reject namespaces/comments/exotic forms rather than creating a marker for a selector we cannot
+ * prove will match after conversion.
+ */
+function isValidAttributeSelector(selector: string): boolean {
+  if (!selector.startsWith('[') || !selector.endsWith(']')) {
+    return false;
+  }
+  const body = selector.slice(1, -1);
+  let index = skipSelectorWhitespace(body, 0);
+  const name = readValidCssIdentifier(body, index);
+  if (!name) return false;
+  index = skipSelectorWhitespace(body, name.end);
+  if (index === body.length) return true;
+
+  const operator = /^(?:[~|^$*]?=)/.exec(body.slice(index))?.[0];
+  if (!operator) return false;
+  index = skipSelectorWhitespace(body, index + operator.length);
+  if (index >= body.length) return false;
+
+  if (isSelectorQuote(body[index])) {
+    const quote = body[index];
+    index += 1;
+    while (index < body.length) {
+      if (body[index] === '\\') {
+        index += 2;
+      } else if (body[index] === quote) {
+        index += 1;
+        break;
+      } else {
+        index += 1;
+      }
+    }
+    if (body[index - 1] !== quote) return false;
+  } else {
+    const value = readValidCssIdentifier(body, index);
+    if (!value) return false;
+    index = value.end;
+  }
+
+  index = skipSelectorWhitespace(body, index);
+  if (index === body.length) return true;
+  if ((body[index] === 'i' || body[index] === 'I' || body[index] === 's' || body[index] === 'S')
+    && skipSelectorWhitespace(body, index + 1) === body.length) {
+    return true;
+  }
+  return false;
+}
+
+function skipSelectorWhitespace(value: string, start: number): number {
+  let index = start;
+  while (/\s/.test(value[index] ?? '')) index += 1;
+  return index;
+}
+
+function isSelectorQuote(value: string | undefined): value is '"' | "'" {
+  return value === '"' || value === "'";
+}
+
+function readValidCssIdentifier(value: string, start: number): { end: number } | undefined {
+  const raw = value[start];
+  if (!raw || (raw !== '\\' && !raw.startsWith('-') && !/[A-Za-z_]/.test(raw) && raw.codePointAt(0)! < 0x80)) {
+    return undefined;
+  }
+  if (raw === '-' && /[0-9]/.test(value[start + 1] ?? '')) {
+    return undefined;
+  }
+  const identifier = readCssIdentifier(value, start);
+  return identifier ? { end: identifier.end } : undefined;
 }
 
 /** Read class names from selectors/CSS with CSS escape semantics (`.\\32xl\\:block` → `2xl:block`). */

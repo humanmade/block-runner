@@ -3,6 +3,7 @@ export { validate } from './gate/validate.js';
 export { convert } from './convert/assemble.js';
 export { author } from './author/index.js';
 export {
+  compileTailwindBuildGraph,
   hasTailwindSignal,
   renderResidualCss,
   scanStylesheet,
@@ -10,6 +11,7 @@ export {
   scopeStylesheet,
   validateCssBuildGraph,
 } from './author/styles.js';
+export type { CssBuildGraph, TailwindCompilation, TailwindCompilationOptions } from './author/styles.js';
 export {
   classifyCssUrlReference,
   processCssAssets,
@@ -102,6 +104,8 @@ export type {
   TokenResolver,
   TokenResolverKind,
   TailwindBuildGraph,
+  TailwindCompiler,
+  TailwindCompilerInput,
   ValidateOptions,
   WpBlock,
 } from './types.js';

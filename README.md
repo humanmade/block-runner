@@ -391,12 +391,15 @@ comes from a block plugin, or is dropped, and every drop or escalation is report
 
 ### Registered-block CSS and assets
 
-`author` accepts compiled CSS through `author.styles.css` (or `<style>` content in the design).
-It does not infer Tailwind output from class names or ship Tailwind at runtime. When Tailwind is
-detected, supply its complete `author.styles.tailwind` graph: CSS entries, resolved imports and
-directives, sources, safelist, plugins, environment, and browser target. Missing inputs are
-reported field by field and generation stops; the supplied CSS must be compiler output, with every
-referenced `--tw-*` variable defined in that output.
+`author` accepts compiled CSS through `author.styles.css` (or `<style>` content in the design), but
+its `author.styles.mode` must explicitly be `css` or `tailwind`. It does not infer Tailwind from
+compiled utility declarations or ship it at runtime. In `tailwind` mode, supply the complete
+`author.styles.tailwind` graph: CSS entries, resolved imports and directives, sources, safelist,
+plugins, environment, browser target, and the project’s pinned compiler. `author` materializes that
+graph and runs the compiler; source directives use its output, while separately supplied CSS must
+match it. Missing inputs, unreadable entries/imports, compiler failures, and mismatches are reported
+field by field and generation stops. Every referenced `--tw-*` variable must also be defined in that
+output.
 
 Non-native selectors are preserved only when they can be rooted beneath the generated block's
 deterministic `.wp-block-<namespace>-<slug>` class. Responsive, container-query, and pseudo-state

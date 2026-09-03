@@ -82,6 +82,8 @@
     "commander": "15.0.0",
     "fast-glob": "3.3.3",
     "jsdom": "29.1.1",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "wesper": "0.0.2"
   },
   "devDependencies": {

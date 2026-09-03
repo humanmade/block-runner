@@ -604,16 +604,17 @@ function imageSetStringReferences(
   fontRanges: Array<{ start: number; end: number }>,
 ): CssUrlReference[] {
   const references: CssUrlReference[] = [];
-  let index = start;
-  while (index < end) {
-    if (!isQuote(css[index])) {
-      index += 1;
+  for (const candidate of imageSetCandidates(css, start, end)) {
+    // CSS Images permits a direct string only in the candidate image position. Quoted strings in
+    // descriptors such as `type("image/avif")`, or inside url(), are not assets themselves.
+    const candidateStart = skipCssSpaceAndComments(css, candidate.start, candidate.end);
+    if (!isQuote(css[candidateStart])) {
       continue;
     }
-    const quote = css[index];
-    const valueStart = index + 1;
+    const quote = css[candidateStart];
+    const valueStart = candidateStart + 1;
     let cursor = valueStart;
-    while (cursor < end) {
+    while (cursor < candidate.end) {
       if (css[cursor] === '\\') {
         cursor += 2;
         continue;
@@ -621,26 +622,73 @@ function imageSetStringReferences(
       if (css[cursor] === quote) break;
       cursor += 1;
     }
-    if (cursor >= end) break;
-
-    // A quoted `url("...")` candidate is accounted for by the ordinary url() scanner. Only
-    // image-set's direct string grammar needs this additional reference type.
-    const before = css.slice(Math.max(start, index - 12), index);
-    if (!/url\(\s*$/i.test(before)) {
-      const value = unescapeCssUrl(css.slice(valueStart, cursor).trim());
-      references.push({
-        raw: css.slice(index, cursor + 1),
-        url: value,
-        start: index,
-        end: cursor + 1,
-        location: locationAt(css, index, sourcePath),
-        kind: fontRanges.some((range) => index >= range.start && index < range.end) || isFontUrl(value) ? 'font' : 'asset',
-        syntax: 'string',
-      });
+    if (cursor >= candidate.end) {
+      continue;
     }
-    index = cursor + 1;
+    const value = unescapeCssUrl(css.slice(valueStart, cursor).trim());
+    references.push({
+      raw: css.slice(candidateStart, cursor + 1),
+      url: value,
+      start: candidateStart,
+      end: cursor + 1,
+      location: locationAt(css, candidateStart, sourcePath),
+      kind: fontRanges.some((range) => candidateStart >= range.start && candidateStart < range.end) || isFontUrl(value) ? 'font' : 'asset',
+      syntax: 'string',
+    });
   }
   return references;
+}
+
+/** Top-level image-set candidates; commas in url(), type(), comments, and strings stay nested. */
+function imageSetCandidates(css: string, start: number, end: number): Array<{ start: number; end: number }> {
+  const candidates: Array<{ start: number; end: number }> = [];
+  let candidateStart = start;
+  let depth = 0;
+  let quote: string | undefined;
+  for (let index = start; index < end; index += 1) {
+    const char = css[index];
+    if (quote) {
+      if (char === '\\') index += 1;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (startsComment(css, index)) {
+      index = skipComment(css, index + 2) - 1;
+      continue;
+    }
+    if (isQuote(char)) {
+      quote = char;
+      continue;
+    }
+    if (char === '(') {
+      depth += 1;
+      continue;
+    }
+    if (char === ')') {
+      depth = Math.max(0, depth - 1);
+      continue;
+    }
+    if (char === ',' && depth === 0) {
+      candidates.push({ start: candidateStart, end: index });
+      candidateStart = index + 1;
+    }
+  }
+  candidates.push({ start: candidateStart, end });
+  return candidates;
+}
+
+function skipCssSpaceAndComments(css: string, start: number, end: number): number {
+  let index = start;
+  while (index < end) {
+    if (/\s/.test(css[index])) {
+      index += 1;
+    } else if (startsComment(css, index)) {
+      index = Math.min(end, skipComment(css, index + 2));
+    } else {
+      break;
+    }
+  }
+  return index;
 }
 
 function unescapeCssUrl(value: string): string {

@@ -44,6 +44,8 @@ export interface StyleLedgerEntry {
   important?: boolean;
   /** Position of the originating stylesheet rule, so the sidecar can keep rules in authored order. */
   originIndex?: number;
+  /** Stable stylesheet-rule identity for authoring's exact declaration handoff. */
+  originId?: string;
   /** Why it was dropped, or what it became. Phrased to point at the input. */
   reason?: string;
   /** The shorthand the author actually wrote, when this came from expanding one. */
@@ -60,6 +62,23 @@ export interface StyleLedgerEntry {
    * or CSS with no single block to attach a class to. Well-formed drops are carryable by default.
    */
   carryable?: false;
+}
+
+/**
+ * Stable identity for one declaration across authoring's preflight and emit pass.
+ *
+ * Selector/property/value is not sufficient: `.card { color:red }` and the identical declaration
+ * inside `@media` are different source declarations with different runtime meaning. `originId`
+ * is the scanner's rule identity when available, while the empty fallback keeps this utility
+ * compatible with inline/non-authoring callers.
+ */
+export function sourceDeclarationKey(
+  selector: string,
+  property: string,
+  value: string,
+  originId?: string,
+): string {
+  return `${originId ?? ''}\u0000${selector.trim()}\u0000${property.trim().toLowerCase()}\u0000${value.trim()}`;
 }
 
 /**

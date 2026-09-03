@@ -92,26 +92,58 @@ export interface AssetLedgerEntry {
   source?: SourceLocation;
 }
 
+/** The materialized inputs handed to the project's pinned Tailwind compiler. */
+export interface TailwindCompilerInput {
+  /** Each declared entry after Block Runner has read it from the supplied style graph. */
+  cssEntries: ReadonlyArray<{ path: string; css: string }>;
+  /** Resolved local imports supplied as part of the graph. */
+  imports: ReadonlyArray<{ path: string; css: string }>;
+  directives: readonly string[];
+  sources: readonly string[];
+  safelist: readonly string[];
+  plugins: readonly string[];
+  environment: Readonly<Record<string, string | number | boolean | null | undefined>>;
+  browserTarget: string | readonly string[];
+}
+
+/**
+ * A compiler deliberately comes from the calling project, where its Tailwind version and plugins
+ * are pinned.  Block Runner invokes it during authoring and never ships it with the generated
+ * block.  The name/version fields make that provenance visible in configuration and reports.
+ */
+export interface TailwindCompiler {
+  name: string;
+  version: string;
+  compile(input: TailwindCompilerInput): string | Promise<string>;
+}
+
 /**
  * Inputs required to make a Tailwind fidelity claim.  Empty arrays/objects are meaningful: they
  * say that a project has explicitly supplied no plugins/safelist/etc.  An omitted field is not
  * equivalent to an empty one and is reported as missing.
  */
 export interface TailwindBuildGraph {
-  cssEntries?: string[];
-  imports?: string[];
-  directives?: string[];
-  sources?: string[];
-  safelist?: string[];
-  plugins?: string[];
-  environment?: Record<string, string | undefined>;
-  browserTarget?: string | string[];
+  cssEntries?: readonly string[];
+  imports?: readonly string[];
+  directives?: readonly string[];
+  sources?: readonly string[];
+  safelist?: readonly string[];
+  plugins?: readonly string[];
+  environment?: Readonly<Record<string, string | number | boolean | null | undefined>>;
+  browserTarget?: string | readonly string[];
+  /** The pinned compiler that must produce the stylesheet used for authoring. */
+  compiler?: TailwindCompiler;
 }
 
 export interface AuthorStyleConfig {
-  /** Actual compiled CSS. Block Runner never derives it from Tailwind class tokens. */
+  /**
+   * Declares how the stylesheet was produced. CSS provenance cannot be recovered from compiled
+   * declarations, so this is required whenever authoring receives non-empty stylesheet input.
+   */
+  mode?: 'css' | 'tailwind';
+  /** Actual compiled CSS. In Tailwind mode it must match the pinned compiler output. */
   css?: string;
-  /** Optional source build graph, required when the CSS uses Tailwind directives or variables. */
+  /** Required for Tailwind source or runtime output; its compiler is run during authoring. */
   tailwind?: TailwindBuildGraph;
   /** Explicitly supplied editor-only affordances. Parity CSS is always emitted through `style`. */
   editorCss?: string;
@@ -249,6 +281,11 @@ export interface ConvertOptions extends CommonOptions {
   preserveSourceClasses?: readonly string[];
   /** Internal authoring handoff for IDs/attributes referenced by the generated scoped CSS. */
   preserveSourceSelectorDependencies?: readonly SourceSelectorDependency[];
+  /**
+   * Source class declarations retained by the authored stylesheet. They are excluded from the
+   * native styling pass so one declaration never lands both as scoped CSS and as a block style.
+   */
+  suppressSourceDeclarations?: readonly string[];
   /** Internal authoring boundary for asset forms a native Core block cannot faithfully retain. */
   preserveAssetForms?: boolean;
   /** Internal observer used by registered-block authoring to account for inline declarations. */
