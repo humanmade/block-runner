@@ -146,6 +146,8 @@ Gutenberg before it reaches the editor.
 | --- | --- |
 | `convert` | Authored HTML to native blocks. The only path that carries CSS. |
 | `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
+| `author preview <plan\|->` | Validate and render a versioned registered-block AuthoringPlan without writing files. |
+| `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write only the reviewed plan bound to its SHA-256 confirmation and destination. |
 | `validate` | Check block markup against headless Gutenberg. |
 | `fix` | Canonicalize near-miss block markup. |
 | `context` | Read a WordPress site into a `site.context.json` manifest (read-only). |
@@ -157,6 +159,43 @@ block-runner assemble intent.json                 # structure in, blocks out
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
 ```
+
+### Registered-block authoring
+
+For a reusable registered block, first make a versioned **AuthoringPlan** rather than jumping
+from a description or design directly to source. The plan records the block target and native
+structure, editable and locked fields, style outcomes, pattern overrides, assets, planned files,
+and warnings. Review it before any write:
+
+```sh
+block-runner author preview authoring-plan.json --output-dir generated/feature-grid
+```
+
+The plain preview is deterministic for a plan, generator version, destination snapshot, and
+terminal width. It shows the plan SHA-256 and a separate confirmation SHA-256 bound to the
+planned destination and its fingerprint, labels fixed/editable/override fields without relying
+on colour, and ends with `No files written.` Preview is
+read-only; it has no prompt. `NO_COLOR` is honoured, and `--json` never contains ANSI escape
+sequences.
+
+An installed Block Runner skill presents that preview to the user and asks for explicit
+approval. The CLI itself is always non-interactive. After the user approves the displayed
+confirmation hash, write the exact same plan to the previewed output directory. `--output-dir` is
+the exact package destination (not a parent root):
+
+```sh
+block-runner author write authoring-plan.json \
+  --confirm '<full-sha-256-from-preview>' \
+  --output-dir '<the-previewed-directory>'
+```
+
+Missing, stale, or incorrect confirmation values write nothing. If a plan replaces existing
+files, get a distinct, explicit replacement decision; a path collision, traversal or absolute
+path, changed destination, or any destination-prefix symlink fails before any write. The command
+rechecks these conditions immediately before exclusive, atomic writes. Use `-` for plan input
+only—never as a source of confirmation. Source generation is separate: this preview release writes only
+`files[].content` already contained in the confirmed plan, so a plan with descriptions alone is
+a successful no-op.
 
 Read from stdin with `-`:
 
