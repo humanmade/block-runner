@@ -187,6 +187,134 @@ export interface IntentTree {
   blocks: IntentNode[];
 }
 
+/**
+ * The lock applied to the one InnerBlocks area a generated block owns.
+ *
+ * `false` is intentional rather than an omitted value: it prevents an inherited template lock
+ * from leaking into an otherwise editable generated block.
+ */
+export type InnerBlocksLock = false | 'insert' | 'all' | 'contentOnly';
+/** Alias for callers that use the WordPress `templateLock` terminology. */
+export type TemplateLock = InnerBlocksLock;
+
+/**
+ * Semantic roles used by the registered-block authoring path.  Roles are deliberately about the
+ * editor surface, not the source HTML tag.  For example, a visual eyebrow is still a paragraph
+ * unless it has document-outline meaning and should be a heading.
+ */
+export type AuthoringRole =
+  | 'wrapper'
+  | 'group'
+  | 'columns'
+  | 'column'
+  | 'cover'
+  | 'heading'
+  | 'paragraph'
+  | 'image'
+  | 'list'
+  | 'list-item'
+  | 'buttons'
+  | 'button'
+  | 'quote'
+  | 'custom';
+
+/**
+ * A typed description of one node in a generated registered block.
+ *
+ * `path` is a producer-owned stable identifier, not an array index invented while emitting
+ * source. It lets previews, review UIs, and diagnostics point at exactly the same authoring
+ * decision after a template has been compiled. Ordinary values intentionally live on the native
+ * child (`content`, `url`, `alt`, and so on), never on the wrapper block.
+ */
+export interface AuthoringNode {
+  /** A stable, unique path within the plan, e.g. `hero.content.title`. */
+  path: string;
+  /** The editor-facing semantic role. */
+  role: AuthoringRole;
+  /**
+   * Explicitly select a block implementation. This is required for `custom`, optional for native
+   * roles (where the compiler supplies the matching core block).
+   */
+  block?: string;
+  /** Initial Gutenberg attributes for this child block. */
+  attributes?: Record<string, unknown>;
+  /** Initial rich-text value for heading, paragraph, list item, button, or a quote's generated paragraph child. */
+  content?: string;
+  /** Initial image or button URL. */
+  url?: string;
+  /** Initial image alternative text. */
+  alt?: string;
+  /** Initial heading level. */
+  level?: number;
+  /** Nested native block template. */
+  children?: AuthoringNode[];
+  /**
+   * A custom child that needs its own InnerBlocks region is allowed only with an explicit reason.
+   * This keeps the generated wrapper at exactly one InnerBlocks region by default.
+   */
+  justification?: string;
+  /** Whether this custom child requires a separately implemented InnerBlocks region. */
+  requiresOwnInnerBlocks?: boolean;
+}
+
+/** A generated package is one custom wrapper around this native child template. */
+export interface AuthoringPlan {
+  /** Fully-qualified registered block name, such as `acme/hero`. */
+  name: string;
+  title: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  textdomain?: string;
+  /** The semantic wrapper. Its children are the direct InnerBlocks children. */
+  root: AuthoringNode;
+  /** Default: `false`, so a post or pattern lock is not inherited accidentally. */
+  templateLock?: InnerBlocksLock;
+  /**
+   * Optional explicit direct-child allowlist. When absent it is inferred only from
+   * `root.children`; nested children do not leak into this list.
+   */
+  allowedBlocks?: string[];
+}
+
+/** A concrete native editor field rendered by a child block. */
+export interface AuthoringEditableField {
+  /** Stable plan path of the node that owns this surface. */
+  path: string;
+  role: AuthoringRole;
+  block: string;
+  attribute: string;
+  /** The native WordPress editor surface that owns the field. */
+  surface: 'richText' | 'media' | 'link' | 'altText';
+}
+
+export interface AuthoringDiagnostic {
+  level: 'warning' | 'error';
+  code:
+    | 'duplicate-path'
+    | 'missing-path'
+    | 'invalid-root'
+    | 'unsupported-role'
+    | 'custom-child-justification-required'
+    | 'multiple-innerblocks-regions'
+    | 'gutenberg-76794';
+  message: string;
+  path?: string;
+}
+
+/** Gutenberg's `[ name, attributes, children? ]` InnerBlocks template tuple. */
+export type AuthoringTemplate = Array<[string, Record<string, unknown>, AuthoringTemplate?]>;
+
+/** The deterministic source package emitted from an AuthoringPlan. */
+export interface CompiledAuthoringBlock {
+  files: Record<string, string>;
+  template: AuthoringTemplate;
+  allowedBlocks: string[];
+  templateLock: InnerBlocksLock;
+  editableFields: AuthoringEditableField[];
+  diagnostics: AuthoringDiagnostic[];
+}
+
 export type WpBlock = {
   name: string;
   attributes: Record<string, unknown>;
@@ -244,6 +372,8 @@ export interface WpModules {
   serialize: (blocks: WpBlock[] | WpBlock) => string;
   validateBlock: (block: WpBlock) => [boolean, unknown[]?];
   getBlockType: (name: string) => unknown;
+  registerBlockType: (nameOrMetadata: string | Record<string, unknown>, settings?: Record<string, unknown>) => unknown;
+  unregisterBlockType: (name: string) => unknown;
 }
 
 export class HeadlessBootError extends Error {

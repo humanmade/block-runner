@@ -1,0 +1,22 @@
+{
+  "name": "acme/content-only-card",
+  "title": "Content-only card",
+  "templateLock": "contentOnly",
+  "root": {
+    "path": "card",
+    "role": "wrapper",
+    "children": [
+      {
+        "path": "card.title",
+        "role": "heading",
+        "content": "A real Core heading",
+        "level": 2
+      },
+      {
+        "path": "card.copy",
+        "role": "paragraph",
+        "content": "Only native child content is editable."
+      }
+    ]
+  }
+}
