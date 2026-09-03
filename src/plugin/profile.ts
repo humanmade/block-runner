@@ -158,11 +158,16 @@ export async function detectWpScriptsPlugin(rootDirectory: string): Promise<Plug
 
   const scripts = asObjectOrEmpty(packageJson.scripts);
   const buildScript = typeof scripts.build === 'string' ? scripts.build : undefined;
-  if (!buildScript || !isWpScriptsBuild(buildScript)) {
+  if (!buildScript || /[;&|><`$]/.test(buildScript)) {
     return unsupported('unsupported', root, 'The package build script is not a direct wp-scripts build command.');
   }
-  if (/[;&|><`$]/.test(buildScript) || /--(?:webpack-config|webpack-src-dir|config)(?:=|\s)/.test(buildScript)) {
-    return unsupported('unsupported', root, 'A custom webpack/config build layout is outside the supported wp-scripts profile.');
+  const parsedBuild = parseWpScriptsBuild(buildScript);
+  if (!parsedBuild) {
+    return unsupported(
+      'unsupported',
+      root,
+      'The package build script must be a direct wp-scripts build command with no positional entries and only supported profile flags.',
+    );
   }
   const automaticWebpackConfig = await findAutomaticWebpackConfig(root);
   if (automaticWebpackConfig) {
@@ -173,8 +178,8 @@ export async function detectWpScriptsPlugin(rootDirectory: string): Promise<Plug
     );
   }
 
-  const sourceRoot = commandPath(buildScript, 'source-path') ?? 'src';
-  const buildRoot = commandPath(buildScript, 'output-path') ?? 'build';
+  const sourceRoot = parsedBuild.sourcePath ?? 'src';
+  const buildRoot = parsedBuild.outputPath ?? 'build';
   if (!isSafeRelativeDirectory(sourceRoot) || !isSafeRelativeDirectory(buildRoot)) {
     return unsupported('unsupported', root, 'The wp-scripts source or output path is not a safe relative directory.');
   }
@@ -518,13 +523,89 @@ function asObjectOrEmpty(value: unknown): Record<string, unknown> {
   return value && typeof value === 'object' && !Array.isArray(value) ? value as Record<string, unknown> : {};
 }
 
-function isWpScriptsBuild(command: string): boolean {
-  return /^\s*wp-scripts\s+build(?:\s|$)/.test(command);
+interface ParsedWpScriptsBuild {
+  sourcePath?: string;
+  outputPath?: string;
+  blocksManifest: boolean;
 }
 
-function commandPath(command: string, option: 'source-path' | 'output-path'): string | undefined {
-  const match = command.match(new RegExp(`--${option}(?:=|\\s+)([^\\s]+)`));
-  return match?.[1]?.replace(/^['"]|['"]$/g, '');
+/**
+ * This profile relies on wp-scripts' metadata entry discovery, which is disabled when a build
+ * entry is supplied positionally. Parse the small, explicit command shape rather than merely
+ * matching its prefix so an arbitrary entry point cannot be mistaken for recursive discovery.
+ */
+function parseWpScriptsBuild(command: string): ParsedWpScriptsBuild | undefined {
+  const argv = shellWords(command);
+  if (!argv || argv[0] !== 'wp-scripts' || argv[1] !== 'build') return undefined;
+
+  const parsed: ParsedWpScriptsBuild = { blocksManifest: false };
+  for (let index = 2; index < argv.length; index += 1) {
+    const argument = argv[index]!;
+    if (argument === '--blocks-manifest') {
+      if (parsed.blocksManifest) return undefined;
+      parsed.blocksManifest = true;
+      continue;
+    }
+
+    const option = argument.match(/^--(source-path|output-path)(?:=(.*))?$/);
+    if (!option) return undefined;
+    const key = option[1] === 'source-path' ? 'sourcePath' : 'outputPath';
+    if (parsed[key] !== undefined) return undefined;
+
+    const value = option[2] === undefined ? argv[++index] : option[2];
+    if (!value || value.startsWith('--')) return undefined;
+    parsed[key] = value;
+  }
+  return parsed;
+}
+
+/** Split the limited package-script syntax we support, including quoted option values. */
+function shellWords(command: string): string[] | undefined {
+  const words: string[] = [];
+  let word = '';
+  let hasWord = false;
+  let quote: '"' | "'" | undefined;
+  let escaped = false;
+
+  for (const character of command) {
+    if (escaped) {
+      word += character;
+      hasWord = true;
+      escaped = false;
+      continue;
+    }
+    if (character === '\\') {
+      escaped = true;
+      hasWord = true;
+      continue;
+    }
+    if (quote) {
+      if (character === quote) quote = undefined;
+      else word += character;
+      hasWord = true;
+      continue;
+    }
+    if (character === '"' || character === "'") {
+      quote = character;
+      hasWord = true;
+      continue;
+    }
+    if (/\s/.test(character)) {
+      if (hasWord) words.push(word);
+      word = '';
+      hasWord = false;
+      continue;
+    }
+    word += character;
+    hasWord = true;
+  }
+  if (quote || escaped) return undefined;
+  if (hasWord) words.push(word);
+  return words;
+}
+
+function isWpScriptsBuild(command: string): boolean {
+  return parseWpScriptsBuild(command) !== undefined;
 }
 
 function isSafeRelativeDirectory(value: string): boolean {

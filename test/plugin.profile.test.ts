@@ -98,6 +98,15 @@ describe('wp-scripts plugin profile', () => {
     await expect(stat(path.join(root, 'src'))).rejects.toThrow();
   });
 
+  it('rejects positional wp-scripts build entries because they bypass metadata entry discovery', async () => {
+    const root = await existingDefaultDirectPlugin('wp-scripts build custom.js');
+
+    await expect(detectWpScriptsPlugin(root)).resolves.toMatchObject({
+      kind: 'unsupported',
+      standaloneAvailable: true,
+    });
+  });
+
   it('rejects version ranges and webpack configurations that wp-scripts loads implicitly', async () => {
     const ranged = await existingDirectPlugin();
     await writeFile(path.join(ranged, 'package.json'), JSON.stringify({
@@ -219,10 +228,22 @@ async function existingDirectPlugin(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-'));
   await writeFile(path.join(root, 'package.json'), JSON.stringify({
     devDependencies: { '@wordpress/scripts': '34.2.0' },
-    scripts: { build: 'wp-scripts build --source-path=src/blocks --output-path=build/blocks' },
+    scripts: { build: 'wp-scripts build --source-path src/blocks --output-path build/blocks' },
   }, null, 2));
   await writeFile(path.join(root, 'main.php'), `<?php\nadd_action( 'init', function() {\n\tregister_block_type( __DIR__ . '/build/blocks/existing' );\n} );\n`);
   await writeSourceBlock(root, 'src/blocks/existing');
+  return root;
+}
+
+/** A valid default-roots host makes the positional-entry regression observable. */
+async function existingDefaultDirectPlugin(build: string): Promise<string> {
+  const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-'));
+  await writeFile(path.join(root, 'package.json'), JSON.stringify({
+    devDependencies: { '@wordpress/scripts': '34.2.0' },
+    scripts: { build },
+  }, null, 2));
+  await writeFile(path.join(root, 'main.php'), `<?php\nadd_action( 'init', function() {\n\tregister_block_type( __DIR__ . '/build/existing' );\n} );\n`);
+  await writeSourceBlock(root, 'src/existing');
   return root;
 }
 
