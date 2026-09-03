@@ -401,7 +401,7 @@ function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
             .map(
               (r) => `<figure class="prod">
                 <figcaption>${esc(r.producer)}</figcaption>
-                <div class="frame"><iframe sandbox loading="lazy" srcdoc="${escAttr(preparePreview(r.inputHtml))}"></iframe></div>
+                <div class="frame"><iframe sandbox loading="eager" srcdoc="${escAttr(preparePreview(r.inputHtml))}"></iframe></div>
               </figure>`,
             )
             .join('\n')
