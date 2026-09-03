@@ -9,6 +9,8 @@ This file is auto-generated from `decisions.jsonl`. Edit records there, then run
 |---|---|---|---|
 | DEC-001 | Accept explicit equivalent benchmark trees | accepted | 2026-09-02 |
 | DEC-002 | Use one canonical cross-harness skill bundle | accepted | 2026-09-02 |
+| DEC-003 | Generate one registered block per input design | accepted | 2026-09-03 |
+| DEC-004 | Make registered-block authoring the 0.9 preview | accepted | 2026-09-03 |
 
 ## Records
 
@@ -47,5 +49,43 @@ Keep one specification-valid source at `skills/block-runner` with detailed mater
 #### Consequences
 
 One npm artifact can serve current cross-agent clients, Claude Code, arbitrary skill roots, and stdout-only harnesses without vendor-specific source forks. The two default installed copies may duplicate bytes, but installation is explicit and deterministic; symlink projection, plugins, lockfiles, and marketplace packaging remain deferred until they solve a demonstrated distribution need.
+
+---
+
+### DEC-003: Generate one registered block per input design
+
+**Status:** accepted
+**Date:** 2026-09-03
+
+#### Context
+
+Block Runner currently converts authored HTML into block markup for content placed on a site. A new code-authoring mode could easily drift into batch design-system synthesis, cross-input deduplication, or preservation of transport-layer dependencies such as Tailwind. The intended outcome is narrower: turn one supplied design into one reusable, registered WordPress block that belongs in the destination editor.
+
+#### Decision
+
+Each authoring run takes one exported HTML design plus its assets and produces one named, registered WordPress block source package. Multiple designs remain independent inputs and outputs. Generated blocks use native Block Editor primitives, map styling to WordPress supports and destination tokens where possible, emit scoped CSS where necessary, and require no Tailwind runtime. Pattern overrides are a first-class output requirement. General Block Bindings remain a later extension, but the generated content model must not prevent them.
+
+#### Consequences
+
+The first release can optimise for faithful one-to-one block generation and real editor behaviour instead of premature component discovery. Repeated runs may duplicate styles or structure, which is acceptable in this phase. Direct Figma or InDesign ingestion, cross-block deduplication, invented dynamic PHP behaviour, and broad data-binding generation remain out of scope. Acceptance must prove the generated block can build, register, insert, edit, save, reopen, render, and participate in pattern overrides on the target WordPress version.
+
+---
+
+### DEC-004: Make registered-block authoring the 0.9 preview
+
+**Status:** accepted
+**Date:** 2026-09-03
+
+#### Context
+
+The registered-block authoring work is a material expansion of Block Runner and needs a real testing period before a 1.0 promise. The public website also needs a coherent description of the product after the recent intent-path, skill, benchmark, styling, context, and packaging work; its current rules-only framing is no longer accurate.
+
+#### Decision
+
+Ship the one-design-to-registered-block capability as the defining 0.9 preview on the path to 1.0. Maintain a separate future-state product brief that describes Block Runner assuming the 0.9 requirements are complete, so website design and messaging can be developed against the intended product rather than the current partial implementation.
+
+#### Consequences
+
+The 0.9 acceptance gate must cover both implementation quality and a testing-ready product narrative. Forward-looking documentation must label itself as an assumed completed 0.9 state and must not be confused with the current npm release. The rules walker remains an offline path and benchmark control, not the headline definition of Block Runner.
 
 ---
