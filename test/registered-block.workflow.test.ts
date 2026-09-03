@@ -89,11 +89,7 @@ function plan(): Record<string, unknown> {
     styles: { strategy: 'native', outcomes: [] },
     pattern: { ready: true, overrides: [{ field: 'heading' }] },
     assets: [],
-    files: [
-      { path: 'block.json', kind: 'metadata', operation: 'create' },
-      { path: 'index.js', kind: 'editor', operation: 'create' },
-      { path: 'style.css', kind: 'style', operation: 'create' },
-    ],
+    files: [],
     warnings: [],
   };
 }

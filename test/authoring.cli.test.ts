@@ -18,7 +18,7 @@ function plan(overrides: Record<string, unknown> = {}): Record<string, unknown> 
     styles: { strategy: 'native', outcomes: [] },
     pattern: { ready: false, overrides: [] },
     assets: [],
-    files: [{ path: 'block.json', content: '{"apiVersion":3}\n', operation: 'create' }],
+    files: [],
     warnings: [],
     ...overrides,
   };
@@ -57,8 +57,14 @@ describe('author CLI', () => {
       project,
     );
     expect(written.code).toBe(0);
-    expect(JSON.parse(written.stdout)).toMatchObject({ written: ['block.json'], noFilesWritten: false });
-    expect(await readFile(path.join(project, 'generated', 'block.json'), 'utf8')).toBe('{"apiVersion":3}\n');
+    expect(JSON.parse(written.stdout)).toMatchObject({
+      written: ['block.json', 'index.js', 'edit.js', 'save.js', 'style.scss', 'editor.scss', 'block.php'],
+      noFilesWritten: false,
+    });
+    expect(JSON.parse(await readFile(path.join(project, 'generated', 'block.json'), 'utf8'))).toMatchObject({
+      name: 'example/notice',
+      title: 'Notice',
+    });
   });
 
   it('rejects approval when the previewed destination fingerprint has changed', async () => {
@@ -67,7 +73,7 @@ describe('author CLI', () => {
     await mkdir(destination);
     await writeFile(path.join(destination, 'block.json'), 'before\n');
     await writeFile(path.join(project, 'plan.json'), JSON.stringify(plan({
-      files: [{ path: 'block.json', content: 'replacement\n', operation: 'replace' }],
+      files: [{ path: 'block.json', operation: 'replace' }],
     })));
 
     const preview = await runCli(['author', 'preview', 'plan.json', '--output-dir', 'generated', '--json'], project);

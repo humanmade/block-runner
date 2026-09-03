@@ -1,0 +1,8 @@
+{
+  "targetWordPress": "7.1",
+  "schemaUrl": "https://schemas.wp.org/wp/7.1/block.json",
+  "upstream": "https://github.com/WordPress/gutenberg/blob/trunk/schemas/json/block.json",
+  "retrieved": "2026-09-03",
+  "sha256": "d45bc343763d21d2b34987fa86b826d1820ff3322945cbe60e63da5f7be5a81a",
+  "note": "The checked-in WordPress schema snapshot is the validation authority. Change it only with a target-version and hash review."
+}
