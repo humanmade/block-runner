@@ -406,7 +406,7 @@ function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
             )
             .join('\n')
         : `<p class="missing">No producer inputs for this layout yet.</p>`;
-      return `<section class="layout">
+      return `<section class="layout" id="${esc(spec.layout)}">
         <header class="layout__head">
           <h2>${esc(humanize(spec.layout))}</h2>
           ${spec.intent ? `<p class="intent">${esc(spec.intent)}</p>` : ''}
