@@ -469,4 +469,61 @@ describe('registered-block authoring parity ledger', () => {
     expect(assetReferences.every((asset) => asset.outcome === 'copied')).toBe(true);
     expect(assetReferences.map((asset) => asset.kind)).toEqual(expect.arrayContaining(['image', 'stylesheet', 'other']));
   });
+
+  it('accounts for SVG gradient, pattern, and animation href references without treating SVG links as navigation', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    const design = path.join(directory, 'design.html');
+    const outDir = path.join(directory, 'package');
+    await writeFile(design, '');
+    await writeFile(path.join(directory, 'gradients.svg'), '<svg/>');
+
+    const report = await author(
+      `<a href="guide.pdf">Guide</a><svg>
+        <linearGradient href="gradients.svg#linear" />
+        <radialGradient href="https://cdn.example/gradients.svg#radial" />
+        <pattern xlink:href="#pattern" />
+        <animate href="gradients.svg#animated" />
+        <animateMotion xlink:href="gradients.svg#motion" />
+        <animateTransform href="gradients.svg#transform" />
+        <set xlink:href="gradients.svg#set" />
+        <discard href="gradients.svg#discard" />
+      </svg>`,
+      { sourcePath: design, outDir, author: { name: 'acme/assets' } },
+    );
+
+    expect(report.ok).toBe(true);
+    const assets = report.assets ?? [];
+    expect(assets).toHaveLength(8);
+    expect(assets.filter((asset) => asset.reference.startsWith('gradients.svg')).every((asset) => asset.outcome === 'copied')).toBe(true);
+    expect(assets).toContainEqual(expect.objectContaining({
+      reference: 'https://cdn.example/gradients.svg#radial',
+      outcome: 'external',
+    }));
+    expect(assets).toContainEqual(expect.objectContaining({ reference: '#pattern', outcome: 'external' }));
+    expect(assets.some((asset) => asset.reference === 'guide.pdf')).toBe(false);
+    expect(report.package?.files['index.js']).toContain('./assets/');
+  });
+
+  it('blocks an unrecognized SVG href form instead of silently leaving it source-relative', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    const design = path.join(directory, 'design.html');
+    const outDir = path.join(directory, 'package');
+    await writeFile(design, '');
+    await writeFile(path.join(directory, 'unknown.svg'), '<svg/>');
+
+    const report = await author(
+      '<svg><foreignObject xlink:href="unknown.svg#content" /></svg>',
+      { sourcePath: design, outDir, author: { name: 'acme/assets' } },
+    );
+
+    expect(report.ok).toBe(false);
+    expect(report.assets).toContainEqual(expect.objectContaining({
+      reference: 'unknown.svg#content',
+      outcome: 'blocked',
+      reason: expect.stringMatching(/foreignObject.*xlink:href.*recognized/i),
+    }));
+    await expect(readFile(path.join(outDir, 'block.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
+  });
 });

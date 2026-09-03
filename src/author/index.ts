@@ -491,8 +491,13 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     reference: string,
     kind: AssetLedgerEntry['kind'],
   ): Promise<string | undefined> => {
+    // Legacy SVG font-face-uri references do not necessarily carry a modern font extension. Put
+    // those through a synthetic @font-face so the shared classifier preserves its font-license
+    // rules rather than mistaking one for a generic image asset.
     const processed = await rewriteCssAssets({
-      sourceCss: `x{background-image:url(${JSON.stringify(reference)})}`,
+      sourceCss: kind === 'font'
+        ? `@font-face{src:url(${JSON.stringify(reference)})}`
+        : `x{background-image:url(${JSON.stringify(reference)})}`,
       sourcePath: options.write ? options.sourcePath : undefined,
       destinationAssetDir: options.destinationAssetDir,
       allowFontLicense: false,
@@ -564,9 +569,29 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       }
     }
 
-    for (const { name: attribute, kind } of assetAttributesFor(element)) {
+    const assetAttributes = assetAttributesFor(element);
+    if (element.namespaceURI === 'http://www.w3.org/2000/svg') {
+      const knownAssetAttributes = new Set(assetAttributes.map(({ name }) => name.toLowerCase()));
+      for (const attribute of [...element.attributes]) {
+        const name = attribute.name.toLowerCase();
+        // SVG links are not all assets: `<a>` remains a normal navigational link. Every other
+        // element must be in the semantic table below before its href can pass through. This is
+        // deliberately fail-closed because an unknown link could otherwise leave a source-relative
+        // dependency in the generated package with no ledger outcome.
+        if (isSvgHrefAttribute(name) && element.localName.toLowerCase() !== 'a' && !knownAssetAttributes.has(name)) {
+          assets.push({
+            reference: attribute.value,
+            kind: 'other',
+            outcome: 'blocked',
+            reason: `SVG <${element.localName}> ${attribute.name} is not a recognized asset/reference attribute`,
+          });
+        }
+      }
+    }
+
+    for (const { name: attribute, kind } of assetAttributes) {
       const value = element.getAttribute(attribute);
-      if (!value?.trim()) continue;
+      if (value === null) continue;
       const rewritten = await processReference(value, kind);
       if (rewritten) {
         element.setAttribute(attribute, rewritten);
@@ -614,6 +639,41 @@ interface AssetAttribute {
   kind: AssetLedgerEntry['kind'];
 }
 
+const SVG_HREF_ASSET_KINDS: Readonly<Record<string, AssetLedgerEntry['kind']>> = {
+  // External image resources.
+  image: 'image',
+  feimage: 'image',
+  // SVG 2 reference attributes. These can point at an external SVG document as well as an
+  // element in this document, so they must receive the same classification/copy treatment as an
+  // ordinary asset reference instead of being inferred from a class or left source-relative.
+  animate: 'other',
+  animatecolor: 'other',
+  animatemotion: 'other',
+  animatetransform: 'other',
+  discard: 'other',
+  lineargradient: 'other',
+  mpath: 'other',
+  pattern: 'other',
+  radialgradient: 'other',
+  set: 'other',
+  textpath: 'other',
+  use: 'other',
+  // SVG 1.1/XLink forms remain in authored assets. Keep their kinds explicit rather than
+  // silently downgrading a legacy cursor/font/reference into an untracked string attribute.
+  altglyph: 'other',
+  'color-profile': 'other',
+  cursor: 'image',
+  'definition-src': 'font',
+  filter: 'other',
+  'font-face-uri': 'font',
+  tref: 'other',
+  glyphref: 'other',
+};
+
+function isSvgHrefAttribute(name: string): boolean {
+  return name === 'href' || name === 'xlink:href';
+}
+
 /**
  * Asset-bearing attributes are not interchangeable: HTML anchors use `href` for navigation while
  * SVG `<image href>` is a concrete image dependency. Keep the table element/namespace-aware so
@@ -623,13 +683,8 @@ interface AssetAttribute {
 function assetAttributesFor(element: Element): AssetAttribute[] {
   const tag = element.localName.toLowerCase();
   if (element.namespaceURI === 'http://www.w3.org/2000/svg') {
-    if (tag === 'image' || tag === 'feimage') {
-      return [{ name: 'href', kind: 'image' }, { name: 'xlink:href', kind: 'image' }];
-    }
-    if (tag === 'use' || tag === 'mpath' || tag === 'textpath') {
-      return [{ name: 'href', kind: 'other' }, { name: 'xlink:href', kind: 'other' }];
-    }
-    return [];
+    const kind = SVG_HREF_ASSET_KINDS[tag];
+    return kind ? [{ name: 'href', kind }, { name: 'xlink:href', kind }] : [];
   }
 
   switch (tag) {
