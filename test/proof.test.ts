@@ -8,6 +8,7 @@ import {
   createDefaultProofGateRecords,
   evaluateProofProfile,
   runProof,
+  type ProofGateContext,
 } from '../src/index.js';
 import { PROOF_GATE_IDS, type ProofGateId } from '../src/proof/profiles.js';
 
@@ -116,6 +117,108 @@ describe('content-addressed proof receipts', () => {
 
     expect(records).toEqual(new Set(PROOF_GATE_IDS.slice(0, 11)));
     expect(result.ok).toBe(false);
-    expect(result.profile.failedGates).toMatchObject([{ gate: 'editor_field_editing', status: 'blocked' }]);
+    expect(result.profile.failedGates).toContainEqual(expect.objectContaining({
+      gate: 'editor_field_editing',
+      status: 'blocked',
+    }));
+  });
+
+  it('requires retained, successful, parseable observation evidence and locked WordPress package pins', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-proof-observations-'));
+    const input = path.join(root, 'input.html');
+    const pluginZip = path.join(root, 'proof.zip');
+    await Promise.all([writeFile(input, '<p>proof input</p>'), writeFile(pluginZip, 'not-a-real-zip')]);
+
+    const verified = await runProof({
+      profile: 'runtime',
+      outputDir: root,
+      inputPath: input,
+      pluginZip,
+      fixture: { blockName: 'acme/proof' },
+      gateRunner: verifiedRuntimeGateRunner(),
+    });
+    const observationGate = verified.receipt.gates.find((record) => record.gate === 'environment_observation');
+    expect(verified.ok).toBe(true);
+    expect(observationGate).toMatchObject({ status: 'pass' });
+    expect(observationGate?.evidence).toContainEqual(verified.receipt.environment.observations);
+
+    const cases: Array<[string, (context: ProofGateContext, observations: Record<string, unknown>) => boolean | void, string]> = [
+      ['missing raw observation evidence', () => false, 'environment.observations'],
+      ['failed PHP observation command', (_context, observations) => {
+        (observations.php as { exitCode: number }).exitCode = 1;
+      }, 'observations.php.exitCode'],
+      ['malformed core hash', (_context, observations) => {
+        (observations.coreHash as { stdout: string }).stdout = 'not-a-sha256';
+      }, 'observations.coreHash.value'],
+      ['missing locked WordPress package', (context) => {
+        delete context.environment.wordpressPackages['@wordpress/env'];
+      }, 'wordpressPackages.@wordpress/env'],
+    ];
+
+    for (const [name, mutate, expectedFailure] of cases) {
+      const receiptDir = path.join(root, name.replace(/\W+/g, '-'));
+      const result = await runProof({
+        profile: 'runtime',
+        outputDir: receiptDir,
+        inputPath: input,
+        pluginZip,
+        fixture: { blockName: 'acme/proof' },
+        gateRunner: verifiedRuntimeGateRunner(mutate),
+      });
+      const gate = result.receipt.gates.find((record) => record.gate === 'environment_observation');
+      expect(result.ok).toBe(false);
+      expect(gate).toMatchObject({ status: 'blocked' });
+      const evidence = Array.isArray(gate?.evidence) ? gate.evidence : [];
+      const details = await Promise.all(evidence.map(async (reference: unknown): Promise<{ unobserved?: string[] } | undefined> => {
+        const candidate = reference as { path: string; mediaType?: string };
+        if (candidate.mediaType !== 'application/json') return undefined;
+        return JSON.parse(await readFile(path.join(receiptDir, candidate.path), 'utf8')) as { unobserved?: string[] };
+      }));
+      const detail = details.find((candidate): candidate is { unobserved?: string[] } => Array.isArray(candidate?.unobserved)) ?? {};
+      expect(detail.unobserved, name).toContain(expectedFailure);
+    }
   });
 });
+
+const observationHash = (hex: string): `sha256:${string}` => `sha256:${hex.repeat(64)}`;
+
+function verifiedRuntimeGateRunner(
+  mutate?: (context: ProofGateContext, observations: Record<string, unknown>) => boolean | void,
+) {
+  return async (context: ProofGateContext) => {
+    const { environment } = context;
+    Object.assign(environment.plugin, { slug: 'proof', name: 'Proof', version: '1.0.0', file: 'proof.php' });
+    Object.assign(environment.wordpress, {
+      version: '7.1',
+      coreHash: observationHash('c'),
+      dockerImage: observationHash('a'),
+    });
+    Object.assign(environment.php, { version: '8.3.1' });
+    Object.assign(environment.database, { image: observationHash('b'), version: '11.0.2' });
+    Object.assign(environment.theme, { name: 'twentytwentyfive', version: '1.0', fileHash: observationHash('d') });
+    Object.assign(environment.browser, { version: '143.0.7499.192', revision: '1234' });
+
+    if (context.gate === 'environment_observation') {
+      const observations: Record<string, unknown> = {
+        php: successfulCommand('8.3.1'),
+        database: successfulCommand('11.0.2'),
+        theme: successfulCommand('[{"name":"twentytwentyfive","version":"1.0"}]'),
+        themeHash: successfulCommand('d'.repeat(64)),
+        wordpress: successfulCommand('7.1'),
+        coreHash: successfulCommand('c'.repeat(64)),
+        wordpressContainer: successfulCommand('abcdef123456'),
+        databaseContainer: successfulCommand('abcdef123456'),
+        wordpressImage: successfulCommand(`abcdef123456 ${observationHash('a')} wordpress:7.1`),
+        databaseImage: successfulCommand(`abcdef123456 ${observationHash('b')} mysql:8`),
+      };
+      if (mutate?.(context, observations) !== false) {
+        environment.observations = await context.capture(observations);
+      }
+    }
+    return { status: 'pass' as const };
+  };
+}
+
+function successfulCommand(stdout: string) {
+  return { command: 'proof-observation', args: [], exitCode: 0, stdout, stderr: '' };
+}

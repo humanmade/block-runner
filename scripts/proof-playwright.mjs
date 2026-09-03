@@ -198,27 +198,54 @@ async function hasVisibleInserterCandidate(page, title) {
   return page.getByText(title, { exact: false }).first().isVisible().catch(() => false);
 }
 
-async function editAllFields(page, editor, fields) {
+async function editAllFields(page, editor, fields, scope) {
   if (fields.length === 0) return { status: 'blocked', reason: 'Fixture declares no editable field classes.' };
   const edited = [];
   for (let index = 0; index < fields.length; index += 1) {
     const field = fields[index];
     try {
       const value = field.value ?? `Proof edit ${field.path}`;
+      // Selecting first keeps inspector-backed controls attached to the
+      // inserted pattern, while a custom selector below is still resolved
+      // from that pattern's roots rather than from the whole editor.
+      if (scope && field.selector && field.surface !== 'richText') {
+        await selectScopedBlock(page, scope, field.surface);
+      }
       if (field.selector) {
-        await page.locator(field.selector).fill(value);
+        const control = scope ? scopedLocator(page, scope, field.selector) : page.locator(field.selector);
+        await control.fill(value);
       } else if (field.surface === 'richText') {
-        const canvas = editor?.canvas ?? page;
+        const canvas = scope ? page : editor?.canvas ?? page;
         const richTextIndex = fields.slice(0, index).filter((candidate) => candidate.surface === 'richText' && !candidate.selector).length;
-        await canvas.locator('[contenteditable="true"]').nth(richTextIndex).fill(value);
+        const controls = scope ? scopedLocator(page, scope, '[contenteditable="true"]') : canvas.locator('[contenteditable="true"]');
+        await controls.nth(richTextIndex).fill(value);
       } else if (field.surface === 'altText') {
-        const control = page.getByLabel(/alt text|alternative text/i).first();
+        await selectScopedBlock(page, scope, 'altText');
+        const control = await scopedSurfaceControl(
+          page,
+          scope,
+          'input[aria-label*="alt" i], textarea[aria-label*="alt" i]',
+        ) ?? page.getByLabel(/alt text|alternative text/i).first();
         await control.fill(value);
       } else if (field.surface === 'link') {
-        const control = page.getByLabel(/url|link/i).first();
+        await selectScopedBlock(page, scope, 'link');
+        const control = await scopedSurfaceControl(
+          page,
+          scope,
+          'input[aria-label*="url" i], input[aria-label*="link" i], textarea[aria-label*="url" i], textarea[aria-label*="link" i]',
+        ) ?? page.getByLabel(/url|link/i).first();
         await control.fill(value);
       } else if (field.surface === 'media') {
-        const replace = page.getByRole('button', { name: /replace|select media/i }).first();
+        await selectScopedBlock(page, scope, 'media');
+        const customMedia = await scopedSurfaceControl(page, scope, 'input[aria-label*="media" i]');
+        if (customMedia) {
+          await customMedia.fill(value);
+          edited.push({ path: field.path, surface: field.surface, value });
+          continue;
+        }
+        const replace = scope
+          ? scopedBlockLocator(page, scope).getByRole('button', { name: /replace|select media/i }).first()
+          : page.getByRole('button', { name: /replace|select media/i }).first();
         if (!(await replace.isVisible().catch(() => false))) throw new Error('No visible media selector.');
         await replace.click();
         const attachment = page.locator('.media-modal .attachment').first();
@@ -234,6 +261,58 @@ async function editAllFields(page, editor, fields) {
     }
   }
   return { status: 'pass', details: { edited } };
+}
+
+function scopedLocator(page, scope, selector) {
+  return combineLocators(scope.rootClientIds.map((clientId) =>
+    page.locator(`[data-block=${JSON.stringify(clientId)}]`).locator(selector)));
+}
+
+function scopedBlockLocator(page, scope) {
+  return combineLocators(scope.rootClientIds.map((clientId) =>
+    page.locator(`[data-block=${JSON.stringify(clientId)}]`)));
+}
+
+function combineLocators(locators) {
+  const [first, ...rest] = locators;
+  if (!first) throw new Error('Pattern scope did not contain any inserted roots.');
+  return rest.reduce((combined, locator) => combined.or(locator), first);
+}
+
+async function scopedSurfaceControl(page, scope, selector) {
+  if (!scope) return undefined;
+  const control = scopedLocator(page, scope, selector).first();
+  return await control.count() > 0 ? control : undefined;
+}
+
+async function selectScopedBlock(page, scope, surface) {
+  if (!scope) return;
+  const clientId = await page.evaluate(({ rootClientIds, editableSurface }) => {
+    const roots = [...document.querySelectorAll('[data-block]')];
+    const hasSurface = (block) => editableSurface === 'link'
+      ? Boolean(block.querySelector('a'))
+      : editableSurface === 'altText' || editableSurface === 'media'
+        ? Boolean(block.querySelector('img')) || Boolean(block.querySelector('.components-placeholder'))
+        : true;
+
+    for (const rootClientId of rootClientIds) {
+      const root = roots.find((element) => element.getAttribute('data-block') === rootClientId);
+      if (!root) continue;
+      // Prefer the deepest matching block so nested pattern blocks open their
+      // own controls instead of selecting an enclosing layout block.
+      const candidates = [root, ...root.querySelectorAll('[data-block]')].reverse();
+      const candidate = candidates.find(hasSurface);
+      if (candidate) return candidate.getAttribute('data-block');
+    }
+    return undefined;
+  }, { rootClientIds: scope.rootClientIds, editableSurface: surface });
+  const candidate = clientId
+    ? page.locator(`[data-block=${JSON.stringify(clientId)}]`)
+    : undefined;
+  if (!candidate || !(await candidate.isVisible().catch(() => false))) {
+    throw new Error(`No inserted-pattern block exposes a ${surface} control.`);
+  }
+  await candidate.click();
 }
 
 async function savePost(page, editor) {
@@ -304,9 +383,13 @@ async function readPublication(page, savedContent) {
 
 function editedValuesPersisted(before, after, fields) {
   const changed = before.contentHash !== after.contentHash || before.treeHash !== after.treeHash;
-  const serialized = `${after.content}\n${JSON.stringify(after.tree)}`;
+  // A changed editor tree alone is not proof that the serializer saved the
+  // edit. The serialized post content is the value WordPress will reopen.
+  const serialized = after.content;
   const missingValues = fields
-    .filter((field) => field.surface !== 'media')
+    // Media chosen through the stock media modal has no fixture value to look
+    // for. A custom media selector does provide one, so retain that assertion.
+    .filter((field) => field.surface !== 'media' || Boolean(field.selector))
     .map((field) => field.value ?? `Proof edit ${field.path}`)
     .filter((value) => !serialized.includes(value));
   return { ok: changed && missingValues.length === 0, changed, missingValues };
@@ -355,32 +438,103 @@ async function provePatternOverride(page, fixture) {
     blocked('pattern_overrides', 'Pattern proof needs a titled pattern fixture and its editable fields.');
     return;
   }
+  const beforeInsertion = await editorState(page);
   const inserted = await insertPatternThroughVisibleInserter(page, pattern.title);
   if (!inserted) {
     set('pattern_overrides', 'fail', `Could not insert the pattern fixture ${JSON.stringify(pattern.title)} through the visible inserter.`);
     return;
   }
-  const before = await editorState(page);
-  const edit = await editAllFields(page, undefined, pattern.editableFields);
+  const afterInsertion = await editorState(page);
+  const scope = insertedPatternScope(beforeInsertion.tree, afterInsertion.tree);
+  if (!scope || scope.rootClientIds.length === 0) {
+    set('pattern_overrides', 'fail', 'Visible pattern insertion did not add a distinct pattern subtree to the editor tree.', {
+      title: pattern.title,
+      beforeInsertion,
+      afterInsertion,
+    });
+    return;
+  }
+  const before = await patternSubtreeState(page, scope);
+  if (before.missingRoots.length > 0) {
+    set('pattern_overrides', 'fail', 'The inserted pattern subtree could not be resolved before editing.', {
+      title: pattern.title,
+      scope,
+      before,
+    });
+    return;
+  }
+  const edit = await editAllFields(page, undefined, pattern.editableFields, scope);
   if (edit.status !== 'pass') {
-    set('pattern_overrides', 'fail', edit.reason, { before, edit: edit.details });
+    set('pattern_overrides', 'fail', edit.reason, { title: pattern.title, scope, before, edit: edit.details });
     return;
   }
   const saved = await savePost(page);
-  const afterSave = await editorState(page);
+  const afterSave = await patternSubtreeState(page, scope);
   const reopened = await reopenPost(page);
-  const afterReopen = await editorState(page);
-  const editedValues = pattern.editableFields.map((field) => field.value ?? `Proof edit ${field.path}`);
+  const afterReopen = await patternSubtreeState(page, scope);
+  const persistence = editedValuesPersisted(before, afterReopen, pattern.editableFields);
   const persisted = saved && reopened
+    && afterSave.missingRoots.length === 0
+    && afterReopen.missingRoots.length === 0
     && afterSave.contentHash === afterReopen.contentHash
-    && editedValues.every((value) => afterReopen.content.includes(value));
+    && afterSave.treeHash === afterReopen.treeHash
+    && persistence.ok;
   set('pattern_overrides', persisted ? 'pass' : 'fail', persisted ? undefined : 'Pattern fixture edits did not persist after save and reopen.', {
     title: pattern.title,
+    scope,
+    beforeInsertion,
+    afterInsertion,
     before,
     afterSave,
     afterReopen,
-    editedValues,
+    persistence,
   });
+}
+
+function insertedPatternScope(before, after) {
+  const existingIds = new Set(flattenEditorTree(before).map((block) => block.clientId));
+  const added = flattenEditorTree(after).filter((block) => !existingIds.has(block.clientId));
+  const roots = added.filter((block) => !block.parentClientId || existingIds.has(block.parentClientId));
+  if (roots.length === 0) return undefined;
+  return {
+    rootClientIds: roots.map((block) => block.clientId),
+    rootPaths: roots.map((block) => block.path),
+    rootNames: roots.map((block) => block.name),
+  };
+}
+
+function flattenEditorTree(blocks, path = [], parentClientId) {
+  return blocks.flatMap((block, index) => {
+    const blockPath = [...path, index];
+    return [{ clientId: block.clientId, name: block.name, path: blockPath, parentClientId }, ...flattenEditorTree(block.innerBlocks ?? [], blockPath, block.clientId)];
+  });
+}
+
+async function patternSubtreeState(page, scope) {
+  return page.evaluate(async (patternScope) => {
+    const roots = globalThis.wp?.data?.select('core/block-editor')?.getBlocks?.() ?? [];
+    const atPath = (blocks, blockPath) => blockPath.reduce((current, index) => current?.innerBlocks
+      ? current.innerBlocks[index]
+      : current?.[index], blocks);
+    const selected = patternScope.rootPaths.map((blockPath) => atPath(roots, blockPath));
+    const missingRoots = selected.flatMap((block, index) => !block || block.name !== patternScope.rootNames[index]
+      ? [{ path: patternScope.rootPaths[index], expectedName: patternScope.rootNames[index], actualName: block?.name }]
+      : []);
+    const blocks = selected.filter(Boolean);
+    const content = globalThis.wp?.blocks?.serialize?.(blocks) ?? '';
+    const canonical = JSON.stringify(blocks, (key, value) => key === 'clientId' ? undefined : value);
+    const digest = async (value) => {
+      const bytes = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(value)));
+      return `sha256:${[...bytes].map((byte) => byte.toString(16).padStart(2, '0')).join('')}`;
+    };
+    return {
+      treeHash: await digest(canonical),
+      contentHash: await digest(content),
+      tree: blocks,
+      content,
+      missingRoots,
+    };
+  }, scope);
 }
 
 async function proveDeactivation(page, fixture, baseUrl, activePublication) {

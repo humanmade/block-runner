@@ -20,6 +20,7 @@ import {
 import {
   EvidenceStore,
   ReceiptWriter,
+  sha256 as hashBytes,
   type EvidenceReference,
   type ReceiptReference,
   type Sha256,
@@ -36,6 +37,28 @@ const defaultWpEnvConfig = path.join(projectRoot, 'proof', 'wp-env.json');
 const playwrightHelper = path.join(projectRoot, 'scripts', 'proof-playwright.mjs');
 const stagedZipDirectory = path.join(projectRoot, '.block-runner-proof-stage');
 const stagedZipContainerDirectory = '/var/www/html/wp-content/uploads/block-runner-proof';
+const REQUIRED_WORDPRESS_VERSION = '7.1' as const;
+const REQUIRED_WORDPRESS_CORE_SOURCE = 'WordPress/WordPress#7.1' as const;
+const REQUIRED_PHP_SERIES = '8.3' as const;
+const RUNTIME_OBSERVATION_COMMANDS = [
+  'php',
+  'database',
+  'theme',
+  'themeHash',
+  'wordpress',
+  'coreHash',
+  'wordpressContainer',
+  'databaseContainer',
+  'wordpressImage',
+  'databaseImage',
+] as const;
+
+export interface WordPressPackagePin {
+  /** Exact version resolved from package-lock.json. */
+  version: string;
+  /** npm Subresource Integrity value resolved from package-lock.json. */
+  integrity: string;
+}
 
 /** Editable surfaces supplied by the generated-block compiler or a fixture. */
 export type ProofEditableSurface = 'richText' | 'media' | 'link' | 'altText';
@@ -175,19 +198,21 @@ export interface ProofEnvironment {
   input?: ProofFilePin;
   wordpress: {
     requestedVersion: '7.1';
-    coreSource: 'WordPress/WordPress#7.1';
+    /** Exact `core` source read from the pinned wp-env configuration. */
+    coreSource: string;
     wpEnv: string;
     wpEnvConfig: ProofFilePin;
     version: string;
     coreHash: string;
     dockerImage?: string;
   };
-  php: { version: string };
+  php: { requestedVersion: string; version: string };
   database: { engine: 'mysql'; image: string; version: string };
   theme: { name: string; version: string; fileHash: string };
   browser: { engine: 'chromium'; playwright: string; revision: string; version: string };
   node: { version: string };
-  wordpressPackages: Record<string, string>;
+  /** Exact, integrity-pinned direct @wordpress/* dependencies. */
+  wordpressPackages: Record<string, WordPressPackagePin>;
 }
 
 export interface ProofReceiptDocument {
@@ -262,7 +287,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
           ? await options.gateRunner(context)
           : await runtime.run(context);
       const result = gate === 'environment_observation' && unverifiedResult?.status === 'pass'
-        ? enforceEnvironmentObservation(unverifiedResult, environment)
+        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence)
         : unverifiedResult;
       records.push(await asRecord(gate, result, context, startedAt));
     }
@@ -345,11 +370,30 @@ function missingProofConfiguration(context: ProofGateContext): string | undefine
   return undefined;
 }
 
-function enforceEnvironmentObservation(result: ProofGateResult, environment: ProofEnvironment): ProofGateResult {
-  const unobserved = requiredRuntimeObservationFailures(environment);
+async function enforceEnvironmentObservation(
+  result: ProofGateResult,
+  environment: ProofEnvironment,
+  evidenceStore: EvidenceStore,
+): Promise<ProofGateResult> {
+  const unobserved = await requiredRuntimeObservationFailures(environment, evidenceStore);
+  const observationEvidence = environment.observations;
+  const evidence = observationEvidence
+    ? dedupeEvidence([...(result.evidence ?? []), observationEvidence])
+    : result.evidence;
   return unobserved.length === 0
-    ? result
-    : { status: 'blocked', reason: `Mandatory runtime observations were unavailable: ${unobserved.join(', ')}.`, details: { unobserved }, evidence: result.evidence };
+    ? { ...result, ...(evidence?.length ? { evidence } : {}) }
+    : {
+      status: 'blocked',
+      reason: `Mandatory runtime observations were unavailable: ${unobserved.join(', ')}.`,
+      details: { unobserved },
+      ...(evidence?.length ? { evidence } : {}),
+    };
+}
+
+function dedupeEvidence(references: readonly EvidenceReference[]): EvidenceReference[] {
+  const unique = new Map<Sha256, EvidenceReference>();
+  for (const reference of references) unique.set(reference.sha256, reference);
+  return [...unique.values()];
 }
 
 async function collectEnvironmentPins(
@@ -357,13 +401,14 @@ async function collectEnvironmentPins(
   evidence: EvidenceStore,
   wpEnvConfig: string,
 ): Promise<ProofEnvironment> {
-  const [packagePin, lockPin, configPin, zipPin, inputPin, wordpressPackages] = await Promise.all([
+  const [packagePin, lockPin, configPin, zipPin, inputPin, wordpressPackages, wpEnvPins] = await Promise.all([
     pinFile(path.join(projectRoot, 'package.json'), evidence),
     pinFile(path.join(projectRoot, 'package-lock.json'), evidence).catch(() => undefined),
     pinFile(wpEnvConfig, evidence),
     options.pluginZip ? pinFile(path.resolve(options.pluginZip), evidence).catch(() => undefined) : undefined,
     pinInput(options, evidence),
     collectWordPressPackagePins(path.join(projectRoot, 'package-lock.json')).catch(() => ({})),
+    readWpEnvPins(wpEnvConfig).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
   ]);
   const packages = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
 
@@ -380,14 +425,14 @@ async function collectEnvironmentPins(
     },
     ...(inputPin ? { input: inputPin } : {}),
     wordpress: {
-      requestedVersion: '7.1',
-      coreSource: 'WordPress/WordPress#7.1',
+      requestedVersion: REQUIRED_WORDPRESS_VERSION,
+      coreSource: wpEnvPins.coreSource,
       wpEnv: packages['@wordpress/env'] ?? 'unresolved',
       wpEnvConfig: configPin,
       version: 'unobserved',
       coreHash: 'unobserved',
     },
-    php: { version: 'unobserved' },
+    php: { requestedVersion: wpEnvPins.phpVersion, version: 'unobserved' },
     database: { engine: 'mysql', image: 'unobserved', version: 'unobserved' },
     theme: { name: 'unobserved', version: 'unobserved', fileHash: 'unobserved' },
     browser: {
@@ -401,17 +446,27 @@ async function collectEnvironmentPins(
   };
 }
 
-async function collectWordPressPackagePins(lockFile: string): Promise<Record<string, string>> {
+async function collectWordPressPackagePins(lockFile: string): Promise<Record<string, WordPressPackagePin>> {
   const parsed = JSON.parse(await readFile(lockFile, 'utf8')) as {
     packages?: Record<string, { version?: string; integrity?: string }>;
   };
-  return Object.fromEntries(
-    Object.entries(parsed.packages ?? {}).flatMap(([location, metadata]) => {
-      const match = /^node_modules\/(\@wordpress\/[^/]+)$/.exec(location);
-      if (!match || !metadata.version) return [];
-      return [[match[1]!, `${metadata.version}${metadata.integrity ? ` ${metadata.integrity}` : ''}`]];
-    }),
-  );
+  const pins: Record<string, WordPressPackagePin> = {};
+  for (const [location, metadata] of Object.entries(parsed.packages ?? {})) {
+    const match = /^node_modules\/(\@wordpress\/[^/]+)$/.exec(location);
+    if (match && metadata.version && metadata.integrity) {
+      pins[match[1]!] = { version: metadata.version, integrity: metadata.integrity };
+    }
+  }
+  return pins;
+}
+
+async function readWpEnvPins(file: string): Promise<{ coreSource: string; phpVersion: string }> {
+  const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
+  if (!isRecord(parsed)) return { coreSource: 'unobserved', phpVersion: 'unobserved' };
+  return {
+    coreSource: typeof parsed.core === 'string' ? parsed.core : 'unobserved',
+    phpVersion: typeof parsed.phpVersion === 'string' ? parsed.phpVersion : 'unobserved',
+  };
 }
 
 async function pinInput(options: ProofRunOptions, evidence: EvidenceStore): Promise<ProofFilePin | undefined> {
@@ -625,10 +680,19 @@ function createRuntime(
       }
 
       if (context.gate === 'environment_observation') {
-        const unobserved = requiredRuntimeObservationFailures(environment);
+        const unobserved = await requiredRuntimeObservationFailures(environment, evidence);
         return unobserved.length === 0
-          ? { status: 'pass', details: { observed: true } }
-          : { status: 'blocked', reason: `Mandatory runtime observations were unavailable: ${unobserved.join(', ')}.`, details: { unobserved } };
+          ? {
+            status: 'pass',
+            details: { observed: true },
+            ...(environment.observations ? { evidence: [environment.observations] } : {}),
+          }
+          : {
+            status: 'blocked',
+            reason: `Mandatory runtime observations were unavailable: ${unobserved.join(', ')}.`,
+            details: { unobserved },
+            ...(environment.observations ? { evidence: [environment.observations] } : {}),
+          };
       }
 
       // Deactivation is intentionally after the frontend/browser snapshot. The checks distinguish
@@ -776,27 +840,154 @@ async function observePluginMetadata(
   return { status: 'pass', evidence: [log], details: { slug, name, version, file } };
 }
 
-function requiredRuntimeObservationFailures(environment: ProofEnvironment): string[] {
-  const missing = (value: string | undefined): boolean => !value || value === 'unobserved' || value === 'unresolved';
+async function requiredRuntimeObservationFailures(
+  environment: ProofEnvironment,
+  evidenceStore: EvidenceStore,
+): Promise<string[]> {
   const failures: string[] = [];
-  if (!environment.input) failures.push('input');
-  if (!environment.plugin.zip) failures.push('plugin.zip');
+  const missing = (value: string | undefined): boolean => !value || value === 'unobserved' || value === 'unresolved';
+  const requirePin = async (name: string, pin: ProofFilePin | undefined): Promise<void> => {
+    if (!isPinnedFile(pin)) {
+      failures.push(name);
+      return;
+    }
+    try {
+      const bytes = await evidenceStore.read(pin.evidence);
+      if (bytes.byteLength !== pin.bytes || hashBytes(bytes) !== pin.sha256) failures.push(name);
+    } catch {
+      failures.push(name);
+    }
+  };
+
+  await Promise.all([
+    requirePin('generator.packageJson', environment.generator.packageJson),
+    requirePin('generator.packageLock', environment.generator.packageLock),
+    requirePin('wordpress.wpEnvConfig', environment.wordpress.wpEnvConfig),
+    requirePin('input', environment.input),
+    requirePin('plugin.zip', environment.plugin.zip),
+  ]);
+  if (missing(environment.generator.package)) failures.push('generator.package');
+  if (!isReleaseVersion(environment.generator.version)) failures.push('generator.version');
+  if (environment.wordpress.requestedVersion !== REQUIRED_WORDPRESS_VERSION) failures.push('wordpress.requestedVersion');
+  if (environment.wordpress.coreSource !== REQUIRED_WORDPRESS_CORE_SOURCE) failures.push('wordpress.coreSource');
+  if (environment.php.requestedVersion !== REQUIRED_PHP_SERIES) failures.push('php.requestedVersion');
+  if (environment.database.engine !== 'mysql') failures.push('database.engine');
+  if (environment.browser.engine !== 'chromium') failures.push('browser.engine');
+  if (!isExactSemver(environment.wordpress.wpEnv)) failures.push('wordpress.wpEnv');
+  if (!isExactSemver(environment.browser.playwright)) failures.push('browser.playwright');
+  if (!/^v\d+\.\d+\.\d+$/.test(environment.node.version)) failures.push('node.version');
+
   if (missing(environment.plugin.slug)) failures.push('plugin.slug');
   if (missing(environment.plugin.name)) failures.push('plugin.name');
-  if (missing(environment.plugin.version)) failures.push('plugin.version');
+  if (!isReleaseVersion(environment.plugin.version)) failures.push('plugin.version');
   if (missing(environment.plugin.file)) failures.push('plugin.file');
-  if (missing(environment.wordpress.version)) failures.push('wordpress.version');
-  if (missing(environment.wordpress.coreHash)) failures.push('wordpress.coreHash');
-  if (missing(environment.wordpress.dockerImage)) failures.push('wordpress.dockerImage');
-  if (missing(environment.php.version)) failures.push('php.version');
-  if (missing(environment.database.image)) failures.push('database.image');
-  if (missing(environment.database.version)) failures.push('database.version');
-  if (missing(environment.theme.name)) failures.push('theme.name');
-  if (missing(environment.theme.version)) failures.push('theme.version');
-  if (missing(environment.theme.fileHash)) failures.push('theme.fileHash');
-  if (missing(environment.browser.version)) failures.push('browser.version');
-  if (missing(environment.browser.revision)) failures.push('browser.revision');
-  return failures;
+  if (!isExactWordPressVersion(environment.wordpress.version)) failures.push('wordpress.version');
+  if (!isSha256Address(environment.wordpress.coreHash)) failures.push('wordpress.coreHash');
+  if (!isSha256Address(environment.wordpress.dockerImage)) failures.push('wordpress.dockerImage');
+  if (!isRequiredPhpVersion(environment.php.version)) failures.push('php.version');
+  if (!isSha256Address(environment.database.image)) failures.push('database.image');
+  if (!isDatabaseVersion(environment.database.version)) failures.push('database.version');
+  if (!isThemeName(environment.theme.name)) failures.push('theme.name');
+  if (!isReleaseVersion(environment.theme.version)) failures.push('theme.version');
+  if (!isSha256Address(environment.theme.fileHash)) failures.push('theme.fileHash');
+  if (!isBrowserVersion(environment.browser.version)) failures.push('browser.version');
+  if (!/^\d+$/.test(environment.browser.revision)) failures.push('browser.revision');
+  failures.push(...requiredWordPressPackageFailures(environment));
+
+  const observation = await readRuntimeObservations(environment.observations, evidenceStore);
+  if ('failures' in observation) {
+    failures.push(...observation.failures);
+  } else {
+    const observed = observation.values;
+    if (environment.php.version !== observed.php.version) failures.push('observations.php.value');
+    if (environment.database.version !== observed.database.version) failures.push('observations.database.value');
+    if (environment.database.image !== observed.database.image) failures.push('observations.databaseImage.value');
+    if (environment.theme.name !== observed.theme.name || environment.theme.version !== observed.theme.version) failures.push('observations.theme.value');
+    if (environment.theme.fileHash !== observed.theme.fileHash) failures.push('observations.themeHash.value');
+    if (environment.wordpress.version !== observed.wordpress.version) failures.push('observations.wordpress.value');
+    if (environment.wordpress.coreHash !== observed.wordpress.coreHash) failures.push('observations.coreHash.value');
+    if (environment.wordpress.dockerImage !== observed.wordpress.dockerImage) failures.push('observations.wordpressImage.value');
+  }
+
+  return [...new Set(failures)];
+}
+
+function requiredWordPressPackageFailures(environment: ProofEnvironment): string[] {
+  const packages = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
+  return Object.entries(packages)
+    .filter(([name]) => name.startsWith('@wordpress/'))
+    .flatMap(([name, requestedVersion]) => {
+      const observed = environment.wordpressPackages[name];
+      return observed
+        && observed.version === requestedVersion
+        && isNpmIntegrity(observed.integrity)
+        ? []
+        : [`wordpressPackages.${name}`];
+    });
+}
+
+type RuntimeObservationMap = Record<(typeof RUNTIME_OBSERVATION_COMMANDS)[number], ProofCommandResult>;
+
+type ObservedRuntimeValues = {
+  php: { version: string };
+  database: { version: string; image: string };
+  theme: { name: string; version: string; fileHash: string };
+  wordpress: { version: string; coreHash: string; dockerImage: string };
+};
+
+async function readRuntimeObservations(
+  reference: EvidenceReference | undefined,
+  evidenceStore: EvidenceStore,
+): Promise<{ values: ObservedRuntimeValues } | { failures: string[] }> {
+  if (!isEvidenceReference(reference)) return { failures: ['environment.observations'] };
+
+  let raw: unknown;
+  try {
+    raw = JSON.parse((await evidenceStore.read(reference)).toString('utf8'));
+  } catch {
+    return { failures: ['environment.observations'] };
+  }
+  if (!isRuntimeObservationMap(raw)) return { failures: ['environment.observations'] };
+
+  const failedCommands = RUNTIME_OBSERVATION_COMMANDS
+    .filter((name) => raw[name].exitCode !== 0)
+    .map((name) => `observations.${name}.exitCode`);
+  if (failedCommands.length > 0) return { failures: failedCommands };
+
+  const php = parsePhpVersion(firstLine(raw.php.stdout));
+  const databaseVersion = parseDatabaseVersion(firstLine(raw.database.stdout));
+  const theme = parseActiveTheme(raw.theme.stdout);
+  const themeHash = parseSha256(firstLine(raw.themeHash.stdout));
+  const wordpressVersion = parseWordPressVersion(firstLine(raw.wordpress.stdout));
+  const coreHash = parseSha256(firstLine(raw.coreHash.stdout));
+  const wordpressContainerId = containerIdFromOutput(raw.wordpressContainer.stdout);
+  const databaseContainerId = containerIdFromOutput(raw.databaseContainer.stdout);
+  const wordpressImage = parseContainerImage(raw.wordpressImage.stdout, wordpressContainerId);
+  const databaseImage = parseContainerImage(raw.databaseImage.stdout, databaseContainerId);
+  const failures = [
+    !php && 'observations.php.value',
+    !databaseVersion && 'observations.database.value',
+    !theme && 'observations.theme.value',
+    !themeHash && 'observations.themeHash.value',
+    !wordpressVersion && 'observations.wordpress.value',
+    !coreHash && 'observations.coreHash.value',
+    !wordpressContainerId && 'observations.wordpressContainer.value',
+    !databaseContainerId && 'observations.databaseContainer.value',
+    !wordpressImage && 'observations.wordpressImage.value',
+    !databaseImage && 'observations.databaseImage.value',
+  ].filter((value): value is string => Boolean(value));
+  if (failures.length > 0 || !php || !databaseVersion || !theme || !themeHash || !wordpressVersion || !coreHash || !wordpressContainerId || !databaseContainerId || !wordpressImage || !databaseImage) {
+    return { failures };
+  }
+
+  return {
+    values: {
+      php: { version: php },
+      database: { version: databaseVersion, image: databaseImage },
+      theme: { ...theme, fileHash: themeHash },
+      wordpress: { version: wordpressVersion, coreHash, dockerImage: wordpressImage },
+    },
+  };
 }
 
 async function collectObservedRuntimePins(
@@ -821,16 +1012,20 @@ async function collectObservedRuntimePins(
   ]);
   const observed = { php, database, theme, themeHash, wordpress, coreHash, wordpressContainer, databaseContainer, wordpressImage, databaseImage };
   environment.observations = await evidence.putJson(observed);
-  environment.php.version = firstLine(php.stdout) || 'unobserved';
-  environment.database.version = firstLine(database.stdout) || 'unobserved';
-  environment.database.image = firstLine(databaseImage.stdout) || 'unobserved';
+  environment.php.version = php.exitCode === 0 ? parsePhpVersion(firstLine(php.stdout)) ?? 'unobserved' : 'unobserved';
+  environment.database.version = database.exitCode === 0 ? parseDatabaseVersion(firstLine(database.stdout)) ?? 'unobserved' : 'unobserved';
+  environment.database.image = databaseImage.exitCode === 0
+    ? parseContainerImage(databaseImage.stdout, containerIdFromOutput(databaseContainer.stdout)) ?? 'unobserved'
+    : 'unobserved';
   const activeTheme = parseActiveTheme(theme.stdout);
-  environment.theme.name = activeTheme?.name ?? 'unobserved';
-  environment.theme.version = activeTheme?.version ?? 'unobserved';
-  environment.theme.fileHash = firstLine(themeHash.stdout) || 'unobserved';
-  environment.wordpress.version = firstLine(wordpress.stdout) || 'unobserved';
-  environment.wordpress.coreHash = firstLine(coreHash.stdout) || 'unobserved';
-  environment.wordpress.dockerImage = firstLine(wordpressImage.stdout) || 'unobserved';
+  environment.theme.name = theme.exitCode === 0 ? activeTheme?.name ?? 'unobserved' : 'unobserved';
+  environment.theme.version = theme.exitCode === 0 ? activeTheme?.version ?? 'unobserved' : 'unobserved';
+  environment.theme.fileHash = themeHash.exitCode === 0 ? parseSha256(firstLine(themeHash.stdout)) ?? 'unobserved' : 'unobserved';
+  environment.wordpress.version = wordpress.exitCode === 0 ? parseWordPressVersion(firstLine(wordpress.stdout)) ?? 'unobserved' : 'unobserved';
+  environment.wordpress.coreHash = coreHash.exitCode === 0 ? parseSha256(firstLine(coreHash.stdout)) ?? 'unobserved' : 'unobserved';
+  environment.wordpress.dockerImage = wordpressImage.exitCode === 0
+    ? parseContainerImage(wordpressImage.stdout, containerIdFromOutput(wordpressContainer.stdout)) ?? 'unobserved'
+    : 'unobserved';
 }
 
 async function inspectRunningContainer(command: ProofCommandRunner, containerId: string): Promise<ProofCommandResult> {
@@ -846,13 +1041,113 @@ function parseActiveTheme(value: string): { name: string; version: string } | un
   try {
     const parsed = JSON.parse(value) as Array<{ name?: unknown; version?: unknown }>;
     const active = parsed[0];
-    if (typeof active?.name === 'string' && typeof active.version === 'string') {
+    if (typeof active?.name === 'string' && isThemeName(active.name) && typeof active.version === 'string' && isReleaseVersion(active.version)) {
       return { name: active.name, version: active.version };
     }
   } catch {
     // The raw WP-CLI output is retained as evidence by the caller.
   }
   return undefined;
+}
+
+function parsePhpVersion(value: string): string | undefined {
+  return isRequiredPhpVersion(value) ? value : undefined;
+}
+
+function parseDatabaseVersion(value: string): string | undefined {
+  return isDatabaseVersion(value) ? value : undefined;
+}
+
+function parseWordPressVersion(value: string): string | undefined {
+  return isExactWordPressVersion(value) ? value : undefined;
+}
+
+function parseSha256(value: string): Sha256 | undefined {
+  const hex = value.startsWith('sha256:') ? value.slice('sha256:'.length) : value;
+  return /^[a-f0-9]{64}$/i.test(hex) ? `sha256:${hex.toLowerCase()}` : undefined;
+}
+
+function parseContainerImage(value: string, expectedContainerId = ''): Sha256 | undefined {
+  const match = /^([a-f0-9]{12,64})\s+(sha256:[a-f0-9]{64})\s+\S+$/im.exec(value.trim());
+  return match && (!expectedContainerId || match[1]!.startsWith(expectedContainerId))
+    ? parseSha256(match[2]!)
+    : undefined;
+}
+
+function isExactWordPressVersion(value: string): boolean {
+  // `WordPress/WordPress#7.1` tracks the 7.1 maintenance line. A patch
+  // release is still the configured 7.1 runtime; another major/minor is not.
+  return new RegExp(`^${REQUIRED_WORDPRESS_VERSION.replace('.', '\\.')}(?:\\.\\d+)?$`).test(value);
+}
+
+function isRequiredPhpVersion(value: string): boolean {
+  return new RegExp(`^${REQUIRED_PHP_SERIES.replace('.', '\\.')}\\.\\d+$`).test(value);
+}
+
+function isDatabaseVersion(value: string): boolean {
+  return /^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z._-]+)?$/.test(value);
+}
+
+function isExactSemver(value: string | undefined): value is string {
+  return typeof value === 'string' && /^\d+\.\d+\.\d+(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isReleaseVersion(value: string | undefined): value is string {
+  return typeof value === 'string' && /^\d+\.\d+(?:\.\d+)?(?:-[0-9A-Za-z.-]+)?(?:\+[0-9A-Za-z.-]+)?$/.test(value);
+}
+
+function isBrowserVersion(value: string): boolean {
+  return /^\d+(?:\.\d+){1,3}$/.test(value);
+}
+
+function isThemeName(value: string): boolean {
+  return /^[A-Za-z0-9_-]+$/.test(value);
+}
+
+function isNpmIntegrity(value: string): boolean {
+  return /^sha(?:256|384|512)-[A-Za-z0-9+/]+={0,2}$/.test(value);
+}
+
+function isSha256Address(value: string | undefined): value is Sha256 {
+  return typeof value === 'string' && /^sha256:[a-f0-9]{64}$/i.test(value);
+}
+
+function isPinnedFile(pin: ProofFilePin | undefined): pin is ProofFilePin {
+  return Boolean(pin
+    && isSha256Address(pin.sha256)
+    && pin.bytes >= 0
+    && isEvidenceReference(pin.evidence)
+    && pin.evidence.sha256 === pin.sha256
+    && pin.evidence.bytes === pin.bytes);
+}
+
+function isEvidenceReference(value: unknown): value is EvidenceReference {
+  if (!isRecord(value)) return false;
+  return isSha256Address(value.sha256 as string | undefined)
+    && typeof value.bytes === 'number'
+    && Number.isInteger(value.bytes)
+    && value.bytes >= 0
+    && typeof value.path === 'string'
+    && /^evidence\/sha256\/[a-f0-9]{64}$/.test(value.path)
+    && typeof value.mediaType === 'string';
+}
+
+function isRuntimeObservationMap(value: unknown): value is RuntimeObservationMap {
+  return isRecord(value) && RUNTIME_OBSERVATION_COMMANDS.every((name) => isProofCommandResult(value[name]));
+}
+
+function isProofCommandResult(value: unknown): value is ProofCommandResult {
+  if (!isRecord(value)) return false;
+  return typeof value.command === 'string'
+    && Array.isArray(value.args)
+    && value.args.every((argument) => typeof argument === 'string')
+    && (typeof value.exitCode === 'number' || value.exitCode === null)
+    && typeof value.stdout === 'string'
+    && typeof value.stderr === 'string';
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
 
 function firstLine(value: string): string {

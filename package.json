@@ -71,6 +71,7 @@
     "tune:t0": "tsx scripts/tune.ts --tier t0",
     "test": "vitest run",
     "test:proof": "vitest run test/proof.test.ts",
+    "test:proof:mutations": "BLOCK_RUNNER_PROOF_MUTATIONS=1 vitest run test/proof-mutations.integration.test.ts",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "check:private": "node scripts/check-private-refs.mjs",
@@ -94,6 +95,8 @@
     "react-dom": "18.3.1",
     "pixelmatch": "7.1.0",
     "pngjs": "7.0.0",
+    "react": "18.3.1",
+    "react-dom": "18.3.1",
     "wesper": "0.0.2"
   },
   "devDependencies": {

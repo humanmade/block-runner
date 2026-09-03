@@ -547,6 +547,7 @@ export type {
   ProofReceiptDocument,
   ProofRunOptions,
   ProofRunResult,
+  WordPressPackagePin,
 } from './proof/runner.js';
 export type {
   GateId,
