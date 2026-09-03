@@ -20,10 +20,11 @@ describe('canonical agent skill', () => {
       await readFile(new URL('./fixtures/skill-activation.json', import.meta.url), 'utf8'),
     ) as { shouldTrigger: string[]; shouldNotTrigger: string[] };
 
-    expect(fixture.shouldTrigger).toHaveLength(8);
+    expect(fixture.shouldTrigger).toHaveLength(9);
     expect(fixture.shouldNotTrigger).toHaveLength(8);
-    expect(new Set([...fixture.shouldTrigger, ...fixture.shouldNotTrigger]).size).toBe(16);
+    expect(new Set([...fixture.shouldTrigger, ...fixture.shouldNotTrigger]).size).toBe(17);
     expect(fixture.shouldTrigger.every((prompt) => /WordPress|Gutenberg|block/i.test(prompt))).toBe(true);
     expect(fixture.shouldNotTrigger.some((prompt) => /non-WordPress|not use WordPress/i.test(prompt))).toBe(true);
+    expect(fixture.shouldTrigger).toContain('Create a reusable named Gutenberg block in my existing WordPress plugin.');
   });
 });

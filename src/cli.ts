@@ -27,6 +27,7 @@ import { runProof, type ProofFixture } from './proof/runner.js';
 import { isProofProfileName } from './proof/profiles.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 import { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
+import { materializeAuthoringPlan } from './authoring/generate.js';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
 import { renderAuthoringPreview } from './authoring/preview.js';
 
@@ -525,7 +526,7 @@ author
     if (options.confirm !== confirmation) {
       throw new Error('authoring confirmation does not match the reviewed plan and destination; no files written');
     }
-    const result = await writeAuthoringPlan(destination, plan, inspection);
+    const result = await writeAuthoringPlan(destination, materializeAuthoringPlan(plan), inspection);
     const output = {
       ok: true,
       command: 'author write',

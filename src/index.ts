@@ -32,6 +32,7 @@ export {
   serializeAuthoringPlan,
   validateAuthoringPlan,
 } from './authoring/schema.js';
+export { materializeAuthoringPlan } from './authoring/generate.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
 export { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
 export {

@@ -7,9 +7,9 @@
  * for a split engine) keyed by everything that could change it, and replay the deterministic
  * tail (*realize*) over the cached artifact for free.
  *
- * Cache key = sha(engineLabel + model + effort + inputHtml + promptHash). A fixture edit
- * changes inputHtml; a prompt/schema edit changes promptHash — either invalidates the entry,
- * so a stale artifact is never replayed silently (T0 reports it as `stale`/`uncached`).
+ * Cache key = sha(engineLabel + model + effort + inputHtml + promptHash + instruction provenance).
+ * A fixture, guide, authoring command, or schema edit moves the key, so a stale artifact is
+ * never replayed silently (T0 reports it as `stale`/`uncached`).
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';
@@ -18,12 +18,19 @@ import { EVAL_DIR } from './score.js';
 
 export const CACHE_DIR = path.join(EVAL_DIR, '.cache');
 
+export interface InstructionProvenance {
+  guideHash?: string;
+  authoringCommandHash?: string;
+  authoringSchemaHash?: string;
+}
+
 export interface CacheKeyParts {
   engineLabel: string;
   model: string;
   effort: string;
   inputHtml: string;
   promptHash: string;
+  instructionProvenance?: InstructionProvenance;
 }
 
 export interface CacheEntry {
@@ -33,6 +40,7 @@ export interface CacheEntry {
   effort: string;
   label: string; // producer/layout
   promptHash: string;
+  instructionProvenance?: InstructionProvenance;
   // The costly artifact: a split engine's propose().raw, or a monolithic engine's
   // convert().output. realize() / validate() is replayed over this.
   raw: string;
@@ -53,6 +61,8 @@ export function cacheKey(parts: CacheKeyParts): string {
   h.update(parts.inputHtml);
   h.update('\0');
   h.update(parts.promptHash);
+  h.update('\0');
+  h.update(JSON.stringify(parts.instructionProvenance ?? {}));
   return h.digest('hex').slice(0, 16);
 }
 
@@ -80,6 +90,7 @@ export function writeCache(parts: CacheKeyParts, label: string, raw: string, pro
     effort: parts.effort,
     label,
     promptHash: parts.promptHash,
+    ...(parts.instructionProvenance ? { instructionProvenance: parts.instructionProvenance } : {}),
     raw,
     proposeMs,
     cachedAt: new Date().toISOString(),

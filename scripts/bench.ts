@@ -52,8 +52,14 @@ import {
 // The scoring core (scripts/tuner/score.ts) stays current — it's a stable scoring
 // utility, not the thing under test. The suite is the constant; the engine is the variable.
 type BenchReport = BlockRunnerReport & { engineError?: string };
+interface InstructionProvenance {
+  guideHash?: string;
+  authoringCommandHash?: string;
+  authoringSchemaHash?: string;
+}
 let convert: (input: string, options?: ConvertOptions) => Promise<BenchReport>;
 let loadedPromptHash = 'rules';
+let loadedInstructionProvenance: InstructionProvenance | undefined;
 
 function engineArg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -72,6 +78,17 @@ async function loadEngine(): Promise<void> {
   const mod = p ? await import(pathToFileURL(path.resolve(p)).href) : await import('../src/index.js');
   convert = mod.convert;
   loadedPromptHash = typeof mod.promptHash === 'string' ? mod.promptHash : p ? 'unreported' : 'rules';
+  loadedInstructionProvenance = readInstructionProvenance(mod.agentSkillProvenance);
+}
+
+function readInstructionProvenance(value: unknown): InstructionProvenance | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const provenance: InstructionProvenance = {};
+  for (const key of ['guideHash', 'authoringCommandHash', 'authoringSchemaHash'] as const) {
+    if (typeof candidate[key] === 'string') provenance[key] = candidate[key];
+  }
+  return Object.keys(provenance).length > 0 ? provenance : undefined;
 }
 
 // Model + reasoning effort behind the conversion. The current engine is
@@ -118,6 +135,9 @@ interface RunRecord {
   suiteHash: string;
   scorerHash?: string;
   promptHash?: string;
+  guideHash?: string;
+  authoringCommandHash?: string;
+  authoringSchemaHash?: string;
   wordpressVersion?: string;
   blockLibraryVersion?: string;
   gutenbergVersion: string;
@@ -280,6 +300,7 @@ function writeTimings(results: Result[], specs: Map<string, Spec>, convertMs: Ma
     suiteHash: suiteHash(specs),
     scorerHash: scorerHash(),
     promptHash: loadedPromptHash,
+    ...(loadedInstructionProvenance ?? {}),
     wordpressVersion: WORDPRESS_TARGET,
     blockLibraryVersion: gutenbergVersion(),
     gutenbergVersion: gutenbergVersion(),
@@ -305,6 +326,7 @@ function buildRecord(results: Result[], specs: Map<string, Spec>, durationMs: nu
     suiteHash: suiteHash(specs),
     scorerHash: scorerHash(),
     promptHash: loadedPromptHash,
+    ...(loadedInstructionProvenance ?? {}),
     wordpressVersion: WORDPRESS_TARGET,
     blockLibraryVersion: gutenbergVersion(),
     gutenbergVersion: gutenbergVersion(),

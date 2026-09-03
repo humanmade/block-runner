@@ -14,12 +14,17 @@ access to fetch the package. **You** are the model in this pipeline.
 
 ## 1. Pick the right command
 
-| You have | Use | Why |
+| You need | Use | Why |
 |---|---|---|
-| A reusable registered block to author — before source exists | **`author preview`** → user confirmation → **`author write`** | A versioned AuthoringPlan makes the consequential implementation choices reviewable and hash-binds the write. |
-| A design in your head, or HTML you are about to write | **`assemble`** | You describe the structure; Block Runner builds valid blocks from it. Best structural results. |
-| Authored source HTML — a design tool export, source file, or paste | **`convert`** | Rule-based translation of existing markup, and the only path that carries CSS. Do not use frontend-scraped render output. |
+| A reusable named block that must live in plugin or theme source | **`author preview`** → confirmation → **`author write`**, then package and proof it | This produces registered-block source. It is not page `post_content`. |
+| New content for a page or post, with no authored HTML | **`assemble`** | An intent tree becomes native page blocks. |
+| Existing authored HTML that must become page or post `post_content` | **`convert`** | Rule-based translation of existing markup, and the only content path that carries CSS. Do not use frontend-scraped render output. |
 | Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Proves the editor will accept it. |
+
+Choose by the requested artifact, not merely by the input format. A supplied HTML design still
+uses registered-block authoring when the user wants a reusable named block in code. Conversely,
+`convert` and `assemble` produce page `post_content`; they do not create a plugin block source
+package. Never use `convert` as a shortcut to author registered-block source.
 
 The single most common mistake is reaching for `convert` when you were about to author the
 HTML yourself. If you are the one inventing the structure, do not write HTML and convert it —
@@ -33,94 +38,208 @@ unsure whether the styling matters, ask the user rather than silently flattening
 
 ---
 
-## 2. Registered-block authoring — preview the plan before a write
+## 2. Registered-block authoring — plan, preview, confirm, write, prove
 
-Use this path when the requested result is a reusable, registered WordPress block source
-package. It is not an HTML conversion path and it does not let a prose description stand in for
-implementation decisions. First make an **`AuthoringPlan`**: a versioned JSON contract that
-names the target block and records its native child structure, editable fields, locking, style
-outcomes, pattern overrides, assets, planned files, and warnings. A plan is the thing being
-reviewed and, eventually, written.
+Use this path for one reusable `namespace/slug` block source package. The model interprets the
+design and produces the versioned declarative **`AuthoringPlan`**; the deterministic source
+generator produces all executable source and serializes blocks. This is deliberately different
+from converting a design into page `post_content`.
 
-AuthoringPlan v1 has these top-level fields. Omitted optional sections canonicalize to their
-documented empty/default form; object keys are recursively sorted for canonical JSON, while
-array order remains material.
+### The model's job: make the authoring plan, never the implementation
 
-| Field | Contract |
+The plan must state the target identity and **final** destination, native structure, field modes
+(`fixed`, `editable`, or `override`), locking, style and asset dispositions, pattern-override
+fields, planned outputs, and every warning. Make material choices explicit: which content can be
+edited, which structure is locked, what maps to native/theme support, what requires scoped CSS,
+which assets are available, and which fields a pattern may override. A missing destination is a
+question for the user, not permission to use a temporary directory.
+
+The plan is declarative JSON only. Do **not** emit or ask the user to paste React, JSX, TSX,
+PHP, `block.json` or other block metadata, generated CSS, `registerBlockType` or
+`register_block_type` calls, or `<!-- wp:… -->` delimiters. Do not put executable source in a
+plan's file content. The generator owns executable source and block serialization; the model
+owns the reviewable design decisions.
+
+### `AuthoringPlan` v1 shape
+
+The CLI accepts exactly this versioned JSON shape. Object keys may be in any order; arrays retain
+their order and every listed value participates in the confirmation hash. `files` names the
+generated source outputs and uses only safe relative POSIX paths. The fields are required, though
+the arrays may be empty when a design genuinely has none of that item.
+
+| Field | Required shape |
 |---|---|
-| `version` | Required literal `1`. |
-| `generatorVersion` | Required generator identity/version; it participates in the confirmation hash. |
-| `target` | Required `{ "name": "namespace/slug", "title": "…" }`; `directory`, when present, is a safe relative package path. |
-| `structure` | Native block nodes: `block`, optional stable `id`, `label`, `attributes`, per-node `lock`, and `children`. Never HTML. |
-| `fields` | Editor values with `id`, `label`, and explicit `mode`: `fixed`, `editable`, or `override`; may identify a structure `node`, `attribute`, type, default, and description. |
-| `locking` | Whole-block lock mode (`all`, `contentOnly`, or `none`) and optional move/remove/insert permissions. |
-| `styles` | Strategy (`native`, `scoped-css`, or `mixed`) plus a disposition for each source property: `native`, `token`, `scoped-css`, or `dropped`. |
-| `pattern` | Readiness flag and overrides that name their field. |
-| `assets` | Identified sources with optional safe relative destinations, availability status, and required flag. |
-| `files` | Planned safe relative paths, optional materialized `content`, optional kind, and `operation: create|replace` (omitted means `create`). `plannedFiles` is only accepted as an input alias and canonicalizes to `files`. |
-| `warnings` | Any unresolved or deliberate caveats. |
+| `version` | The number `1`. |
+| `generatorVersion` | Non-empty generator version string. |
+| `target` | `{ "name": "namespace/slug", "title": "…" }`; optional `description`, `category`, `icon`, `textDomain`, `wordpress`, and safe relative `directory`. |
+| `structure` | Ordered native nodes: `block`, optional stable `id`, `label`, JSON `attributes`, `lock`, and recursive `children`. Never HTML. |
+| `fields` | Ordered `{ "id", "label", "mode" }` records; `mode` is exactly `fixed`, `editable`, or `override`. Optional `node`, `attribute`, `type`, `default`, and `description` explain the editor surface. |
+| `locking` | `{ "mode": "all" | "contentOnly" | "none" }`, with optional boolean `move`, `remove`, and `insert`. |
+| `styles` | `{ "strategy": "native" | "scoped-css" | "mixed", "outcomes": [] }`; an outcome has `property`, `outcome` (`native`, `token`, `scoped-css`, or `dropped`) and optional `value`, `token`, and `reason`. |
+| `pattern` | `{ "ready": boolean, "overrides": [{ "field": "<field id>" }] }`, with optional override label and description. |
+| `assets` | `{ "id", "source" }` records with optional `kind`, safe relative `destination`, `status` (`ready`, `missing`, `external`), and `required`. |
+| `files` | `{ "path" }` records with optional `kind` and `operation` (`create` or `replace`; default `create`). `plannedFiles` is accepted only as an input alias and canonicalizes to `files`. |
+| `warnings` | Ordered, non-empty warning strings; use `[]` when there are none. |
 
-The plan must make every material choice explicit. In particular, label fields as **fixed**,
-**editable**, or **override**; say which styles map to native or theme support and which need a
-different outcome; and identify every replacement as `replace` (new files default to `create`).
-Do not hide those choices in generated code, HTML, a chat summary, or an implied default.
+Here is a complete valid plan. Replace its identity, structure, decisions, and retained final
+destination for the supplied design; do not copy its values blindly.
 
-### Preview, then talk to the user
-
-```bash
-npx -y block-runner@latest author preview authoring-plan.json --output-dir generated/feature-grid
+```json
+{
+  "version": 1,
+  "generatorVersion": "0.9.0-preview.1",
+  "target": {
+    "name": "acme/feature-grid",
+    "title": "Feature grid",
+    "description": "A reusable feature grid.",
+    "category": "design",
+    "textDomain": "acme",
+    "wordpress": "7.1",
+    "directory": "blocks/acme-feature-grid"
+  },
+  "structure": [
+    {
+      "id": "root",
+      "block": "core/group",
+      "label": "Feature grid",
+      "attributes": { "layout": { "type": "constrained" } },
+      "lock": { "move": false, "remove": false },
+      "children": [
+        {
+          "id": "heading",
+          "block": "core/heading",
+          "label": "Heading",
+          "attributes": { "level": 2 }
+        }
+      ]
+    }
+  ],
+  "fields": [
+    {
+      "id": "heading",
+      "label": "Heading",
+      "mode": "editable",
+      "type": "rich-text",
+      "node": "heading",
+      "attribute": "content"
+    },
+    {
+      "id": "layout",
+      "label": "Layout",
+      "mode": "fixed",
+      "type": "layout"
+    },
+    {
+      "id": "accent",
+      "label": "Accent",
+      "mode": "override",
+      "type": "color"
+    }
+  ],
+  "locking": { "mode": "contentOnly", "move": false, "remove": false, "insert": false },
+  "styles": {
+    "strategy": "mixed",
+    "outcomes": [
+      { "property": "color", "outcome": "token", "token": "accent" },
+      { "property": "display", "outcome": "scoped-css", "value": "grid", "reason": "No native support." }
+    ]
+  },
+  "pattern": { "ready": true, "overrides": [{ "field": "accent", "label": "Accent" }] },
+  "assets": [
+    { "id": "logo", "source": "assets/logo.svg", "kind": "svg", "destination": "assets/logo.svg", "status": "ready", "required": true }
+  ],
+  "files": [
+    { "path": "block.json", "kind": "metadata", "operation": "create" },
+    { "path": "index.js", "kind": "editor", "operation": "create" },
+    { "path": "style.css", "kind": "style", "operation": "create" }
+  ],
+  "warnings": []
+}
 ```
 
-`author preview` is read-only. It validates and canonicalizes the plan, computes a SHA-256
-confirmation value bound to both the plan and the selected destination fingerprint, and prints a
-deterministic plain-text review. It includes the target, structure, editable fields, style
-outcomes, assets, pattern readiness, planned files, warnings, destination fingerprint, and the
-unambiguous line **`No files written.`** It labels fixed, editable, and override fields in text,
-so colour is never needed to understand it. Terminal width affects wrapping only; `NO_COLOR` is
-honoured and the preview never inserts ANSI escape sequences into JSON.
+### Preview the exact plan before asking
 
-Read this preview before asking for consent. Summarize the decisions in ordinary language and
-show the complete 64-character, lower-case hexadecimal confirmation SHA-256. The installed skill
-owns the conversation: ask a clear yes/no
-question such as “Approve writing exactly this plan, identified by `<hash>`, to `<directory>`?”
-Do not ask the CLI to prompt, and do not consider an earlier or general “go ahead” to approve a
-changed plan.
+```bash
+npx -y block-runner@latest author preview authoring-plan.json \
+  --output-dir <exact-final-destination>
+```
 
-If any planned file is a replacement, ask separately and name the affected files. Replacing an
-existing file is a distinct decision from creating the plan; no affirmative replacement answer
-means no `author write`.
+`author preview` writes no files. Before requesting consent, paste the literal plain-text
+terminal output verbatim. Do not replace the structure tree or the `Warnings` section with a
+prose summary. The user must see the full confirmation SHA-256, destination, destination
+fingerprint, tree, planned files, replacement markers, and warnings — including the `Warnings`
+section when it says `- none`, and `No files written.`
 
-### Write only the previewed plan
+Only after showing that exact preview, ask a clear question such as: “Approve writing exactly
+plan `<full hash>` to `<destination>`?” If replacements are listed, name them and obtain a
+separate explicit replacement approval. A general “go ahead”, a changed plan, a changed
+destination, or a changed destination fingerprint is not approval. The CLI is deliberately
+non-interactive; it never obtains conversational consent for you.
 
-After the user has affirmatively approved the displayed confirmation hash (and any replacements), run:
+### Write, then finish the delivery
+
+After that exact approval, run:
 
 ```bash
 npx -y block-runner@latest author write authoring-plan.json \
-  --confirm '<full-sha-256-from-preview>' \
-  --output-dir '<the-previewed-directory>'
+  --confirm '<full preview hash>' \
+  --output-dir '<exact previewed destination>'
 ```
 
-Pass the full confirmation hash exactly as the preview displayed it; `--output-dir` names the
-exact package destination, rather than a parent directory. The command is intentionally
-non-interactive: it never opens a prompt and never consumes stdin as confirmation. This also
-applies with `--json` and when stdout is redirected. A missing, stale, or incorrect hash must
-be treated as a no-write result, not as a reason to retry with a looser invocation.
+Use the full hash and exact destination from the preview. If either changes, preview again and
+obtain fresh consent. Do not write into `mktemp`, an auto-deleted staging folder, or an
+unspecified location. A source package is incomplete until it lands in the requested existing
+plugin or retained standalone-plugin directory.
 
-`-` may supply the plan on stdin (`author preview -` or `author write -`); it is only plan input,
-never confirmation input. For a write, provide the same canonical plan that was previewed, the
-same destination, and the confirmation hash from that preview. If any changes, preview it again
-and obtain fresh consent.
+### Existing-plugin output
 
-Do not work around a rejected write. Unsafe relative paths, absolute paths, `..` traversal,
-destination changes, collisions, or a symlink in the selected output directory's prefix
-are failures before any write. The command rechecks the destination fingerprint, paths,
-symlinks, and collisions immediately before it uses exclusive, atomic file writes. Surface the
-failure, revise the plan or destination safely, then start again at preview.
+Use this only after inspecting the target plugin. Do not guess its build or registration layout.
 
-Generation of source is deliberately separate from this review loop. `author write` can
-materialize only `files[].content` already present in the exact reviewed plan; a plan that only
-describes future files is a valid no-op. Do not pretend that `author preview` generated files,
-parse its display back into JSON, or use `author write` to fill decisions the plan omitted.
+```bash
+npx -y block-runner@latest plugin inspect <plugin-root>
+npx -y block-runner@latest plugin preview <generated-block-dir> --host <plugin-root>
+# Show this complete preview, then obtain its displayed fingerprint and any separate replacement approvals.
+npx -y block-runner@latest plugin write <generated-block-dir> --host <plugin-root> \
+  --confirm '<plugin preview fingerprint>' \
+  --approve-replace '<each explicitly approved path>'
+```
+
+Write the generated block directly below the existing plugin's lasting source directory, not a
+temporary directory. If `plugin inspect` says the layout is unsupported, stop and offer
+standalone output rather than improvising registration or a build configuration.
+
+### Standalone-plugin output
+
+Use a retained, explicitly named plugin directory. Preview the wrapper before it is written,
+then build the final plugin archive from that same directory.
+
+```bash
+npx -y block-runner@latest plugin preview <generated-block-dir> \
+  --standalone <retained-plugin-directory>
+# Show this complete preview, then obtain its displayed fingerprint and any replacement approvals.
+npx -y block-runner@latest plugin write <generated-block-dir> \
+  --standalone <retained-plugin-directory> \
+  --confirm '<plugin preview fingerprint>'
+```
+
+### Proof is part of completion
+
+Headless validation, source generation, or a successful build is not a full success claim. Build
+the final plugin ZIP and run a full proof against the exact reviewed input and generated package:
+
+```bash
+npx -y block-runner@latest proof dist/acme-feature-grid.zip \
+  --profile full \
+  --input designs/feature-grid.html \
+  --markup fixtures/feature-grid.blocks.html \
+  --fixture fixtures/feature-grid.proof.json \
+  --receipt-dir artifacts/proof
+```
+
+Call the result fully successful only after a passing immutable `proof --profile full` receipt.
+That profile must include real WordPress runtime registration/activation and editor gates plus a
+passing `pattern_overrides` gate. `skip`, `blocked`, missing, or failed runtime or override gates
+mean the source is still unproven; report it as incomplete rather than successful.
 
 ---
 
@@ -265,7 +384,7 @@ not registered produces a warning naming that node.
 
 ---
 
-## 4. `convert` — someone else's HTML
+## 4. `convert` — someone else's HTML into page `post_content`
 
 ```bash
 printf '%s' "$PASTED_HTML" | npx -y block-runner@latest convert - --json
@@ -292,7 +411,7 @@ design yourself and describing it as an intent tree instead.
 
 ---
 
-## 5. The pre-flight loop — before anything is saved
+## 5. The pre-flight loop — before page markup is saved
 
 Run this on block markup before you write it to WordPress:
 
@@ -335,7 +454,7 @@ Read `.ok` and `.summary.invalid` for the verdict, `.items[].source.htmlLine` fo
 
 ---
 
-## 6. Where the blocks go
+## 6. Where page blocks go
 
 Producing valid markup is not the end of the job. Every run ends in one of three places, and
 you pick based on what is available — never leave the markup sitting in a temp file or scroll
