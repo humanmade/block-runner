@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
@@ -18,7 +18,7 @@ const execFileAsync = promisify(execFile);
 describe('real WordPress generated-pattern full-profile receipt', () => {
   it('writes a complete WordPress 7.1 receipt for the actual generated block inside a synced pattern', async () => {
     await requireDocker();
-    const outputDir = await mkdtemp(path.join(tmpdir(), 'block-runner-real-proof-'));
+    const outputDir = await proofOutputDirectory();
     const built = await buildPatternOverridesFixture(outputDir);
 
     expect(existsSync(built.pluginZip)).toBe(true);
@@ -63,8 +63,26 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       .not.toEqual(lifecycle?.preSaveCoreBlockContent?.[1]?.content);
     await expect(readFile(path.join(outputDir, result.receiptReference.path), 'utf8'))
       .resolves.toBe(canonicalJson(result.receipt));
+    await writeFile(path.join(outputDir, 'receipt-index.json'), `${JSON.stringify({
+      schemaVersion: 1,
+      receipt: result.receiptReference,
+      environment: result.receipt.environment,
+    }, null, 2)}\n`, 'utf8');
   }, 480_000);
 });
+
+/**
+ * CI supplies a retained directory so the receipt and every content-addressed
+ * evidence object can be uploaded after this test. Local runs remain isolated
+ * in a temporary directory.
+ */
+async function proofOutputDirectory(): Promise<string> {
+  const configured = process.env.BLOCK_RUNNER_PROOF_OUTPUT_DIR;
+  if (!configured) return mkdtemp(path.join(tmpdir(), 'block-runner-real-proof-'));
+  const outputDir = path.resolve(configured);
+  await mkdir(outputDir, { recursive: true });
+  return outputDir;
+}
 
 async function requireDocker(): Promise<void> {
   try {

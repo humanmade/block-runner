@@ -295,6 +295,12 @@ The WordPress phase requires a working Docker CLI and daemon. Proof commands rec
 Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
 specific blocked or failed phase instead of exhausting the general test timeout.
 
+On GitHub Actions, every verification-matrix job uploads a
+`wordpress-7.1-pattern-overrides-receipt-node-*` artifact retained for 14 days. It contains
+`receipt-index.json`, the content-addressed `receipts/sha256` record, and its
+`evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
+the relevant build without committing environment-specific run output.
+
 ## Media Resolution
 
 A `<img src="hero.jpg">` in generated HTML is just a URL, but WordPress image and cover blocks

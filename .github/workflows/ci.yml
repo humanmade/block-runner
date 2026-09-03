@@ -24,4 +24,17 @@ jobs:
       # avoid `npm@latest` floating across majors on the matrix).
       - run: npm install -g npm@11
       - run: npm ci
-      - run: npm run verify
+      - name: Verify
+        env:
+          # The real WordPress test writes the immutable receipt, its evidence,
+          # and a receipt-index.json pointer here for the artifact below.
+          BLOCK_RUNNER_PROOF_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt
+        run: npm run verify
+      - name: Upload WordPress 7.1 pattern-overrides receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-7.1-pattern-overrides-receipt-node-${{ matrix.node }}
+          path: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt
+          if-no-files-found: warn
+          retention-days: 14
