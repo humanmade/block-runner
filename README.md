@@ -272,25 +272,28 @@ block-runner proof generated-plugin.zip \\
   --profile full \\
   --input design.html \\
   --markup generated.blocks.html \\
-  --fixture test/fixtures/proof-pattern-overrides.json
+  --fixture proof-fixture.json
 ```
 
 It starts a real WordPress 7.1 `wp-env`, records the canonical `wp_block` content and each
 `core/block.content` instance value in an immutable receipt, then verifies two instances,
 reopen, canonical update, reset, structural policy, a missing-binding negative, and frontend
-output. A fixture-specific plugin archive and reviewed visual/accessibility inputs are required
-for a passing full receipt.
+output. Consumer proofs require an installable plugin archive and reviewed visual/accessibility
+inputs for a passing full receipt.
 
-The repository’s opt-in real-receipt test uses the same full path (with no proof adapter). Point
-it at the generated ZIP, reviewed input/markup, and the fixture’s reviewed PNG golden:
+The repository builds its generated fixture plugin and native markup from
+`test/fixtures/authoring/pattern-overrides.plan.json`. Its WordPress visual assertion compares
+the completed page with the checked-in, reviewed
+`proof/wordpress-7.1-pattern-overrides.expected.png` golden; it never creates a baseline while
+evaluating one. The real receipt runs without a proof adapter or externally supplied artifacts:
 
 ```sh
-BLOCK_RUNNER_REAL_PROOF_PLUGIN_ZIP=generated-plugin.zip \
-BLOCK_RUNNER_REAL_PROOF_INPUT=design.html \
-BLOCK_RUNNER_REAL_PROOF_MARKUP=generated.blocks.html \
-BLOCK_RUNNER_REAL_PROOF_GOLDEN=reviewed-pattern.png \
-npm run test:proof
+npm run verify
 ```
+
+The WordPress phase requires a working Docker CLI and daemon. Proof commands record bounded
+Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
+specific blocked or failed phase instead of exhausting the general test timeout.
 
 ## Media Resolution
 

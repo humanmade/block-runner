@@ -1,28 +1,55 @@
 {
-  "name": "acme/pattern-hero",
-  "title": "Pattern hero",
+  "name": "block-runner/pattern-overrides-fixture",
+  "title": "Pattern overrides fixture",
   "templateLock": "contentOnly",
   "root": {
     "path": "hero",
     "role": "wrapper",
     "children": [
       {
-        "path": "hero.title",
-        "role": "heading",
-        "content": "Canonical heading"
-      },
-      {
-        "path": "hero.image",
-        "role": "image",
-        "attributes": { "id": 42 },
-        "url": "https://example.test/canonical.jpg",
-        "alt": "Canonical image"
-      },
-      {
-        "path": "hero.cta",
-        "role": "button",
-        "content": "Canonical action",
-        "url": "https://example.test/canonical"
+        "path": "hero.layout",
+        "role": "group",
+        "attributes": {
+          "className": "block-runner-pattern-layout",
+          "templateLock": "contentOnly",
+          "style": {
+            "color": {
+              "background": "#dcecff"
+            }
+          }
+        },
+        "children": [
+          {
+            "path": "hero.title",
+            "role": "heading",
+            "content": "Canonical heading"
+          },
+          {
+            "path": "hero.layout-note",
+            "role": "paragraph",
+            "content": "Canonical layout version one.",
+            "patternOverrides": false
+          },
+          {
+            "path": "hero.image",
+            "role": "image",
+            "attributes": { "id": 42 },
+            "url": "https://example.test/canonical.jpg",
+            "alt": "Canonical image"
+          },
+          {
+            "path": "hero.actions",
+            "role": "buttons",
+            "children": [
+              {
+                "path": "hero.cta",
+                "role": "button",
+                "content": "Canonical action",
+                "url": "https://example.test/canonical"
+              }
+            ]
+          }
+        ]
       }
     ]
   }

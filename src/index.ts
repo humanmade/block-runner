@@ -93,6 +93,7 @@ export type {
   ProofGateResult,
   ProofGateRunner,
   ProofCommandResult,
+  ProofCommandOptions,
   ProofCommandRunner,
   ProofReceiptDocument,
   ProofRunOptions,

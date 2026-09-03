@@ -1,35 +1,49 @@
+import { createHash } from 'node:crypto';
+import { existsSync } from 'node:fs';
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { buildPatternOverridesFixture } from '../scripts/build-pattern-overrides-fixture.js';
 import { runProof } from '../src/index.js';
 
 describe('pattern-override receipts', () => {
-  it('ships a two-instance text, image, and button/link lifecycle fixture', async () => {
-    const fixture = JSON.parse(await readFile(new URL('./fixtures/proof-pattern-overrides.json', import.meta.url), 'utf8')) as {
-      patternOverrides: {
-        canonicalContent: string;
-        instances: Array<{ content: Record<string, Record<string, unknown>> }>;
-        requiredBindings: unknown[];
-        negative: { value?: unknown; fallback?: unknown };
-      };
-      visual?: { expectedPath?: unknown; threshold?: unknown };
-    };
-    const pattern = fixture.patternOverrides;
+  it('builds a deterministic generated plugin and uses its markup inside both synced-pattern versions', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-pattern-fixture-'));
+    const secondRoot = await mkdtemp(path.join(tmpdir(), 'block-runner-pattern-fixture-'));
+    const built = await buildPatternOverridesFixture(root);
+    const second = await buildPatternOverridesFixture(secondRoot);
+    const pattern = built.fixture.patternOverrides!;
+    const browserSource = await readFile(path.join(built.pluginDirectory, 'build', 'index.js'), 'utf8');
+    const generatedTemplate = await readFile(path.join(built.pluginDirectory, 'generated-source', 'template.js'), 'utf8');
 
     expect(pattern.instances).toHaveLength(2);
     expect(pattern.instances[0]!.content).not.toEqual(pattern.instances[1]!.content);
+    expect(pattern.canonicalContent).toContain(`<!-- wp:${built.fixture.blockName}`);
+    expect(pattern.canonicalUpdate.content).toContain(`<!-- wp:${built.fixture.blockName}`);
+    expect(pattern.canonicalContent).toContain(built.nativeContainerMarkup);
     expect(pattern.canonicalContent).toContain('core/pattern-overrides');
     expect(pattern.canonicalContent).not.toContain('"innerBlocks"');
     expect(pattern.requiredBindings).toHaveLength(6);
+    expect(browserSource).toContain('useInnerBlocksProps');
+    expect(browserSource).toContain('core/pattern-overrides');
+    expect(generatedTemplate).toContain('core/pattern-overrides');
+    await expect(readFile(built.pluginZip)).resolves.toEqual(await readFile(second.pluginZip));
     expect(pattern.negative).toMatchObject({
       value: expect.any(String),
       fallback: expect.any(String),
     });
-    expect(fixture.visual).toMatchObject({
+    expect(built.nativeContainerMarkup).toContain('wp-block-group block-runner-pattern-layout has-background');
+    expect(built.nativeContainerMarkup).toContain('style="background-color:#dcecff"');
+    expect(pattern.canonicalUpdate.content).toContain('block-runner-layout-v2 has-background');
+    expect(built.fixture.visual).toMatchObject({
       expectedPath: expect.any(String),
       threshold: expect.any(Number),
     });
+    expect(built.fixture.visual?.expectedPath).toBe(path.resolve('proof/wordpress-7.1-pattern-overrides.expected.png'));
+    expect(existsSync(built.fixture.visual!.expectedPath)).toBe(true);
+    expect(createHash('sha256').update(await readFile(built.fixture.visual!.expectedPath)).digest('hex'))
+      .toBe('28ba963d8c728c462f81c9123c67b7d8644aa33eaa202cc37a8df10a95cb1bcd');
   });
 
   it('retains explicitly supplied headless adapter evidence in a headless receipt', async () => {
@@ -83,6 +97,48 @@ describe('pattern-override receipts', () => {
         frontend: { url: 'http://example.test/' },
         visual: { expectedPath: 'fixture.png', threshold: 0 },
         accessibility: { manualReview: 'pass' },
+      },
+      gateRunner: async () => ({ status: 'pass' }),
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.profile.failedGates).toContainEqual(expect.objectContaining({
+      gate: 'pattern_overrides',
+      status: 'blocked',
+    }));
+  });
+
+  it('does not let a Core-only pattern pass as generated-block evidence', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-core-only-pattern-'));
+    const input = path.join(root, 'plan.json');
+    const plugin = path.join(root, 'fixture.zip');
+    await Promise.all([writeFile(input, '{"plan":"pattern"}'), writeFile(plugin, 'fixture')]);
+    const coreOnly = '<!-- wp:heading {"metadata":{"name":"hero-title","bindings":{"content":{"source":"core/pattern-overrides"}}}} --><h2>Canonical heading</h2><!-- /wp:heading -->';
+
+    const result = await runProof({
+      profile: 'full',
+      inputPath: input,
+      pluginZip: plugin,
+      outputDir: root,
+      fixture: {
+        blockName: 'acme/generated-wrapper',
+        editableFields: [{ path: 'content', surface: 'richText' }],
+        frontend: { url: 'http://example.test/' },
+        visual: { expectedPath: 'fixture.png', threshold: 0 },
+        accessibility: { manualReview: 'pass' },
+        patternOverrides: {
+          title: 'Core-only counterexample',
+          canonicalContent: coreOnly,
+          instances: [
+            { label: 'first', content: { 'hero-title': { content: 'First' } } },
+            { label: 'second', content: { 'hero-title': { content: 'Second' } } },
+          ],
+          canonicalUpdate: { marker: 'Updated', content: coreOnly },
+          reset: { instance: 0, name: 'hero-title', attribute: 'content', fallback: 'Canonical heading' },
+          requiredBindings: [{ name: 'hero-title', attribute: 'content' }],
+          structuralPolicy: 'contentOnly',
+          negative: { name: 'hero-title', attribute: 'content', value: 'Rejected', fallback: 'Canonical heading' },
+        },
       },
       gateRunner: async () => ({ status: 'pass' }),
     });

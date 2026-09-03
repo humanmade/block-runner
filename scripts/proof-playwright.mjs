@@ -44,10 +44,38 @@ const set = (gate, status, reason, details, artifacts) => {
 };
 const blocked = (gate, reason) => set(gate, 'blocked', reason);
 const sha256 = (value) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
+const phases = [];
+const phase = async (name, action) => {
+  const startedAt = new Date().toISOString();
+  const started = Date.now();
+  process.stderr.write(`[block-runner proof] browser ${name} started\n`);
+  try {
+    const result = await action();
+    const durationMs = Date.now() - started;
+    phases.push({ name, status: 'pass', startedAt, durationMs });
+    process.stderr.write(`[block-runner proof] browser ${name} finished after ${durationMs}ms\n`);
+    return result;
+  } catch (error) {
+    const durationMs = Date.now() - started;
+    phases.push({
+      name,
+      status: 'fail',
+      startedAt,
+      durationMs,
+      error: error instanceof Error ? error.message : String(error),
+    });
+    process.stderr.write(`[block-runner proof] browser ${name} failed after ${durationMs}ms\n`);
+    throw error;
+  }
+};
 
 const browser = await chromium.launch({ headless: true });
 const browserVersion = browser.version();
 const page = await browser.newPage();
+// A failed native interaction should fail its phase rather than silently burn
+// the whole proof's timeout one default Playwright wait at a time.
+page.setDefaultTimeout(20_000);
+page.setDefaultNavigationTimeout(20_000);
 const consoleErrors = [];
 const pageErrors = [];
 const responses = [];
@@ -64,10 +92,10 @@ page.on('response', (response) => {
 page.on('requestfailed', (request) => responses.push({ url: request.url(), method: request.method(), resourceType: request.resourceType(), status: 0, failure: request.failure()?.errorText }));
 
 try {
-  await login(page, baseUrl);
+  await phase('login', () => login(page, baseUrl));
 
   if (input.mode === 'deactivated') {
-    await proveDeactivation(page, fixture, baseUrl, input.publication);
+    await phase('deactivation-browser', () => proveDeactivation(page, fixture, baseUrl, input.publication));
   } else {
 
     // Exercise the official utilities as part of the WordPress browser runtime.
@@ -77,25 +105,28 @@ try {
     const pageUtils = PageUtils ? new PageUtils({ page }) : undefined;
     const admin = Admin ? new Admin({ page, pageUtils }) : undefined;
     const editor = Editor ? new Editor({ page }) : undefined;
-    if (admin?.visitAdminPage) {
-      await admin.visitAdminPage('post-new.php');
-    } else {
-      await page.goto(`${baseUrl}/wp-admin/post-new.php`, { waitUntil: 'networkidle' });
-    }
+    await phase('open-editor', async () => {
+      if (admin?.visitAdminPage) {
+        await admin.visitAdminPage('post-new.php');
+      } else {
+        await page.goto(`${baseUrl}/wp-admin/post-new.php`, { waitUntil: 'domcontentloaded' });
+      }
+      await waitForEditorReady(page);
+    });
 
   const clientBlock = await page.evaluate((name) => Boolean(globalThis.wp?.blocks?.getBlockType(name)), fixture.blockName);
   set('client_registry', clientBlock ? 'pass' : 'fail', clientBlock ? undefined : 'Client block registry did not contain the generated block.', {
     block: fixture.blockName,
   });
 
-  const inserted = await insertThroughVisibleInserter(page, fixture);
+  const inserted = await phase('editor-inserter', () => insertThroughVisibleInserter(page, fixture));
   set('editor_inserter', inserted ? 'pass' : 'fail', inserted ? undefined : 'Could not insert the block through the visible inserter.');
 
   const preEdit = await editorState(page);
-  const fieldResult = await editAllFields(page, editor, fixture.editableFields ?? []);
+  const fieldResult = await phase('editor-field-editing', () => editAllFields(page, editor, fixture.editableFields ?? []));
   set('editor_field_editing', fieldResult.status, fieldResult.reason, fieldResult.details);
 
-  const saved = await savePost(page, editor);
+  const saved = await phase('editor-save', () => savePost(page, editor));
   const savedState = await editorState(page);
   const editPersistence = editedValuesPersisted(preEdit, savedState, fixture.editableFields ?? []);
   const savePassed = saved && editPersistence.ok;
@@ -105,7 +136,7 @@ try {
     editPersistence,
   });
 
-  const reopened = await reopenPost(page);
+  const reopened = await phase('editor-reopen', () => reopenPost(page));
   const reopenedState = await editorState(page);
   const reopenPersistence = editedValuesPersisted(preEdit, reopenedState, fixture.editableFields ?? []);
   const persisted = savePassed && reopened && savedState.contentHash === reopenedState.contentHash && savedState.treeHash === reopenedState.treeHash && reopenPersistence.ok;
@@ -116,15 +147,15 @@ try {
     reopenPersistence,
   });
 
-  patternLifecycle = await provePatternOverride(page, fixture);
-  const published = await publishPost(page, editor);
+  patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
+  const published = await phase('publish', () => publishPost(page, editor));
   const publishedState = await editorState(page);
   publication = published ? await readPublication(page, publishedState.content) : undefined;
-  await proveAxeEditor(page, fixture);
-  await proveFrontend(page, fixture, baseUrl, publication);
-  await completePatternOverride(page, fixture, publication, patternLifecycle);
-  await proveVisual(page, fixture, artifactDir);
-  await proveAxeFrontend(page, fixture);
+  await phase('accessibility-editor', () => proveAxeEditor(page, fixture));
+  await phase('frontend', () => proveFrontend(page, fixture, baseUrl, publication));
+  await phase('pattern-frontend', () => completePatternOverride(page, fixture, publication, patternLifecycle));
+  await phase('visual-regression', () => proveVisual(page, fixture, artifactDir));
+  await phase('accessibility-frontend', () => proveAxeFrontend(page, fixture));
     set('accessibility_manual_review', fixture.accessibility?.manualReview ?? 'blocked',
       fixture.accessibility?.manualReview ? 'Manual review status supplied by fixture.' : 'No manual review scope was supplied.');
   }
@@ -151,7 +182,7 @@ try {
 
 const executablePath = chromium.executablePath();
 const revision = /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(executablePath)?.[1] ?? 'unobserved';
-await writeFile(outputPath, JSON.stringify({ gates, publication, environment: { browser: { version: browserVersion, revision, executablePath } } }, null, 2), 'utf8');
+await writeFile(outputPath, JSON.stringify({ gates, publication, phases, environment: { browser: { version: browserVersion, revision, executablePath } } }, null, 2), 'utf8');
 
 async function login(page, baseUrl) {
   await page.goto(`${baseUrl}/wp-login.php`, { waitUntil: 'domcontentloaded' });
@@ -159,9 +190,21 @@ async function login(page, baseUrl) {
   await page.locator('#user_login').fill(process.env.WP_USERNAME ?? 'admin');
   await page.locator('#user_pass').fill(process.env.WP_PASSWORD ?? 'password');
   await Promise.all([
-    page.waitForLoadState('networkidle'),
+    page.waitForLoadState('domcontentloaded'),
     page.locator('#wp-submit').click(),
   ]);
+}
+
+async function waitForEditorReady(page) {
+  await page.waitForFunction(
+    () => Boolean(globalThis.wp?.data?.select('core/block-editor')?.getBlocks),
+    undefined,
+    { timeout: 20_000 },
+  );
+  // Depending on the registered block set, WordPress hosts the writing flow
+  // in the API-v3 iframe or directly in the page.
+  await page.locator('iframe[name="editor-canvas"], .block-editor-writing-flow, .editor-styles-wrapper').first()
+    .waitFor({ state: 'visible', timeout: 20_000 });
 }
 
 async function insertThroughVisibleInserter(page, fixture) {
@@ -271,7 +314,10 @@ async function publishPost(page, editor) {
 
 async function reopenPost(page) {
   try {
-    await page.reload({ waitUntil: 'networkidle' });
+    // Editor heartbeat requests can keep networkidle open after the editor is
+    // ready. The writing flow is the lifecycle condition that matters here.
+    await page.reload({ waitUntil: 'domcontentloaded' });
+    await waitForEditorReady(page);
     return true;
   } catch {
     return false;
@@ -360,10 +406,12 @@ async function provePatternOverride(page, fixture) {
 
   const canonical = pattern.storedCanonicalContent ?? pattern.canonicalContent;
   const bindingCheck = inspectRequiredPatternBindings(canonical, pattern.requiredBindings);
-  if (!bindingCheck.ok) {
-    set('pattern_overrides', 'fail', 'The saved canonical wp_block content did not satisfy the required binding contract.', {
+  const generatedBlockCheck = inspectGeneratedBlockCoverage(canonical, fixture.blockName, pattern.requiredBindings);
+  if (!bindingCheck.ok || !generatedBlockCheck.ok) {
+    set('pattern_overrides', 'fail', 'The saved canonical wp_block did not keep every required binding inside the generated block.', {
       canonicalWpBlockContent: canonical,
       bindingCheck,
+      generatedBlockCheck,
     });
     return undefined;
   }
@@ -438,13 +486,18 @@ async function provePatternOverride(page, fixture) {
   const canonicalUpdate = await updateCanonicalPattern(page, pattern.ref, pattern.canonicalUpdate.content);
   const afterCanonicalUpdate = await editorState(page);
   const afterCanonicalInstances = await patternInstanceStates(page, pattern.ref);
+  const updatedGeneratedBlockCheck = canonicalUpdate.ok
+    ? inspectGeneratedBlockCoverage(canonicalUpdate.content, fixture.blockName, pattern.requiredBindings)
+    : { ok: false, reason: 'canonical_update_unavailable' };
   const canonicalReachedBoth = canonicalUpdate.ok
     && canonicalUpdate.content.includes(pattern.canonicalUpdate.marker)
+    && updatedGeneratedBlockCheck.ok
     && samePatternInstances(afterCanonicalInstances, pattern.instances);
   if (!canonicalReachedBoth) {
     set('pattern_overrides', 'fail', 'A canonical layout/style update did not reach both synced instances without erasing local content.', {
       canonicalWpBlockContent: canonical,
       canonicalUpdate,
+      updatedGeneratedBlockCheck,
       afterCanonicalUpdate,
       coreBlockContent: afterCanonicalInstances,
     });
@@ -473,7 +526,7 @@ async function provePatternOverride(page, fixture) {
     return undefined;
   }
 
-  const structural = await observePatternStructure(page, pattern.ref, pattern.structuralPolicy);
+  const structural = await observePatternStructure(page, pattern.ref, fixture.blockName, pattern.structuralPolicy);
   if (!structural.unavailable) {
     set('pattern_overrides', 'fail', 'Structural operations remained available under the fixture structural-lock policy.', {
       canonicalWpBlockContent: canonical,
@@ -534,6 +587,24 @@ function inspectRequiredPatternBindings(content, required) {
     missing,
     structuralBinding: structuralBinding ? structuralBinding.name : undefined,
     blocks,
+  };
+}
+
+function inspectGeneratedBlockCoverage(content, blockName, required) {
+  const opening = `<!-- wp:${blockName}`;
+  const closing = `<!-- /wp:${blockName} -->`;
+  const start = content.indexOf(opening);
+  const openingEnd = start === -1 ? -1 : content.indexOf('-->', start);
+  const end = openingEnd === -1 ? -1 : content.indexOf(closing, openingEnd + 3);
+  if (start === -1 || openingEnd === -1 || end === -1) {
+    return { ok: false, blockName, reason: 'generated_block_absent', missing: required };
+  }
+  const bindingCheck = inspectRequiredPatternBindings(content.slice(openingEnd + 3, end), required);
+  return {
+    ok: bindingCheck.ok,
+    blockName,
+    missing: bindingCheck.missing,
+    structuralBinding: bindingCheck.structuralBinding,
   };
 }
 
@@ -771,47 +842,62 @@ function canonicalValue(value) {
   return JSON.stringify(value);
 }
 
-async function observePatternStructure(page, ref, policy) {
-  return page.evaluate(({ patternRef, structuralPolicy }) => {
+async function observePatternStructure(page, ref, generatedBlockName, policy) {
+  return page.evaluate(({ patternRef, wrapperName, structuralPolicy }) => {
     const selector = globalThis.wp?.data?.select('core/block-editor');
     const visit = (blocks) => blocks.flatMap((block) => [block, ...visit(block.innerBlocks ?? [])]);
     const block = visit(selector?.getBlocks?.() ?? [])
       .find((candidate) => candidate.name === 'core/block' && Number(candidate.attributes?.ref) === patternRef);
     if (!block) return { unavailable: false, reason: 'No synced core/block reference remained in the editor.' };
-    const structuralBlock = visit(block.innerBlocks ?? [])
-      .find((candidate) => candidate.attributes?.templateLock === structuralPolicy) ?? block;
-    const protectedChild = visit(structuralBlock.innerBlocks ?? [])[0];
-    if (!protectedChild) {
+    const wrapper = visit(block.innerBlocks ?? []).find((candidate) => candidate.name === wrapperName);
+    if (!wrapper) {
       return {
         unavailable: false,
-        reason: 'The locked pattern has no child block whose structural operations can be observed.',
+        reason: 'The generated block wrapper was absent from the synced-pattern editor tree.',
         policy: structuralPolicy,
-        structuralBlock: structuralBlock.name,
+        expectedWrapper: wrapperName,
       };
     }
-    const lock = selector?.getBlockLock?.(structuralBlock.clientId);
-    const canInsert = selector?.canInsertBlockType?.('core/paragraph', structuralBlock.clientId);
-    const rootClientId = selector?.getBlockRootClientId?.(protectedChild.clientId);
-    const canMove = selector?.canMoveBlock?.(protectedChild.clientId, rootClientId)
-      ?? selector?.canMoveBlocks?.([protectedChild.clientId], rootClientId);
-    const canRemove = selector?.canRemoveBlock?.(protectedChild.clientId)
-      ?? selector?.canRemoveBlocks?.([protectedChild.clientId]);
-    const declaredPolicy = structuralBlock.attributes?.templateLock;
+    const layoutChild = wrapper.innerBlocks?.[0];
+    if (!layoutChild) {
+      return {
+        unavailable: false,
+        reason: 'The generated block wrapper has no direct layout child whose structural operations can be observed.',
+        policy: structuralPolicy,
+        wrapper: wrapper.name,
+      };
+    }
+    // useInnerBlocksProps applies the template lock to the generated wrapper's
+    // block-list settings. Verify that actual wrapper, then check the direct
+    // layout child rather than a conveniently locked nested Core container.
+    const wrapperLock = selector?.getBlockLock?.(wrapper.clientId);
+    const wrapperSettings = selector?.getBlockListSettings?.(wrapper.clientId);
+    const wrapperPolicy = wrapper.attributes?.templateLock ?? wrapperSettings?.templateLock;
+    const canInsert = selector?.canInsertBlockType?.('core/paragraph', wrapper.clientId);
+    const rootClientId = selector?.getBlockRootClientId?.(layoutChild.clientId);
+    const canMove = selector?.canMoveBlock?.(layoutChild.clientId, rootClientId)
+      ?? selector?.canMoveBlocks?.([layoutChild.clientId], rootClientId);
+    const canRemove = selector?.canRemoveBlock?.(layoutChild.clientId)
+      ?? selector?.canRemoveBlocks?.([layoutChild.clientId]);
     return {
       policy: structuralPolicy,
-      structuralBlock: structuralBlock.name,
-      protectedChild: protectedChild.name,
-      declaredPolicy,
-      lock,
+      wrapper: wrapper.name,
+      wrapperClientId: wrapper.clientId,
+      wrapperAttributesPolicy: wrapper.attributes?.templateLock,
+      wrapperSettingsPolicy: wrapperSettings?.templateLock,
+      wrapperPolicy,
+      wrapperLock,
+      directLayoutChild: layoutChild.name,
+      directLayoutChildClientId: layoutChild.clientId,
       canInsert,
       canMove,
       canRemove,
-      unavailable: declaredPolicy === structuralPolicy
+      unavailable: wrapperPolicy === structuralPolicy
         && canInsert === false
         && canMove === false
         && canRemove === false,
     };
-  }, { patternRef: ref, structuralPolicy: policy });
+  }, { patternRef: ref, wrapperName: generatedBlockName, structuralPolicy: policy });
 }
 
 async function completePatternOverride(page, fixture, activePublication, lifecycle) {
@@ -881,7 +967,7 @@ async function proveDeactivation(page, fixture, baseUrl, activePublication) {
     blocked('static_deactivation_assets', 'Static deactivation proof needs the active run’s recorded published post and assets.');
   } else {
     const start = responses.length;
-    const response = await page.goto(new URL(activePublication.permalink, baseUrl).toString(), { waitUntil: 'networkidle' });
+    const response = await page.goto(new URL(activePublication.permalink, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
     const assets = frontendAssetResponses(responses.slice(start));
     const activeAssets = activePublication.frontendAssets;
     const remaining = activeAssets.filter((asset) => assets.some((current) => current.url === asset.url));
@@ -895,7 +981,8 @@ async function proveDeactivation(page, fixture, baseUrl, activePublication) {
       });
   }
 
-  await page.goto(`${baseUrl}/wp-admin/post-new.php`, { waitUntil: 'networkidle' });
+  await page.goto(`${baseUrl}/wp-admin/post-new.php`, { waitUntil: 'domcontentloaded' });
+  await waitForEditorReady(page);
   const stillRegistered = await page.evaluate((name) => Boolean(globalThis.wp?.blocks?.getBlockType(name)), fixture.blockName);
   const stillVisible = await hasVisibleInserterCandidate(page, fixture.blockTitle ?? fixture.blockName);
   const removed = !stillRegistered && !stillVisible;
@@ -919,7 +1006,7 @@ async function proveFrontend(page, fixture, baseUrl, activePublication) {
   const responseStart = responses.length;
   const consoleStart = consoleErrors.length;
   const pageErrorStart = pageErrors.length;
-  const response = await page.goto(new URL(activePublication.permalink, baseUrl).toString(), { waitUntil: 'networkidle' });
+  const response = await page.goto(new URL(activePublication.permalink, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
   const status = response?.status() ?? 0;
   const selector = fixture.frontend.subtreeSelector ?? 'main';
   const subtree = await page.locator(selector).first().innerHTML().catch(() => '');

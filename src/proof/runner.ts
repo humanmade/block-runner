@@ -38,6 +38,12 @@ const stagedZipDirectory = path.join(projectRoot, '.block-runner-proof-stage');
 const stagedZipContainerDirectory = '/var/www/html/wp-content/uploads/block-runner-proof';
 const REQUIRED_WORDPRESS_VERSION = '7.1' as const;
 const REQUIRED_WORDPRESS_CORE_SOURCE = 'WordPress/WordPress#7.1' as const;
+const PROOF_COMMAND_TIMEOUTS = {
+  docker: 15_000,
+  wpEnvStart: 180_000,
+  wpEnv: 45_000,
+  browser: 180_000,
+} as const;
 
 /** Editable surfaces supplied by the generated-block compiler or a fixture. */
 export type ProofEditableSurface = 'richText' | 'media' | 'link' | 'altText';
@@ -131,7 +137,7 @@ export interface ProofFixture {
     expectedMedia?: readonly string[];
   };
   visual?: {
-    /** Reviewed golden; the runner never changes this file. */
+    /** Checked-in, reviewed PNG golden. */
     expectedPath: string;
     masks?: readonly string[];
     /** Fraction of differing pixels, from 0 to 1. */
@@ -152,9 +158,21 @@ export interface ProofCommandResult {
   exitCode: number | null;
   stdout: string;
   stderr: string;
+  phase?: string;
+  durationMs?: number;
+  timedOut?: boolean;
 }
 
-export type ProofCommandRunner = (command: string, args: readonly string[], options: { cwd?: string; env?: NodeJS.ProcessEnv }) => Promise<ProofCommandResult>;
+export interface ProofCommandOptions {
+  cwd?: string;
+  env?: NodeJS.ProcessEnv;
+  /** A bounded command phase; defaults are applied by the built-in runner. */
+  timeoutMs?: number;
+  /** Included in immutable command evidence and concise proof progress logs. */
+  phase?: string;
+}
+
+export type ProofCommandRunner = (command: string, args: readonly string[], options: ProofCommandOptions) => Promise<ProofCommandResult>;
 
 export interface ProofGateResult {
   status: ProofGateStatus;
@@ -403,10 +421,15 @@ function missingProofConfiguration(context: ProofGateContext): string | undefine
   }
   if (gate === 'pattern_overrides') {
     const pattern = fixture?.patternOverrides;
-    if (!pattern?.title || !pattern.canonicalContent || pattern.instances?.length !== 2
+    if (!fixture?.blockName || !pattern?.title || !pattern.canonicalContent || pattern.instances?.length !== 2
       || !pattern.canonicalUpdate?.content || !pattern.reset || pattern.requiredBindings.length === 0
       || !pattern.negative?.value || !pattern.negative.fallback || !pattern.structuralPolicy) {
       return 'Pattern proof requires canonical wp_block content, exactly two instances, reset/canonical-update assertions, required bindings, a structural policy, and a saved negative binding exercise.';
+    }
+    const canonicalCoverage = generatedBlockPatternCoverage(pattern.canonicalContent, fixture.blockName, pattern.requiredBindings);
+    const updateCoverage = generatedBlockPatternCoverage(pattern.canonicalUpdate.content, fixture.blockName, pattern.requiredBindings);
+    if (!canonicalCoverage.ok || !updateCoverage.ok) {
+      return `Pattern proof requires every required native binding inside generated ${fixture.blockName} markup in both canonical versions.`;
     }
   }
   if (gate === 'visual_regression' && (!fixture?.visual?.expectedPath || typeof fixture.visual.threshold !== 'number')) {
@@ -561,10 +584,15 @@ function createRuntime(
   let stagedPluginZip: { host: string; container: string } | undefined;
   let publication: ProofPublication | undefined;
   let preparedPattern: PreparedSyncedPattern | undefined;
+  let startupFailure: ProofGateResult | undefined;
   const command = options.commandRunner ?? runCommand;
 
-  const wpEnv = async (args: string[]): Promise<ProofCommandResult> => {
-    const result = await command('npx', ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], { cwd: projectRoot });
+  const wpEnv = async (args: string[], phase = `wp-env:${args.slice(0, 3).join(' ')}`): Promise<ProofCommandResult> => {
+    const result = await command('npx', ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], {
+      cwd: projectRoot,
+      timeoutMs: args[0] === 'start' ? PROOF_COMMAND_TIMEOUTS.wpEnvStart : PROOF_COMMAND_TIMEOUTS.wpEnv,
+      phase,
+    });
     return result;
   };
   const logged = async (result: ProofCommandResult): Promise<EvidenceReference> =>
@@ -572,15 +600,33 @@ function createRuntime(
   const start = async (): Promise<ProofGateResult> => {
     if (options.execute === false) return { status: 'blocked', reason: 'Proof execution was disabled.' };
     if (environmentStarted) return { status: 'pass', reason: 'Pinned wp-env is already running.' };
+    if (startupFailure) return startupFailure;
     if (!options.pluginZip) return { status: 'blocked', reason: 'Runtime proof requires --plugin-zip.' };
+    const docker = await command('docker', ['info', '--format', '{{.ServerVersion}}'], {
+      cwd: projectRoot,
+      timeoutMs: PROOF_COMMAND_TIMEOUTS.docker,
+      phase: 'docker-info',
+    });
+    const dockerLog = await logged(docker);
+    if (docker.exitCode !== 0) {
+      startupFailure = {
+        status: 'blocked',
+        reason: 'A working Docker CLI and daemon are required for the WordPress 7.1 proof.',
+        evidence: [dockerLog],
+      };
+      return startupFailure;
+    }
     const staged = await stagePluginZip();
     if (staged.status !== 'pass') return staged;
-    const result = await wpEnv(['start', '--update']);
+    const result = await wpEnv(['start', '--update'], 'wp-env-start');
     const log = await logged(result);
-    if (result.exitCode !== 0) return { status: 'blocked', reason: 'wp-env could not start Docker/MySQL.', evidence: [log] };
+    if (result.exitCode !== 0) {
+      startupFailure = { status: 'blocked', reason: 'wp-env could not start Docker/MySQL.', evidence: [dockerLog, log] };
+      return startupFailure;
+    }
     environmentStarted = true;
     await collectObservedRuntimePins(wpEnv, command, environment, evidence);
-    return { status: 'pass', evidence: [log] };
+    return { status: 'pass', evidence: [dockerLog, log] };
   };
   const wp = async (php: string): Promise<{ result: ProofCommandResult; evidence: EvidenceReference }> => {
     const result = await wpEnv(['run', 'cli', 'wp', 'eval', php]);
@@ -651,7 +697,11 @@ function createRuntime(
           }
         : options.fixture;
       await writeFile(config, JSON.stringify({ fixture, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
-      const result = await command(process.execPath, [playwrightHelper, '--config', config, '--out', report], { cwd: projectRoot });
+      const result = await command(process.execPath, [playwrightHelper, '--config', config, '--out', report], {
+        cwd: projectRoot,
+        timeoutMs: PROOF_COMMAND_TIMEOUTS.browser,
+        phase: `browser-${mode}`,
+      });
       const logs = await logged(result);
       if (result.exitCode !== 0) {
         const failedResults = Object.fromEntries(
@@ -665,10 +715,12 @@ function createRuntime(
         gates?: Record<string, ProofGateResult & { artifacts?: Array<{ path: string; mediaType: string }> }>;
         environment?: { browser?: { version?: string; revision?: string } };
         publication?: unknown;
+        phases?: unknown;
       };
       if (raw.environment?.browser?.version) environment.browser.version = raw.environment.browser.version;
       if (raw.environment?.browser?.revision) environment.browser.revision = raw.environment.browser.revision;
       if (raw.publication && isProofPublication(raw.publication)) publication = raw.publication;
+      const phaseEvidence = raw.phases === undefined ? undefined : await evidence.putJson({ mode, phases: raw.phases });
       const completedResults = Object.fromEntries(
         await Promise.all(Object.entries(raw.gates ?? {}).map(async ([gate, value]) => {
           if (!isGateId(gate)) return [];
@@ -679,7 +731,10 @@ function createRuntime(
             }
             return evidence.put(await readFile(absolute), { mediaType: artifact.mediaType });
           }));
-          return [[gate, { ...value, evidence: [...(value.evidence ?? []), ...artifacts, logs] }]];
+          return [[gate, {
+            ...value,
+            evidence: [...(value.evidence ?? []), ...artifacts, logs, ...(phaseEvidence ? [phaseEvidence] : [])],
+          }]];
         })),
       ) as Partial<Record<ProofGateId, ProofGateResult>>;
       if (mode === 'active') browserResults = completedResults;
@@ -985,6 +1040,44 @@ function removeRequiredPatternBinding(content: string, requirement: ProofPattern
   });
 }
 
+/**
+ * A Core-only wp_block cannot prove generated-block support. Every required
+ * binding must be nested inside the actual custom wrapper in both canonical
+ * versions before a runner or external adapter may report a passing gate.
+ */
+function generatedBlockPatternCoverage(
+  content: string,
+  blockName: string,
+  requirements: readonly ProofPatternRequiredBinding[],
+): { ok: boolean; blockName: string; missing: ProofPatternRequiredBinding[]; reason?: string } {
+  const opening = `<!-- wp:${blockName}`;
+  const closing = `<!-- /wp:${blockName} -->`;
+  const start = content.indexOf(opening);
+  const openingEnd = start === -1 ? -1 : content.indexOf('-->', start);
+  const end = openingEnd === -1 ? -1 : content.indexOf(closing, openingEnd + 3);
+  if (start === -1 || openingEnd === -1 || end === -1) {
+    return { ok: false, blockName, missing: [...requirements], reason: 'generated_block_absent' };
+  }
+  const enclosed = content.slice(openingEnd + 3, end);
+  type PatternCommentAttributes = {
+    metadata?: { name?: unknown; bindings?: Record<string, { source?: unknown }> };
+  };
+  const blocks: PatternCommentAttributes[] = [...enclosed.matchAll(/<!-- wp:([^\s]+)(?:\s+({[\s\S]*?}))?\s*-->/g)].flatMap((match) => {
+    try {
+      const attributes: PatternCommentAttributes = match[2]
+        ? JSON.parse(match[2]) as PatternCommentAttributes
+        : {};
+      return [attributes];
+    } catch {
+      return [];
+    }
+  });
+  const missing = requirements.filter((requirement) => !blocks.some((attributes) =>
+    attributes.metadata?.name === requirement.name
+      && attributes.metadata.bindings?.[requirement.attribute]?.source === 'core/pattern-overrides'));
+  return { ok: missing.length === 0, blockName, missing };
+}
+
 function isGateId(value: string): value is ProofGateId {
   return (PROOF_GATE_IDS as readonly string[]).includes(value);
 }
@@ -1136,7 +1229,11 @@ async function collectObservedRuntimePins(
 async function inspectRunningContainer(command: ProofCommandRunner, containerId: string): Promise<ProofCommandResult> {
   if (!containerId) return commandFailure('docker', new Error('wp-env did not return a running container ID.'));
   try {
-    return await command('docker', ['container', 'inspect', '--format={{.Id}} {{.Image}} {{.Config.Image}}', containerId], { cwd: projectRoot });
+    return await command('docker', ['container', 'inspect', '--format={{.Id}} {{.Image}} {{.Config.Image}}', containerId], {
+      cwd: projectRoot,
+      timeoutMs: PROOF_COMMAND_TIMEOUTS.docker,
+      phase: 'docker-inspect',
+    });
   } catch (error) {
     return commandFailure('docker', error);
   }
@@ -1167,9 +1264,16 @@ function containerIdFromOutput(value: string): string {
 async function runCommand(
   command: string,
   args: readonly string[],
-  options: { cwd?: string; env?: NodeJS.ProcessEnv } = {},
+  options: ProofCommandOptions = {},
 ): Promise<ProofCommandResult> {
   return new Promise((resolve) => {
+    const startedAt = Date.now();
+    const timeoutMs = options.timeoutMs ?? PROOF_COMMAND_TIMEOUTS.wpEnv;
+    const label = options.phase ?? command;
+    let settled = false;
+    let timedOut = false;
+    let timeout: NodeJS.Timeout | undefined;
+    if (options.phase) process.stderr.write(`[block-runner proof] ${label} started (timeout ${timeoutMs}ms)\n`);
     const child = spawn(command, [...args], {
       cwd: options.cwd,
       env: options.env,
@@ -1177,15 +1281,41 @@ async function runCommand(
     });
     let stdout = '';
     let stderr = '';
+    const finish = (exitCode: number | null) => {
+      if (settled) return;
+      settled = true;
+      if (timeout) clearTimeout(timeout);
+      const durationMs = Date.now() - startedAt;
+      if (options.phase) {
+        process.stderr.write(`[block-runner proof] ${label} ${timedOut ? 'timed out' : 'finished'} after ${durationMs}ms\n`);
+      }
+      resolve({
+        command,
+        args: [...args],
+        ...(options.cwd ? { cwd: options.cwd } : {}),
+        exitCode,
+        stdout,
+        stderr,
+        ...(options.phase ? { phase: options.phase } : {}),
+        durationMs,
+        ...(timedOut ? { timedOut: true } : {}),
+      });
+    };
+    timeout = setTimeout(() => {
+      timedOut = true;
+      stderr += `Command exceeded ${timeoutMs}ms (${label}).`;
+      child.kill('SIGTERM');
+      setTimeout(() => child.kill('SIGKILL'), 5_000).unref();
+    }, timeoutMs);
     child.stdout.setEncoding('utf8');
     child.stderr.setEncoding('utf8');
     child.stdout.on('data', (chunk) => { stdout += chunk; });
     child.stderr.on('data', (chunk) => { stderr += chunk; });
     child.on('error', (error) => {
       stderr += error.message;
-      resolve({ command, args: [...args], ...(options.cwd ? { cwd: options.cwd } : {}), exitCode: null, stdout, stderr });
+      finish(null);
     });
-    child.on('close', (exitCode) => resolve({ command, args: [...args], ...(options.cwd ? { cwd: options.cwd } : {}), exitCode, stdout, stderr }));
+    child.on('close', finish);
   });
 }
 
