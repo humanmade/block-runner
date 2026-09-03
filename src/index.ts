@@ -34,6 +34,30 @@ export {
 } from './authoring/schema.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
 export { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
+export {
+  assertStandaloneZipEntries,
+  detectWpScriptsPlugin,
+  planExistingPluginOutput,
+  planStandalonePluginOutput,
+  STANDALONE_WP_SCRIPTS_VERSION,
+  UnsupportedPluginLayoutError,
+  WP_SCRIPTS_PROFILE,
+  writePluginOutput,
+} from './plugin/profile.js';
+export type {
+  GeneratedBlockPackage as PluginGeneratedBlockPackage,
+  PluginFileContent,
+  PluginFileOperation,
+  PluginOutputPlan,
+  PluginPlanMode,
+  PluginProfile,
+  PluginRegistrationStrategy,
+  PluginTouchedFile,
+  UnsupportedPluginProfile,
+  WpScriptsPluginProfile,
+  WritePluginOutputOptions,
+  WritePluginOutputResult,
+} from './plugin/profile.js';
 export type { SiteContextOptions } from './context/run.js';
 export type {
   AuthoringAsset,

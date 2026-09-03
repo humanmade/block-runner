@@ -163,6 +163,8 @@ Gutenberg before it reaches the editor.
 | `fix` | Canonicalize near-miss block markup. |
 | `context` | Read a WordPress site into a `site.context.json` manifest (read-only). |
 | `skill` | Print or install the agent guide. |
+| `plugin inspect` | Read-only detection of the supported `@wordpress/scripts` plugin profile. |
+| `plugin preview` / `plugin write` | Preview, confirm, and integrate a generated registered-block directory; or create a standalone plugin wrapper. |
 
 ```sh
 block-runner convert hero.html                    # blocks to stdout
@@ -170,7 +172,22 @@ block-runner author hero.html --name acme/hero --out-dir blocks/hero
 block-runner assemble intent.json                 # structure in, blocks out
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
+
+# Inspect a host before integrating generated block files. This writes nothing.
+block-runner plugin inspect ./my-plugin --json
+
+# Preview every exact target, then use the displayed fingerprint with `plugin write`.
+block-runner plugin preview ./generated-block --host ./my-plugin
+
+# For an absent or unsupported host layout, make a complete standalone plugin instead.
+block-runner plugin preview ./generated-block --standalone ./my-notice-plugin
 ```
+
+`plugin preview` never writes. Its fingerprint binds the exact target files; pass it to
+`plugin write --confirm <fingerprint>`. Existing PHP or `package.json` files are marked as
+separate replacement approvals, so their absolute preview paths must also be supplied with
+`--approve-replace <path...>` before they can change. An unrecognised host is refused without
+writing and the command offers the standalone form above.
 
 ### Registered-block authoring
 
