@@ -1,5 +1,5 @@
 import { JSDOM } from 'jsdom';
-import { ReportItem, RuleContext, SourceLocation } from '../types.js';
+import { ReportItem, RuleContext, SourceLocation, SourceSelectorDependency } from '../types.js';
 import { effectiveDeclarations } from '../styles/apply.js';
 import { extractUrl } from '../styles/declarations.js';
 import { Declaration, parseDeclarationBlock, parseInlineStyle, resolvePrecedence } from '../styles/parse.js';
@@ -29,6 +29,36 @@ export function prepareDom(input: string, sourcePath?: string): PreparedDom {
     cssClassRules,
     warnings,
   };
+}
+
+/**
+ * Native blocks cannot retain arbitrary source attributes, and most cannot retain a raw `id`.
+ * Registered-block authoring rewrites those selector atoms to marker classes, then marks the
+ * matching source elements before conversion so the scoped CSS still selects the same nodes.
+ */
+export function retainSelectorDependencies(document: Document, dependencies: readonly SourceSelectorDependency[]): void {
+  if (dependencies.length === 0) {
+    return;
+  }
+
+  for (const element of [...document.querySelectorAll('*')]) {
+    for (const dependency of dependencies) {
+      if (dependency.kind === 'id') {
+        if (element.id === dependency.value) {
+          element.classList.add(dependency.markerClass);
+        }
+        continue;
+      }
+      try {
+        if (element.matches(dependency.value)) {
+          element.classList.add(dependency.markerClass);
+        }
+      } catch {
+        // The stylesheet scanner will report the associated selector as blocked rather than
+        // pretending an invalid attribute selector has a meaningful runtime dependency.
+      }
+    }
+  }
 }
 
 export function sanitizeDocument(dom: JSDOM, warnings: ReportItem[], sourcePath?: string): void {

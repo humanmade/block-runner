@@ -154,7 +154,8 @@ Gutenberg before it reaches the editor.
 
 | Command | What it does |
 | --- | --- |
-| `convert` | Authored HTML to native blocks. The only path that carries CSS. |
+| `convert` | Authored HTML to native post-content blocks, including the legacy styling path. |
+| `author` | One authored design to a static, registered block package with scoped parity CSS and assets. |
 | `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
 | `author preview <plan\|->` | Validate and render a versioned registered-block AuthoringPlan without writing files. |
 | `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write only the reviewed plan bound to its SHA-256 confirmation and destination. |
@@ -165,6 +166,7 @@ Gutenberg before it reaches the editor.
 
 ```sh
 block-runner convert hero.html                    # blocks to stdout
+block-runner author hero.html --name acme/hero --out-dir blocks/hero
 block-runner assemble intent.json                 # structure in, blocks out
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
@@ -241,6 +243,11 @@ All commands:
 | `--wp-url <url>` | WordPress URL for `wpcli` or `rest` resolution. |
 | `--wp-user <user>` | WordPress username for `rest` resolution. |
 | `--wp-app-password-env <name>` | Env var holding a WordPress application password. |
+
+`author` generates exactly one block package. It requires `--name <namespace/slug>` and writes
+to `--out-dir <path>` (or use `--json` to inspect the package without writing). Its `style.css`
+is registered with `block.json`'s `style` field, so parity-critical CSS loads in both editor and
+frontend; `editorStyle` is used only for explicitly supplied editor affordances.
 
 `skill --install` adds installation flags:
 
@@ -381,6 +388,22 @@ than not offering it.
 
 Custom JavaScript is never inlined. A behavior maps to a native interactive block,
 comes from a block plugin, or is dropped, and every drop or escalation is reported.
+
+### Registered-block CSS and assets
+
+`author` accepts compiled CSS through `author.styles.css` (or `<style>` content in the design).
+It does not infer Tailwind output from class names or ship Tailwind at runtime. When Tailwind is
+detected, supply its complete `author.styles.tailwind` graph: CSS entries, resolved imports and
+directives, sources, safelist, plugins, environment, and browser target. Missing inputs are
+reported field by field and generation stops; the supplied CSS must be compiler output, with every
+referenced `--tw-*` variable defined in that output.
+
+Non-native selectors are preserved only when they can be rooted beneath the generated block's
+deterministic `.wp-block-<namespace>-<slug>` class. Responsive, container-query, and pseudo-state
+rules retain their conditions. Preflight/global rules, escaping selectors, imports, keyframes, and
+font faces are ledgered and blocked rather than silently scoped. Local static asset references are
+copied into `assets/` and rewritten; remote URLs remain external by default, while font files
+remain unresolved pending an external licensing decision.
 
 > Status: `strict`, `relaxed` and `open` are implemented. `source` is not built yet and is
 > rejected rather than silently downgraded — though the converter already falls back to a

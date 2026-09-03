@@ -1,6 +1,7 @@
+import type { StyleLedgerEntry } from './styles/apply.js';
 import type { Declaration } from './styles/parse.js';
 
-export type CommandName = 'validate' | 'fix' | 'convert' | 'assemble';
+export type CommandName = 'validate' | 'fix' | 'convert' | 'assemble' | 'author';
 
 export type ReportStatus = 'valid' | 'invalid' | 'warning';
 
@@ -10,6 +11,17 @@ export interface SourceLocation {
   htmlLine?: number;
   htmlColumn?: number;
   offset?: number;
+}
+
+/**
+ * A selector condition rewritten to a transport class before native conversion removes arbitrary
+ * source IDs/attributes. It is internal to the registered-block authoring handoff.
+ */
+export interface SourceSelectorDependency {
+  markerClass: string;
+  kind: 'id' | 'attribute';
+  /** Decoded id value, or the complete attribute selector such as `[data-state="open"]`. */
+  value: string;
 }
 
 export interface ReportItem {
@@ -42,6 +54,83 @@ export interface BlockRunnerReport {
    * honest if it does, which is why `open` requires an explicit sink.
    */
   sidecarCss?: string;
+  /**
+   * Every asset observed while authoring a registered block.  This is deliberately separate from
+   * Gutenberg media IDs: static block assets do not need (and must never invent) media-library
+   * records.
+   */
+  assets?: AssetLedgerEntry[];
+  /** One terminal disposition for every declaration in an authored stylesheet graph. */
+  styleLedger?: AuthoredStyleLedgerEntry[];
+  /** Files that make up an authored registered block, keyed by their package-relative path. */
+  package?: GeneratedBlockPackage;
+}
+
+export type AuthoredStyleOutcome = 'native' | 'preset' | 'literal' | 'scoped-css' | 'warned' | 'blocked';
+
+export interface AuthoredStyleLedgerEntry {
+  property: string;
+  value: string;
+  outcome: AuthoredStyleOutcome;
+  reason?: string;
+  atRules: string[];
+  source?: SourceLocation;
+}
+
+/** The terminal disposition of a source asset. */
+export type AssetOutcome = 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
+
+export interface AssetLedgerEntry {
+  /** The source spelling, before any package-relative rewrite. */
+  reference: string;
+  /** The package-relative replacement, where a local asset was copied. */
+  rewritten?: string;
+  /** How the asset was encountered. */
+  kind: 'image' | 'font' | 'stylesheet' | 'media' | 'other';
+  outcome: AssetOutcome;
+  reason?: string;
+  source?: SourceLocation;
+}
+
+/**
+ * Inputs required to make a Tailwind fidelity claim.  Empty arrays/objects are meaningful: they
+ * say that a project has explicitly supplied no plugins/safelist/etc.  An omitted field is not
+ * equivalent to an empty one and is reported as missing.
+ */
+export interface TailwindBuildGraph {
+  cssEntries?: string[];
+  imports?: string[];
+  directives?: string[];
+  sources?: string[];
+  safelist?: string[];
+  plugins?: string[];
+  environment?: Record<string, string | undefined>;
+  browserTarget?: string | string[];
+}
+
+export interface AuthorStyleConfig {
+  /** Actual compiled CSS. Block Runner never derives it from Tailwind class tokens. */
+  css?: string;
+  /** Optional source build graph, required when the CSS uses Tailwind directives or variables. */
+  tailwind?: TailwindBuildGraph;
+  /** Explicitly supplied editor-only affordances. Parity CSS is always emitted through `style`. */
+  editorCss?: string;
+}
+
+export interface AuthorConfig {
+  /** Namespace/slug, for example `acme/hero`. Must name exactly one registered block. */
+  name?: string;
+  title?: string;
+  category?: string;
+  /** Optional known supports of the generated block. Values are never assumed from a slug. */
+  supports?: Record<string, unknown>;
+  styles?: AuthorStyleConfig;
+}
+
+export interface GeneratedBlockPackage {
+  name: string;
+  rootSelector: string;
+  files: Record<string, string>;
 }
 
 export type ResolverKind = 'noop' | 'map' | 'wpcli' | 'rest';
@@ -131,6 +220,8 @@ export interface BlockRunnerConfig {
   media?: MediaConfig;
   tokens?: TokenConfig;
   rules?: RuleConfig | unknown[];
+  /** Registered-block authoring options. Kept separate from the legacy post-content converter. */
+  author?: AuthorConfig;
 }
 
 export interface CommonOptions {
@@ -151,6 +242,24 @@ export interface CommonOptions {
 
 export interface ConvertOptions extends CommonOptions {
   config?: BlockRunnerConfig;
+  /**
+   * Internal authoring hook: retain only source classes referenced by generated scoped CSS on the
+   * native block that claimed the source element. Undefined preserves legacy conversion output.
+   */
+  preserveSourceClasses?: readonly string[];
+  /** Internal authoring handoff for IDs/attributes referenced by the generated scoped CSS. */
+  preserveSourceSelectorDependencies?: readonly SourceSelectorDependency[];
+  /** Internal authoring boundary for asset forms a native Core block cannot faithfully retain. */
+  preserveAssetForms?: boolean;
+  /** Internal observer used by registered-block authoring to account for inline declarations. */
+  styleLedgerObserver?: (entries: readonly StyleLedgerEntry[], source: SourceLocation, block?: string) => void;
+}
+
+export interface AuthorOptions extends ConvertOptions {
+  /** Directory to write the generated package. Omit to inspect `report.package` without writing. */
+  outDir?: string;
+  /** Per-run author settings, which override `config.author`. */
+  author?: AuthorConfig;
 }
 
 export interface AssembleOptions extends CommonOptions {
@@ -342,6 +451,8 @@ export interface RuleContext {
    * should resolve it from these plus the inline attribute, never from either alone.
    */
   cssClassRules: Array<{ className: string; declarations: Declaration[]; problems: string[] }>;
+  /** Preserve asset-bearing source markup as Custom HTML when a native block would drop it. */
+  preserveAssetForms?: boolean;
   /**
    * Carry an element's inline CSS onto the block a rule just claimed. Called by the walker for
    * every claimed node; rules never need to invoke it.

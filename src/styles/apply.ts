@@ -135,6 +135,12 @@ function collectDeclarations(input: ApplyStylesInput) {
 export function applyElementStyles(input: ApplyStylesInput): StyleLedgerEntry[] {
   const { element, block } = input;
 
+  // A Custom HTML fallback can contain inline styles below its outer element, and the walker does
+  // not visit those descendants. Inspect it before the root-only fast path below.
+  if (block.name === 'core/html') {
+    return customHtmlStyles(element, input);
+  }
+
   const { declarations, overridden, problems } = collectDeclarations(input);
   if (declarations.length === 0 && overridden.length === 0 && problems.length === 0) {
     return [];
@@ -152,23 +158,42 @@ export function applyElementStyles(input: ApplyStylesInput): StyleLedgerEntry[] 
     ...overridden.map(overriddenEntry),
   ];
 
-  // A Custom HTML fallback keeps the original markup verbatim, style attribute and all. Mapping
-  // it onto the wrapper would apply the same CSS twice.
-  if (block.name === 'core/html') {
-    return [
-      ...accounting,
-      ...declarations.map((declaration) => ({
-        ...declaration,
-        outcome: 'consumed' as const,
-        reason: 'preserved inline in the Custom HTML fallback',
-      })),
-    ];
-  }
-
   return [
     ...accounting,
     ...declarations.map((declaration) => noteImportant(declaration, applyDeclaration(declaration, input))),
   ];
+}
+
+/**
+ * The walker claims a Custom HTML fallback at its outer element and intentionally does not walk
+ * descendants. Their inline declarations nevertheless survive verbatim, so account every one
+ * here rather than leaving nested styles (and their asset-bearing values) invisible to authoring.
+ */
+function customHtmlStyles(root: Element, input: ApplyStylesInput): StyleLedgerEntry[] {
+  const entries: StyleLedgerEntry[] = [];
+  for (const element of [root, ...root.querySelectorAll('*')]) {
+    const { declarations, overridden, problems } = collectDeclarations({
+      element,
+      classRules: input.classRules,
+    } as ApplyStylesInput);
+    entries.push(
+      ...problems.map<StyleLedgerEntry>((chunk) => ({
+        property: chunk,
+        value: '',
+        outcome: 'consumed',
+        reason: 'preserved verbatim in the Custom HTML fallback',
+      })),
+      ...overridden.map(overriddenEntry),
+      ...declarations.map<StyleLedgerEntry>((declaration) => ({
+        ...declaration,
+        outcome: 'consumed',
+        reason: declaration.origin
+          ? 'preserved by the authored selector in the Custom HTML fallback'
+          : 'preserved inline in the Custom HTML fallback',
+      })),
+    );
+  }
+  return entries;
 }
 
 /** A mapped declaration that was authored `!important` landed without its priority — say so. */

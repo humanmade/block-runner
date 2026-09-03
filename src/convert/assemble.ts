@@ -21,7 +21,15 @@ import {
   StylingRung,
   WpBlock,
 } from '../types.js';
-import { contextHtml, contextText, isElementNode, makeContextWarning, prepareDom, sourceForNode } from './dom.js';
+import {
+  contextHtml,
+  contextText,
+  isElementNode,
+  makeContextWarning,
+  prepareDom,
+  retainSelectorDependencies,
+  sourceForNode,
+} from './dom.js';
 import { defaultRules } from './defaults.js';
 import { finalizeBlocks } from './finalize.js';
 import { walkChildren } from './walk.js';
@@ -66,6 +74,10 @@ async function runConvert(
   wp: Awaited<ReturnType<typeof getWp>>,
 ): Promise<BlockRunnerReport> {
   const prepared = prepareDom(input, options.sourcePath);
+  retainSelectorDependencies(
+    prepared.dom.window.document,
+    options.preserveSourceSelectorDependencies ?? [],
+  );
   const warnings: ReportItem[] = [...prepared.warnings];
   const explainItems: ReportItem[] = [];
   const rules = buildRules(config);
@@ -90,6 +102,7 @@ async function runConvert(
     explain: options.explain === true,
     cssBackgrounds: prepared.cssBackgrounds,
     cssClassRules: prepared.cssClassRules,
+    preserveAssetForms: options.preserveAssetForms === true,
     warn(reason, node, block, rule, details) {
       warnings.push(makeContextWarning(context, reason, node, block, rule, details));
     },
@@ -116,6 +129,19 @@ async function runConvert(
             classRules: prepared.cssClassRules,
           })
         : unattributableStyles(element, blocks.length, prepared.cssClassRules);
+
+      // Registered-block authoring owns a stylesheet rooted at its generated wrapper. Retain only
+      // the source classes that stylesheet actually references, and only on the one native block
+      // that claimed this source element. The ordinary convert path deliberately keeps its prior
+      // no-source-class output, so a transport class can never leak accidentally into post content.
+      if (block && options.preserveSourceClasses) {
+        const retained = new Set(options.preserveSourceClasses);
+        for (const className of element.classList) {
+          if (retained.has(className)) {
+            addClassName(block, className);
+          }
+        }
+      }
 
       reportLedger(carryToSidecar(ledger, block), element, block?.name, 'styles');
     },
@@ -224,6 +250,7 @@ async function runConvert(
   // `overridden` and clean `mapped` outcomes are accounted for under --explain, because warning on
   // them would bury the entries that need action.
   function reportLedger(ledger: StyleLedgerEntry[], element: Element, block: string | undefined, rule: string): void {
+    options.styleLedgerObserver?.(ledger, context.sourceFor(element), block);
     for (const entry of ledger) {
       const authored = entry.shorthand ? `${entry.shorthand} (${entry.property})` : entry.property;
       // An unparseable chunk has no value to quote — it *is* the quoted text. Name the rule a

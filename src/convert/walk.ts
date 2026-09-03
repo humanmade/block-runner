@@ -36,6 +36,13 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
     return [emitCustomHtml(node, context, 'foreign element emitted as Custom HTML fallback')];
   }
 
+  // `srcset` and inline `image-set()` values describe multiple concrete assets. Core's simple
+  // media blocks only retain one URL, so authoring preserves the original markup rather than
+  // emitting a successful-looking block that silently drops candidates.
+  if (context.preserveAssetForms && hasNonNativeAssetForm(node)) {
+    return [emitCustomHtml(node, context, 'asset-bearing source form emitted as Custom HTML fallback')];
+  }
+
   for (const rule of context.rules) {
     let matched: boolean;
     let reason: string | undefined;
@@ -79,6 +86,10 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
   }
 
   return [];
+}
+
+function hasNonNativeAssetForm(node: Element): boolean {
+  return node.hasAttribute('srcset') || /(?:-webkit-)?image-set\s*\(/i.test(node.getAttribute('style') ?? '');
 }
 
 function emitCustomHtml(node: Element, context: RuleContext, reason: string): WpBlock {
