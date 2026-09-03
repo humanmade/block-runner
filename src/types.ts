@@ -187,6 +187,105 @@ export interface IntentTree {
   blocks: IntentNode[];
 }
 
+/**
+ * The lock applied to the single InnerBlocks region a generated wrapper owns.
+ * It deliberately controls structure independently from content overrides.
+ */
+export type InnerBlocksLock = false | 'insert' | 'all' | 'contentOnly';
+export type TemplateLock = InnerBlocksLock;
+
+export type AuthoringRole =
+  | 'wrapper'
+  | 'group'
+  | 'columns'
+  | 'column'
+  | 'cover'
+  | 'heading'
+  | 'paragraph'
+  | 'image'
+  | 'list'
+  | 'list-item'
+  | 'buttons'
+  | 'button'
+  | 'quote'
+  | 'custom';
+
+/**
+ * A stable semantic node in one generated registered block. Its values remain
+ * native child-block attributes rather than wrapper attributes.
+ */
+export interface AuthoringNode {
+  path: string;
+  role: AuthoringRole;
+  block?: string;
+  attributes?: Record<string, unknown>;
+  content?: string;
+  url?: string;
+  alt?: string;
+  level?: number;
+  /**
+   * Defaults to enabled for supported native content attributes. Set false
+   * only when this content region must remain canonical in every pattern.
+   */
+  patternOverrides?: boolean;
+  children?: AuthoringNode[];
+  justification?: string;
+  requiresOwnInnerBlocks?: boolean;
+}
+
+export interface AuthoringPlan {
+  name: string;
+  title: string;
+  description?: string;
+  category?: string;
+  icon?: string;
+  textdomain?: string;
+  root: AuthoringNode;
+  templateLock?: InnerBlocksLock;
+  allowedBlocks?: string[];
+}
+
+export interface AuthoringEditableField {
+  /** Stable plan path of the native node that owns this surface. */
+  path: string;
+  role: AuthoringRole;
+  block: string;
+  attribute: string;
+  surface: 'richText' | 'media' | 'link' | 'altText';
+  /**
+   * Stable unique key used by WordPress core/pattern-overrides. Omitted only
+   * for an explicitly non-overrideable field.
+   */
+  overrideName?: string;
+}
+
+export interface AuthoringDiagnostic {
+  level: 'warning' | 'error';
+  code:
+    | 'duplicate-path'
+    | 'missing-path'
+    | 'invalid-root'
+    | 'unsupported-role'
+    | 'unsupported-pattern-override'
+    | 'duplicate-override-name'
+    | 'custom-child-justification-required'
+    | 'multiple-innerblocks-regions'
+    | 'gutenberg-76794';
+  message: string;
+  path?: string;
+}
+
+export type AuthoringTemplate = Array<[string, Record<string, unknown>, AuthoringTemplate?]>;
+
+export interface CompiledAuthoringBlock {
+  files: Record<string, string>;
+  template: AuthoringTemplate;
+  allowedBlocks: string[];
+  templateLock: InnerBlocksLock;
+  editableFields: AuthoringEditableField[];
+  diagnostics: AuthoringDiagnostic[];
+}
+
 export type WpBlock = {
   name: string;
   attributes: Record<string, unknown>;
@@ -244,6 +343,8 @@ export interface WpModules {
   serialize: (blocks: WpBlock[] | WpBlock) => string;
   validateBlock: (block: WpBlock) => [boolean, unknown[]?];
   getBlockType: (name: string) => unknown;
+  registerBlockType: (nameOrMetadata: string | Record<string, unknown>, settings?: Record<string, unknown>) => unknown;
+  unregisterBlockType: (name: string) => unknown;
 }
 
 export class HeadlessBootError extends Error {
@@ -252,3 +353,48 @@ export class HeadlessBootError extends Error {
     this.name = 'HeadlessBootError';
   }
 }
+
+export type {
+  ProofEditableField,
+  ProofEditableSurface,
+  ProofEnvironment,
+  ProofFilePin,
+  ProofFixture,
+  ProofGateContext,
+  ProofGateResult,
+  ProofGateRunner,
+  ProofCommandResult,
+  ProofCommandRunner,
+  ProofReceiptDocument,
+  ProofRunOptions,
+  ProofRunResult,
+  ProofPatternInstance,
+  ProofPatternRequiredBinding,
+  PatternOverrideContent,
+} from './proof/runner.js';
+export type {
+  GateId,
+  GateRecord,
+  GateStatus,
+  ProfileName,
+  ProofGateId,
+  ProofGateOutcome,
+  ProofGateRecord,
+  ProofGateRecords,
+  ProofGateStatus,
+  ProofProfile,
+  ProofProfileEvaluation,
+  ProofProfileName,
+  ProofProfileReport,
+} from './proof/profiles.js';
+export type {
+  CanonicalJsonValue,
+  ContentAddressedReference,
+  EvidencePutOptions,
+  EvidenceReference,
+  HashInput,
+  ProofReceipt,
+  ReceiptReference,
+  ReceiptWriteResult,
+  Sha256,
+} from './proof/receipt.js';

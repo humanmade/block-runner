@@ -14,6 +14,8 @@ import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
 import { installCanonicalSkill, readCanonicalSkillGuide, SkillScope, SkillTarget } from './skill.js';
+import { runProof, type ProofFixture } from './proof/runner.js';
+import { isProofProfileName } from './proof/profiles.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
@@ -44,6 +46,18 @@ interface SkillCliOptions {
   target?: SkillTarget;
   dryRun?: boolean;
   force?: boolean;
+}
+
+interface ProofCliOptions {
+  profile?: string;
+  fixture?: string;
+  markup?: string;
+  input?: string;
+  receiptDir?: string;
+  wpEnvConfig?: string;
+  run?: boolean;
+  keepEnvironment?: boolean;
+  json?: boolean;
 }
 
 const program = new Command();
@@ -208,6 +222,53 @@ program
   });
 
 program
+  .command('proof <pluginZip>')
+  .description('Run a WordPress proof profile and write a content-addressed receipt.')
+  .addOption(new Option('--profile <profile>', 'headless, runtime, editor, or full').choices(['headless', 'runtime', 'editor', 'full']).default('full'))
+  .option('--fixture <path>', 'JSON fixture with block name, editable fields, and override assertions')
+  .option('--markup <path>', 'generated block markup for the headless validation gate')
+  .option('--input <path>', 'reviewed generator input to pin as evidence (required for a passing proof)')
+  .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
+  .option('--wp-env-config <path>', 'wp-env configuration (default: proof/wp-env.json)')
+  .option('--no-run', 'only produce a blocked receipt; do not start Docker or Playwright')
+  .option('--keep-environment', 'leave wp-env running after the proof')
+  .option('--json', 'emit the complete receipt result as JSON')
+  .action(async (pluginZip: string, options: ProofCliOptions) => {
+    const profile = options.profile ?? 'full';
+    if (!isProofProfileName(profile)) {
+      program.error(`error: unsupported proof profile ${JSON.stringify(profile)}`);
+      return;
+    }
+    const [fixture, markup, input] = await Promise.all([
+      options.fixture ? readJsonFixture(options.fixture) : undefined,
+      options.markup ? readFile(options.markup, 'utf8') : undefined,
+      options.input ? readFile(options.input) : undefined,
+    ]);
+    const result = await runProof({
+      profile,
+      pluginZip,
+      fixture,
+      markup,
+      input,
+      inputPath: options.input,
+      outputDir: options.receiptDir,
+      wpEnvConfig: options.wpEnvConfig,
+      execute: options.run,
+      keepEnvironment: options.keepEnvironment,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`proof ${result.profile.profile}: ${result.ok ? 'pass' : 'fail'}`);
+      console.log(`receipt: ${result.receiptReference.path} (${result.receiptReference.sha256})`);
+      for (const failed of result.profile.failedGates) {
+        console.log(`- ${failed.gate}: ${failed.status}`);
+      }
+    }
+    process.exitCode = result.ok ? 0 : 1;
+  });
+
+program
   .command('skill')
   .description('Print or install the agent guide.')
   .option('--install', 'install the agent skill files')
@@ -368,6 +429,19 @@ function readStdin(): Promise<string> {
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
+}
+
+async function readJsonFixture(file: string): Promise<ProofFixture> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read proof fixture ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof (parsed as { blockName?: unknown }).blockName !== 'string') {
+    throw new Error(`Proof fixture ${file} must be an object with a string blockName`);
+  }
+  return parsed as ProofFixture;
 }
 
 function aggregateReports(command: BlockRunnerReport['command'], reports: BlockRunnerReport[]): BlockRunnerReport {

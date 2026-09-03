@@ -253,6 +253,45 @@ const fixed = await canonicalize(markup);
 const converted = await convert(html, { resolver: 'noop' });
 ```
 
+## Synced-pattern overrides (WordPress 7.1)
+
+`compileAuthoringPlan()` makes native content regions of a generated wrapper ready for
+WordPress's synced-pattern override flow. It adds a deterministic `metadata.name` and explicit
+`core/pattern-overrides` binding only to supported Core child attributes: rich text
+`content`, image `id`/`url`/`alt`, and button `text`/`url`. Layout remains the one canonical
+InnerBlocks template; the compiler never binds or synthesizes `innerBlocks`.
+
+Stable names derive from the reviewed plan path, so a synced pattern stores an instance's local
+values in the normal `core/block` `content` map. Use `templateLock: 'all'` or
+`'contentOnly'` when the pattern must retain canonical structure.
+
+The full proof route is intentionally fail-closed:
+
+```sh
+block-runner proof generated-plugin.zip \\
+  --profile full \\
+  --input design.html \\
+  --markup generated.blocks.html \\
+  --fixture test/fixtures/proof-pattern-overrides.json
+```
+
+It starts a real WordPress 7.1 `wp-env`, records the canonical `wp_block` content and each
+`core/block.content` instance value in an immutable receipt, then verifies two instances,
+reopen, canonical update, reset, structural policy, a missing-binding negative, and frontend
+output. A fixture-specific plugin archive and reviewed visual/accessibility inputs are required
+for a passing full receipt.
+
+The repository’s opt-in real-receipt test uses the same full path (with no proof adapter). Point
+it at the generated ZIP, reviewed input/markup, and the fixture’s reviewed PNG golden:
+
+```sh
+BLOCK_RUNNER_REAL_PROOF_PLUGIN_ZIP=generated-plugin.zip \
+BLOCK_RUNNER_REAL_PROOF_INPUT=design.html \
+BLOCK_RUNNER_REAL_PROOF_MARKUP=generated.blocks.html \
+BLOCK_RUNNER_REAL_PROOF_GOLDEN=reviewed-pattern.png \
+npm run test:proof
+```
+
 ## Media Resolution
 
 A `<img src="hero.jpg">` in generated HTML is just a URL, but WordPress image and cover blocks

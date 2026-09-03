@@ -36,7 +36,10 @@ export function createRestResolver(config: BlockRunnerConfig): MediaResolver {
             'Content-Disposition': `attachment; filename="${filename}"`,
             'Content-Type': contentType(filename),
           },
-          body: bytes,
+          // Buffer's backing store may be typed as ArrayBufferLike, which isn't
+          // accepted by the fetch BodyInit definition. Copy it into a standard
+          // Uint8Array before uploading.
+          body: new Uint8Array(bytes),
         });
 
         if (!response.ok) {

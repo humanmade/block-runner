@@ -2,18 +2,66 @@ export { canonicalize } from './gate/canonicalize.js';
 export { validate } from './gate/validate.js';
 export { convert } from './convert/assemble.js';
 export { assemble, extractIntent, realize } from './intent/index.js';
+export { compileAuthoringBlock, compileAuthoringPlan } from './authoring/compile.js';
+export {
+  PATTERN_OVERRIDE_SOURCE,
+  applyPatternOverrides,
+  patternOverrideName,
+  supportedPatternOverrideAttributes,
+} from './authoring/overrides.js';
+export {
+  patternOverrideContent,
+  templateOverrideName,
+  validatePatternOverrideContract,
+} from './authoring/pattern-overrides.js';
+export type { PatternOverrideBinding, PatternOverrideContract } from './authoring/pattern-overrides.js';
 export { collectSiteContext } from './context/run.js';
+export { runProof, prove } from './proof/runner.js';
+export {
+  PROOF_GATE_IDS,
+  PROOF_GATE_STATUSES,
+  PROOF_PROFILE_NAMES,
+  PROOF_PROFILES,
+  canBeNotApplicable,
+  createDefaultGateRecords,
+  createDefaultProofGateRecords,
+  evaluateProfile,
+  evaluateProofProfile,
+  evaluateProofProfiles,
+  getProofProfile,
+  isProofGateStatus,
+  isProofProfileName,
+  normalizeProofGateId,
+  reportProofProfile,
+} from './proof/profiles.js';
+export {
+  EvidenceStore,
+  ImmutableContentError,
+  ReceiptWriter,
+  canonicalJson,
+  canonicalJsonStringify,
+  hashCanonicalJson,
+  sha256,
+} from './proof/receipt.js';
 export type { SiteContextOptions } from './context/run.js';
 export type {
   AssembleOptions,
+  AuthoringDiagnostic,
+  AuthoringEditableField,
+  AuthoringNode,
+  AuthoringPlan,
+  AuthoringRole,
+  AuthoringTemplate,
   BlockRunnerConfig,
   BlockRunnerReport,
   CanonicalizeOptions,
   CommandName,
   CommonOptions,
+  CompiledAuthoringBlock,
   ConvertOptions,
   IntentNode,
   IntentTree,
+  InnerBlocksLock,
   MediaConfig,
   MediaMapEntry,
   MediaResult,
@@ -27,6 +75,7 @@ export type {
   RuleContext,
   SourceLocation,
   StylingRung,
+  TemplateLock,
   TokenConfig,
   TokenMatchMode,
   TokenResolver,
@@ -34,3 +83,48 @@ export type {
   ValidateOptions,
   WpBlock,
 } from './types.js';
+export type {
+  ProofEditableField,
+  ProofEditableSurface,
+  ProofEnvironment,
+  ProofFilePin,
+  ProofFixture,
+  ProofGateContext,
+  ProofGateResult,
+  ProofGateRunner,
+  ProofCommandResult,
+  ProofCommandRunner,
+  ProofReceiptDocument,
+  ProofRunOptions,
+  ProofRunResult,
+  ProofPatternInstance,
+  ProofPatternNegativeBinding,
+  ProofPatternRequiredBinding,
+  PatternOverrideContent,
+} from './proof/runner.js';
+export type {
+  GateId,
+  GateRecord,
+  GateStatus,
+  ProfileName,
+  ProofGateId,
+  ProofGateOutcome,
+  ProofGateRecord,
+  ProofGateRecords,
+  ProofGateStatus,
+  ProofProfile,
+  ProofProfileEvaluation,
+  ProofProfileName,
+  ProofProfileReport,
+} from './proof/profiles.js';
+export type {
+  CanonicalJsonValue,
+  ContentAddressedReference,
+  EvidencePutOptions,
+  EvidenceReference,
+  HashInput,
+  ProofReceipt,
+  ReceiptReference,
+  ReceiptWriteResult,
+  Sha256,
+} from './proof/receipt.js';

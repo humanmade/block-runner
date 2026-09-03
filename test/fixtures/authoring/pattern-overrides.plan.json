@@ -1,0 +1,29 @@
+{
+  "name": "acme/pattern-hero",
+  "title": "Pattern hero",
+  "templateLock": "contentOnly",
+  "root": {
+    "path": "hero",
+    "role": "wrapper",
+    "children": [
+      {
+        "path": "hero.title",
+        "role": "heading",
+        "content": "Canonical heading"
+      },
+      {
+        "path": "hero.image",
+        "role": "image",
+        "attributes": { "id": 42 },
+        "url": "https://example.test/canonical.jpg",
+        "alt": "Canonical image"
+      },
+      {
+        "path": "hero.cta",
+        "role": "button",
+        "content": "Canonical action",
+        "url": "https://example.test/canonical"
+      }
+    ]
+  }
+}

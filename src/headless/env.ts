@@ -34,6 +34,8 @@ async function boot(): Promise<WpModules> {
       serialize: blocks.serialize,
       validateBlock: blocks.validateBlock,
       getBlockType: blocks.getBlockType,
+      registerBlockType: blocks.registerBlockType,
+      unregisterBlockType: blocks.unregisterBlockType,
     };
   } catch (error) {
     bootPromise = undefined;

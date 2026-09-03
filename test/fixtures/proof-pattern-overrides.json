@@ -1,0 +1,73 @@
+{
+  "blockName": "block-runner/pattern-overrides-fixture",
+  "blockTitle": "Pattern overrides fixture",
+  "editableFields": [
+    {
+      "path": "fixture.content",
+      "surface": "richText",
+      "value": "Proof editor field"
+    }
+  ],
+  "patternOverrides": {
+    "title": "Block Runner pattern overrides lifecycle",
+    "canonicalContent": "<!-- wp:group {\"className\":\"block-runner-pattern-layout\",\"templateLock\":\"contentOnly\"} -->\n<div class=\"wp-block-group block-runner-pattern-layout\">\n<!-- wp:heading {\"metadata\":{\"name\":\"block-runner-hero-title-1m38b21\",\"bindings\":{\"content\":{\"source\":\"core/pattern-overrides\"}}}} -->\n<h2 class=\"wp-block-heading\">Canonical heading</h2>\n<!-- /wp:heading -->\n<!-- wp:paragraph -->\n<p>Canonical layout version one.</p>\n<!-- /wp:paragraph -->\n<!-- wp:image {\"id\":42,\"url\":\"https://example.test/canonical.jpg\",\"alt\":\"Canonical image\",\"metadata\":{\"name\":\"block-runner-hero-image-1ya70ru\",\"bindings\":{\"id\":{\"source\":\"core/pattern-overrides\"},\"url\":{\"source\":\"core/pattern-overrides\"},\"alt\":{\"source\":\"core/pattern-overrides\"}}}} -->\n<figure class=\"wp-block-image\"><img src=\"https://example.test/canonical.jpg\" alt=\"Canonical image\" class=\"wp-image-42\"/></figure>\n<!-- /wp:image -->\n<!-- wp:buttons -->\n<div class=\"wp-block-buttons\">\n<!-- wp:button {\"text\":\"Canonical action\",\"url\":\"https://example.test/canonical\",\"metadata\":{\"name\":\"block-runner-hero-cta-1xqivfd\",\"bindings\":{\"text\":{\"source\":\"core/pattern-overrides\"},\"url\":{\"source\":\"core/pattern-overrides\"}}}} -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\" href=\"https://example.test/canonical\">Canonical action</a></div>\n<!-- /wp:button -->\n</div>\n<!-- /wp:buttons -->\n</div>\n<!-- /wp:group -->",
+    "instances": [
+      {
+        "label": "first",
+        "content": {
+          "block-runner-hero-title-1m38b21": { "content": "First instance title" },
+          "block-runner-hero-image-1ya70ru": { "id": 101, "url": "https://example.test/first.jpg", "alt": "First instance image" },
+          "block-runner-hero-cta-1xqivfd": { "text": "First instance action", "url": "https://example.test/first" }
+        }
+      },
+      {
+        "label": "second",
+        "content": {
+          "block-runner-hero-title-1m38b21": { "content": "Second instance title" },
+          "block-runner-hero-image-1ya70ru": { "id": 202, "url": "https://example.test/second.jpg", "alt": "Second instance image" },
+          "block-runner-hero-cta-1xqivfd": { "text": "Second instance action", "url": "https://example.test/second" }
+        }
+      }
+    ],
+    "canonicalUpdate": {
+      "marker": "Canonical layout version two",
+      "content": "<!-- wp:group {\"className\":\"block-runner-pattern-layout block-runner-layout-v2\",\"templateLock\":\"contentOnly\"} -->\n<div class=\"wp-block-group block-runner-pattern-layout block-runner-layout-v2\">\n<!-- wp:heading {\"metadata\":{\"name\":\"block-runner-hero-title-1m38b21\",\"bindings\":{\"content\":{\"source\":\"core/pattern-overrides\"}}}} -->\n<h2 class=\"wp-block-heading\">Canonical fallback after reset</h2>\n<!-- /wp:heading -->\n<!-- wp:paragraph -->\n<p>Canonical layout version two</p>\n<!-- /wp:paragraph -->\n<!-- wp:image {\"id\":42,\"url\":\"https://example.test/canonical.jpg\",\"alt\":\"Canonical image\",\"metadata\":{\"name\":\"block-runner-hero-image-1ya70ru\",\"bindings\":{\"id\":{\"source\":\"core/pattern-overrides\"},\"url\":{\"source\":\"core/pattern-overrides\"},\"alt\":{\"source\":\"core/pattern-overrides\"}}}} -->\n<figure class=\"wp-block-image\"><img src=\"https://example.test/canonical.jpg\" alt=\"Canonical image\" class=\"wp-image-42\"/></figure>\n<!-- /wp:image -->\n<!-- wp:buttons -->\n<div class=\"wp-block-buttons\">\n<!-- wp:button {\"text\":\"Canonical action\",\"url\":\"https://example.test/canonical\",\"metadata\":{\"name\":\"block-runner-hero-cta-1xqivfd\",\"bindings\":{\"text\":{\"source\":\"core/pattern-overrides\"},\"url\":{\"source\":\"core/pattern-overrides\"}}}} -->\n<div class=\"wp-block-button\"><a class=\"wp-block-button__link wp-element-button\" href=\"https://example.test/canonical\">Canonical action</a></div>\n<!-- /wp:button -->\n</div>\n<!-- /wp:buttons -->\n</div>\n<!-- /wp:group -->"
+    },
+    "reset": {
+      "instance": 0,
+      "name": "block-runner-hero-title-1m38b21",
+      "attribute": "content",
+      "fallback": "Canonical fallback after reset"
+    },
+    "requiredBindings": [
+      { "name": "block-runner-hero-title-1m38b21", "attribute": "content" },
+      { "name": "block-runner-hero-image-1ya70ru", "attribute": "id" },
+      { "name": "block-runner-hero-image-1ya70ru", "attribute": "url" },
+      { "name": "block-runner-hero-image-1ya70ru", "attribute": "alt" },
+      { "name": "block-runner-hero-cta-1xqivfd", "attribute": "text" },
+      { "name": "block-runner-hero-cta-1xqivfd", "attribute": "url" }
+    ],
+    "structuralPolicy": "contentOnly",
+    "negative": {
+      "name": "block-runner-hero-title-1m38b21",
+      "attribute": "content",
+      "value": "This missing binding must not persist",
+      "fallback": "Canonical heading"
+    }
+  },
+  "frontend": {
+    "url": "http://localhost:8888/",
+    "subtreeSelector": "body",
+    "expectedLinks": ["https://example.test/first", "https://example.test/second"],
+    "expectedMedia": ["https://example.test/first.jpg", "https://example.test/second.jpg"]
+  },
+  "visual": {
+    "expectedPath": "test/fixtures/proof-pattern-overrides.expected.png",
+    "threshold": 0.005
+  },
+  "accessibility": {
+    "editorSelector": ".editor-styles-wrapper",
+    "frontendSelector": "body",
+    "manualReview": "pass"
+  }
+}
