@@ -10,7 +10,7 @@ import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
 import { convert } from './convert/assemble.js';
-import { author } from './author/index.js';
+import { author as generateRegisteredBlock } from './author/index.js';
 import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
@@ -97,19 +97,27 @@ addTokenOptions(
     process.exitCode = report.ok ? 0 : 1;
   });
 
+const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
+
 addTokenOptions(
   addWpCredentialOptions(
-    addSharedOptions(program.command('author <htmlOrStdin>').description('Generate one static, registered block package.'), {
+    addSharedOptions(program.command('generate-author <htmlOrStdin>', { hidden: true }), {
       output: false,
     }),
   ),
   { styling: false },
 )
-  .requiredOption('--name <namespace/slug>', 'registered block name, for example acme/hero')
+  .option('--name <namespace/slug>', 'registered block name, for example acme/hero')
   .option('--title <title>', 'block title (defaults from the slug)')
   .option('--category <category>', 'block category (default: widgets)')
   .option('--out-dir <path>', 'write the generated package and copied assets to this directory')
   .action(async (htmlOrStdin: string, options: CliOptions) => {
+    if (!htmlOrStdin) {
+      program.error('error: author needs exactly one design input');
+    }
+    if (!options.name) {
+      program.error("error: required option '--name <namespace/slug>' not specified");
+    }
     const apiOptions = normalizeOptions(options);
     const inputs = await readInputs(htmlOrStdin, { allowInline: true });
     if (inputs.length !== 1) {
@@ -122,7 +130,7 @@ addTokenOptions(
     if (!input) {
       return;
     }
-    const report = await author(input.content, {
+    const report = await generateRegisteredBlock(input.content, {
       ...apiOptions,
       sourcePath: input.path,
       outDir: options.outDir,
@@ -305,8 +313,6 @@ program
     }
   });
 
-const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
-
 author
   .command('preview <planOrStdin>')
   .description('Validate and render an authoring plan without writing files.')
@@ -400,6 +406,7 @@ author
 
 async function main(): Promise<void> {
   try {
+    routeDirectAuthorInvocation(process.argv);
     rejectAssembleStylingOptions(process.argv);
     await program.parseAsync(process.argv);
   } catch (error) {
@@ -416,6 +423,12 @@ async function main(): Promise<void> {
 
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
+  }
+}
+
+function routeDirectAuthorInvocation(argv: string[]): void {
+  if (argv[2] === 'author' && argv[3] && !['preview', 'write'].includes(argv[3])) {
+    argv[2] = 'generate-author';
   }
 }
 

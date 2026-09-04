@@ -47,7 +47,7 @@ export type {
   AuthoringNodeLock,
   AuthoringPattern,
   AuthoringPatternOverride,
-  AuthoringPlan,
+  AuthoringPlan as GeneratedAuthoringPlan,
   AuthoringStructureNode,
   AuthoringStyleOutcome,
   AuthoringStyleOutcomeKind,
