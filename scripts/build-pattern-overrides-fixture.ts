@@ -29,10 +29,17 @@ const execFileAsync = promisify(execFile);
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
 const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'pattern-overrides.plan.json');
-const visualGoldenPath = path.join(projectRoot, 'proof', 'wordpress-7.1-pattern-overrides.expected.png');
+const visualGoldenPath = fixtureVisualGoldenPath();
 const pluginSlug = 'block-runner-pattern-overrides-fixture';
 const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z');
 const fixedZipMode = 0o644;
+
+/** Font rasterization differs by host OS; never compare Linux against the macOS review. */
+export function fixtureVisualGoldenPath(platform: string = process.platform): string {
+  const suffix = platform === 'darwin' ? '' : `.${platform}`;
+  // An unreviewed platform resolves to a missing golden and is blocked by the proof gate.
+  return path.join(projectRoot, 'proof', `wordpress-7.1-pattern-overrides${suffix}.expected.png`);
+}
 
 const RETAINED_FIXTURE_ASSET_SOURCES = new Map([
   ['canonical-image', 'source/canonical.png'],
