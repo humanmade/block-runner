@@ -1,14 +1,76 @@
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { portableFixturePlan } from '../scripts/build-pattern-overrides-fixture.js';
+import {
+  normalizePluginZipInputs,
+  portableFixturePlan,
+} from '../scripts/build-pattern-overrides-fixture.js';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
 import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
 import { hashAuthoringPlan, type AuthoringPlan } from '../src/authoring/schema.js';
 import { runProof } from '../src/index.js';
 
 describe('pattern-override receipts', () => {
+  it('normalizes archive inputs while leaving source-only files unchanged', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-zip-inputs-'));
+    await mkdir(path.join(root, 'build', 'blocks', 'fixture'), { recursive: true });
+    await mkdir(path.join(root, 'src'), { recursive: true });
+    const archiveInputs = [
+      path.join(root, 'package.json'),
+      path.join(root, 'plugin.php'),
+      path.join(root, 'readme.txt'),
+      path.join(root, 'build', 'blocks', 'fixture', 'block.json'),
+    ];
+    const sourceOnly = path.join(root, 'src', 'private-note.txt');
+    await Promise.all([
+      writeFile(archiveInputs[0]!, '{}'),
+      writeFile(archiveInputs[1]!, '<?php\n'),
+      writeFile(archiveInputs[2]!, 'Fixture\n'),
+      writeFile(archiveInputs[3]!, '{}'),
+      writeFile(sourceOnly, 'not in the ZIP\n'),
+    ]);
+    const oldTimestamp = new Date('2024-01-02T03:04:06.000Z');
+    await Promise.all([...archiveInputs, sourceOnly].map(async (file) => {
+      await chmod(file, 0o600);
+      await utimes(file, oldTimestamp, oldTimestamp);
+    }));
+
+    await normalizePluginZipInputs(root);
+
+    const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z').getTime();
+    for (const file of archiveInputs) {
+      const result = await stat(file);
+      expect(result.mode & 0o777).toBe(0o644);
+      expect(result.mtimeMs).toBe(fixedTimestamp);
+    }
+    const untouched = await stat(sourceOnly);
+    expect(untouched.mode & 0o777).toBe(0o600);
+    expect(untouched.mtimeMs).toBe(oldTimestamp.getTime());
+  });
+
+  it('rejects symlinked and non-regular archive inputs', async () => {
+    const symlinkRoot = await mkdtemp(path.join(tmpdir(), 'block-runner-zip-symlink-'));
+    await mkdir(path.join(symlinkRoot, 'build'), { recursive: true });
+    await Promise.all([
+      writeFile(path.join(symlinkRoot, 'package.json'), '{}'),
+      writeFile(path.join(symlinkRoot, 'plugin.php'), '<?php\n'),
+      writeFile(path.join(symlinkRoot, 'readme.txt'), 'Fixture\n'),
+      writeFile(path.join(symlinkRoot, 'outside.txt'), 'outside\n'),
+    ]);
+    await symlink(path.join(symlinkRoot, 'outside.txt'), path.join(symlinkRoot, 'build', 'linked.js'));
+    await expect(normalizePluginZipInputs(symlinkRoot)).rejects.toThrow('not a regular file');
+
+    const directoryRoot = await mkdtemp(path.join(tmpdir(), 'block-runner-zip-directory-'));
+    await mkdir(path.join(directoryRoot, 'build'), { recursive: true });
+    await Promise.all([
+      mkdir(path.join(directoryRoot, 'package.json')),
+      writeFile(path.join(directoryRoot, 'plugin.php'), '<?php\n'),
+      writeFile(path.join(directoryRoot, 'readme.txt'), 'Fixture\n'),
+    ]);
+    await expect(normalizePluginZipInputs(directoryRoot)).rejects.toThrow('not a regular file');
+  });
+
   it('keeps retained fixture input hashes stable across temporary proof roots', () => {
     const planForRoot = (root: string): AuthoringPlan => ({
       version: 1,

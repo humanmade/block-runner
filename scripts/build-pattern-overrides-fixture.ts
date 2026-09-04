@@ -199,10 +199,15 @@ export async function normalizePluginZipInputs(pluginDirectory: string): Promise
   ];
   for (const file of selected) {
     const stats = await lstat(file);
+    if (stats.isDirectory()) {
+      // Recursive directory enumeration includes the build tree's structural directories, but a
+      // root allowlisted file replaced by a directory is a malformed generated package.
+      if (file.startsWith(`${buildRoot}${path.sep}`)) continue;
+      throw new Error(`Generated ZIP input is not a regular file: ${file}`);
+    }
     if (!stats.isFile() || stats.isSymbolicLink()) {
-      // A directory is not an archive member; all other non-regular entries would make the
-      // generated package depend on host filesystem metadata and are refused explicitly.
-      if (stats.isDirectory()) continue;
+      // Symlinks and other non-regular entries would make the generated package depend on host
+      // filesystem metadata and are refused explicitly.
       throw new Error(`Generated ZIP input is not a regular file: ${file}`);
     }
     await chmod(file, fixedZipMode);
