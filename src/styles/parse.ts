@@ -21,6 +21,12 @@ export interface Declaration {
    * original positions — collapsing them onto the first occurrence reverses the author's cascade.
    */
   originIndex?: number;
+  /**
+   * Stable stylesheet-rule identity used internally by registered-block authoring. Unlike the
+   * selector text, it distinguishes repeated selectors and the same selector inside a conditional
+   * at-rule from its top-level counterpart.
+   */
+  originId?: string;
 }
 
 export interface OverriddenDeclaration extends Declaration {
@@ -71,6 +77,7 @@ export function parseDeclarationBlock(
   css: string,
   origin?: string,
   originIndex?: number,
+  originId?: string,
 ): { declarations: Declaration[]; problems: string[] } {
   const parsed: Declaration[] = [];
   const problems: string[] = [];
@@ -110,6 +117,7 @@ export function parseDeclarationBlock(
         ...(important ? { important } : {}),
         ...(origin ? { origin } : {}),
         ...(originIndex === undefined ? {} : { originIndex }),
+        ...(originId === undefined ? {} : { originId }),
       })),
     );
   }

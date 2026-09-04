@@ -1,5 +1,6 @@
 import { JSDOM } from 'jsdom';
-import { ReportItem, RuleContext, SourceLocation } from '../types.js';
+import { ReportItem, RuleContext, SourceLocation, SourceSelectorDependency } from '../types.js';
+import { scanStylesheet } from '../author/styles.js';
 import { effectiveDeclarations } from '../styles/apply.js';
 import { extractUrl } from '../styles/declarations.js';
 import { Declaration, parseDeclarationBlock, parseInlineStyle, resolvePrecedence } from '../styles/parse.js';
@@ -29,6 +30,34 @@ export function prepareDom(input: string, sourcePath?: string): PreparedDom {
     cssClassRules,
     warnings,
   };
+}
+
+/**
+ * Native blocks cannot retain arbitrary source attributes, and most cannot retain a raw `id`.
+ * Registered-block authoring rewrites those selector atoms to marker classes, then marks the
+ * matching source elements before conversion so the scoped CSS still selects the same nodes.
+ */
+export function retainSelectorDependencies(document: Document, dependencies: readonly SourceSelectorDependency[]): void {
+  if (dependencies.length === 0) {
+    return;
+  }
+
+  for (const element of [...document.querySelectorAll('*')]) {
+    for (const dependency of dependencies) {
+      if (dependency.kind === 'id') {
+        if (element.id === dependency.value) {
+          element.classList.add(dependency.markerClass);
+        }
+        continue;
+      }
+      // Authoring validates attribute-selector syntax before it creates a dependency. Let an
+      // unexpected selector-engine failure surface instead of emitting a marker CSS rule that can
+      // never match the converted DOM.
+      if (element.matches(dependency.value)) {
+        element.classList.add(dependency.markerClass);
+      }
+    }
+  }
 }
 
 export function sanitizeDocument(dom: JSDOM, warnings: ReportItem[], sourcePath?: string): void {
@@ -93,7 +122,7 @@ export interface CssClassRule {
 }
 
 /**
- * Extract single-class rules (`.hero { … }`) from `<style>` elements, in document order.
+ * Extract top-level single-class rules (`.hero { … }`) from `<style>` elements, in document order.
  *
  * Single-class only, deliberately: those are the rules a design-HTML generator emits, and they are
  * the only ones whose declarations map onto exactly one element with no specificity reasoning.
@@ -104,26 +133,30 @@ export function extractCssClassRules(document: Document): CssClassRule[] {
   const rules: CssClassRule[] = [];
 
   for (const style of [...document.querySelectorAll('style')]) {
-    // At-rule blocks are dropped whole. Their inner rules are conditional (`@media print`,
-    // `@supports`) and applying them unconditionally would style every render with CSS meant for
-    // one — and a flat rule scan happily matches rules nested inside them.
-    const css = stripAtRuleBlocks(style.textContent ?? '');
-    // Split into selector/body pairs, then keep only the ones whose selector is exactly one class.
-    // Matching `.name{…}` directly cannot handle consecutive rules (the previous rule's `}` is
-    // already consumed) and would also match the `.b` inside a compound selector like `div.a .b`.
-    const rulePattern = /([^{}]+)\{([^{}]*)\}/g;
-    let ruleMatch: RegExpExecArray | null;
-
-    while ((ruleMatch = rulePattern.exec(css))) {
-      const [, selector, body] = ruleMatch;
-      const single = /^\s*\.([_a-zA-Z][\w-]*)\s*$/.exec(selector);
+    const css = style.textContent ?? '';
+    const stylesheet = scanStylesheet(css);
+    for (const rule of stylesheet.rules) {
+      // Conditional rules deliberately do not take part in native mapping: their conditions are
+      // not evaluated by the conversion probe. Scanning the complete sheet (rather than deleting
+      // at-rule text first) still gives every top-level rule its true source identity.
+      if (rule.kind !== 'style') continue;
+      const single = /^\s*\.([_a-zA-Z][\w-]*)\s*$/.exec(rule.selector);
       if (!single) {
         continue;
       }
       const className = single[1];
-      // The index is the rule's position across all stylesheets, so the sidecar can keep two rules
-      // sharing a selector as separate rules in their authored positions.
-      const { declarations, problems } = parseDeclarationBlock(body, `.${className}`, rules.length);
+      const rawRule = css.slice(rule.source.start.offset, rule.source.end.offset);
+      const bodyStart = rawRule.indexOf('{');
+      const bodyEnd = rawRule.lastIndexOf('}');
+      if (bodyStart === -1 || bodyEnd <= bodyStart) continue;
+      // The index retains sidecar order. The scanner rule ID is the stronger identity used by
+      // authoring, so repeated selectors and conditionally nested rules cannot alias each other.
+      const { declarations, problems } = parseDeclarationBlock(
+        rawRule.slice(bodyStart + 1, bodyEnd),
+        `.${className}`,
+        rules.length,
+        rule.id,
+      );
       if (declarations.length > 0 || problems.length > 0) {
         rules.push({ className, declarations, problems });
       }
@@ -131,49 +164,6 @@ export function extractCssClassRules(document: Document): CssClassRule[] {
   }
 
   return rules;
-}
-
-/**
- * Remove `@media`/`@supports`/`@layer` blocks, brace-balanced so nested rules go with them.
- */
-function stripAtRuleBlocks(css: string): string {
-  let out = '';
-  let index = 0;
-
-  while (index < css.length) {
-    if (css[index] !== '@') {
-      out += css[index];
-      index += 1;
-      continue;
-    }
-
-    // Skip to the end of the at-rule: either a `;` (e.g. @import) or a balanced block.
-    let cursor = index;
-    while (cursor < css.length && css[cursor] !== '{' && css[cursor] !== ';') {
-      cursor += 1;
-    }
-    if (cursor >= css.length || css[cursor] === ';') {
-      index = cursor + 1;
-      continue;
-    }
-
-    let depth = 0;
-    while (cursor < css.length) {
-      if (css[cursor] === '{') {
-        depth += 1;
-      } else if (css[cursor] === '}') {
-        depth -= 1;
-        if (depth === 0) {
-          cursor += 1;
-          break;
-        }
-      }
-      cursor += 1;
-    }
-    index = cursor;
-  }
-
-  return out;
 }
 
 /**

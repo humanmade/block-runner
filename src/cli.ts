@@ -10,6 +10,7 @@ import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
 import { convert } from './convert/assemble.js';
+import { author as generateRegisteredBlock } from './author/index.js';
 import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
@@ -29,6 +30,10 @@ interface CliOptions extends CommonOptions {
   out?: string;
   cssOut?: string;
   wpAppPasswordEnv?: string;
+  name?: string;
+  title?: string;
+  category?: string;
+  outDir?: string;
 }
 
 interface ContextCliOptions {
@@ -89,6 +94,53 @@ addTokenOptions(
     );
     const report = aggregateReports('validate', reports);
     await emit(report, options);
+    process.exitCode = report.ok ? 0 : 1;
+  });
+
+const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
+
+addTokenOptions(
+  addWpCredentialOptions(
+    addSharedOptions(program.command('generate-author <htmlOrStdin>', { hidden: true }), {
+      output: false,
+    }),
+  ),
+  { styling: false },
+)
+  .option('--name <namespace/slug>', 'registered block name, for example acme/hero')
+  .option('--title <title>', 'block title (defaults from the slug)')
+  .option('--category <category>', 'block category (default: widgets)')
+  .option('--out-dir <path>', 'write the generated package and copied assets to this directory')
+  .action(async (htmlOrStdin: string, options: CliOptions) => {
+    if (!htmlOrStdin) {
+      program.error('error: author needs exactly one design input');
+    }
+    if (!options.name) {
+      program.error("error: required option '--name <namespace/slug>' not specified");
+    }
+    const apiOptions = normalizeOptions(options);
+    const inputs = await readInputs(htmlOrStdin, { allowInline: true });
+    if (inputs.length !== 1) {
+      program.error('error: author accepts exactly one design input because it generates exactly one registered block');
+    }
+    if (!options.outDir && !options.json) {
+      program.error('error: author needs --out-dir <path> to write its package, or --json to inspect the generated package');
+    }
+    const input = inputs[0];
+    if (!input) {
+      return;
+    }
+    const report = await generateRegisteredBlock(input.content, {
+      ...apiOptions,
+      sourcePath: input.path,
+      outDir: options.outDir,
+      author: {
+        name: options.name,
+        title: options.title,
+        category: options.category,
+      },
+    });
+    await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
 
@@ -261,8 +313,6 @@ program
     }
   });
 
-const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
-
 author
   .command('preview <planOrStdin>')
   .description('Validate and render an authoring plan without writing files.')
@@ -356,6 +406,7 @@ author
 
 async function main(): Promise<void> {
   try {
+    routeDirectAuthorInvocation(process.argv);
     rejectAssembleStylingOptions(process.argv);
     await program.parseAsync(process.argv);
   } catch (error) {
@@ -372,6 +423,12 @@ async function main(): Promise<void> {
 
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
+  }
+}
+
+function routeDirectAuthorInvocation(argv: string[]): void {
+  if (argv[2] === 'author' && argv[3] && !['preview', 'write'].includes(argv[3])) {
+    argv[2] = 'generate-author';
   }
 }
 
@@ -409,7 +466,7 @@ function addTokenOptions(command: Command, options: { styling?: boolean } = {}):
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {
-  const { config, json, out, wpAppPasswordEnv, ...rest } = options;
+  const { config, json, out, wpAppPasswordEnv, name, title, category, outDir, ...rest } = options;
   const wpAppPassword = wpAppPasswordEnv ? process.env[wpAppPasswordEnv] : rest.wpAppPassword;
   return {
     ...rest,

@@ -1,6 +1,23 @@
 export { canonicalize } from './gate/canonicalize.js';
 export { validate } from './gate/validate.js';
 export { convert } from './convert/assemble.js';
+export { author } from './author/index.js';
+export {
+  compileTailwindBuildGraph,
+  hasTailwindSignal,
+  renderResidualCss,
+  scanStylesheet,
+  scopeLocalSelectorList,
+  scopeStylesheet,
+  validateCssBuildGraph,
+} from './author/styles.js';
+export type { CssBuildGraph, TailwindCompilation, TailwindCompilationOptions } from './author/styles.js';
+export {
+  classifyCssUrlReference,
+  processCssAssets,
+  rewriteCssAssets,
+  scanCssUrlReferences,
+} from './author/assets.js';
 export { assemble, extractIntent, realize } from './intent/index.js';
 export { compileAuthoringBlock, compileAuthoringPlan } from './authoring/compile.js';
 export { collectSiteContext } from './context/run.js';
@@ -30,7 +47,7 @@ export type {
   AuthoringNodeLock,
   AuthoringPattern,
   AuthoringPatternOverride,
-  AuthoringPlan,
+  AuthoringPlan as GeneratedAuthoringPlan,
   AuthoringStructureNode,
   AuthoringStyleOutcome,
   AuthoringStyleOutcomeKind,
@@ -50,6 +67,13 @@ export type {
   AuthoringPlan,
   AuthoringRole,
   AuthoringTemplate,
+  AssetLedgerEntry,
+  AssetOutcome,
+  AuthoredStyleLedgerEntry,
+  AuthoredStyleOutcome,
+  AuthorConfig,
+  AuthorOptions,
+  AuthorStyleConfig,
   BlockRunnerConfig,
   BlockRunnerReport,
   CanonicalizeOptions,
@@ -60,6 +84,7 @@ export type {
   IntentNode,
   IntentTree,
   InnerBlocksLock,
+  GeneratedBlockPackage,
   MediaConfig,
   MediaMapEntry,
   MediaResult,
@@ -78,6 +103,9 @@ export type {
   TokenMatchMode,
   TokenResolver,
   TokenResolverKind,
+  TailwindBuildGraph,
+  TailwindCompiler,
+  TailwindCompilerInput,
   ValidateOptions,
   WpBlock,
 } from './types.js';

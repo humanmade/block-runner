@@ -62,6 +62,12 @@ export function mergeConfig(config: BlockRunnerConfig = {}, options: CommonOptio
       context: options.context ?? config.tokens?.context,
     },
     rules: normalizeRules(config.rules),
+    author: config.author
+      ? {
+          ...config.author,
+          styles: config.author.styles ? { ...config.author.styles } : undefined,
+        }
+      : undefined,
   };
 }
 
