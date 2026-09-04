@@ -11,8 +11,9 @@ This file is auto-generated from `decisions.jsonl`. Edit records there, then run
 | DEC-002 | Use one canonical cross-harness skill bundle | accepted | 2026-09-02 |
 | DEC-003 | Generate one registered block per input design | accepted | 2026-09-03 |
 | DEC-004 | Make registered-block authoring the 0.9 preview | accepted | 2026-09-03 |
-| DEC-005 | Retain a narrow WordPress editor exception for 0.9 testing | accepted | 2026-09-04 |
 | DEC-006 | Keep live model benchmarks explicitly scoped | accepted | 2026-09-04 |
+| DEC-007 | Keep native WordPress editor behavior with evidence-bound testing exceptions | accepted | 2026-09-04 |
+| DEC-005 | Retain a narrow WordPress editor exception for 0.9 testing | superseded | 2026-09-04 |
 
 ## Records
 
@@ -92,25 +93,6 @@ The 0.9 acceptance gate must cover both implementation quality and a testing-rea
 
 ---
 
-### DEC-005: Retain a narrow WordPress editor exception for 0.9 testing
-
-**Status:** accepted
-**Date:** 2026-09-04
-
-#### Context
-
-Axe reports aria-allowed-attr and aria-allowed-role on the WordPress 7.1 native Heading editing surface. A retained control run reproduced both findings with core/heading and no generated Block Runner wrapper, while native insert, edit, save and reopen passed.
-
-#### Decision
-
-Accept these verified upstream native Heading editor findings as an explicit exception for the 0.9 testing release only, as approved by the project owner. Keep the raw accessibility_editor gate failed and retain both control and generated-block evidence. Do not disable the Axe rules or call the full proof profile passed.
-
-#### Consequences
-
-Release reporting must identify the accepted upstream exception and archive its evidence. Other elements or findings, frontend accessibility, missing manual review, visual proof and all other release gates remain outside the exception. Recheck on WordPress upgrades and before 1.0; do not carry the exception forward automatically.
-
----
-
 ### DEC-006: Keep live model benchmarks explicitly scoped
 
 **Status:** accepted
@@ -127,5 +109,43 @@ Use deterministic tests, reviewed fixed inputs, and retained runtime evidence fi
 #### Consequences
 
 Regression and release receipts must state what actually ran. An unrun registered-block model benchmark remains pending and produces no score; historical page-content scores are not evidence for registered-block generation. The current per-model operating restrictions are maintained in the local handover.
+
+---
+
+### DEC-007: Keep native WordPress editor behavior with evidence-bound testing exceptions
+
+**Status:** accepted
+**Date:** 2026-09-04
+
+#### Context
+
+WordPress 7.1 native Heading and Paragraph editing controls reproduce the same Axe findings without a Block Runner wrapper. The project owner delegated release decisions and prioritized native WordPress compatibility over replacing its editor controls.
+
+#### Decision
+
+Extend the 0.9-testing-only exception to the exact independently reproduced native Paragraph finding alongside the existing Heading findings. Require matching standalone native-control lifecycle evidence, observed WordPress version and immutable evidence hashes. Preserve raw failures and reject unrelated rules, elements, frontend failures or missing review. Keep the original release and mutation gates.
+
+#### Consequences
+
+No custom replacement editor is introduced to hide upstream failures. Report the accepted upstream exception explicitly; recheck after WordPress upgrades and before 1.0. This does not waive missing tests, artifact review or unrelated accessibility failures.
+
+---
+
+### DEC-005: Retain a narrow WordPress editor exception for 0.9 testing
+
+**Status:** superseded
+**Date:** 2026-09-04
+
+#### Context
+
+Axe reports aria-allowed-attr and aria-allowed-role on the WordPress 7.1 native Heading editing surface. A retained control run reproduced both findings with core/heading and no generated Block Runner wrapper, while native insert, edit, save and reopen passed.
+
+#### Decision
+
+Accept these verified upstream native Heading editor findings as an explicit exception for the 0.9 testing release only, as approved by the project owner. Keep the raw accessibility_editor gate failed and retain both control and generated-block evidence. Do not disable the Axe rules or call the full proof profile passed.
+
+#### Consequences
+
+Release reporting must identify the accepted upstream exception and archive its evidence. Other elements or findings, frontend accessibility, missing manual review, visual proof and all other release gates remain outside the exception. Recheck on WordPress upgrades and before 1.0; do not carry the exception forward automatically.
 
 ---
