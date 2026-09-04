@@ -1,15 +1,15 @@
 {
   "schemaVersion": 1,
   "reviewer": "Codex, agent-assisted keyboard and screenshot review",
-  "reviewedAt": "2026-09-04",
-  "inputHash": "sha256:ad5f452aa7bd8fd219e25e7988529b8031c57cd93e74fcc9f00d66b426eaf124",
-  "pluginZipHash": "sha256:79202b302cfdf261d060ac4ecb2c46120893c01099589eb0610aeb12db32a064",
+  "reviewedAt": "2026-09-04T13:00:46Z",
+  "inputHash": "sha256:3321e9846b4c042ff9c4c23bed09a2c3e2aa552ce702624fc9b9100b4297eaaa",
+  "pluginZipHash": "sha256:8d525c79df7792259b61790a113959fbbff20aa34ff0c1f1bd5fb92542272e9d",
   "status": "pass",
   "checks": {
     "editor-keyboard": "On the installed generated block in WordPress 7.1, focused the native heading, typed with the keyboard, undid the edit, and verified exact original text. Six subsequent Tab presses moved out to named sidebar controls. No save was made and no keyboard trap was observed in this scoped path.",
     "frontend-keyboard": "Keyboard Tab navigation reached all four generated section links in visual document order. Each had the expected canonical or instance label and destination. External links were not activated.",
-    "focus-visibility": "Inspected the retained frontend focus screenshot and editor sidebar focus screenshot. Frontend links have a visible 2px outline, and the editor Image content control has a visible focus border. Computed focus-visible states and focus styles are retained for all observed stops.",
-    "content-reading-order": "Compared the full reviewed frontend screenshot with retained DOM order: each section contains the SVG alt text, heading, explanatory paragraph, image alt text, and action link in that order. Instance override and reset text remains in the expected sections."
+    "focus-visibility": "Inspected all four retained frontend focus screenshots and the editor sidebar focus screenshot. Each frontend link has a visible 2px outline, and the editor Image content control has a visible focus border. Computed focus-visible states and styles are retained for all observed stops.",
+    "content-reading-order": "Compared the four frontend screenshots with retained DOM order: each section contains SVG alt text, a heading, explanatory paragraph, image alt text, and action link in that order. Canonical update, per-instance override, and reset text remains in the expected sections."
   },
   "findings": [],
   "limitations": [
@@ -20,9 +20,7 @@
   ],
   "evidence": {
     "observations": "observations.json",
-    "observationsSha256": "f01dbff0e264ceec5cb8ad62a3525735964b23b64aa0f9e3ee9874a6c76d851f",
-    "originalObservationsSha256": "747efba7785776bdeca6ab354b03f716050a2e418b6965091e24c95a73c214a9",
-    "observationsEncodingNote": "The committed copy adds a terminal newline; observation content is unchanged.",
+    "observationsSha256": "6084b04a0e57e4b128991e1a9f6bfa3d77a80c918263f3e229d4dfbf0f84240b",
     "screenshots": [
       "editor-keyboard.png",
       "frontend-focus-1.png",
@@ -30,6 +28,7 @@
       "frontend-focus-3.png",
       "frontend-focus-4.png"
     ],
-    "retainedTraceSha256": "f44f329591aa348aafe855343a3918dbf9617a6ca61ee930183670d7dd59f8ca"
+    "retainedTraceSha256": "77e77b2807ff0a66cba8b7f96bdd44cdbe878d25b29df0c1f753f9dad15fdd06",
+    "sourceReceiptSha256": "25e8112a9d69ea7120b3fdb80fb79ef41c5076ab8044c0faf446fd60b8dcefcc"
   }
 }

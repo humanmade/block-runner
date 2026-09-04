@@ -1,7 +1,21 @@
 {
+  "inputHash": "sha256:3321e9846b4c042ff9c4c23bed09a2c3e2aa552ce702624fc9b9100b4297eaaa",
+  "pluginZipHash": "sha256:8d525c79df7792259b61790a113959fbbff20aa34ff0c1f1bd5fb92542272e9d",
+  "publication": {
+    "contentHash": "sha256:a6611815a16529692fde25f1132001cad041afe82b38d365de05e567cfc84d13",
+    "id": 256,
+    "permalink": "http://localhost:8888/2026/09/04/256/"
+  },
+  "browser": "149.0.7827.55",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
   "frontend": [
     {
       "tag": "A",
+      "name": null,
+      "role": null,
       "text": "Canonical action",
       "href": "https://example.test/canonical",
       "outline": "rgb(104, 104, 104) solid 2px",
@@ -10,6 +24,8 @@
     },
     {
       "tag": "A",
+      "name": null,
+      "role": null,
       "text": "Canonical action",
       "href": "https://example.test/canonical",
       "outline": "rgb(104, 104, 104) solid 2px",
@@ -18,6 +34,8 @@
     },
     {
       "tag": "A",
+      "name": null,
+      "role": null,
       "text": "First instance action",
       "href": "https://example.test/first",
       "outline": "rgb(104, 104, 104) solid 2px",
@@ -26,6 +44,8 @@
     },
     {
       "tag": "A",
+      "name": null,
+      "role": null,
       "text": "Second instance action",
       "href": "https://example.test/second",
       "outline": "rgb(104, 104, 104) solid 2px",
@@ -39,7 +59,9 @@
       "name": null,
       "role": "tab",
       "text": "Block",
+      "href": null,
       "outline": "rgb(30, 30, 30) none 3px",
+      "boxShadow": "none",
       "focusVisible": true
     },
     {
@@ -47,7 +69,9 @@
       "name": "Close Settings",
       "role": null,
       "text": "",
+      "href": null,
       "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
       "focusVisible": true
     },
     {
@@ -55,7 +79,9 @@
       "name": null,
       "role": null,
       "text": "Edit pattern",
+      "href": null,
       "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
       "focusVisible": true
     },
     {
@@ -63,7 +89,9 @@
       "name": "Content",
       "role": "tab",
       "text": "",
+      "href": null,
       "outline": "rgb(30, 30, 30) none 3px",
+      "boxShadow": "none",
       "focusVisible": true
     },
     {
@@ -71,7 +99,9 @@
       "name": null,
       "role": null,
       "text": "Content",
+      "href": null,
       "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
       "focusVisible": true
     },
     {
@@ -79,17 +109,11 @@
       "name": null,
       "role": null,
       "text": "Image",
+      "href": null,
       "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
       "focusVisible": true
     }
-  ],
-  "findings": [],
-  "screenshots": [
-    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-1.png",
-    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-2.png",
-    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-3.png",
-    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-4.png",
-    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/editor-keyboard.png"
   ],
   "readingOrder": [
     {
@@ -173,7 +197,15 @@
       "text": "Second instance action"
     }
   ],
-  "editorEditUndo": {
+  "screenshots": [
+    "frontend-focus-1.png",
+    "frontend-focus-2.png",
+    "frontend-focus-3.png",
+    "frontend-focus-4.png",
+    "editor-keyboard.png"
+  ],
+  "findings": [],
+  "editorKeyboardEdit": {
     "original": "Proof editor field",
     "restored": "Proof editor field",
     "saved": false
