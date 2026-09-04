@@ -1,0 +1,80 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://humanmade.com/block-runner/benchmarks/authoring/receipt.schema.json",
+  "title": "Registered-block authoring execution receipt",
+  "type": "object",
+  "additionalProperties": true,
+  "required": [
+    "schemaVersion", "fixtureId", "status", "startedAt", "finishedAt", "durationMs", "timingMethod",
+    "provenance", "checks", "artifacts"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "fixtureId": { "type": "string", "minLength": 1 },
+    "status": { "enum": ["scored", "unsupported", "blocked", "engine_error"] },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "durationMs": { "type": "number", "minimum": 0 },
+    "timingMethod": { "const": "monotonic-wall-clock-source-materialization-through-receipt-write" },
+    "provenance": {
+      "type": "object",
+      "required": [
+        "corpusHash", "suiteHash", "fixtureManifestHash", "sourceSetHash", "sourceDependencyHash", "expectedPlanHash",
+        "sourceHash", "scorerHash", "promptGuideHash", "templateHash", "dependencyHash", "wordpressHash", "themeHash",
+        "browserHash", "generatedSourceHash", "model", "effort"
+      ],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 }
+      },
+      "additionalProperties": true
+    },
+    "checks": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/check" }
+    },
+    "artifacts": {
+      "type": "object",
+      "minProperties": 1,
+      "additionalProperties": { "$ref": "#/$defs/artifact" }
+    },
+    "failClosed": {
+      "type": "object",
+      "required": ["warningCode", "noInteractiveRuntime", "evidence"],
+      "properties": {
+        "warningCode": { "type": "string", "minLength": 1 },
+        "noInteractiveRuntime": { "const": true },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      }
+    }
+  },
+  "$defs": {
+    "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/hash" }
+      }
+    },
+    "evidence": {
+      "oneOf": [
+        { "$ref": "#/$defs/artifact" },
+        { "type": "array", "minItems": 1, "items": { "$ref": "#/$defs/artifact" } }
+      ]
+    },
+    "check": {
+      "type": "object",
+      "required": ["pass", "evidence"],
+      "properties": {
+        "pass": { "type": "boolean" },
+        "score": { "type": "number", "minimum": 0, "maximum": 100 },
+        "detail": { "type": "string" },
+        "evidence": { "$ref": "#/$defs/evidence" }
+      },
+      "additionalProperties": false
+    }
+  }
+}

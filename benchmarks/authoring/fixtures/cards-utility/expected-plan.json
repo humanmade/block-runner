@@ -1,0 +1,80 @@
+{
+  "version": 1,
+  "root": "collection",
+  "blocks": [
+    {
+      "key": "collection",
+      "blockName": "block-runner/card-collection",
+      "role": "collection",
+      "attributes": {
+        "minimumItems": 3,
+        "layout": "three-up",
+        "mobileColumns": 1
+      },
+      "allowedControls": [
+        "items",
+        "columns",
+        "spacing"
+      ],
+      "children": [
+        {
+          "key": "card-template",
+          "blockName": "block-runner/card",
+          "role": "repeater-template",
+          "attributes": {
+            "repeat": true
+          },
+          "allowedControls": [
+            "reorder",
+            "duplicate",
+            "remove"
+          ],
+          "children": [
+            {
+              "key": "image",
+              "blockName": "core/image",
+              "role": "card-image",
+              "attributes": {},
+              "allowedControls": [
+                "media",
+                "alt",
+                "crop"
+              ]
+            },
+            {
+              "key": "title",
+              "blockName": "core/heading",
+              "role": "card-heading",
+              "attributes": {
+                "level": 3
+              },
+              "allowedControls": [
+                "content",
+                "level"
+              ]
+            },
+            {
+              "key": "body",
+              "blockName": "core/paragraph",
+              "role": "card-body",
+              "attributes": {},
+              "allowedControls": [
+                "content"
+              ]
+            },
+            {
+              "key": "link",
+              "blockName": "core/button",
+              "role": "card-link",
+              "attributes": {},
+              "allowedControls": [
+                "text",
+                "url"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

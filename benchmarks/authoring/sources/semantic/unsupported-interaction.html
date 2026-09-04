@@ -1,0 +1,15 @@
+<section class="sortable-roadmap" aria-labelledby="roadmap-title">
+  <header>
+    <p class="eyebrow">Interaction requirement</p>
+    <h2 id="roadmap-title">Drag these launch tasks into your team’s delivery order.</h2>
+    <p>Users must be able to reorder cards with a pointer drag gesture; the updated order is saved to their roadmap.</p>
+  </header>
+  <ol class="sortable-roadmap__list" data-sortable-roadmap aria-describedby="roadmap-help">
+    <li draggable="true" data-roadmap-id="brief"><button type="button" class="drag-handle" aria-label="Drag Discovery brief">⠿</button><strong>Discovery brief</strong><span>Confirm editor fields.</span></li>
+    <li draggable="true" data-roadmap-id="package"><button type="button" class="drag-handle" aria-label="Drag Package block">⠿</button><strong>Package block</strong><span>Build and install the ZIP.</span></li>
+    <li draggable="true" data-roadmap-id="activate"><button type="button" class="drag-handle" aria-label="Drag Activate test site">⠿</button><strong>Activate test site</strong><span>Persist the chosen task order.</span></li>
+  </ol>
+  <p id="roadmap-help">Drag a task to a new position. This sortable, persisted interaction has no supported native-block mapping in the 0.9 testing release.</p>
+  <output class="sortable-roadmap__status" aria-live="polite"></output>
+</section>
+<script type="module" src="./unsupported-interaction.js"></script>

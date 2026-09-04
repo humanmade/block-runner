@@ -1,0 +1,84 @@
+{
+  "version": 1,
+  "root": "panel-grid",
+  "blocks": [
+    {
+      "key": "panel-grid",
+      "blockName": "block-runner/responsive-panel-grid",
+      "role": "section",
+      "attributes": {
+        "breakpoints": {
+          "default": {
+            "columns": 1,
+            "gap": "24px",
+            "padding": "48px 24px"
+          },
+          "sm": {
+            "columns": 2,
+            "gap": "32px"
+          },
+          "lg": {
+            "columns": 4,
+            "padding": "48px"
+          }
+        },
+        "reducedMotion": true
+      },
+      "allowedControls": [
+        "columns",
+        "gap",
+        "padding",
+        "background"
+      ],
+      "children": [
+        {
+          "key": "heading",
+          "blockName": "core/group",
+          "role": "heading-region",
+          "attributes": {},
+          "allowedControls": [
+            "content",
+            "width"
+          ]
+        },
+        {
+          "key": "panel-template",
+          "blockName": "block-runner/info-panel",
+          "role": "repeater-template",
+          "attributes": {
+            "repeat": true,
+            "minimumItems": 4
+          },
+          "allowedControls": [
+            "reorder",
+            "duplicate",
+            "remove"
+          ],
+          "children": [
+            {
+              "key": "title",
+              "blockName": "core/heading",
+              "role": "panel-heading",
+              "attributes": {
+                "level": 3
+              },
+              "allowedControls": [
+                "content",
+                "level"
+              ]
+            },
+            {
+              "key": "body",
+              "blockName": "core/paragraph",
+              "role": "panel-body",
+              "attributes": {},
+              "allowedControls": [
+                "content"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

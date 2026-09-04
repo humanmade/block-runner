@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "root": "sortable-roadmap",
+  "blocks": [
+    {
+      "key": "sortable-roadmap",
+      "blockName": "block-runner/unsupported",
+      "role": "unsupported-interaction",
+      "attributes": {
+        "requestedCapabilities": [
+          "pointer-drag-reorder",
+          "per-user-persisted-order",
+          "live-region-sort-announcement"
+        ],
+        "requiredDisposition": "unsupported"
+      },
+      "allowedControls": [],
+      "children": [
+        {
+          "key": "warning",
+          "blockName": "block-runner/authoring-warning",
+          "role": "fail-closed-warning",
+          "attributes": {
+            "code": "BR_UNSUPPORTED_INTERACTION",
+            "message": "Drag-and-drop persistence is not supported by the 0.9 testing release."
+          },
+          "allowedControls": [
+            "none"
+          ]
+        }
+      ]
+    }
+  ]
+}

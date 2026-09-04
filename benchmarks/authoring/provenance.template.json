@@ -1,0 +1,39 @@
+{
+  "version": "1",
+  "timingMethod": {
+    "id": "monotonic-wall-clock-source-materialization-through-receipt-write",
+    "start": "immediately before the fixture source is copied into the fresh candidate workspace",
+    "end": "immediately after the fixture receipt is atomically written",
+    "unit": "milliseconds",
+    "excludes": ["queue time", "human review time"]
+  },
+  "requiredRunFields": [
+    "suiteHash",
+    "scorerHash",
+    "promptGuideHash",
+    "templateHash",
+    "dependencyHash",
+    "wordpressHash",
+    "themeHash",
+    "browserHash",
+    "model",
+    "effort",
+    "workload",
+    "invalidCounts",
+    "timingMethod"
+  ],
+  "hashInputs": {
+    "suiteHash": ["suite.json", "fixtures.json", "fixtures/**/*.json", "sources/**/*", "assets/**/*"],
+    "scorerHash": ["<runner-revision>", "<scorer-source-tree>"],
+    "promptGuideHash": ["fixtures/**/prompt.md", "contract.md", "README.md"],
+    "templateHash": ["<candidate-template-revision>"],
+    "dependencyHash": ["package-lock.json", "<candidate-lockfile>"],
+    "wordpressHash": ["wordpress=7.1", "wp-content/plugins/*@installed-version"],
+    "themeHash": ["<theme-slug>@<version>", "theme.json"],
+    "browserHash": ["<browser-name>", "<browser-version>", "viewport=1440x1024", "deviceScaleFactor=1"]
+  },
+  "publicationLabel": {
+    "required": ["workload", "suiteSize", "model", "effort", "invalidCount", "timingMethod"],
+    "forbidden": ["unlabeled aggregate", "unrun browser pass", "cross-suite aggregate"]
+  }
+}

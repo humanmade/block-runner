@@ -1,0 +1,1800 @@
+{
+  "version": "1",
+  "suite": "registered-block-authoring-0.9",
+  "schema": "schema.json",
+  "fixtureCount": 13,
+  "fixtures": [
+    {
+      "id": "hero-semantic",
+      "family": "hero",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/hero.html",
+        "sha256": "9f250c9c5925f3bb09054c3ed1a3d05b57ed5b78a1b709667ecd850144eabe60"
+      },
+      "prompt": "fixtures/hero-semantic/prompt.md",
+      "plan": "fixtures/hero-semantic/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/hero-semantic/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "hero copy media and two actions"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/hero",
+            "core/heading",
+            "core/image"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/hero-semantic",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/hero-semantic.json"
+        ],
+        "receipt": "receipts/hero-semantic.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "hero-utility",
+      "family": "hero",
+      "producer": "utility-generator",
+      "sourceStyle": "utility-tailwind",
+      "source": {
+        "path": "sources/utility/hero.html",
+        "sha256": "e2498a57e8306a15f5409d1245ca016aa4aa20399486bf14a1705419054fb9a4"
+      },
+      "prompt": "fixtures/hero-utility/prompt.md",
+      "plan": "fixtures/hero-utility/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/hero-utility/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "hero responsive split and Tailwind-free package"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/hero",
+            "core/heading",
+            "core/image"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ],
+          "expected": [
+            "responsive layout mapping",
+            "no Tailwind runtime/classes in output"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/hero-utility",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/hero-utility.json"
+        ],
+        "receipt": "receipts/hero-utility.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "split-feature-semantic",
+      "family": "split-feature",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/split-feature.html",
+        "sha256": "b9ae89e2057353088758e0dbcc2dc6c22724ee7807f7a7bb7f7e9aa9b7c62e71"
+      },
+      "prompt": "fixtures/split-feature-semantic/prompt.md",
+      "plan": "fixtures/split-feature-semantic/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/split-feature-semantic/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "split feature media and three feature points"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/split-feature",
+            "core/list",
+            "core/image"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/split-feature-semantic",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/split-feature-semantic.json"
+        ],
+        "receipt": "receipts/split-feature-semantic.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "split-feature-utility",
+      "family": "split-feature",
+      "producer": "utility-generator",
+      "sourceStyle": "utility-tailwind",
+      "source": {
+        "path": "sources/utility/split-feature.html",
+        "sha256": "34cf400d0df5238e366cdb998ac36f25d4e39e527b2242748645cb727b30dd47"
+      },
+      "prompt": "fixtures/split-feature-utility/prompt.md",
+      "plan": "fixtures/split-feature-utility/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/split-feature-utility/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "responsive split feature column mapping"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/split-feature",
+            "core/list",
+            "core/image"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ],
+          "expected": [
+            "responsive column CSS or layout configuration",
+            "no Tailwind runtime/classes in output"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/split-feature-utility",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/split-feature-utility.json"
+        ],
+        "receipt": "receipts/split-feature-utility.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "cards-semantic",
+      "family": "cards",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/cards.html",
+        "sha256": "9a012f2262f918806bd60469c5294cd59844a7957f35cc877c9314090f2eaf35"
+      },
+      "prompt": "fixtures/cards-semantic/prompt.md",
+      "plan": "fixtures/cards-semantic/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/cards-semantic/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "three reorderable cards"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/card-collection",
+            "block-runner/card",
+            "core/button"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/cards-semantic",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/cards-semantic.json"
+        ],
+        "receipt": "receipts/cards-semantic.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "cards-utility",
+      "family": "cards",
+      "producer": "utility-generator",
+      "sourceStyle": "utility-tailwind",
+      "source": {
+        "path": "sources/utility/cards.html",
+        "sha256": "ee50a38bc08aec40ff1a8d397595b934a7cf311707e7d5d5d5ce97fc3e39109b"
+      },
+      "prompt": "fixtures/cards-utility/prompt.md",
+      "plan": "fixtures/cards-utility/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/cards-utility/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "three utility-source cards"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/card-collection",
+            "block-runner/card",
+            "core/button"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ],
+          "expected": [
+            "grid gap shadow breakpoint ledger",
+            "no Tailwind runtime/classes in output"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/cards-utility",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/cards-utility.json"
+        ],
+        "receipt": "receipts/cards-utility.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "repeater-semantic",
+      "family": "repeater",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/repeater.html",
+        "sha256": "cd866f92df305b6ccc51496950d6e4037b628fd72dda757de14eee89b33cb459"
+      },
+      "prompt": "fixtures/repeater-semantic/prompt.md",
+      "plan": "fixtures/repeater-semantic/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/repeater-semantic/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "three ordered customer stories"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/customer-stories",
+            "block-runner/customer-story",
+            "core/quote"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/repeater-semantic",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/repeater-semantic.json"
+        ],
+        "receipt": "receipts/repeater-semantic.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "repeater-utility",
+      "family": "repeater",
+      "producer": "utility-generator",
+      "sourceStyle": "utility-tailwind",
+      "source": {
+        "path": "sources/utility/repeater.html",
+        "sha256": "9aa103f1df83a1a796abd80eb80001a176fa9cb752a8012503714583d8e32f29"
+      },
+      "prompt": "fixtures/repeater-utility/prompt.md",
+      "plan": "fixtures/repeater-utility/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/repeater-utility/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "three responsive customer stories"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/customer-stories",
+            "block-runner/customer-story",
+            "core/quote"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ],
+          "expected": [
+            "one-to-three-column responsive grid ledger",
+            "no Tailwind runtime/classes in output"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/repeater-utility",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/repeater-utility.json"
+        ],
+        "receipt": "receipts/repeater-utility.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "tailwind-responsive",
+      "family": "tailwind-responsive-css",
+      "producer": "utility-generator",
+      "sourceStyle": "utility-tailwind",
+      "source": {
+        "path": "sources/utility/tailwind-responsive.html",
+        "sha256": "511be4b715b86583db068aeeabb02a39e6d307bff22835d84bacc14a2ed4eea0"
+      },
+      "sourceDependencies": [
+        {
+          "path": "sources/utility/tailwind-responsive.css",
+          "sha256": "79e70276b0bd916229d1cc19c344891493f94b07aedef8594d7e4de6ffb0d3af"
+        }
+      ],
+      "prompt": "fixtures/tailwind-responsive/prompt.md",
+      "plan": "fixtures/tailwind-responsive/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/tailwind-responsive/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "1/2/4 column breakpoints"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/responsive-panel-grid",
+            "block-runner/info-panel"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ],
+          "expected": [
+            "base 1-column",
+            "sm 2-column",
+            "lg 4-column",
+            "reduced-motion rule"
+          ],
+          "sourceDependencies": [
+            {
+              "path": "sources/utility/tailwind-responsive.css",
+              "sha256": "79e70276b0bd916229d1cc19c344891493f94b07aedef8594d7e4de6ffb0d3af"
+            }
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "375x812",
+            "768x1024",
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/tailwind-responsive",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/tailwind-responsive.json"
+        ],
+        "receipt": "receipts/tailwind-responsive.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "pseudo-states",
+      "family": "pseudo-states",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/pseudo-states.html",
+        "sha256": "44c09598ff003e95b30aa0729c542e02109a08712a9b542975265adba1ca48ab"
+      },
+      "sourceDependencies": [
+        {
+          "path": "sources/semantic/pseudo-states.css",
+          "sha256": "b99beac82f436616753d837ce0c9f6363d2cf181d64715c5172d04d11498e35a"
+        }
+      ],
+      "prompt": "fixtures/pseudo-states/prompt.md",
+      "plan": "fixtures/pseudo-states/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/pseudo-states/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "hover focus-visible and pseudo-element"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/style-callout",
+            "core/button"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ],
+          "expected": [
+            "default",
+            "hover",
+            ":focus-visible",
+            "::before"
+          ],
+          "sourceDependencies": [
+            {
+              "path": "sources/semantic/pseudo-states.css",
+              "sha256": "b99beac82f436616753d837ce0c9f6363d2cf181d64715c5172d04d11498e35a"
+            }
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "visible keyboard focus",
+            "decorative pseudo-element excluded from accessibility tree"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/pseudo-states",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/pseudo-states.json"
+        ],
+        "receipt": "receipts/pseudo-states.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "local-assets",
+      "family": "local-assets",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/local-assets.html",
+        "sha256": "35b26914c6b3dc05d8c3b3bfa205bf05be27240defc35f61bfbbc7a57b0f595b"
+      },
+      "sourceDependencies": [
+        {
+          "path": "sources/assets/aurora-dashboard.svg",
+          "sha256": "18ab15d443086fa3fc379734c0f0e86b891535ea222f6499e0b37170067e6cf9"
+        }
+      ],
+      "prompt": "fixtures/local-assets/prompt.md",
+      "plan": "fixtures/local-assets/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/local-assets/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "bundled local SVG and alt text"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "assets/aurora-dashboard.svg"
+          ],
+          "forbid": [
+            "remote media URL",
+            "data:image"
+          ],
+          "sourceDependencies": [
+            {
+              "path": "sources/assets/aurora-dashboard.svg",
+              "sha256": "18ab15d443086fa3fc379734c0f0e86b891535ea222f6499e0b37170067e6cf9"
+            }
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/asset-feature",
+            "core/image"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "select bundled media",
+            "edit alternative text",
+            "save reload"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "built local asset URL resolves",
+            "no network substitute"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/local-assets",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/local-assets.json"
+        ],
+        "receipt": "receipts/local-assets.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "pattern-overrides",
+      "family": "pattern-overrides",
+      "producer": "semantic-studio",
+      "sourceStyle": "semantic",
+      "source": {
+        "path": "sources/semantic/pattern-override.html",
+        "sha256": "502ac211e425cf2f2880ded9d3c2e0a686efe34eae967b8ea6603db88f094850"
+      },
+      "prompt": "fixtures/pattern-overrides/prompt.md",
+      "plan": "fixtures/pattern-overrides/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/pattern-overrides/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "whitelisted core-block pattern overrides"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "core/group",
+            "core/heading",
+            "core/button"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": true,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ]
+        },
+        "frontend": {
+          "required": true,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ]
+        },
+        "pattern": {
+          "required": true,
+          "expected": "named-pattern-used-with-whitelisted-overrides",
+          "checks": [
+            "insert named pattern",
+            "edit heading body background and button",
+            "save reload",
+            "reject structural override"
+          ],
+          "allowed": [
+            "heading.content",
+            "body.content",
+            "background",
+            "button.text",
+            "button.url"
+          ],
+          "forbidden": [
+            "structure",
+            "blockNames",
+            "interactiveScript"
+          ]
+        },
+        "fidelity": {
+          "required": true,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "heading hierarchy",
+            "image alternative text",
+            "keyboard reachable action"
+          ]
+        }
+      },
+      "expectedStatus": "scored",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/pattern-overrides",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/pattern-overrides.json"
+        ],
+        "receipt": "receipts/pattern-overrides.json"
+      },
+      "notes": "A passing declaration is not a receipt; executable checks remain blocked until the runner writes evidence."
+    },
+    {
+      "id": "unsupported-interaction",
+      "family": "unsupported-interaction",
+      "producer": "interaction-probe",
+      "sourceStyle": "interaction-spec",
+      "source": {
+        "path": "sources/semantic/unsupported-interaction.html",
+        "sha256": "198a6dc7104e8598cf990e7baf137985667cb5f11277dc22b482ea90e172883a"
+      },
+      "sourceDependencies": [
+        {
+          "path": "sources/semantic/unsupported-interaction.js",
+          "sha256": "ec715435651ab920f35d046b3bb02d30a504574ac1ac1b08b2c1f22b1ab04d0e"
+        }
+      ],
+      "prompt": "fixtures/unsupported-interaction/prompt.md",
+      "plan": "fixtures/unsupported-interaction/expected-plan.json",
+      "requiredDimensions": [
+        "plan",
+        "source",
+        "native",
+        "style",
+        "warnings",
+        "build",
+        "editor",
+        "frontend",
+        "pattern",
+        "fidelity",
+        "accessibility"
+      ],
+      "assertions": {
+        "plan": {
+          "required": true,
+          "planPath": "fixtures/unsupported-interaction/expected-plan.json",
+          "checks": [
+            "registered root block",
+            "ordered editable nodes",
+            "allowed controls declared"
+          ],
+          "expected": "fail closed instead of sortable interaction"
+        },
+        "source": {
+          "required": true,
+          "expectedFiles": [
+            "block.json",
+            "src/edit.tsx",
+            "src/save.tsx",
+            "authoring-plan.json",
+            "src/style-ledger.json"
+          ],
+          "forbid": [
+            "core/html",
+            "dangerouslySetInnerHTML",
+            "generated sortable script"
+          ]
+        },
+        "native": {
+          "required": true,
+          "mustInclude": [
+            "block-runner/authoring-warning"
+          ],
+          "forbid": [
+            "core/html"
+          ]
+        },
+        "style": {
+          "required": true,
+          "checks": [
+            "every retained declaration has owner editorControl and source provenance"
+          ]
+        },
+        "warnings": {
+          "required": true,
+          "checks": [
+            "warnings JSON is present",
+            "no unacknowledged unsupported declaration"
+          ],
+          "expectedCodes": [
+            "BR_UNSUPPORTED_INTERACTION"
+          ],
+          "forbid": [
+            "silent fallback",
+            "sortable script",
+            "localStorage persistence"
+          ]
+        },
+        "build": {
+          "required": true,
+          "checks": [
+            "package build exits zero",
+            "declared block assets are emitted"
+          ]
+        },
+        "editor": {
+          "required": false,
+          "checks": [
+            "insert block",
+            "edit every plan control",
+            "save",
+            "reload and re-open"
+          ],
+          "reason": "terminal unsupported outcome intentionally stops before editor insertion"
+        },
+        "frontend": {
+          "required": false,
+          "checks": [
+            "saved content renders",
+            "no editor-only console error"
+          ],
+          "reason": "terminal unsupported outcome intentionally stops before frontend render"
+        },
+        "pattern": {
+          "required": true,
+          "expected": "not-used"
+        },
+        "fidelity": {
+          "required": false,
+          "viewportCaptures": [
+            "1440x1024"
+          ],
+          "comparison": "reference screenshot or DOM layout metric",
+          "reason": "terminal unsupported outcome intentionally stops before visual comparison"
+        },
+        "accessibility": {
+          "required": true,
+          "checks": [
+            "warning text names unsupported behavior and supported handoff"
+          ]
+        }
+      },
+      "expectedStatus": "unsupported",
+      "candidate": {
+        "artifactRoot": "runs/<run-id>/candidates/unsupported-interaction",
+        "requiredFiles": [
+          "block.json",
+          "src/edit.tsx",
+          "src/save.tsx",
+          "src/style-ledger.json",
+          "authoring-plan.json",
+          "receipts/unsupported-interaction.json"
+        ],
+        "receipt": "receipts/unsupported-interaction.json"
+      },
+      "notes": "Expected negative: only an explicit unsupported warning is a successful fixture result."
+    }
+  ]
+}

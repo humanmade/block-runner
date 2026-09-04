@@ -1,0 +1,82 @@
+{
+  "version": 1,
+  "root": "signal-callout",
+  "blocks": [
+    {
+      "key": "signal-callout",
+      "blockName": "core/group",
+      "role": "pattern-instance",
+      "attributes": {
+        "pattern": "block-runner/signal-callout",
+        "overridePolicy": {
+          "allowed": [
+            "heading.content",
+            "body.content",
+            "background",
+            "button.text",
+            "button.url"
+          ],
+          "forbidden": [
+            "structure",
+            "blockNames",
+            "interactiveScript"
+          ]
+        }
+      },
+      "allowedControls": [
+        "pattern-overrides"
+      ],
+      "children": [
+        {
+          "key": "eyebrow",
+          "blockName": "core/paragraph",
+          "role": "eyebrow",
+          "attributes": {
+            "content": "Testing release"
+          },
+          "allowedControls": [
+            "content",
+            "color",
+            "typography"
+          ]
+        },
+        {
+          "key": "heading",
+          "blockName": "core/heading",
+          "role": "heading",
+          "attributes": {
+            "level": 2,
+            "content": "Review the pattern, then make it yours."
+          },
+          "allowedControls": [
+            "content",
+            "level",
+            "typography"
+          ]
+        },
+        {
+          "key": "body",
+          "blockName": "core/paragraph",
+          "role": "body",
+          "attributes": {},
+          "allowedControls": [
+            "content"
+          ]
+        },
+        {
+          "key": "button",
+          "blockName": "core/button",
+          "role": "primary-action",
+          "attributes": {
+            "text": "Review this override"
+          },
+          "allowedControls": [
+            "text",
+            "url",
+            "style"
+          ]
+        }
+      ]
+    }
+  ]
+}
