@@ -81,6 +81,22 @@ describe('release manual review binding', () => {
 });
 
 describe('release native control retention', () => {
+  it('requires both native controls even when generated editor findings are clean', () => {
+    const begin = source.indexOf('function recordNativeControlRequirement(');
+    const finish = source.indexOf('\nfunction ', begin + 1);
+    const rows: Array<{ status: string }> = [];
+    const record = runInNewContext(`(${source.slice(begin, finish)})`, {
+      rows, blockedRow: () => rows.push({ status: 'blocked' }), retainLogs: () => ({}),
+    }) as (acceptance: unknown) => void;
+    const evidence = { wordpressVersion: '7.1', evidence: { path: 'control.json', sha256: hash } };
+    record({ releaseOk: true });
+    record({ nativeHeadingControlEvidence: evidence });
+    record({ nativeHeadingControlEvidence: evidence,
+      nativeParagraphControlEvidence: { ...evidence, wordpressVersion: '7.1.1' } });
+    record({ nativeHeadingControlEvidence: evidence, nativeParagraphControlEvidence: evidence });
+    expect(rows.map(({ status }) => status)).toEqual(['blocked', 'blocked', 'blocked', 'passed']);
+    expect(source).toContain('recordNativeControlRequirement(acceptance);');
+  });
   const helperStart = source.indexOf('function retainNativeControlEvidence(');
   const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
   it.each(['heading', 'paragraph'])('retains separate hash-verified %s evidence', (kind) => {

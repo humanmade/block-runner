@@ -329,6 +329,7 @@ function retainNativeControlEvidence(kind, loadEvidence) {
 function recordFullProofAcceptance() {
   const acceptance = activation?.acceptance;
   const activationRow = rows.find((item) => item.id === 'generated-plugin-zip-activation');
+  recordNativeControlRequirement(acceptance);
   if (!acceptance || !activationRow) {
     blockedRow(
       'generated-plugin-full-proof-acceptance',
@@ -347,6 +348,22 @@ function recordFullProofAcceptance() {
       : `Full-profile release blockers remain: ${acceptance.releaseBlockers.map(({ gate, status }) => `${gate}:${status}`).join(', ')}`,
     artifacts: activationRow.artifacts,
     acceptanceArtifact: activation.acceptanceArtifact?.path,
+  });
+}
+
+function recordNativeControlRequirement(acceptance) {
+  const heading = acceptance?.nativeHeadingControlEvidence;
+  const paragraph = acceptance?.nativeParagraphControlEvidence;
+  if (!heading || !paragraph || heading.wordpressVersion !== paragraph.wordpressVersion) {
+    blockedRow('native-heading-control', 'validate retained native Heading and Paragraph controls',
+      'The full release matrix requires both separately validated native controls from the same WordPress version, even when the generated editor has no Axe failures.');
+    return;
+  }
+  rows.push({
+    id: 'native-heading-control', status: 'passed',
+    command: 'validate retained native Heading and Paragraph controls', elapsedMs: 0,
+    detail: 'Both standalone native controls have validated lifecycle results and hash-bound evidence.',
+    artifacts: retainLogs('native-heading-control', JSON.stringify({ heading, paragraph }, null, 2), ''),
   });
 }
 
