@@ -1071,7 +1071,7 @@ async function editPatternButtonThroughNativeControls(page, target, values, patt
   const wantsTarget = values.linkTarget === '_blank';
   const wantsNoFollow = typeof requestedRel === 'string' && /(?:^|\s)nofollow(?:\s|$)/.test(requestedRel);
   if (Object.prototype.hasOwnProperty.call(values, 'linkTarget') || Object.prototype.hasOwnProperty.call(values, 'rel')) {
-    await control.getByRole('button', { name: 'Advanced', exact: true }).click();
+    await openNativeLinkSettings(control);
     await setNativeLinkSetting(page, 'Open in new tab', wantsTarget);
     await setNativeLinkSetting(page, 'Mark as nofollow', wantsNoFollow);
   }
@@ -1099,6 +1099,14 @@ async function editPatternButtonThroughNativeControls(page, target, values, patt
   };
 }
 
+async function openNativeLinkSettings(control) {
+  const toggle = control.getByRole('button', { name: 'Advanced', exact: true });
+  // WordPress remembers this preference between blocks and browser sessions.
+  // Clicking an already-open drawer closes it while its inputs animate away.
+  if (await toggle.getAttribute('aria-expanded') !== 'true') await toggle.click();
+  await control.locator('.block-editor-link-control__drawer').waitFor({ state: 'visible' });
+}
+
 async function setNativeLinkSetting(page, labelText, wanted) {
   const control = page.locator('.block-editor-link-control:visible');
   const label = control.locator('label').filter({ hasText: labelText }).first();
@@ -1107,7 +1115,7 @@ async function setNativeLinkSetting(page, labelText, wanted) {
   const checkbox = page.locator(`#${inputId}`);
   const current = await checkbox.isChecked();
   if (current === wanted) return;
-  await label.click();
+  await checkbox.setChecked(wanted);
   await page.waitForFunction(({ id, expected }) => document.getElementById(id)?.checked === expected, { id: inputId, expected: wanted });
 }
 
