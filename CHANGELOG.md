@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.0 — 2026-09-04 — testing release
+
+### Added
+
+- A separate registered-block authoring benchmark and release matrix. Its fixture outcomes and
+  dimension scores are intentionally independent of the historical HTML-to-block benchmark.
+- Receipt-backed release-candidate checks for the package artifact, canonical skill, installer,
+  and activation smoke. Model/tool errors are invalid measurements, not zero product scores.
+
+### Release status
+
+`0.9.0` is configured for the `testing` dist-tag once its receipt-backed release gate passes. It
+is a testing release; 1.0 remains contingent on real-project feedback and resolved failures.
+
 ## 0.8.0 — 2026-09-02
 
 ### Changed

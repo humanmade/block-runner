@@ -1,0 +1,38 @@
+{
+  "algorithm": "sha256",
+  "generatedFrom": "repository content; regenerate before a release record if any listed input changes",
+  "values": {
+    "suiteHash": {
+      "value": "1d91c2aa2b90e4de00829f63b4d794e267e5918104f2511a1a83e764f04b409b",
+      "inputs": "all versioned files under benchmarks/authoring except hashes.json and ephemeral runs/, ordered by path and hashed as canonical path/content-hash pairs"
+    },
+    "fixtureDefinitionHash": {
+      "value": "d6e5ad341b209820020eaf68eb6a3bbc30da893177aa892a3afd569c71f8e07e",
+      "inputs": "all fixtures/** files, ordered by path"
+    },
+    "sourceSetHash": {
+      "value": "edf36ad64ceacfe70c35cf46fa0736909966e2b0a9b137b8c3955492238a8bf0",
+      "inputs": "all sources/** files, ordered by path"
+    },
+    "fixtureIndexHash": "f15c7bc8d11e450498588372f175c0a9cc0b4d905f32c9084d5078d31a38e155",
+    "fixtureSchemaHash": "8f9453fc636c8f1c322a33946b8fd2538d614666f6866e6e2199d0afcb5b6bea",
+    "contractHash": "f231d2ce5e91e831a073817be4f0130cb38512ab188a7705fc6333a7bc51a8f8",
+    "candidateContractHash": "221e4fcd66428be0ce211eebf5cf50186abb3c1144d21ffca82845331a29280e",
+    "provenanceGuideHash": "5ae10cb3bb3e09734c07000f4fde37fec5194af8a70275fbf95620af7ab6e288",
+    "releaseMatrixHash": "065428608fea7b477f3fedf986c3b9fe2667dff383918d901e0dc75cfe6b92ca",
+    "suiteManifestHash": "a0e57d1b46caa6868e290b9ae063bb8edf2a891ad6f31ddc213adf3171f12427",
+    "fixtureManifestHash": "3104a5a0646a10a9c760d026e751ab47b8fc9aa28c43c82181d645126478d4c7",
+    "sourceDependencyHash": "d8e39545a4fc92817f916afbff48ad726c5d046d31ba4d794aa5bef01d15ad9e",
+    "expectedPlanHash": "4cf3168e85a02092065f20f1cd9f7a413c505f44e28648469ac026261b81af65",
+    "receiptSchemaHash": "8eb4e5ce8bc76d933991890b040c946272771bd88550bc32616257b250e90a9d"
+  },
+  "perRunOnly": {
+    "scorerHash": "Hash the exact scorer/runner revision, not this corpus.",
+    "templateHash": "Hash the candidate plugin template revision used for the run.",
+    "dependencyHash": "Hash the exact candidate lockfile and installed dependency inventory.",
+    "wordpressHash": "Hash the WordPress 7.1 install and installed plugin inventory.",
+    "themeHash": "Hash the theme slug/version and its active theme.json.",
+    "browserHash": "Hash browser name/version plus viewport and deviceScaleFactor."
+  },
+  "command": "find benchmarks/authoring -type f ! -name hashes.json -print0 | sort -z | xargs -0 shasum -a 256 | shasum -a 256"
+}

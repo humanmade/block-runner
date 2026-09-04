@@ -1,0 +1,160 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "matrixVersion": 1,
+  "release": {
+    "line": "0.9.0",
+    "designation": "testing",
+    "onePointZeroCondition": "Real-project feedback has been reviewed and all release-relevant failures are resolved."
+  },
+  "statusVocabulary": [
+    "pending",
+    "passed",
+    "failed",
+    "unsupported",
+    "blocked",
+    "engine_error"
+  ],
+  "measurementStateVocabulary": [
+    "scored",
+    "unsupported",
+    "blocked",
+    "engine_error",
+    "not_applicable"
+  ],
+  "defaultExpectedStatus": "passed",
+  "requiredProvenance": [
+    "suiteHash",
+    "scorerHash",
+    "promptGuideHash",
+    "templateHash",
+    "dependencyHash",
+    "wordpressHash",
+    "themeHash",
+    "browserHash"
+  ],
+  "rows": [
+    {
+      "id": "authoring-wordpress-71-proof",
+      "area": "authoring-proof",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run authoring:prove",
+      "environment": "WordPress 7.1 release fixture environment",
+      "asserts": [
+        "all release fixtures run",
+        "plan structure and editability",
+        "generated file contract",
+        "native-block use",
+        "style ledger and warnings",
+        "generated plugin build",
+        "editor insert-edit-save-reopen",
+        "front-end render",
+        "pattern override",
+        "fidelity/visual gate",
+        "accessibility gate"
+      ],
+      "receiptKinds": ["authoring-proof", "wordpress-71"]
+    },
+    {
+      "id": "unsupported-interaction-fails-closed",
+      "area": "authoring-proof",
+      "required": true,
+      "expectedStatus": "unsupported",
+      "command": "npm run authoring:prove",
+      "expectedMeasurementState": "unsupported",
+      "asserts": [
+        "unsupported interaction is warned",
+        "no interactive runtime is generated",
+        "fixture fails closed rather than silently passing"
+      ],
+      "receiptKinds": ["expected-negative"]
+    },
+    {
+      "id": "candidate-verify",
+      "area": "package",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run verify",
+      "environment": "fresh release-candidate install",
+      "asserts": ["typecheck", "tests", "build", "private-reference check", "package dry run"],
+      "receiptKinds": ["package"]
+    },
+    {
+      "id": "candidate-package-dry-run",
+      "area": "package",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run pack:check",
+      "environment": "fresh release-candidate install",
+      "asserts": ["npm package contents", "publishable artifact inspection"],
+      "receiptKinds": ["package"]
+    },
+    {
+      "id": "packed-candidate-smoke",
+      "area": "package",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check -- --matrix package-packed",
+      "environment": "empty consumer project using the produced npm tarball",
+      "asserts": ["packed tarball installs", "published CLI/skill files are usable", "tarball hash retained"],
+      "receiptKinds": ["package", "packed-consumer"]
+    },
+    {
+      "id": "canonical-skill-validation",
+      "area": "skill",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check -- --matrix skill-validate",
+      "environment": "release-candidate source and packed tarball",
+      "asserts": ["canonical skill bundle validates", "guide references resolve", "version pin is correct"],
+      "receiptKinds": ["skill-validation"]
+    },
+    {
+      "id": "project-skill-installer-smoke",
+      "area": "skill",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check -- --matrix skill-project-install",
+      "environment": "empty project consumer using the packed tarball",
+      "asserts": ["default installer writes agents and claude locations", "manifest hashes match", "second install is idempotent"],
+      "receiptKinds": ["installer-smoke", "project-scope"]
+    },
+    {
+      "id": "user-skill-installer-smoke",
+      "area": "skill",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check -- --matrix skill-user-install",
+      "environment": "isolated home directory and packed tarball",
+      "asserts": ["user scoped installation", "target selection", "manifest hashes match"],
+      "receiptKinds": ["installer-smoke", "user-scope"]
+    },
+    {
+      "id": "generated-plugin-zip-activation",
+      "area": "activation",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check -- --matrix zip-activation",
+      "environment": "clean WordPress 7.1 release fixture site",
+      "asserts": ["generated plugin ZIP installs", "plugin activates", "registered block appears in the editor", "activation logs are clean"],
+      "receiptKinds": ["zip-activation", "wordpress-71"]
+    },
+    {
+      "id": "full-release-matrix",
+      "area": "release",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check",
+      "environment": "release candidate",
+      "asserts": ["all package rows", "all skill rows", "all activation rows", "receipts are retained"],
+      "receiptKinds": ["release-matrix"]
+    }
+  ],
+  "releaseRule": {
+    "allRequiredRowsMustReachExpectedState": true,
+    "expectedNegativeRowsMustMatchExpectedState": true,
+    "missingReceiptBlocksRelease": true,
+    "invalidMeasurementsBlockRelease": true,
+    "unrunVisualOrBrowserGateCannotPass": true
+  }
+}

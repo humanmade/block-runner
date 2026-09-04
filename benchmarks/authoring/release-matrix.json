@@ -1,0 +1,68 @@
+{
+  "release": "0.9.0-testing",
+  "policy": {
+    "state": "pending",
+    "passRule": "Every row must have an executed receipt with a zero exit code, except expected-negative fixture rows which must record unsupported with fail-closed evidence.",
+    "forbid": ["marking an unrun browser/visual gate passed", "using engine errors as zero scores", "calling this a 1.0 release"],
+    "nextMilestone": "1.0 remains contingent on real-project feedback and resolved failures."
+  },
+  "matrix": [
+    {
+      "id": "verify-release-candidate",
+      "workload": "release candidate repository",
+      "command": "npm run verify",
+      "receipt": "receipts/release/verify.json",
+      "required": true,
+      "state": "pending"
+    },
+    {
+      "id": "package-dry-run",
+      "workload": "release candidate package",
+      "command": "npm pack --dry-run --ignore-scripts",
+      "receipt": "receipts/release/package-dry-run.json",
+      "required": true,
+      "state": "pending"
+    },
+    {
+      "id": "skill-validation",
+      "workload": "skills/block-runner",
+      "command": "<skill validator> skills/block-runner/SKILL.md",
+      "receipt": "receipts/release/skill-validation.json",
+      "required": true,
+      "state": "pending"
+    },
+    {
+      "id": "installer-smoke",
+      "workload": "packed artifact installed in clean temporary project",
+      "command": "npm install <packed-artifact> && block-runner --help",
+      "receipt": "receipts/release/installer-smoke.json",
+      "required": true,
+      "state": "pending"
+    },
+    {
+      "id": "zip-activation",
+      "workload": "packed release candidate activated in WordPress 7.1",
+      "command": "wp plugin install <packed-artifact> --activate",
+      "receipt": "receipts/release/zip-activation.json",
+      "required": true,
+      "state": "pending"
+    },
+    {
+      "id": "authoring-wordpress-proof",
+      "workload": "13 authoring fixtures on WordPress 7.1",
+      "command": "<authoring-runner> --suite benchmarks/authoring --wordpress 7.1",
+      "receipt": "receipts/release/authoring-wordpress-7.1.json",
+      "required": true,
+      "state": "pending"
+    },
+    {
+      "id": "expected-negative-fails-closed",
+      "workload": "unsupported-interaction",
+      "command": "<authoring-runner> --fixture unsupported-interaction",
+      "receipt": "receipts/release/unsupported-interaction.json",
+      "expectedStatus": "unsupported",
+      "required": true,
+      "state": "pending"
+    }
+  ]
+}

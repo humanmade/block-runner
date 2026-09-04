@@ -80,12 +80,22 @@ between harnesses, so use `--dir` when a client documents a different global roo
 
 ## Benchmark
 
-![Benchmark results across Opus 5, Fable 5.1, Luna, Terra, and Sol: direct markup scores 17 to 48, while the same models using Block Runner score 97 to 99](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/assets/benchmark.jpg)
+![Historical HTML-to-block benchmark: five low-effort model lanes plus the deterministic rules engine, 63 HTML sections per lane; the adjacent caption gives invalid counts and timing method.](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/assets/benchmark.jpg)
 
-The benchmark runs 63 fixed HTML fixtures. Each model gets the same fixture in two lanes:
-**Direct** writes Gutenberg markup itself; **Block Runner** returns an intent tree that the
+The image is **historical conversion evidence**, not an authoring result. Its workload is 63
+fixed HTML sections per lane (11 serial lanes, 693 conversions); the suite, models/low effort,
+per-lane invalid counts, and monotonic serial timing method are labelled in the
+[benchmark report](benchmarks/presentation/figures.html). Each model gets the same fixture in two
+lanes: **Direct** writes Gutenberg markup itself; **Block Runner** returns an intent tree that the
 package assembles and validates. The dashed line is the deterministic rules converter running
 without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
+
+Registered-block authoring is measured by a separate corpus in
+[`benchmarks/authoring`](benchmarks/authoring/README.md). It has no combined score with this
+suite: it records editable plans, generated plugin source, native-block use, the style ledger,
+warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
+The 0.9 release gate publishes only receipt-backed results; a missing browser or WordPress gate is
+`blocked`, never a pass.
 
 ## What it does
 
@@ -390,6 +400,18 @@ npm run bench:record   # also append a provenance-tagged run to benchmarks/resul
 Runs are recorded with `engine` / `model` / `effort` / `suiteHash`, so older engines stay
 backtestable against the current suite (`scripts/backtest.sh`). See `benchmarks/README.md`
 for adding producers and engines.
+
+The registered-block authoring corpus is deliberately separate from that conversion suite:
+
+```sh
+npm run authoring:prove  # validate the 0.9 authoring contract and WordPress-7.1 runtime proof
+```
+
+Its output reports `scored`, `unsupported`, `blocked`, and `engine-error` separately. It does
+not turn unrun browser/editor work or a model/tool failure into a zero product score. The 0.9
+testing-release package, installer, and activation checks are run with `npm run release:check`;
+see [`release/0.9-testing`](release/0.9-testing/README.md) for the receipt matrix and the
+draft product-preview brief.
 
 ## License
 

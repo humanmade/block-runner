@@ -1,0 +1,125 @@
+{
+  "version": 1,
+  "root": "hero",
+  "blocks": [
+    {
+      "key": "hero",
+      "blockName": "block-runner/hero",
+      "role": "container",
+      "attributes": {
+        "layout": "split",
+        "mobileOrder": [
+          "copy",
+          "media"
+        ]
+      },
+      "allowedControls": [
+        "spacing",
+        "background",
+        "alignment"
+      ],
+      "children": [
+        {
+          "key": "copy",
+          "blockName": "core/group",
+          "role": "copy",
+          "attributes": {},
+          "allowedControls": [
+            "width"
+          ],
+          "children": [
+            {
+              "key": "eyebrow",
+              "blockName": "core/paragraph",
+              "role": "eyebrow",
+              "attributes": {
+                "content": "Release 0.9"
+              },
+              "allowedControls": [
+                "content",
+                "typography",
+                "color"
+              ]
+            },
+            {
+              "key": "title",
+              "blockName": "core/heading",
+              "role": "heading",
+              "attributes": {
+                "level": 1,
+                "content": "Ship blocks your editors can own"
+              },
+              "allowedControls": [
+                "content",
+                "level",
+                "typography"
+              ]
+            },
+            {
+              "key": "body",
+              "blockName": "core/paragraph",
+              "role": "body",
+              "attributes": {
+                "content": "Turn a design into an editable registered block."
+              },
+              "allowedControls": [
+                "content",
+                "typography"
+              ]
+            },
+            {
+              "key": "actions",
+              "blockName": "core/buttons",
+              "role": "actions",
+              "attributes": {},
+              "allowedControls": [
+                "layout"
+              ],
+              "children": [
+                {
+                  "key": "primary",
+                  "blockName": "core/button",
+                  "role": "primary-action",
+                  "attributes": {
+                    "text": "Start a project"
+                  },
+                  "allowedControls": [
+                    "text",
+                    "url",
+                    "style"
+                  ]
+                },
+                {
+                  "key": "secondary",
+                  "blockName": "core/button",
+                  "role": "secondary-action",
+                  "attributes": {
+                    "text": "Read the guide"
+                  },
+                  "allowedControls": [
+                    "text",
+                    "url",
+                    "style"
+                  ]
+                }
+              ]
+            }
+          ]
+        },
+        {
+          "key": "media",
+          "blockName": "core/image",
+          "role": "product-image",
+          "attributes": {
+            "alt": "Block editor showing a hero"
+          },
+          "allowedControls": [
+            "media",
+            "alt",
+            "crop"
+          ]
+        }
+      ]
+    }
+  ]
+}

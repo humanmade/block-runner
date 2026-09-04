@@ -28,6 +28,9 @@ benchmarks/presentation/scoreboard.html
 benchmarks/.cache/
 benchmarks/regressions/
 
+# Immutable release evidence is retained by CI/release artifacts, not overwritten in-tree.
+release/0.9-testing/receipts/
+
 # Raw research reference (local)
 WORDPRESS_BLOCK_PATTERNS_REFERENCE.md
 

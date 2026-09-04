@@ -25,7 +25,29 @@ jobs:
       # and changes pack --json shape — we support both, but stay on the proven line).
       - run: npm install -g npm@11
       - run: npm ci
-      - run: npm run verify
-      - run: npm publish --provenance --access public
+      - name: Run the receipt-backed release candidate matrix
+        run: npm run release:check -- --receipt "release/0.9-testing/receipts/${RELEASE_RECEIPT_TAG}.json"
+        env:
+          # Release names are data, never shell syntax. Keep the expansion
+          # quoted so valid Git tag punctuation cannot alter this command.
+          RELEASE_RECEIPT_TAG: ${{ github.event.release.tag_name }}
+          # This repository cannot invent a WordPress/browser activation pass.
+          # Configure the isolated WP 7.1 fixture executables in the release
+          # environment; an unset executable makes the relevant gate blocked.
+          BLOCK_RUNNER_AUTHORING_RUNNER: ${{ vars.BLOCK_RUNNER_AUTHORING_RUNNER }}
+          BLOCK_RUNNER_WP_ZIP_ACTIVATION_RUNNER: ${{ vars.BLOCK_RUNNER_WP_ZIP_ACTIVATION_RUNNER }}
+      - name: Retain release receipts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: release-receipts-${{ github.event.release.tag_name }}
+          path: release/0.9-testing/receipts/
+          if-no-files-found: warn
+      - name: Publish 0.9 testing release
+        if: startsWith(github.event.release.tag_name, 'v0.9.')
+        run: npm publish --provenance --access public --tag testing
+      - name: Publish stable release
+        if: "!startsWith(github.event.release.tag_name, 'v0.9.')"
+        run: npm publish --provenance --access public
         # No NODE_AUTH_TOKEN: Trusted Publishing authenticates via OIDC.
         # Provenance is generated automatically; --provenance makes intent explicit.

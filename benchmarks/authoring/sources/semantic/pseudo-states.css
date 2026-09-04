@@ -1,0 +1,15 @@
+.callout {
+  --ink: #172554;
+  --accent: #7c3aed;
+  position: relative;
+  max-width: 48rem;
+  padding: 3rem;
+  border-radius: 1rem;
+  background: #f5f3ff;
+  color: var(--ink);
+}
+.callout::before { content: ""; display: block; width: 3rem; height: .25rem; margin-bottom: 1rem; background: var(--accent); border-radius: 999px; }
+.callout__link { display: inline-flex; gap: .5rem; margin-top: 1.5rem; color: #5b21b6; font-weight: 700; text-underline-offset: .25em; transition: color 160ms ease, transform 160ms ease; }
+.callout__link:hover { color: #3b0764; transform: translateX(.25rem); }
+.callout__link:focus-visible { outline: 3px solid #f59e0b; outline-offset: .3rem; border-radius: .125rem; }
+@media (prefers-reduced-motion: reduce) { .callout__link { transition: none; } .callout__link:hover { transform: none; } }

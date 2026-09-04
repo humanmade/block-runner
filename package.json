@@ -1,6 +1,6 @@
 {
   "name": "block-runner",
-  "version": "0.8.0",
+  "version": "0.9.0",
   "description": "The layer between generated content and WordPress — convert what AI, agents, and design tools emit into clean, valid, native Gutenberg blocks, and validate every result. CLI + library.",
   "type": "module",
   "license": "GPL-2.0-or-later",
@@ -62,12 +62,15 @@
     "dev": "tsx src/cli.ts",
     "bench": "tsx scripts/bench.ts",
     "bench:record": "tsx scripts/bench.ts --record",
+    "authoring:bench": "tsx scripts/authoring-bench.ts",
+    "authoring:prove": "tsx scripts/authoring-runner.ts",
     "tune": "tsx scripts/tune.ts",
     "tune:t0": "tsx scripts/tune.ts --tier t0",
     "test": "vitest run",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "check:private": "node scripts/check-private-refs.mjs",
+    "release:check": "node scripts/release-check.mjs",
     "verify": "npm run typecheck && npm test && npm run build && npm run check:private && npm run pack:check",
     "prepare": "npm run build",
     "postinstall": "node scripts/prune-wp-vips.mjs"

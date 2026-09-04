@@ -1,0 +1,67 @@
+{
+  "schemaVersion": 1,
+  "receiptId": "rc.1-candidate-verify-2026-09-04T00:00:00Z",
+  "matrixRowId": "candidate-verify",
+  "status": "passed",
+  "measurementState": "not_applicable",
+  "startedAt": "2026-09-04T00:00:00Z",
+  "finishedAt": "2026-09-04T00:02:14Z",
+  "command": "npm run verify",
+  "candidate": {
+    "commit": "0123456789abcdef0123456789abcdef01234567",
+    "packageVersion": "0.9.0-rc.1",
+    "worktreeClean": true
+  },
+  "provenance": {
+    "suiteHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "corpusHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "scorerHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "sourceSetHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "sourceDependencyHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "expectedPlanHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "promptGuideHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "templateHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "dependencyHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "wordpressHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "themeHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "browserHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "fixtureManifestHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "generatedSourceHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "model": "deterministic release harness",
+    "effort": "not applicable"
+  },
+  "environment": {
+    "os": "linux-x64",
+    "node": "v22.0.0",
+    "npm": "11.0.0",
+    "wordpress": "7.1",
+    "theme": "release-fixture-theme@sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "browser": "Chromium 000",
+    "driver": "Playwright 0.0.0"
+  },
+  "timing": {
+    "elapsedMs": 134000,
+    "method": "monotonic wall-clock measured by the release harness from process spawn to exit",
+    "timeoutMs": 900000
+  },
+  "artifacts": {
+    "npmTarballHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "stdoutHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "stderrHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000",
+    "retained": ["ci://artifacts/rc.1/candidate-verify"]
+  },
+  "gates": {
+    "build": { "state": "passed", "evidence": "ci://artifacts/rc.1/build.log" },
+    "editor": { "state": "blocked", "evidence": "not exercised by candidate-verify" },
+    "frontend": { "state": "blocked", "evidence": "not exercised by candidate-verify" },
+    "pattern": { "state": "blocked", "evidence": "not exercised by candidate-verify" },
+    "fidelity": { "state": "blocked", "evidence": "not exercised by candidate-verify" },
+    "accessibility": { "state": "blocked", "evidence": "not exercised by candidate-verify" }
+  },
+  "measurement": {
+    "suiteSize": 0,
+    "workload": "release-candidate package verification only; no authoring fixture score",
+    "invalidCount": 0,
+    "warnings": []
+  }
+}

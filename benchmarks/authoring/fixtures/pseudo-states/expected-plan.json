@@ -1,0 +1,73 @@
+{
+  "version": 1,
+  "root": "callout",
+  "blocks": [
+    {
+      "key": "callout",
+      "blockName": "block-runner/style-callout",
+      "role": "section",
+      "attributes": {
+        "visualStates": [
+          "default",
+          "hover",
+          "focus-visible"
+        ],
+        "decorativeRule": true
+      },
+      "allowedControls": [
+        "content",
+        "spacing",
+        "colors"
+      ],
+      "children": [
+        {
+          "key": "eyebrow",
+          "blockName": "core/paragraph",
+          "role": "eyebrow",
+          "attributes": {
+            "content": "Interaction styling"
+          },
+          "allowedControls": [
+            "content",
+            "typography"
+          ]
+        },
+        {
+          "key": "title",
+          "blockName": "core/heading",
+          "role": "heading",
+          "attributes": {
+            "level": 2,
+            "content": "The quiet states are part of the design."
+          },
+          "allowedControls": [
+            "content",
+            "level"
+          ]
+        },
+        {
+          "key": "body",
+          "blockName": "core/paragraph",
+          "role": "body",
+          "attributes": {},
+          "allowedControls": [
+            "content"
+          ]
+        },
+        {
+          "key": "link",
+          "blockName": "core/button",
+          "role": "link",
+          "attributes": {
+            "text": "Inspect the style ledger"
+          },
+          "allowedControls": [
+            "text",
+            "url",
+            "style"
+          ]
+        }
+      ]
+    }
+  ]
+}

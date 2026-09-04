@@ -1,0 +1,101 @@
+{
+  "version": 1,
+  "root": "asset-feature",
+  "blocks": [
+    {
+      "key": "asset-feature",
+      "blockName": "block-runner/asset-feature",
+      "role": "section",
+      "attributes": {
+        "assetPolicy": "bundled-only"
+      },
+      "allowedControls": [
+        "spacing",
+        "layout"
+      ],
+      "children": [
+        {
+          "key": "copy",
+          "blockName": "core/group",
+          "role": "copy",
+          "attributes": {},
+          "allowedControls": [
+            "width"
+          ],
+          "children": [
+            {
+              "key": "eyebrow",
+              "blockName": "core/paragraph",
+              "role": "eyebrow",
+              "attributes": {
+                "content": "Local media contract"
+              },
+              "allowedControls": [
+                "content"
+              ]
+            },
+            {
+              "key": "title",
+              "blockName": "core/heading",
+              "role": "heading",
+              "attributes": {
+                "level": 2,
+                "content": "Package the asset with the block."
+              },
+              "allowedControls": [
+                "content",
+                "level"
+              ]
+            },
+            {
+              "key": "body",
+              "blockName": "core/paragraph",
+              "role": "body",
+              "attributes": {},
+              "allowedControls": [
+                "content"
+              ]
+            },
+            {
+              "key": "action",
+              "blockName": "core/button",
+              "role": "action",
+              "attributes": {
+                "text": "Read the asset guide"
+              },
+              "allowedControls": [
+                "text",
+                "url"
+              ]
+            }
+          ]
+        },
+        {
+          "key": "illustration",
+          "blockName": "core/image",
+          "role": "local-asset",
+          "attributes": {
+            "source": "assets/aurora-dashboard.svg",
+            "alt": "Aurora dashboard with color tokens, release receipts, and a completed activation check"
+          },
+          "allowedControls": [
+            "media",
+            "alt",
+            "crop"
+          ]
+        },
+        {
+          "key": "caption",
+          "blockName": "core/paragraph",
+          "role": "caption",
+          "attributes": {
+            "content": "Local SVG fixture: no network asset may substitute for this file."
+          },
+          "allowedControls": [
+            "content"
+          ]
+        }
+      ]
+    }
+  ]
+}

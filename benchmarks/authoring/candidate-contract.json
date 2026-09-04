@@ -1,0 +1,51 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Registered-block authoring candidate artifact",
+  "version": "0.9.0-testing",
+  "artifactRoot": "<run-root>/candidates/<fixture-id>/",
+  "requiredFiles": [
+    "block.json",
+    "src/edit.tsx",
+    "src/save.tsx",
+    "src/style-ledger.json",
+    "authoring-plan.json",
+    "receipts/<fixture-id>.json"
+  ],
+  "blockJson": {
+    "required": ["apiVersion", "name", "title", "editorScript", "style", "attributes"],
+    "forbiddenFallbacks": ["core/html", "dangerouslySetInnerHTML"]
+  },
+  "plan": {
+    "required": ["version", "root", "blocks"],
+    "rootMustReferenceRegisteredBlock": true,
+    "everyEditableNodeHas": ["key", "role", "attributes", "allowedControls"]
+  },
+  "styleLedger": {
+    "required": ["version", "entries"],
+    "entryRequired": ["selector", "property", "value", "owner", "editorControl", "source"],
+    "owners": ["block", "theme", "pattern", "asset", "unsupported"]
+  },
+  "receipt": {
+    "schema": "receipt.schema.json",
+    "required": [
+      "fixtureId",
+      "status",
+      "startedAt",
+      "finishedAt",
+      "timing",
+      "provenance",
+      "checks",
+      "artifacts"
+    ],
+    "statuses": ["scored", "unsupported", "blocked", "engine-error"],
+    "checkKeys": [
+      "plan", "source", "native", "style", "warnings", "build",
+      "editor", "frontend", "pattern", "fidelity", "accessibility"
+    ],
+    "timing": {
+      "method": "monotonic-wall-clock-source-materialization-through-receipt-write",
+      "unit": "milliseconds"
+    },
+    "artifactKeys": ["buildLog", "editorTrace", "frontendTrace", "patternTrace", "fidelityReport", "accessibilityReport"]
+  }
+}

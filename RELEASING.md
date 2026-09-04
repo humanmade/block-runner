@@ -21,18 +21,37 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 
 ## Per-release flow
 
+### 0.9 testing release
+
+`0.9.x` is a **testing** release line for registered-block authoring. Publish it with the
+`testing` npm dist-tag; it must not be described as the 1.0 stability promise. Before creating a
+release, run the release candidate gates from the candidate checkout:
+
+```sh
+npm run authoring:prove
+npm run release:check -- --receipt release/0.9-testing/receipts/<version>.json
+```
+
+Keep the resulting receipt with the release. It records the authoring suite/scorer/prompt/guide,
+template, dependency, WordPress, theme, and browser hashes; the workload, model/effort, invalid
+counts, and timing method; and the package, skill, and activation matrix. A browser or visual gate
+without a receipt is `blocked`, not passed. The detailed matrix and product-preview state live in
+[`release/0.9-testing`](release/0.9-testing/README.md).
+
 1. Bump the version: `npm version patch|minor|major` (commits + tags).
 2. Push the tag: `git push --follow-tags`.
 3. Draft a **GitHub Release** for that tag and **Publish** it.
-4. The Release workflow runs `npm run verify` then
-   `npm publish --provenance --access public`.
+4. The Release workflow runs the complete release candidate check then publishes 0.9 tags with
+   `npm publish --provenance --access public --tag testing`.
 5. Confirm afterward: `npm view block-runner` shows the new version, and
    `npm audit signatures` passes (provenance attestation present).
 
 ## Pre-1.0 note
 
-While on `0.x`, any release may include breaking changes — that's expected semver
-for `0.x`. Move to `1.0.0` when the public API (CLI flags + library exports) is
-stable enough to promise backward compatibility. At that point, consider adopting
-[changesets](https://github.com/changesets/changesets) to automate version bumps,
-changelogs, and the publish PR.
+While on `0.x`, any release may include breaking changes — that's expected semver for `0.x`.
+Do **not** promote 0.9 to 1.0 merely because the release matrix is green: 1.0 remains contingent
+on real-project feedback and resolution of all release failures. Move to `1.0.0` only when the
+public API (CLI flags + library exports) is stable enough to promise backward compatibility and
+those conditions are satisfied. At that point, consider adopting
+[changesets](https://github.com/changesets/changesets) to automate version bumps, changelogs, and
+the publish PR.
