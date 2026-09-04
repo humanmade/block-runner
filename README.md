@@ -346,6 +346,9 @@ model-agnostic: it works on the output of any model, from any vendor.
 
 ## Library
 
+The library is ESM-only and requires Node.js 20 or later. CommonJS callers should use
+`await import('block-runner')` rather than `require('block-runner')`.
+
 ```ts
 import { canonicalize, convert, validate } from 'block-runner';
 
