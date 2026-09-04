@@ -24,6 +24,10 @@ benchmarks/presentation/review.html
 benchmarks/presentation/scoreboard.html
 .playwright-mcp/
 
+# Immutable proof-run evidence is an output artifact, not a source fixture.
+proof-receipts/
+.block-runner-proof-stage/
+
 # tuner: cached propose artifacts + captured regressions (smoke.seed.json + baselines/ stay committed)
 benchmarks/.cache/
 benchmarks/regressions/

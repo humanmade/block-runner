@@ -530,3 +530,48 @@ export class HeadlessBootError extends Error {
     this.name = 'HeadlessBootError';
   }
 }
+
+// The real-WordPress proof ladder is kept in focused modules, but its public
+// contracts are also reachable from this conventional central type surface.
+export type {
+  ProofEditableField,
+  ProofEditableSurface,
+  ProofEnvironment,
+  ProofFilePin,
+  ProofFixture,
+  ProofGateContext,
+  ProofGateResult,
+  ProofGateRunner,
+  ProofCommandResult,
+  ProofCommandRunner,
+  ProofReceiptDocument,
+  ProofRunOptions,
+  ProofRunResult,
+  WordPressPackagePin,
+} from './proof/runner.js';
+export type {
+  GateId,
+  GateRecord,
+  GateStatus,
+  ProfileName,
+  ProofGateId,
+  ProofGateOutcome,
+  ProofGateRecord,
+  ProofGateRecords,
+  ProofGateStatus,
+  ProofProfile,
+  ProofProfileEvaluation,
+  ProofProfileName,
+  ProofProfileReport,
+} from './proof/profiles.js';
+export type {
+  CanonicalJsonValue,
+  ContentAddressedReference,
+  EvidencePutOptions,
+  EvidenceReference,
+  HashInput,
+  ProofReceipt,
+  ReceiptReference,
+  ReceiptWriteResult,
+  Sha256,
+} from './proof/receipt.js';

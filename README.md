@@ -162,6 +162,7 @@ Gutenberg before it reaches the editor.
 | `validate` | Check block markup against headless Gutenberg. |
 | `fix` | Canonicalize near-miss block markup. |
 | `context` | Read a WordPress site into a `site.context.json` manifest (read-only). |
+| `proof` | Run a real-WordPress proof profile for a built plugin ZIP and write an immutable receipt. |
 | `skill` | Print or install the agent guide. |
 | `plugin inspect` | Read-only detection of the supported `@wordpress/scripts` plugin profile. |
 | `plugin preview` / `plugin write` | Preview, confirm, and integrate a generated registered-block directory; or create a standalone plugin wrapper. |
@@ -225,6 +226,27 @@ rechecks these conditions immediately before exclusive, atomic writes. Use `-` f
 only—never as a source of confirmation. Source generation is separate: this preview release writes only
 `files[].content` already contained in the confirmed plan, so a plan with descriptions alone is
 a successful no-op.
+
+### WordPress proof profiles
+
+Headless validation is a fast first rung. A generated plugin needs a separate real-WordPress proof before any claim that it activates, registers, edits, renders, or supports pattern overrides is credible. The `proof` command runs the cumulative profile you select against an installable ZIP and a checked-in JSON fixture:
+
+```sh
+# Fast Gutenberg markup check; no Docker is started.
+block-runner proof dist/acme-hero.zip --profile headless --markup fixtures/hero.blocks.html --input fixtures/hero.source.html --fixture fixtures/hero.proof.json
+
+# Docker/MySQL WordPress 7.1, visible inserter, save/reopen, frontend, deactivation,
+# visual and Axe checks. Evidence and the final receipt are SHA-256 addressed.
+block-runner proof dist/acme-hero.zip --profile full --markup fixtures/hero.blocks.html --input fixtures/hero.source.html --fixture fixtures/hero.proof.json --receipt-dir artifacts/proof
+```
+
+Profiles build on each other: `headless` validates Gutenberg markup; `runtime` installs and activates the ZIP and checks PHP, REST, client registries, and observed runtime pins independently; `editor` adds visible insertion, every declared editable field, save, and reopen; `full` adds frontend, static deactivation, pattern override, visual, and accessibility gates. A required `fail`, `skip`, `blocked`, or missing result fails the selected profile. `not_applicable` can pass only for media when the fixture explicitly has no media; it never substitutes for omitted proof configuration.
+
+The fixture supplies the generated block name, a non-empty editable field inventory, a titled pattern fixture with edits to persist, frontend scope/expectations, reviewed visual golden/masks/threshold, and Axe/manual-review scopes. The browser always navigates to the post it created and published during the run, then records that ID and permalink. Golden images are read-only inputs: the runner stores expected, actual, and diff evidence but never refreshes a golden. Axe output is preserved in full; it is an automated check plus a separately recorded manual-review status, not a claim of complete WCAG conformance.
+
+Proof tooling is exact-pinned in production dependencies: `@wordpress/env`, `@wordpress/e2e-test-utils-playwright`, Playwright, Axe, pixelmatch, and pngjs. The included `proof/wp-env.json` pins WordPress core 7.1 and PHP 8.3; the receipt additionally captures running-container image IDs, database/PHP/core/theme/browser observations, observed plugin metadata, Node and WordPress-package pins, generator/input/plugin/ZIP hashes, command logs, and every evidence object. The environment gate verifies that every retained observation command exited successfully, parses each value against its requested version/hash format, and requires the lockfile plus integrity-pinned direct `@wordpress/*` packages. Missing or malformed observations block the runtime profile. Use `--no-run` only to produce an honest blocked diagnostic receipt.
+
+`npm run test:proof:mutations` is an opt-in Docker acceptance suite. It builds deliberately broken plugin ZIPs and proves that registration, save, stylesheet, and pattern failures reach their respective independent gates; it does not run as part of the ordinary unit suite.
 
 Read from stdin with `-`:
 
