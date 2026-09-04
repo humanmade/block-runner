@@ -17,17 +17,20 @@ replace any command with an equivalent-looking local check: the command, artifac
 and environment in its receipt are the evidence.
 
 ```sh
-npm run proof:control
+npm run proof:control -- --block heading
+npm run proof:control -- --block paragraph
 npm run release:check -- --manual-review /path/to/review.json
 ```
 
-The CI WordPress job first runs `npm run proof:control` to collect the standalone
-native Heading control against the pinned `proof/wp-env.json`, records the observed
-core version before and after the browser run, and passes the resulting content hash
-to the generated-block acceptance test. This is deterministic WordPress/browser
-evidence and does not invoke a model or the paid benchmark lanes.
-For a local release-check run, export the three `BLOCK_RUNNER_NATIVE_HEADING_CONTROL_*`
-values written to `github-env.txt`; without them, a raw generated Heading failure
+The CI WordPress job first runs `npm run proof:control -- --block heading` and
+`npm run proof:control -- --block paragraph` to collect the standalone native
+controls against the pinned `proof/wp-env.json`, records the observed core version
+before and after each browser run, and passes both resulting content hashes to the
+generated-block acceptance test. This is deterministic WordPress/browser evidence
+and does not invoke a model or the paid benchmark lanes. For a local release-check
+run, export the three `BLOCK_RUNNER_NATIVE_HEADING_CONTROL_*` and three
+`BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_*` values written to `github-env.txt`;
+without the matching control evidence, the corresponding raw generated finding
 remains unexcepted.
 
 `--manual-review` supplies the saved keyboard/visual accessibility review. Its input
@@ -69,20 +72,21 @@ The WordPress proof receipt is the raw record and is never rewritten for release
 reporting. The release checker stores a separate `acceptance` summary: `rawProfileOk`
 describes the unmodified 27-gate profile, `automatedOk` evaluates the runnable gates
 without treating the human review gate as automated evidence, and `releaseOk` is the
-actual 0.9 decision. A raw Heading Axe finding may appear in `acceptedUpstreamFindings`
-only when it matches the documented native-control exception and a retained WordPress
-7.1 control-evidence hash is supplied. The retained control JSON must also carry
-that observed 7.1 version and the passing insert/edit/save/reopen control gates. The
-control may either retain the same documented Heading findings or be clean; a clean
-control is valid evidence but supplies no exception, so a generated-block Axe failure
-remains a blocker. The generated proof must observe the same supported WordPress 7.1
-version as the control. A Paragraph finding, an unknown Axe rule, a missing visual
-golden, or missing manual review remains a blocker.
+actual 0.9 decision. A raw Heading or Paragraph Axe finding may appear in
+`acceptedUpstreamFindings` only when it matches the corresponding documented
+native-control exception and a retained WordPress 7.1 control-evidence hash is
+supplied. The retained control JSON must also carry that observed 7.1 version and
+the passing insert/edit/save/reopen control gates. The control may either retain
+the same documented finding(s) or be clean; a clean control is valid evidence but
+supplies no exception, so a generated-block Axe failure remains a blocker. The
+generated proof must observe the same supported WordPress 7.1 version as the
+control. An unknown Axe rule or node, a missing visual golden, or missing manual
+review remains a blocker.
 
-The only approved exception is the [native WordPress Heading editor accessibility
-finding](./accessibility-exception.md), limited to 0.9 testing. Its raw gate remains
-failed, with the upstream exception explicitly reported. It does not waive frontend
-accessibility, manual review, or any other proof gate.
+The only approved exceptions are the [native WordPress Heading and Paragraph editor
+accessibility findings](./accessibility-exception.md), limited to 0.9 testing. Their
+raw gate remains failed, with each upstream exception explicitly reported. They do
+not waive frontend accessibility, manual review, or any other proof gate.
 
 The 13-fixture registered-block authoring benchmark is optional for 0.9 testing
 readiness. The default release check leaves `benchmarkReadiness.status` as `pending`,
@@ -108,19 +112,24 @@ any unapproved automated blocker even though it uploads the raw receipt on failu
 Local diagnostic runs may omit that variable, but their acceptance summary must not
 be described as a release pass.
 
-To use the approved native Heading exception in a release-check run, provide the
-separately retained control result and verify its bytes before invoking the checker:
+To use the approved native Heading and Paragraph exceptions in a release-check run,
+provide both separately retained control results and verify their bytes before
+invoking the checker:
 
 ```sh
 BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_PATH=/path/to/native-heading-control.json \
 BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_SHA256=sha256:<64-hex-digits> \
 BLOCK_RUNNER_NATIVE_HEADING_CONTROL_WORDPRESS_VERSION=7.1 \
+BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_EVIDENCE_PATH=/path/to/native-paragraph-control.json \
+BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_EVIDENCE_SHA256=sha256:<64-hex-digits> \
+BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_WORDPRESS_VERSION=7.1 \
 npm run release:check -- --matrix full-release-matrix --plans /path/to/candidate-plans
 ```
 
-If any of those values is absent or the declared hash does not match the file, the
-exception is unavailable and the raw Heading failure remains in the acceptance
-blockers. The control file is copied into the immutable release receipt artifacts.
+If any values for one control are absent or its declared hash does not match the
+file, that exception is unavailable and the corresponding raw failure remains in
+the acceptance blockers. Each control file is copied into the immutable release
+receipt artifacts.
 
 ## Matrix and receipts
 

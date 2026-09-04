@@ -113,13 +113,17 @@ export {
 } from './proof/profiles.js';
 export {
   APPROVED_UPSTREAM_EXCEPTION_ID,
+  APPROVED_UPSTREAM_PARAGRAPH_EXCEPTION_ID,
   evaluateReleaseAcceptance,
   loadNativeHeadingControlEvidence,
+  loadNativeParagraphControlEvidence,
   summarizeReleaseAcceptance,
 } from './proof/release-acceptance.js';
 export type {
   AcceptedUpstreamFinding,
+  NativeBlockControlEvidence,
   NativeHeadingControlEvidence,
+  NativeParagraphControlEvidence,
   ReleaseAcceptanceBlocker,
   ReleaseAcceptanceOptions,
   ReleaseAcceptanceReport,

@@ -7,6 +7,7 @@ import {
   createDefaultProofGateRecords,
   evaluateReleaseAcceptance,
   loadNativeHeadingControlEvidence,
+  loadNativeParagraphControlEvidence,
   summarizeReleaseAcceptance,
   type ProofGateRecord,
   type ProofReceiptDocument,
@@ -58,6 +59,25 @@ const nativeHeadingControlEvidence = {
   },
 } as const;
 
+const nativeParagraphControlEvidence = {
+  wordpressVersion: '7.1',
+  evidence: {
+    path: 'control/evidence/sha256/native-paragraph-control.json',
+    sha256: `sha256:${'c'.repeat(64)}` as `sha256:${string}`,
+  },
+  controlReceipt: {
+    wordpressVersion: '7.1',
+    gates: {
+      client_registry: { status: 'pass', details: { block: 'core/paragraph' } },
+      editor_inserter: { status: 'pass' },
+      editor_field_editing: { status: 'pass' },
+      editor_save: { status: 'pass' },
+      editor_reopen: { status: 'pass' },
+      accessibility_editor: { status: 'fail', details: paragraphAxe() },
+    },
+  },
+} as const;
+
 const cleanNativeHeadingControlEvidence = {
   wordpressVersion: '7.1',
   evidence: {
@@ -88,6 +108,16 @@ function headingAxe(nodes = [headingNode]) {
   };
 }
 
+function paragraphAxe(nodes = [paragraphNode]) {
+  return {
+    axe: {
+      violations: [
+        { id: 'aria-allowed-attr', nodes },
+      ],
+    },
+  };
+}
+
 describe('0.9 proof release acceptance', () => {
   it('loads and validates the hash-bound native control before applying the exception', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-heading-control-'));
@@ -98,6 +128,22 @@ describe('0.9 proof release acceptance', () => {
     const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}` as `sha256:${string}`;
 
     const loaded = loadNativeHeadingControlEvidence({
+      wordpressVersion: '7.1',
+      evidence: { path: controlPath, sha256 },
+    });
+
+    expect(loaded.controlReceipt).toEqual(controlReceipt);
+  });
+
+  it('loads and validates the hash-bound native Paragraph control', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-paragraph-control-'));
+    const controlPath = path.join(root, 'native-paragraph-control.json');
+    const controlReceipt = nativeParagraphControlEvidence.controlReceipt;
+    const bytes = `${JSON.stringify(controlReceipt)}\n`;
+    await writeFile(controlPath, bytes, 'utf8');
+    const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}` as `sha256:${string}`;
+
+    const loaded = loadNativeParagraphControlEvidence({
       wordpressVersion: '7.1',
       evidence: { path: controlPath, sha256 },
     });
@@ -178,6 +224,32 @@ describe('0.9 proof release acceptance', () => {
     }));
   });
 
+  it('keeps raw Paragraph Axe failures while accepting the approved native Paragraph control', () => {
+    const result = evaluateReleaseAcceptance(receipt({
+      accessibility_editor: {
+        gate: 'accessibility_editor',
+        status: 'fail',
+        reason: 'Axe found editor subtree violations.',
+        details: paragraphAxe(),
+      },
+      accessibility_manual_review: {
+        gate: 'accessibility_manual_review',
+        status: 'pass',
+      },
+    }), { nativeParagraphControlEvidence });
+
+    expect(result.rawProfile.ok).toBe(false);
+    expect(result.rawProfile.failedGates.map(({ gate }) => gate)).toContain('accessibility_editor');
+    expect(result.acceptedUpstreamFindings).toEqual([expect.objectContaining({
+      exceptionId: 'wordpress-7.1-native-paragraph-editor-a11y',
+      violationId: 'aria-allowed-attr',
+      target: '#paragraph',
+    })]);
+    expect(result.automated).toMatchObject({ ok: true, blockers: [] });
+    expect(result.release).toMatchObject({ ok: true, status: 'passed', blockers: [] });
+    expect(summarizeReleaseAcceptance(result)).not.toHaveProperty('nativeParagraphControlEvidence.controlReceipt');
+  });
+
   it('does not let a Paragraph finding hide inside the Heading exception', () => {
     const result = evaluateReleaseAcceptance(receipt({
       accessibility_editor: {
@@ -213,6 +285,35 @@ describe('0.9 proof release acceptance', () => {
       gate: 'accessibility_editor',
       reason: expect.stringContaining('color-contrast'),
     });
+  });
+
+  it('requires the retained control to contain the exact Axe finding being excepted', () => {
+    const controlWithOnlyAttr = {
+      ...nativeHeadingControlEvidence,
+      controlReceipt: {
+        ...nativeHeadingControlEvidence.controlReceipt,
+        gates: {
+          ...nativeHeadingControlEvidence.controlReceipt.gates,
+          accessibility_editor: { status: 'fail', details: {
+            axe: { violations: [{ id: 'aria-allowed-attr', nodes: [headingNode] }] },
+          } },
+        },
+      },
+    };
+    const result = evaluateReleaseAcceptance(receipt({
+      accessibility_editor: {
+        gate: 'accessibility_editor',
+        status: 'fail',
+        details: { axe: { violations: [{ id: 'aria-allowed-role', nodes: [headingNode] }] } },
+      },
+      accessibility_manual_review: { gate: 'accessibility_manual_review', status: 'pass' },
+    }), { nativeHeadingControlEvidence: controlWithOnlyAttr });
+
+    expect(result.acceptedUpstreamFindings).toEqual([]);
+    expect(result.automated.blockers).toContainEqual(expect.objectContaining({
+      gate: 'accessibility_editor',
+      reason: expect.stringContaining('does not contain Axe finding aria-allowed-role'),
+    }));
   });
 
   it('can accept a release only after the manual review gate passes', () => {

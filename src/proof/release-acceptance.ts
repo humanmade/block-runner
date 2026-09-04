@@ -12,17 +12,51 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 
 /**
- * The one upstream exception currently approved for the 0.9 testing release.
+ * The upstream exceptions currently approved for the 0.9 testing release.
  *
- * This is deliberately a node-level exception. It must not turn an entire Axe
- * result, or an arbitrary accessibility failure, into a pass. The matching
- * code below also requires the exact native Heading markup that WordPress 7.1
- * emits, so a Paragraph (or a custom wrapper) remains a release blocker.
+ * These are deliberately node-level exceptions. They must not turn an entire
+ * Axe result, or an arbitrary accessibility failure, into a pass. Each match
+ * also requires the exact native control markup and a separately retained
+ * WordPress 7.1 control run.
  */
 export const APPROVED_UPSTREAM_EXCEPTION_ID =
   'wordpress-7.1-native-heading-editor-a11y' as const;
+export const APPROVED_UPSTREAM_PARAGRAPH_EXCEPTION_ID =
+  'wordpress-7.1-native-paragraph-editor-a11y' as const;
 
-const APPROVED_HEADING_FINDINGS = new Set(['aria-allowed-attr', 'aria-allowed-role']);
+type ApprovedUpstreamExceptionId = typeof APPROVED_UPSTREAM_EXCEPTION_ID
+  | typeof APPROVED_UPSTREAM_PARAGRAPH_EXCEPTION_ID;
+type NativeControlKind = 'heading' | 'paragraph';
+
+interface NativeControlSpec {
+  kind: NativeControlKind;
+  label: 'Heading' | 'Paragraph';
+  blockName: `core/${NativeControlKind}`;
+  element: 'h2' | 'p';
+  exceptionId: ApprovedUpstreamExceptionId;
+  findings: ReadonlySet<string>;
+}
+
+const NATIVE_CONTROL_SPECS: Readonly<Record<NativeControlKind, NativeControlSpec>> = {
+  heading: {
+    kind: 'heading',
+    label: 'Heading',
+    blockName: 'core/heading',
+    element: 'h2',
+    exceptionId: APPROVED_UPSTREAM_EXCEPTION_ID,
+    findings: new Set(['aria-allowed-attr', 'aria-allowed-role']),
+  },
+  paragraph: {
+    kind: 'paragraph',
+    label: 'Paragraph',
+    blockName: 'core/paragraph',
+    element: 'p',
+    exceptionId: APPROVED_UPSTREAM_PARAGRAPH_EXCEPTION_ID,
+    // WordPress 7.1's native Paragraph control currently reports only this
+    // rule. Keep the set exact so a future/new rule remains a blocker.
+    findings: new Set(['aria-allowed-attr']),
+  },
+};
 const MANUAL_REVIEW_GATE: ProofGateId = 'accessibility_manual_review';
 
 export type ReleaseAcceptanceStatus = 'passed' | 'failed' | 'blocked' | 'engine_error';
@@ -34,7 +68,7 @@ export interface ReleaseAcceptanceBlocker {
 }
 
 export interface AcceptedUpstreamFinding {
-  exceptionId: typeof APPROVED_UPSTREAM_EXCEPTION_ID;
+  exceptionId: ApprovedUpstreamExceptionId;
   gate: 'accessibility_editor';
   violationId: string;
   target: string;
@@ -47,7 +81,7 @@ export interface AcceptedUpstreamFinding {
  * this descriptor to the acceptance function; a path or a version string alone
  * is never enough to activate the exception.
  */
-export interface NativeHeadingControlEvidence {
+export interface NativeBlockControlEvidence {
   wordpressVersion: string;
   evidence: {
     path: string;
@@ -57,8 +91,15 @@ export interface NativeHeadingControlEvidence {
   controlReceipt?: unknown;
 }
 
+/** Evidence for the standalone native WordPress Heading editor control. */
+export type NativeHeadingControlEvidence = NativeBlockControlEvidence;
+
+/** Evidence for the standalone native WordPress Paragraph editor control. */
+export type NativeParagraphControlEvidence = NativeBlockControlEvidence;
+
 export interface ReleaseAcceptanceOptions {
   nativeHeadingControlEvidence?: NativeHeadingControlEvidence;
+  nativeParagraphControlEvidence?: NativeParagraphControlEvidence;
 }
 
 /**
@@ -69,6 +110,20 @@ export interface ReleaseAcceptanceOptions {
 export function loadNativeHeadingControlEvidence(
   evidence: NativeHeadingControlEvidence,
 ): NativeHeadingControlEvidence {
+  return loadNativeControlEvidence(evidence, NATIVE_CONTROL_SPECS.heading);
+}
+
+/** Load and validate the retained standalone native Paragraph control. */
+export function loadNativeParagraphControlEvidence(
+  evidence: NativeParagraphControlEvidence,
+): NativeParagraphControlEvidence {
+  return loadNativeControlEvidence(evidence, NATIVE_CONTROL_SPECS.paragraph);
+}
+
+function loadNativeControlEvidence<T extends NativeBlockControlEvidence>(
+  evidence: T,
+  spec: NativeControlSpec,
+): T {
   const file = path.resolve(evidence.evidence.path);
   let bytes: Buffer;
   let controlReceipt: unknown;
@@ -76,16 +131,16 @@ export function loadNativeHeadingControlEvidence(
     bytes = readFileSync(file);
     controlReceipt = JSON.parse(bytes.toString('utf8'));
   } catch (error) {
-    throw new Error(`Could not read native Heading control evidence: ${error instanceof Error ? error.message : String(error)}`);
+    throw new Error(`Could not read native ${spec.label} control evidence: ${error instanceof Error ? error.message : String(error)}`);
   }
   const actual = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   if (actual !== evidence.evidence.sha256) {
-    throw new Error(`Native Heading control evidence hash mismatch: declared ${evidence.evidence.sha256}, observed ${actual}`);
+    throw new Error(`Native ${spec.label} control evidence hash mismatch: declared ${evidence.evidence.sha256}, observed ${actual}`);
   }
   const loaded = { ...evidence, controlReceipt };
-  const validation = validateNativeHeadingControlEvidence(loaded);
+  const validation = validateNativeControlEvidence(loaded, spec);
   if (!validation.ok) throw new Error(validation.reason);
-  return loaded;
+  return loaded as T;
 }
 
 export interface ReleaseAcceptanceReport {
@@ -106,6 +161,8 @@ export interface ReleaseAcceptanceReport {
   acceptedUpstreamFindings: readonly AcceptedUpstreamFinding[];
   /** The control descriptor supplied for the exception decision, if any. */
   nativeHeadingControlEvidence?: NativeHeadingControlEvidence;
+  /** The retained native Paragraph control descriptor, if supplied. */
+  nativeParagraphControlEvidence?: NativeParagraphControlEvidence;
 }
 
 /**
@@ -145,9 +202,12 @@ export function evaluateReleaseAcceptance(
     if (record.status === 'pass' || (record.status === 'not_applicable' && canBeNotApplicable(gate))) continue;
 
     if (gate === 'accessibility_editor' && record.status === 'fail') {
-      const inspected = inspectApprovedHeadingException(
+      const inspected = inspectApprovedNativeExceptions(
         record,
-        options.nativeHeadingControlEvidence,
+        [
+          { spec: NATIVE_CONTROL_SPECS.heading, evidence: options.nativeHeadingControlEvidence },
+          { spec: NATIVE_CONTROL_SPECS.paragraph, evidence: options.nativeParagraphControlEvidence },
+        ],
         receipt.environment.wordpress.version,
       );
       acceptedUpstreamFindings.push(...inspected.accepted);
@@ -189,6 +249,9 @@ export function evaluateReleaseAcceptance(
     ...(options.nativeHeadingControlEvidence
       ? { nativeHeadingControlEvidence: options.nativeHeadingControlEvidence }
       : {}),
+    ...(options.nativeParagraphControlEvidence
+      ? { nativeParagraphControlEvidence: options.nativeParagraphControlEvidence }
+      : {}),
   };
 }
 
@@ -207,6 +270,7 @@ export function summarizeReleaseAcceptance(report: ReleaseAcceptanceReport): {
   releaseBlockers: readonly ReleaseAcceptanceBlocker[];
   acceptedUpstreamFindings: readonly AcceptedUpstreamFinding[];
   nativeHeadingControlEvidence?: NativeHeadingControlEvidence;
+  nativeParagraphControlEvidence?: NativeParagraphControlEvidence;
 } {
   return {
     rawProfileOk: report.rawProfile.ok,
@@ -220,10 +284,13 @@ export function summarizeReleaseAcceptance(report: ReleaseAcceptanceReport): {
     ...(report.nativeHeadingControlEvidence
       ? { nativeHeadingControlEvidence: evidenceReference(report.nativeHeadingControlEvidence) }
       : {}),
+    ...(report.nativeParagraphControlEvidence
+      ? { nativeParagraphControlEvidence: evidenceReference(report.nativeParagraphControlEvidence) }
+      : {}),
   };
 }
 
-function evidenceReference(evidence: NativeHeadingControlEvidence): Omit<NativeHeadingControlEvidence, 'controlReceipt'> {
+function evidenceReference(evidence: NativeBlockControlEvidence): Omit<NativeBlockControlEvidence, 'controlReceipt'> {
   return {
     wordpressVersion: evidence.wordpressVersion,
     evidence: evidence.evidence,
@@ -247,9 +314,9 @@ function indexRequiredRecords(records: readonly ProofGateRecord[]): {
   return { records: result, duplicates };
 }
 
-function inspectApprovedHeadingException(
+function inspectApprovedNativeExceptions(
   record: ProofGateRecord,
-  controlEvidence: NativeHeadingControlEvidence | undefined,
+  controls: readonly { spec: NativeControlSpec; evidence: NativeBlockControlEvidence | undefined }[],
   candidateWordPressVersion: string | undefined,
 ): {
   accepted: AcceptedUpstreamFinding[];
@@ -257,39 +324,11 @@ function inspectApprovedHeadingException(
 } {
   const accepted: AcceptedUpstreamFinding[] = [];
   const blockers: ReleaseAcceptanceBlocker[] = [];
-  const controlValidation = validateNativeHeadingControlEvidence(controlEvidence);
-  if (!controlValidation.ok) {
-    return {
-      accepted,
-      blockers: [{
-        gate: 'accessibility_editor',
-        status: 'fail',
-        reason: controlValidation.reason,
-      }],
-    };
-  }
-  if (!controlValidation.exceptionAvailable) {
-    return {
-      accepted,
-      blockers: [{
-        gate: 'accessibility_editor',
-        status: 'fail',
-        reason: 'The retained native Heading control is clean; no upstream accessibility exception applies.',
-      }],
-    };
-  }
-  const controlWordPressVersion = controlEvidence?.wordpressVersion;
-  if (!isSupportedWordPress71(candidateWordPressVersion)
-    || candidateWordPressVersion !== controlWordPressVersion) {
-    return {
-      accepted,
-      blockers: [{
-        gate: 'accessibility_editor',
-        status: 'fail',
-        reason: `The generated proof observed WordPress ${candidateWordPressVersion ?? 'unavailable'}, but the retained native control observed ${controlWordPressVersion ?? 'unavailable'}; the exception requires the same supported 7.1 version.`,
-      }],
-    };
-  }
+  const validations = controls.map(({ spec, evidence }) => ({
+    spec,
+    evidence,
+    validation: validateNativeControlEvidence(evidence, spec),
+  }));
   const axe = asRecord(record.details)?.axe;
   const violations = asRecord(axe)?.violations;
   if (!Array.isArray(violations) || violations.length === 0) {
@@ -303,33 +342,77 @@ function inspectApprovedHeadingException(
     const value = asRecord(violation);
     const id = typeof value?.id === 'string' ? value.id : '';
     const nodes = Array.isArray(value?.nodes) ? value.nodes : [];
-    if (!APPROVED_HEADING_FINDINGS.has(id) || nodes.length === 0) {
+    const matchingSpecs = validations.filter(({ spec }) => spec.findings.has(id));
+    if (!id || matchingSpecs.length === 0 || nodes.length === 0) {
       blockers.push({
         gate: 'accessibility_editor',
         status: 'fail',
         reason: id
-          ? `Axe editor finding ${id} is not covered by the approved native Heading exception.`
+          ? `Axe editor finding ${id} is not covered by an approved native control exception.`
           : 'Axe editor failure contains an unidentified violation.',
       });
       continue;
     }
     for (const node of nodes) {
       const target = targetFor(node);
-      if (isApprovedNativeHeadingNode(node)) {
-        accepted.push({
-          exceptionId: APPROVED_UPSTREAM_EXCEPTION_ID,
-          gate: 'accessibility_editor',
-          violationId: id,
-          target,
-          basis: 'WordPress 7.1 native core/heading h2 editor control emits the same ARIA attributes as the retained standalone control.',
-        });
-      } else {
+      const control = matchingSpecs.find(({ spec }) => isApprovedNativeNode(node, spec));
+      if (!control) {
         blockers.push({
           gate: 'accessibility_editor',
           status: 'fail',
-          reason: `Axe editor finding ${id} includes an unapproved node${target ? ` (${target})` : ''}; only the native WordPress Heading control is excepted.`,
+          reason: `Axe editor finding ${id} includes an unapproved node${target ? ` (${target})` : ''}; only the retained native Heading or Paragraph controls are excepted.`,
         });
+        continue;
       }
+      const { spec, evidence, validation } = control;
+      if (!validation.ok) {
+        blockers.push({ gate: 'accessibility_editor', status: 'fail', reason: validation.reason });
+        continue;
+      }
+      if (!validation.exceptionAvailable) {
+        blockers.push({
+          gate: 'accessibility_editor',
+          status: 'fail',
+          reason: `The retained native ${spec.label} control is clean; no upstream accessibility exception applies.`,
+        });
+        continue;
+      }
+      if (!validation.findingIds.has(id)) {
+        blockers.push({
+          gate: 'accessibility_editor',
+          status: 'fail',
+          reason: `The retained native ${spec.label} control does not contain Axe finding ${id}; the raw finding remains a blocker.`,
+        });
+        continue;
+      }
+      // `validateNativeControlEvidence` rejects an absent descriptor, but keep
+      // the guard explicit here so this path can never accept an unbound
+      // finding if that validator changes later.
+      if (!evidence) {
+        blockers.push({
+          gate: 'accessibility_editor',
+          status: 'fail',
+          reason: `The native ${spec.label} exception requires an immutable evidence reference/hash.`,
+        });
+        continue;
+      }
+      const controlWordPressVersion = evidence.wordpressVersion;
+      if (!isSupportedWordPress71(candidateWordPressVersion)
+        || candidateWordPressVersion !== controlWordPressVersion) {
+        blockers.push({
+          gate: 'accessibility_editor',
+          status: 'fail',
+          reason: `The generated proof observed WordPress ${candidateWordPressVersion ?? 'unavailable'}, but the retained native control observed ${controlWordPressVersion ?? 'unavailable'}; the exception requires the same supported 7.1 version.`,
+        });
+        continue;
+      }
+      accepted.push({
+        exceptionId: spec.exceptionId,
+        gate: 'accessibility_editor',
+        violationId: id,
+        target,
+        basis: `WordPress 7.1 native ${spec.blockName} ${spec.element} editor control emits the same ARIA attributes as the retained standalone control.`,
+      });
     }
   }
   return { accepted, blockers };
@@ -339,36 +422,37 @@ function isSupportedWordPress71(version: string | undefined): boolean {
   return typeof version === 'string' && /^7\.1(?:\.\d+)?$/.test(version);
 }
 
-function validateNativeHeadingControlEvidence(
-  evidence: NativeHeadingControlEvidence | undefined,
-): { ok: true; exceptionAvailable: boolean } | { ok: false; reason: string } {
+function validateNativeControlEvidence(
+  evidence: NativeBlockControlEvidence | undefined,
+  spec: NativeControlSpec,
+): { ok: true; exceptionAvailable: boolean; findingIds: ReadonlySet<string> } | { ok: false; reason: string } {
   if (!evidence
     || !/^7\.1(?:\.\d+)?$/.test(evidence.wordpressVersion)
     || typeof evidence.evidence.path !== 'string'
     || evidence.evidence.path.trim().length === 0
     || !/^sha256:[0-9a-f]{64}$/.test(evidence.evidence.sha256)) {
-    return { ok: false, reason: 'The native Heading exception requires an observed WordPress 7.1 control and an immutable evidence reference/hash.' };
+    return { ok: false, reason: `The native ${spec.label} exception requires an observed WordPress 7.1 control and an immutable evidence reference/hash.` };
   }
   if (evidence.controlReceipt === undefined) {
-    return { ok: false, reason: 'The native Heading exception requires the retained control result to be loaded and validated.' };
+    return { ok: false, reason: `The native ${spec.label} exception requires the retained control result to be loaded and validated.` };
   }
   const control = asRecord(evidence.controlReceipt);
   const observedVersion = observedWordPressVersion(control);
   if (observedVersion !== evidence.wordpressVersion) {
     return {
       ok: false,
-      reason: 'Native Heading control evidence must carry an observed WordPress version matching the declared 7.1 version.',
+      reason: `Native ${spec.label} control evidence must carry an observed WordPress version matching the declared 7.1 version.`,
     };
   }
   const gates = asGateMap(control?.gates);
-  if (!gates) return { ok: false, reason: 'Native Heading control evidence has no readable gate results.' };
+  if (!gates) return { ok: false, reason: `Native ${spec.label} control evidence has no readable gate results.` };
   const required = ['editor_inserter', 'editor_field_editing', 'editor_save', 'editor_reopen'];
   if (required.some((gate) => gates[gate]?.status !== 'pass')) {
-    return { ok: false, reason: 'Native Heading control evidence must pass insert, edit, save, and reopen.' };
+    return { ok: false, reason: `Native ${spec.label} control evidence must pass insert, edit, save, and reopen.` };
   }
   const registry = gates.client_registry;
-  if (!registry || registry.status !== 'pass' || asRecord(registry.details)?.block !== 'core/heading') {
-    return { ok: false, reason: 'Native Heading control evidence must identify a passing standalone core/heading control.' };
+  if (!registry || registry.status !== 'pass' || asRecord(registry.details)?.block !== spec.blockName) {
+    return { ok: false, reason: `Native ${spec.label} control evidence must identify a passing standalone ${spec.blockName} control.` };
   }
   const axe = asRecord(asRecord(gates.accessibility_editor?.details)?.axe);
   const violations = axe?.violations;
@@ -378,20 +462,22 @@ function validateNativeHeadingControlEvidence(
     // A future WordPress release may fix the native issue. Keep the clean
     // control as valid lifecycle evidence, but do not use it to adjudicate a
     // generated-block failure: there is no upstream failure to except.
-    return { ok: true, exceptionAvailable: false };
+    return { ok: true, exceptionAvailable: false, findingIds: new Set() };
   }
   if (gates.accessibility_editor?.status !== 'fail' || !Array.isArray(violations) || violations.length === 0) {
-    return { ok: false, reason: 'Native Heading control evidence must retain the expected Axe failure details.' };
+    return { ok: false, reason: `Native ${spec.label} control evidence must retain the expected Axe failure details.` };
   }
+  const findingIds = new Set<string>();
   for (const violation of violations) {
     const value = asRecord(violation);
     const id = typeof value?.id === 'string' ? value.id : '';
     const nodes = Array.isArray(value?.nodes) ? value.nodes : [];
-    if (!APPROVED_HEADING_FINDINGS.has(id) || nodes.length === 0 || nodes.some((node) => !isApprovedNativeHeadingNode(node))) {
-      return { ok: false, reason: 'Native Heading control evidence contains an unexpected Axe rule or non-Heading node.' };
+    if (!spec.findings.has(id) || nodes.length === 0 || nodes.some((node) => !isApprovedNativeNode(node, spec))) {
+      return { ok: false, reason: `Native ${spec.label} control evidence contains an unexpected Axe rule or non-${spec.label} node.` };
     }
+    findingIds.add(id);
   }
-  return { ok: true, exceptionAvailable: true };
+  return { ok: true, exceptionAvailable: true, findingIds };
 }
 
 function observedWordPressVersion(control: Record<string, unknown> | undefined): string | undefined {
@@ -418,15 +504,15 @@ function asGateMap(value: unknown): Record<string, Record<string, unknown>> | un
   }));
 }
 
-function isApprovedNativeHeadingNode(node: unknown): boolean {
+function isApprovedNativeNode(node: unknown, spec: NativeControlSpec): boolean {
   const value = asRecord(node);
   const html = typeof value?.html === 'string' ? value.html : '';
   const target = targetFor(node);
-  return /^<h2\b/i.test(html)
+  return new RegExp(`^<${spec.element}\\b`, 'i').test(html)
     && /\brole=["']document["']/.test(html)
     && /\baria-multiline=["']true["']/.test(html)
     && /\baria-readonly=["']false["']/.test(html)
-    && /\bdata-type=["']core\/heading["']/.test(html)
+    && new RegExp(`\\bdata-type=["']${spec.blockName}["']`).test(html)
     && target.length > 0;
 }
 

@@ -187,7 +187,12 @@
       "additionalProperties": false,
       "required": ["exceptionId", "gate", "violationId", "target", "basis"],
       "properties": {
-        "exceptionId": { "const": "wordpress-7.1-native-heading-editor-a11y" },
+        "exceptionId": {
+          "enum": [
+            "wordpress-7.1-native-heading-editor-a11y",
+            "wordpress-7.1-native-paragraph-editor-a11y"
+          ]
+        },
         "gate": { "const": "accessibility_editor" },
         "violationId": { "type": "string", "minLength": 1 },
         "target": { "type": "string", "minLength": 1 },
@@ -216,21 +221,23 @@
         "automatedBlockers": { "type": "array", "items": { "$ref": "#/$defs/acceptanceBlocker" } },
         "releaseBlockers": { "type": "array", "items": { "$ref": "#/$defs/acceptanceBlocker" } },
         "acceptedUpstreamFindings": { "type": "array", "items": { "$ref": "#/$defs/acceptedUpstreamFinding" } },
-        "nativeHeadingControlEvidence": {
+        "nativeHeadingControlEvidence": { "$ref": "#/$defs/nativeControlEvidence" },
+        "nativeParagraphControlEvidence": { "$ref": "#/$defs/nativeControlEvidence" }
+      }
+    },
+    "nativeControlEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wordpressVersion", "evidence"],
+      "properties": {
+        "wordpressVersion": { "type": "string", "pattern": "^7\\.1(?:\\.\\d+)?$" },
+        "evidence": {
           "type": "object",
           "additionalProperties": false,
-          "required": ["wordpressVersion", "evidence"],
+          "required": ["path", "sha256"],
           "properties": {
-            "wordpressVersion": { "type": "string", "pattern": "^7\\.1(?:\\.\\d+)?$" },
-            "evidence": {
-              "type": "object",
-              "additionalProperties": false,
-              "required": ["path", "sha256"],
-              "properties": {
-                "path": { "type": "string", "minLength": 1 },
-                "sha256": { "$ref": "#/$defs/hash" }
-              }
-            }
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "$ref": "#/$defs/hash" }
           }
         }
       }

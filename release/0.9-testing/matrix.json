@@ -152,7 +152,7 @@
       "environment": "same generated WordPress 7.1 proof receipt plus retained acceptance evidence",
       "asserts": [
         "raw full-profile gate statuses remain retained",
-        "automated gates pass except only the explicitly approved native Heading finding",
+        "automated gates pass except only the explicitly approved native Heading or Paragraph finding",
         "manual accessibility review is present and passes",
         "no unapproved accessibility, visual, or runtime blocker remains"
       ],
@@ -163,12 +163,12 @@
       "area": "accessibility-control",
       "required": true,
       "expectedStatus": "passed",
-      "command": "npm run proof:control",
+      "command": "npm run proof:control -- --block heading && npm run proof:control -- --block paragraph",
       "environment": "same pinned WordPress 7.1 environment and Chromium browser",
       "asserts": [
         "observed wp core version is 7.1 before and after the run",
-        "standalone core/heading inserts, edits, saves, and reopens",
-        "the native Heading Axe result is clean or retains only the documented findings",
+        "standalone core/heading and core/paragraph each insert, edit, save, and reopen",
+        "the native Heading and Paragraph Axe results are clean or retain only their documented findings",
         "control JSON and raw browser result are hash-bound"
       ],
       "receiptKinds": ["native-control", "wordpress-71"]

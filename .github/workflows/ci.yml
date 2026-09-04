@@ -39,13 +39,19 @@ jobs:
       - run: npm install -g npm@11
       - run: npm ci
       - run: npx --no-install playwright install --with-deps chromium
-      - name: Collect native WordPress Heading control
+      - name: Collect native WordPress Heading and Paragraph controls
         env:
-          BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-control
+          BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-heading-control
+          BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-paragraph-control
           BLOCK_RUNNER_NATIVE_HEADING_CONTROL_KEEP: '1'
-        run: npm run proof:control -- --output-dir "$BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR"
+          BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_KEEP: '1'
+        run: |
+          npm run proof:control -- --block heading --output-dir "$BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR"
+          npm run proof:control -- --block paragraph --output-dir "$BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_OUTPUT_DIR"
       - name: Bind native control evidence to the acceptance test
-        run: cat "${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-control/github-env.txt" >> "$GITHUB_ENV"
+        run: |
+          cat "${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-heading-control/github-env.txt" >> "$GITHUB_ENV"
+          cat "${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-paragraph-control/github-env.txt" >> "$GITHUB_ENV"
       - name: Verify generated-plugin automated acceptance in WordPress 7.1
         env:
           BLOCK_RUNNER_PROOF_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt

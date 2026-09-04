@@ -1,7 +1,9 @@
 #!/usr/bin/env node
 /**
- * Collect the WordPress 7.1 native Heading control used by the narrowly scoped
- * 0.9 editor accessibility exception.
+ * Collect a WordPress 7.1 native rich-text control used by a narrowly scoped
+ * 0.9 editor accessibility exception. The default is Heading for backwards
+ * compatibility; pass `--block paragraph` to collect the native Paragraph
+ * control as a separate, hash-bound evidence set.
  *
  * This is deliberately a separate control run. It starts the same pinned
  * wp-env, observes the actual core version before and after the browser run,
@@ -22,14 +24,34 @@ const DEFAULT_BASE_URL = 'http://localhost:8888';
 const WP_ENV_CONFIG = path.join(ROOT, 'proof', 'wp-env.json');
 const BROWSER_HELPER = path.join(ROOT, 'scripts', 'proof-playwright.mjs');
 const EXPECTED_WORDPRESS_VERSION = '7.1';
-const EXPECTED_FINDINGS = new Set(['aria-allowed-attr', 'aria-allowed-role']);
+const CONTROL_CONFIGS = {
+  heading: {
+    blockName: 'core/heading',
+    blockTitle: 'Heading',
+    element: 'h2',
+    expectedFindings: new Set(['aria-allowed-attr', 'aria-allowed-role']),
+  },
+  paragraph: {
+    blockName: 'core/paragraph',
+    blockTitle: 'Paragraph',
+    element: 'p',
+    // WordPress 7.1's native Paragraph control currently reports only this
+    // rule. Keep the set exact so new findings remain release blockers.
+    expectedFindings: new Set(['aria-allowed-attr']),
+  },
+};
+const controlKind = valueFor('--block') ?? 'heading';
+const control = CONTROL_CONFIGS[controlKind];
+if (!control) throw new Error(`--block must be one of: ${Object.keys(CONTROL_CONFIGS).join(', ')}`);
+const environmentPrefix = controlKind.toUpperCase();
+const outputEnvironmentVariable = `BLOCK_RUNNER_NATIVE_${environmentPrefix}_CONTROL_OUTPUT_DIR`;
 
 const outputDirectory = path.resolve(valueFor('--output-dir')
-  ?? process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR
-  ?? path.join(process.cwd(), 'native-heading-control-proof'));
+  ?? process.env[outputEnvironmentVariable]
+  ?? path.join(process.cwd(), `native-${controlKind}-control-proof`));
 const baseUrl = (process.env.BLOCK_RUNNER_PROOF_BASE_URL ?? DEFAULT_BASE_URL).replace(/\/$/, '');
 const keepEnvironment = process.argv.includes('--keep-environment')
-  || process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_KEEP === '1';
+  || process.env[`BLOCK_RUNNER_NATIVE_${environmentPrefix}_CONTROL_KEEP`] === '1';
 const commandRecords = [];
 
 await mkdir(outputDirectory, { recursive: true });
@@ -52,15 +74,15 @@ try {
     baseUrl,
     profile: 'full',
     fixture: {
-      blockName: 'core/heading',
-      blockTitle: 'Heading',
+      blockName: control.blockName,
+      blockTitle: control.blockTitle,
       editableFields: [{
-        path: 'control-heading',
+        path: `control-${controlKind}`,
         surface: 'richText',
-        value: 'Unwrapped native WordPress heading',
+        value: `Unwrapped native WordPress ${controlKind}`,
       }],
       accessibility: {
-        editorSelector: '[data-type="core/heading"]',
+        editorSelector: `[data-type="${control.blockName}"]`,
         manualReview: 'blocked',
       },
     },
@@ -70,7 +92,7 @@ try {
     '--config', fixturePath,
     '--out', rawResultPath,
   ], 'browser');
-  if (browser.exitCode !== 0) throw new Error(`Native Heading browser helper failed (exit ${browser.exitCode}).`);
+  if (browser.exitCode !== 0) throw new Error(`Native ${control.blockTitle} browser helper failed (exit ${browser.exitCode}).`);
 
   const after = await observeVersion('after');
   if (after.version !== EXPECTED_WORDPRESS_VERSION) {
@@ -79,11 +101,12 @@ try {
 
   const rawBytes = await readFile(rawResultPath);
   const rawResult = JSON.parse(rawBytes.toString('utf8'));
-  validateBrowserControl(rawResult);
-  const control = {
+  validateBrowserControl(rawResult, control);
+  const controlReceipt = {
     ...rawResult,
     schemaVersion: 1,
     kind: 'block-runner.native-wordpress-control',
+    blockName: control.blockName,
     wordpressVersion: EXPECTED_WORDPRESS_VERSION,
     wordpressVersionObservation: {
       command: `npx --no-install wp-env --config=${path.relative(ROOT, WP_ENV_CONFIG)} run cli wp core version`,
@@ -98,25 +121,26 @@ try {
       sha256: sha256(rawBytes),
     },
   };
-  const controlPath = path.join(outputDirectory, 'native-heading-control.json');
-  await writeJson(controlPath, control);
+  const controlPath = path.join(outputDirectory, `native-${controlKind}-control.json`);
+  await writeJson(controlPath, controlReceipt);
   const controlBytes = await readFile(controlPath);
   const controlHash = sha256(controlBytes);
   await writeJson(path.join(outputDirectory, 'manifest.json'), {
     schemaVersion: 1,
     status: 'passed',
+    blockName: control.blockName,
     wordpressVersion: EXPECTED_WORDPRESS_VERSION,
     control: {
       path: path.relative(outputDirectory, controlPath).split(path.sep).join('/'),
       sha256: controlHash,
     },
-    rawBrowserResult: control.rawBrowserResult,
+    rawBrowserResult: controlReceipt.rawBrowserResult,
     commands: commandRecords.map(({ label, command, exitCode }) => ({ label, command, exitCode })),
   });
   await writeFile(path.join(outputDirectory, 'github-env.txt'), [
-    `BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_PATH=${controlPath}`,
-    `BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_SHA256=${controlHash}`,
-    `BLOCK_RUNNER_NATIVE_HEADING_CONTROL_WORDPRESS_VERSION=${EXPECTED_WORDPRESS_VERSION}`,
+    `BLOCK_RUNNER_NATIVE_${environmentPrefix}_CONTROL_EVIDENCE_PATH=${controlPath}`,
+    `BLOCK_RUNNER_NATIVE_${environmentPrefix}_CONTROL_EVIDENCE_SHA256=${controlHash}`,
+    `BLOCK_RUNNER_NATIVE_${environmentPrefix}_CONTROL_WORDPRESS_VERSION=${EXPECTED_WORDPRESS_VERSION}`,
   ].join('\n') + '\n', 'utf8');
   process.stdout.write(`${JSON.stringify({
     status: 'passed',
@@ -189,14 +213,14 @@ async function observeVersion(label) {
   };
 }
 
-function validateBrowserControl(result) {
+function validateBrowserControl(result, control) {
   const gates = result?.gates;
   const requiredPasses = ['client_registry', 'editor_inserter', 'editor_field_editing', 'editor_save', 'editor_reopen'];
   for (const gate of requiredPasses) {
-    if (gates?.[gate]?.status !== 'pass') throw new Error(`Native Heading control gate ${gate} did not pass.`);
+    if (gates?.[gate]?.status !== 'pass') throw new Error(`Native ${control.blockTitle} control gate ${gate} did not pass.`);
   }
-  if (gates.client_registry.details?.block !== 'core/heading') {
-    throw new Error('Native Heading control did not identify the standalone core/heading block.');
+  if (gates.client_registry.details?.block !== control.blockName) {
+    throw new Error(`Native ${control.blockTitle} control did not identify the standalone ${control.blockName} block.`);
   }
   const accessibilityEditor = gates.accessibility_editor;
   const violations = accessibilityEditor?.details?.axe?.violations;
@@ -208,27 +232,27 @@ function validateBrowserControl(result) {
     return;
   }
   if (accessibilityEditor?.status !== 'fail' || !Array.isArray(violations) || violations.length === 0) {
-    throw new Error('Native Heading control did not retain a clean Axe result or its expected editor findings.');
+    throw new Error(`Native ${control.blockTitle} control did not retain a clean Axe result or its expected editor findings.`);
   }
   const ids = new Set();
   for (const violation of violations) {
-    if (!EXPECTED_FINDINGS.has(violation?.id) || !Array.isArray(violation.nodes) || violation.nodes.length === 0) {
-      throw new Error('Native Heading control retained an unexpected Axe rule or empty node list.');
+    if (!control.expectedFindings.has(violation?.id) || !Array.isArray(violation.nodes) || violation.nodes.length === 0) {
+      throw new Error(`Native ${control.blockTitle} control retained an unexpected Axe rule or empty node list.`);
     }
     ids.add(violation.id);
     for (const node of violation.nodes) {
       const html = typeof node?.html === 'string' ? node.html : '';
-      if (!/^<h2\b/i.test(html)
+      if (!new RegExp(`^<${control.element}\\b`, 'i').test(html)
         || !/\brole=["']document["']/.test(html)
         || !/\baria-multiline=["']true["']/.test(html)
         || !/\baria-readonly=["']false["']/.test(html)
-        || !/\bdata-type=["']core\/heading["']/.test(html)
+        || !new RegExp(`\\bdata-type=["']${control.blockName}["']`).test(html)
         || !Array.isArray(node.target) || node.target.length === 0) {
-        throw new Error('Native Heading control Axe node is not the expected native h2 editor control.');
+        throw new Error(`Native ${control.blockTitle} control Axe node is not the expected native ${control.element} editor control.`);
       }
     }
   }
-  for (const id of EXPECTED_FINDINGS) if (!ids.has(id)) throw new Error(`Native Heading control is missing expected Axe finding ${id}.`);
+  for (const id of control.expectedFindings) if (!ids.has(id)) throw new Error(`Native ${control.blockTitle} control is missing expected Axe finding ${id}.`);
 }
 
 async function writeJson(file, value) {

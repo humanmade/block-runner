@@ -52,7 +52,8 @@ Before marking this brief **CURRENT**, the release owner must attach receipts pr
   receipt must be linked; the deterministic release receipt must not be presented as
   that benchmark result;
 - the raw WordPress proof receipt and the separate acceptance summary are both linked;
-  any accepted native Heading finding links its WordPress 7.1 control evidence hash;
+  any accepted native Heading or Paragraph finding links its WordPress 7.1 control
+  evidence hash;
 - each figure uses the approved claim shape above; and
 - every README, website, release-note, and product-preview figure agrees with the
   linked workload and receipt data.
