@@ -80,6 +80,26 @@ describe('release manual review binding', () => {
   });
 });
 
+describe('release native control retention', () => {
+  const helperStart = source.indexOf('function retainNativeControlEvidence(');
+  const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
+  it.each(['heading', 'paragraph'])('retains separate hash-verified %s evidence', (kind) => {
+    const prefix = `BLOCK_RUNNER_NATIVE_${kind.toUpperCase()}_CONTROL_`;
+    const env: Record<string, string> = { [`${prefix}EVIDENCE_PATH`]: '/control.json', [`${prefix}EVIDENCE_SHA256`]: hash, [`${prefix}WORDPRESS_VERSION`]: '7.1' };
+    let copied = '';
+    const retain = runInNewContext(`(${source.slice(helperStart, helperEnd)})`, {
+      process: { env }, path, existsSync: () => true, hashFile: () => hash,
+      evidenceDirectory: '/release', mkdirSync: () => {},
+      copyFileSync: (_source: string, destination: string) => { copied = destination; },
+      relativeArtifact: (file: string) => path.relative('/release', file),
+    }) as (kind: string, load: (evidence: unknown) => unknown) => { evidence: { path: string } };
+    expect(retain(kind, (evidence) => evidence).evidence.path).toBe(`control/native-${kind}-control.json`);
+    expect(copied).toBe(`/release/control/native-${kind}-control.json`);
+    env[`${prefix}EVIDENCE_SHA256`] = 'mismatch';
+    expect(() => retain(kind, (evidence) => evidence)).toThrow('hash mismatch');
+  });
+});
+
 describe('release installed skill verification', () => {
   it('keeps package-install logs distinct for the two installer consumers', () => {
     expect(source).toContain("installPackedCandidate(candidate, 'project-skill-package-install')");

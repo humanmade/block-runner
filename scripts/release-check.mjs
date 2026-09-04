@@ -15,7 +15,7 @@ import process from 'node:process';
 import { register } from 'tsx/esm/api';
 
 register();
-const { evaluateReleaseAcceptance, loadNativeHeadingControlEvidence, summarizeReleaseAcceptance } =
+const { evaluateReleaseAcceptance, loadNativeHeadingControlEvidence, loadNativeParagraphControlEvidence, summarizeReleaseAcceptance } =
   await import('../src/proof/release-acceptance.ts');
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -253,6 +253,7 @@ function activateGeneratedPluginZip() {
     const observed = validateGeneratedPluginActivation(receipt, pluginZip.sha256);
     const acceptance = summarizeReleaseAcceptance(evaluateReleaseAcceptance(receipt, {
       nativeHeadingControlEvidence: retainNativeHeadingControlEvidence(),
+      nativeParagraphControlEvidence: retainNativeParagraphControlEvidence(),
     }));
     const acceptanceFile = path.join(work, 'release-acceptance.json');
     writeFileSync(acceptanceFile, `${JSON.stringify(acceptance, null, 2)}\n`, 'utf8');
@@ -297,19 +298,28 @@ function validateManualReviewBinding(review, inputHash, pluginZipHash) {
  * deliberately unavailable and the raw Heading failure remains a blocker.
  */
 function retainNativeHeadingControlEvidence() {
-  const sourceValue = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_PATH;
-  const declaredHash = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_SHA256;
-  const wordpressVersion = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_WORDPRESS_VERSION;
+  return retainNativeControlEvidence('heading', loadNativeHeadingControlEvidence);
+}
+
+function retainNativeParagraphControlEvidence() {
+  return retainNativeControlEvidence('paragraph', loadNativeParagraphControlEvidence);
+}
+
+function retainNativeControlEvidence(kind, loadEvidence) {
+  const prefix = `BLOCK_RUNNER_NATIVE_${kind.toUpperCase()}_CONTROL_`;
+  const sourceValue = process.env[`${prefix}EVIDENCE_PATH`];
+  const declaredHash = process.env[`${prefix}EVIDENCE_SHA256`];
+  const wordpressVersion = process.env[`${prefix}WORDPRESS_VERSION`];
   if (!sourceValue && !declaredHash && !wordpressVersion) return undefined;
-  if (!sourceValue || !declaredHash || !wordpressVersion) throw new Error('native Heading exception requires evidence path, SHA-256, and observed WordPress version');
+  if (!sourceValue || !declaredHash || !wordpressVersion) throw new Error(`native ${kind} exception requires evidence path, SHA-256, and observed WordPress version`);
   const source = path.resolve(sourceValue);
-  if (!existsSync(source)) throw new Error(`native Heading control evidence is missing: ${source}`);
+  if (!existsSync(source)) throw new Error(`native ${kind} control evidence is missing: ${source}`);
   const actualHash = hashFile(source);
-  if (actualHash !== declaredHash) throw new Error(`native Heading control evidence hash mismatch: declared ${declaredHash}, observed ${actualHash}`);
-  const destination = path.join(evidenceDirectory, 'control', 'native-heading-control.json');
+  if (actualHash !== declaredHash) throw new Error(`native ${kind} control evidence hash mismatch: declared ${declaredHash}, observed ${actualHash}`);
+  const destination = path.join(evidenceDirectory, 'control', `native-${kind}-control.json`);
   mkdirSync(path.dirname(destination), { recursive: true });
   copyFileSync(source, destination);
-  const loaded = loadNativeHeadingControlEvidence({
+  const loaded = loadEvidence({
     wordpressVersion,
     evidence: { path: destination, sha256: actualHash },
   });
