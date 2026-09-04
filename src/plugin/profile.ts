@@ -7,6 +7,61 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+const ALLOW_SCRIPTS_ENV_KEYS = ['npm_config_allow_scripts', 'NPM_CONFIG_ALLOW_SCRIPTS'] as const;
+
+/**
+ * npm projects a user-level allow-scripts setting into every npm-run child process. A generated
+ * plugin is a separate package, so its lockfile resolution must not inherit that projection and
+ * accidentally reject ordinary WordPress dependencies with EALLOWSCRIPTS. Remove only an exact
+ * match; an explicit value that differs from the user config remains in force.
+ */
+export function removeMatchingAllowScriptsProjection(
+  environment: NodeJS.ProcessEnv,
+  userConfigValue: string,
+): NodeJS.ProcessEnv {
+  const projected = ALLOW_SCRIPTS_ENV_KEYS
+    .filter((key) => Object.prototype.hasOwnProperty.call(environment, key))
+    .map((key) => [key, environment[key]] as const)
+    .filter(([, value]) => value !== undefined);
+  if (projected.length === 0 || userConfigValue === '' || userConfigValue === 'undefined') {
+    return { ...environment };
+  }
+  if (!projected.every(([, value]) => value === userConfigValue)) {
+    return { ...environment };
+  }
+  const childEnvironment = { ...environment };
+  for (const key of ALLOW_SCRIPTS_ENV_KEYS) delete childEnvironment[key];
+  return childEnvironment;
+}
+
+/**
+ * Return the environment for a generated-plugin npm child. The readback runs in the same cwd as
+ * that child and with both projected keys absent, so a project-local config or an explicit caller
+ * override cannot be mistaken for the user-level projection. A failed readback preserves policy.
+ */
+export async function npmEnvironmentForGeneratedPlugin(
+  cwd: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv> {
+  const probeEnvironment = { ...environment };
+  const hasProjection = ALLOW_SCRIPTS_ENV_KEYS.some((key) => Object.prototype.hasOwnProperty.call(probeEnvironment, key));
+  if (!hasProjection) return { ...environment };
+  for (const key of ALLOW_SCRIPTS_ENV_KEYS) delete probeEnvironment[key];
+  try {
+    const { stdout } = await execFileAsync('npm', ['config', 'get', 'allow-scripts', '--location=user'], {
+      cwd,
+      env: probeEnvironment,
+      encoding: 'utf8',
+      timeout: 5_000,
+      maxBuffer: 16 * 1024,
+    });
+    return removeMatchingAllowScriptsProjection(environment, stdout.trim());
+  } catch {
+    // A failed readback is not permission to bypass an explicit environment policy.
+    return { ...environment };
+  }
+}
+
 /**
  * The single host profile this preview recognises.  Deliberately accepting only a small,
  * explainable shape is safer than putting a source directory into an arbitrary webpack build.
@@ -968,7 +1023,7 @@ async function writeStandaloneDependencyLock(root: string): Promise<void> {
       '--ignore-scripts',
       '--no-audit',
       '--no-fund',
-    ], { cwd: root });
+    ], { cwd: root, env: await npmEnvironmentForGeneratedPlugin(root), timeout: 120_000 });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not resolve the standalone @wordpress/scripts dependency lock: ${detail}`);

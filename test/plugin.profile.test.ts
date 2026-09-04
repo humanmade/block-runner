@@ -12,6 +12,8 @@ import {
   detectWpScriptsPlugin,
   planExistingPluginOutput,
   planStandalonePluginOutput,
+  npmEnvironmentForGeneratedPlugin,
+  removeMatchingAllowScriptsProjection,
   UnsupportedPluginLayoutError,
   writePluginOutput,
 } from '../src/plugin/profile.js';
@@ -176,6 +178,23 @@ describe('wp-scripts plugin profile', () => {
 });
 
 describe('standalone plugin profile', () => {
+  it('removes only an exact npm user-config projection and preserves a different explicit policy', () => {
+    const userConfigValue = '@example/approved-script';
+    const projected = { ...process.env, npm_config_allow_scripts: userConfigValue };
+    const stripped = removeMatchingAllowScriptsProjection(projected, userConfigValue);
+    expect(stripped.npm_config_allow_scripts).toBeUndefined();
+
+    const explicit = `${userConfigValue}-explicit-different`;
+    const preserved = removeMatchingAllowScriptsProjection(
+      { ...process.env, npm_config_allow_scripts: explicit },
+      userConfigValue,
+    );
+    expect(preserved.npm_config_allow_scripts).toBe(explicit);
+
+    const missingConfig = removeMatchingAllowScriptsProjection(projected, 'undefined');
+    expect(missingConfig.npm_config_allow_scripts).toBe(userConfigValue);
+  });
+
   it('plans a pinned clean-install wrapper, ZIP policy, runtime bootstrap, and every generated source file', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-standalone-'));
     const output = path.join(root, 'notice-plugin');
@@ -297,9 +316,14 @@ describe('standalone plugin profile', () => {
     expect(lock.packages['node_modules/@wordpress/scripts']?.version).toBe('34.2.0');
     await expect(stat(path.join(output, 'node_modules'))).rejects.toThrow();
 
-    await execFileAsync('npm', ['ci', '--include=dev', '--no-audit', '--no-fund'], { cwd: output, timeout: 120_000 });
+    const npmEnvironment = await npmEnvironmentForGeneratedPlugin(output);
+    await execFileAsync('npm', ['ci', '--include=dev', '--no-audit', '--no-fund'], {
+      cwd: output,
+      timeout: 120_000,
+      env: npmEnvironment,
+    });
     await execFileAsync('npm', ['run', 'zip'], { cwd: output, timeout: 120_000,
-      env: { ...process.env, NODE_ENV: 'production' } });
+      env: { ...npmEnvironment, NODE_ENV: 'production' } });
     const archive = path.join(output, 'acme-notice.zip');
     expect(await stat(archive)).toBeTruthy();
     await execFileAsync('npm', ['run', 'test:zip', '--', archive], { cwd: output, timeout: 30_000 });
@@ -376,7 +400,7 @@ describe('standalone plugin profile', () => {
       expect(await readFile(path.join(output, 'src/blocks/notice', relative))).toEqual(bytes);
     }
     await execFileAsync('npm', ['run', 'zip'], { cwd: output, timeout: 120_000,
-      env: { ...process.env, NODE_ENV: 'production' } });
+      env: { ...npmEnvironment, NODE_ENV: 'production' } });
     await execFileAsync('npm', ['run', 'test:zip', '--', archive], { cwd: output, timeout: 30_000 });
     const rebuiltEntries = (await execFileAsync('unzip', ['-Z1', archive])).stdout.split(/\r?\n/).filter(Boolean);
     for (const leaf of ['notice', 'second-notice']) {
