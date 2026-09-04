@@ -14,6 +14,17 @@ const prepare = (root: string) => (runInNewContext(`(${collector.slice(begin, en
 }) as () => Promise<void>)();
 
 describe('WordPress control startup and retained failures', () => {
+  it('keeps Docker ZIP staging outside WordPress media uploads', () => {
+    const config = JSON.parse(readFileSync(new URL('../proof/wp-env.json', import.meta.url), 'utf8'));
+    expect(config.mappings).toEqual({ 'wp-content/block-runner-proof': '.block-runner-proof-stage' });
+    const runner = readFileSync(new URL('../src/proof/runner.ts', import.meta.url), 'utf8');
+    expect(runner).toContain("const stagedZipContainerDirectory = '/var/www/html/wp-content/block-runner-proof'");
+    expect(runner).toContain('wp_upload_bits($filename, null, $png)');
+    expect(runner).toContain("if (!empty($upload['error']))");
+    expect(runner).toContain("hash_file('sha256', $file) !== hash('sha256', $png)");
+    expect(runner).not.toContain('file_put_contents($file, $png)');
+  });
+
   it('creates the writable host staging directory before Docker startup', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-control-stage-'));
     await prepare(root);

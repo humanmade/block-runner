@@ -36,7 +36,9 @@ const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json
 const defaultWpEnvConfig = path.join(projectRoot, 'proof', 'wp-env.json');
 const playwrightHelper = path.join(projectRoot, 'scripts', 'proof-playwright.mjs');
 const stagedZipDirectory = path.join(projectRoot, '.block-runner-proof-stage');
-const stagedZipContainerDirectory = '/var/www/html/wp-content/uploads/block-runner-proof';
+// Keep staging outside uploads: a nested Docker mount can create its parent as
+// root on a fresh Linux host, preventing WordPress from creating media folders.
+const stagedZipContainerDirectory = '/var/www/html/wp-content/block-runner-proof';
 const REQUIRED_WORDPRESS_VERSION = '7.1' as const;
 const REQUIRED_WORDPRESS_CORE_SOURCE = 'WordPress/WordPress#7.1' as const;
 const REQUIRED_PHP_SERIES = '8.3' as const;
@@ -868,15 +870,17 @@ function createRuntime(
   ): Promise<readonly { id: number; url: string }[] | undefined> => {
     const php = [
       "require_once ABSPATH . 'wp-admin/includes/image.php';",
-      "$uploads = wp_upload_dir();",
       `$png = base64_decode('${PROOF_IMAGE_BASE64}');`,
       '$result = array();',
       `for ($index = 0; $index < ${instances.length}; $index++) {`,
       "  $filename = 'block-runner-proof-pattern-' . $index . '.png';",
-      "  $file = trailingslashit($uploads['path']) . $filename;",
-      '  file_put_contents($file, $png);',
+      '  $upload = wp_upload_bits($filename, null, $png);',
+      "  if (!empty($upload['error'])) { throw new RuntimeException('Proof media upload failed: ' . $upload['error']); }",
+      "  $file = $upload['file'];",
+      "  if (!is_readable($file) || hash_file('sha256', $file) !== hash('sha256', $png)) { throw new RuntimeException('Proof media bytes were not retained correctly.'); }",
       "  $attachment = array('post_mime_type' => 'image/png', 'post_title' => 'Block Runner proof pattern ' . ($index + 1), 'post_status' => 'inherit');",
-      '  $id = wp_insert_attachment($attachment, $file);',
+      '  $id = wp_insert_attachment($attachment, $file, 0, true);',
+      "  if (is_wp_error($id) || !$id) { throw new RuntimeException('Proof media attachment registration failed.'); }",
       '  $metadata = wp_generate_attachment_metadata($id, $file);',
       '  wp_update_attachment_metadata($id, $metadata);',
       "  $result[] = array('id' => (int) $id, 'url' => wp_get_attachment_url($id));",
