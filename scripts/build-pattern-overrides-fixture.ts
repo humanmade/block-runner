@@ -13,7 +13,11 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
 import { patternOverrideName } from '../src/authoring/overrides.js';
-import { planStandalonePluginOutput, writePluginOutput } from '../src/plugin/profile.js';
+import {
+  npmEnvironmentForGeneratedPlugin,
+  planStandalonePluginOutput,
+  writePluginOutput,
+} from '../src/plugin/profile.js';
 import type { AuthoringPlan } from '../src/authoring/schema.js';
 import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
 import { getWp } from '../src/headless/wp.js';
@@ -28,6 +32,26 @@ const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'patter
 const visualGoldenPath = path.join(projectRoot, 'proof', 'wordpress-7.1-pattern-overrides.expected.png');
 const pluginSlug = 'block-runner-pattern-overrides-fixture';
 const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z');
+
+const RETAINED_FIXTURE_ASSET_SOURCES = new Map([
+  ['canonical-image', 'source/canonical.png'],
+  ['static-logo', 'source/logo.svg'],
+]);
+
+/**
+ * Keep the checked-in proof input independent of the temporary directory used to build it.
+ * The fixture owns these two asset IDs, so their retained paths are explicit rather than inferred
+ * from a host-specific absolute source path. The compiler resolves them against its proof root.
+ */
+export function portableFixturePlan(plan: AuthoringPlan): AuthoringPlan {
+  return {
+    ...plan,
+    assets: plan.assets.map((asset) => ({
+      ...asset,
+      source: RETAINED_FIXTURE_ASSET_SOURCES.get(asset.id) ?? asset.source,
+    })),
+  };
+}
 
 export interface BuiltPatternOverridesFixture {
   inputPath: string;
@@ -57,33 +81,48 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
   const sourceSvg = path.join(root, 'source', 'logo.svg');
   const svgBytes = Buffer.from(PROOF_SVG_SOURCE);
   await writeFile(sourceSvg, svgBytes);
-  plan.assets = [{ id: 'canonical-image', source: sourceImage, status: 'ready', destination: 'assets/canonical.png',
+  const assetPlan: AuthoringPlan['assets'] = [{ id: 'canonical-image', source: 'source/canonical.png', status: 'ready', destination: 'assets/canonical.png',
     sha256: createHash('sha256').update(imageBytes).digest('hex'), uses: [{ node: 'hero.image', attribute: 'url' }] },
-  { id: 'static-logo', source: sourceSvg, status: 'ready', destination: 'assets/logo.svg',
+  { id: 'static-logo', source: 'source/logo.svg', status: 'ready', destination: 'assets/logo.svg',
     sha256: createHash('sha256').update(svgBytes).digest('hex'), uses: [{ node: 'hero.logo', attribute: 'url' }] }];
-  const compiled = compileRegisteredBlock(plan);
+  // The retained plan stays portable; the compiler receives resolved files for its asset reads.
+  const portablePlan = portableFixturePlan({ ...plan, assets: assetPlan });
+  const compilerPlan: AuthoringPlan = {
+    ...portablePlan,
+    assets: portablePlan.assets.map((asset) => ({ ...asset, source: path.resolve(root, asset.source) })),
+  };
+  const compiled = compileRegisteredBlock(compilerPlan);
   const contract = validatePatternOverrideContract(compiled.template, []);
   const errors = contract.errors;
   if (errors.length > 0) throw new Error(`The generated pattern fixture plan is invalid: ${errors.join('; ')}`);
 
-  const updatedPlan = canonicalUpdatePlan(plan);
+  const updatedPlan = canonicalUpdatePlan(compilerPlan);
   const updated = compileRegisteredBlock(updatedPlan);
   const updatedContract = validatePatternOverrideContract(updated.template, []);
   const updatedErrors = updatedContract.errors;
   if (updatedErrors.length > 0) throw new Error(`The updated generated pattern fixture plan is invalid: ${updatedErrors.join('; ')}`);
 
   await mkdir(pluginDirectory, { recursive: true });
-  await writeFixed(inputPath, `${JSON.stringify(plan, null, 2)}\n`);
+  await writeFixed(inputPath, `${JSON.stringify(portablePlan, null, 2)}\n`);
   const packagePlan = await planStandalonePluginOutput(pluginDirectory, {
-    name: plan.target.name,
+    name: compilerPlan.target.name,
     files: Object.fromEntries([...compiled.files, ...compiled.assets].map((file) => [file.path, file.content])),
   });
   await writePluginOutput(packagePlan);
-  await execFileAsync('npm', ['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: pluginDirectory, timeout: 180_000 });
+  const npmEnvironment = await npmEnvironmentForGeneratedPlugin(pluginDirectory);
+  await execFileAsync('npm', ['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+    cwd: pluginDirectory,
+    timeout: 180_000,
+    env: npmEnvironment,
+  });
   // wp-scripts preserves an inherited NODE_ENV. In Vitest that otherwise builds a development ZIP.
   await execFileAsync('npm', ['run', 'zip'], { cwd: pluginDirectory, timeout: 180_000,
-    env: { ...process.env, NODE_ENV: 'production' } });
-  await execFileAsync('npm', ['run', 'test:zip', '--', pluginZip], { cwd: pluginDirectory, timeout: 30_000 });
+    env: { ...npmEnvironment, NODE_ENV: 'production' } });
+  await execFileAsync('npm', ['run', 'test:zip', '--', pluginZip], {
+    cwd: pluginDirectory,
+    timeout: 30_000,
+    env: npmEnvironment,
+  });
 
   // Observe real webpack-emitted files instead of predicting a content hash or inlining a URL.
   const buildRoot = path.join(pluginDirectory, 'build');
@@ -103,13 +142,13 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
   ] as AuthoringTemplate[number]);
   const nativeContainerMarkup = await serializeNativeTemplate(runtimeTemplate(compiled.template));
   assertBackgroundClass(nativeContainerMarkup, 'initial');
-  const generatedBlockMarkup = wrapGeneratedBlock(plan.target.name, nativeContainerMarkup);
+  const generatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, nativeContainerMarkup);
   const updatedNativeMarkup = await serializeNativeTemplate(runtimeTemplate(updated.template));
   assertBackgroundClass(updatedNativeMarkup, 'updated');
-  const updatedBlockMarkup = wrapGeneratedBlock(plan.target.name, updatedNativeMarkup);
+  const updatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, updatedNativeMarkup);
 
   const fixture = proofFixture({
-    plan,
+    plan: compilerPlan,
     canonicalContent: generatedBlockMarkup,
     canonicalUpdateContent: updatedBlockMarkup,
     requiredBindings: contract.bindings.map(({ name, attribute }) => ({ name, attribute })),

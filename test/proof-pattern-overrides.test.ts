@@ -2,11 +2,52 @@ import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { portableFixturePlan } from '../scripts/build-pattern-overrides-fixture.js';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
 import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
+import { hashAuthoringPlan, type AuthoringPlan } from '../src/authoring/schema.js';
 import { runProof } from '../src/index.js';
 
 describe('pattern-override receipts', () => {
+  it('keeps retained fixture input hashes stable across temporary proof roots', () => {
+    const planForRoot = (root: string): AuthoringPlan => ({
+      version: 1,
+      generatorVersion: '0.9.0',
+      target: { name: 'acme/pattern', title: 'Pattern' },
+      structure: [],
+      fields: [],
+      locking: { mode: 'contentOnly' },
+      styles: { strategy: 'native', outcomes: [] },
+      pattern: { ready: false, overrides: [] },
+      assets: [
+        {
+          id: 'canonical-image',
+          source: path.join(root, 'source', 'canonical.png'),
+          status: 'ready',
+          destination: 'assets/canonical.png',
+          sha256: 'a'.repeat(64),
+          uses: [{ node: 'hero.image', attribute: 'url' }],
+        },
+        {
+          id: 'static-logo',
+          source: path.join(root, 'source', 'logo.svg'),
+          status: 'ready',
+          destination: 'assets/logo.svg',
+          sha256: 'b'.repeat(64),
+          uses: [{ node: 'hero.logo', attribute: 'url' }],
+        },
+      ],
+      files: [],
+      warnings: [],
+    });
+
+    const first = portableFixturePlan(planForRoot('/private/tmp/proof-one'));
+    const second = portableFixturePlan(planForRoot('/private/tmp/proof-two'));
+    expect(first.assets.map(({ source }) => source)).toEqual(['source/canonical.png', 'source/logo.svg']);
+    expect(second).toEqual(first);
+    expect(hashAuthoringPlan(second)).toBe(hashAuthoringPlan(first));
+  });
+
   it('serializes wp-env invocations so concurrent config writers cannot erase its runtime cache', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-proof-serial-'));
     const inputPath = path.join(root, 'input.json');

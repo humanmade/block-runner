@@ -6,6 +6,7 @@ import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildPatternOverridesFixture, type BuiltPatternOverridesFixture } from '../scripts/build-pattern-overrides-fixture.js';
 import { runProof, type ProofGateId, type ProofRunResult } from '../src/index.js';
+import { npmEnvironmentForGeneratedPlugin } from '../src/plugin/profile.js';
 import {
   evaluateReleaseAcceptance,
   loadNativeHeadingControlEvidence,
@@ -122,8 +123,9 @@ const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
       let mutatedZip: string;
       try {
         await writeFile(file, changed);
+        const npmEnvironment = await npmEnvironmentForGeneratedPlugin(built.pluginDirectory);
         await execFile('npm', ['run', 'zip'], { cwd: built.pluginDirectory, timeout: 180_000,
-          env: { ...process.env, NODE_ENV: 'production' } });
+          env: { ...npmEnvironment, NODE_ENV: 'production' } });
         mutatedZip = path.join(root, candidate.name + '.zip');
         await copyFile(built.pluginZip, mutatedZip);
       } finally {
