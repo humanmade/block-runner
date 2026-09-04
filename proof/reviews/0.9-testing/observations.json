@@ -1,0 +1,181 @@
+{
+  "frontend": [
+    {
+      "tag": "A",
+      "text": "Canonical action",
+      "href": "https://example.test/canonical",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "A",
+      "text": "Canonical action",
+      "href": "https://example.test/canonical",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "A",
+      "text": "First instance action",
+      "href": "https://example.test/first",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "A",
+      "text": "Second instance action",
+      "href": "https://example.test/second",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    }
+  ],
+  "editor": [
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": "tab",
+      "text": "Block",
+      "outline": "rgb(30, 30, 30) none 3px",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": "Close Settings",
+      "role": null,
+      "text": "",
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": null,
+      "text": "Edit pattern",
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": "Content",
+      "role": "tab",
+      "text": "",
+      "outline": "rgb(30, 30, 30) none 3px",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": null,
+      "text": "Content",
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": null,
+      "text": "Image",
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "focusVisible": true
+    }
+  ],
+  "findings": [],
+  "screenshots": [
+    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-1.png",
+    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-2.png",
+    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-3.png",
+    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/frontend-focus-4.png",
+    "/tmp/block-runner-final-v8-dMybxN/keyboard-review/editor-keyboard.png"
+  ],
+  "readingOrder": [
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Proof editor field"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version one."
+    },
+    {
+      "tag": "IMG",
+      "text": "Canonical image"
+    },
+    {
+      "tag": "A",
+      "text": "Canonical action"
+    },
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Canonical heading"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version one."
+    },
+    {
+      "tag": "IMG",
+      "text": "Canonical image"
+    },
+    {
+      "tag": "A",
+      "text": "Canonical action"
+    },
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Canonical fallback after reset"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version two."
+    },
+    {
+      "tag": "IMG",
+      "text": "First instance image"
+    },
+    {
+      "tag": "A",
+      "text": "First instance action"
+    },
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Second instance title"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version two."
+    },
+    {
+      "tag": "IMG",
+      "text": "Second instance image"
+    },
+    {
+      "tag": "A",
+      "text": "Second instance action"
+    }
+  ],
+  "editorEditUndo": {
+    "original": "Proof editor field",
+    "restored": "Proof editor field",
+    "saved": false
+  }
+}

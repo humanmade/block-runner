@@ -1,0 +1,35 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "Codex, agent-assisted keyboard and screenshot review",
+  "reviewedAt": "2026-09-04",
+  "inputHash": "sha256:ad5f452aa7bd8fd219e25e7988529b8031c57cd93e74fcc9f00d66b426eaf124",
+  "pluginZipHash": "sha256:79202b302cfdf261d060ac4ecb2c46120893c01099589eb0610aeb12db32a064",
+  "status": "pass",
+  "checks": {
+    "editor-keyboard": "On the installed generated block in WordPress 7.1, focused the native heading, typed with the keyboard, undid the edit, and verified exact original text. Six subsequent Tab presses moved out to named sidebar controls. No save was made and no keyboard trap was observed in this scoped path.",
+    "frontend-keyboard": "Keyboard Tab navigation reached all four generated section links in visual document order. Each had the expected canonical or instance label and destination. External links were not activated.",
+    "focus-visibility": "Inspected the retained frontend focus screenshot and editor sidebar focus screenshot. Frontend links have a visible 2px outline, and the editor Image content control has a visible focus border. Computed focus-visible states and focus styles are retained for all observed stops.",
+    "content-reading-order": "Compared the full reviewed frontend screenshot with retained DOM order: each section contains the SVG alt text, heading, explanatory paragraph, image alt text, and action link in that order. Instance override and reset text remains in the expected sections."
+  },
+  "findings": [],
+  "limitations": [
+    "This is an agent-assisted focused keyboard/visual review, not a human accessibility certification or a screen-reader test.",
+    "The raw native Heading and Paragraph Axe failures remain separate failures; this record does not waive them.",
+    "The content-only editor displayed an Edit pattern sidebar control for the standalone wrapper; this separate editing-policy finding is retained as a native-editor policy limitation.",
+    "Only Chromium at 1280 by 900 was reviewed. This record is valid only for the exact input and plugin ZIP hashes above."
+  ],
+  "evidence": {
+    "observations": "observations.json",
+    "observationsSha256": "f01dbff0e264ceec5cb8ad62a3525735964b23b64aa0f9e3ee9874a6c76d851f",
+    "originalObservationsSha256": "747efba7785776bdeca6ab354b03f716050a2e418b6965091e24c95a73c214a9",
+    "observationsEncodingNote": "The committed copy adds a terminal newline; observation content is unchanged.",
+    "screenshots": [
+      "editor-keyboard.png",
+      "frontend-focus-1.png",
+      "frontend-focus-2.png",
+      "frontend-focus-3.png",
+      "frontend-focus-4.png"
+    ],
+    "retainedTraceSha256": "f44f329591aa348aafe855343a3918dbf9617a6ca61ee930183670d7dd59f8ca"
+  }
+}

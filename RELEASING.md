@@ -28,7 +28,7 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 release, run the deterministic release candidate gates from the candidate checkout:
 
 ```sh
-npm run release:check -- --receipt release/0.9-testing/receipts/<version>.json
+npm run release:check -- --manual-review proof/reviews/0.9-testing/manual-review.json --receipt release/0.9-testing/receipts/<version>.json
 ```
 
 The 13-fixture registered-block authoring benchmark is optional and does not

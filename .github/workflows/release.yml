@@ -36,7 +36,7 @@ jobs:
       - name: Run the receipt-backed release candidate matrix
         # No --plans is intentional: the optional registered-block authoring
         # benchmark remains pending/unscored and is not a release prerequisite.
-        run: npm run release:check -- --matrix full-release-matrix --receipt "release/0.9-testing/receipts/${RELEASE_RECEIPT_TAG}.json"
+        run: npm run release:check -- --matrix full-release-matrix --manual-review proof/reviews/0.9-testing/manual-review.json --receipt "release/0.9-testing/receipts/${RELEASE_RECEIPT_TAG}.json"
         env:
           # Release names are data, never shell syntax. Keep the expansion
           # quoted so valid Git tag punctuation cannot alter this command.
