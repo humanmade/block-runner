@@ -25,6 +25,20 @@ function plan(overrides: Record<string, unknown> = {}): Record<string, unknown> 
 }
 
 describe('author CLI', () => {
+  it('does not let direct HTML authoring bypass source confirmation', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
+    await writeFile(path.join(project, 'design.html'), '<p>Native paragraph</p>');
+    const rejected = await runCli(['author', 'design.html', '--name', 'example/notice', '--out-dir', 'generated', '--json'], project);
+    expect(rejected.code).not.toBe(0);
+    expect(rejected.stderr).toContain('analysis-only');
+    await expect(stat(path.join(project, 'generated'))).rejects.toMatchObject({ code: 'ENOENT' });
+    const analyzed = await runCli(['author', 'design.html', '--name', 'example/notice', '--json'], project);
+    expect(analyzed.code).toBe(0);
+    const report = JSON.parse(analyzed.stdout);
+    expect(report.package.canonicalPlan.structure[0].block).toBe('core/paragraph');
+    expect(report.package.files['index.js']).toContain("import './style.scss'");
+    await expect(stat(path.join(project, 'generated'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
   it('previews without writing and only writes the exact confirmed canonical plan', async () => {
     const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
     const input = plan();

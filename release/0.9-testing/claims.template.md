@@ -1,7 +1,8 @@
 # 0.9 product-preview claim record
 
-**Status:** DRAFT — not current until the linked authoring proof and full release
-matrix pass for the same release candidate.
+**Status:** DRAFT — not current until the linked deterministic release matrix and
+representative WordPress proof pass for the same release candidate. The optional
+authoring benchmark remains a separate, explicitly scored claim.
 
 This is the future-state product-preview brief for a completed 0.9 testing release.
 It must not be presented as a statement about the current npm package until every
@@ -44,11 +45,15 @@ Required fields for every numerical or percentage claim:
 
 Before marking this brief **CURRENT**, the release owner must attach receipts proving:
 
-- [`npm run authoring:prove`](./README.md#required-release-commands) passed against
-  the full WordPress 7.1 release fixture set;
 - [`npm run release:check`](./README.md#required-release-commands) passed, including
   `npm run verify`, package dry run, skill validation, installer smoke, and generated
-  plugin ZIP activation from the candidate;
+  plugin ZIP activation from the candidate, with `acceptance.releaseOk: true`;
+- if the optional registered-block authoring benchmark is mentioned, its own scored
+  receipt must be linked; the deterministic release receipt must not be presented as
+  that benchmark result;
+- the raw WordPress proof receipt and the separate acceptance summary are both linked;
+  any accepted native Heading or Paragraph finding links its WordPress 7.1 control
+  evidence hash;
 - each figure uses the approved claim shape above; and
 - every README, website, release-note, and product-preview figure agrees with the
   linked workload and receipt data.

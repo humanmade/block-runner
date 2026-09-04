@@ -1,0 +1,213 @@
+{
+  "inputHash": "sha256:3321e9846b4c042ff9c4c23bed09a2c3e2aa552ce702624fc9b9100b4297eaaa",
+  "pluginZipHash": "sha256:8d525c79df7792259b61790a113959fbbff20aa34ff0c1f1bd5fb92542272e9d",
+  "publication": {
+    "contentHash": "sha256:a6611815a16529692fde25f1132001cad041afe82b38d365de05e567cfc84d13",
+    "id": 256,
+    "permalink": "http://localhost:8888/2026/09/04/256/"
+  },
+  "browser": "149.0.7827.55",
+  "viewport": {
+    "width": 1280,
+    "height": 900
+  },
+  "frontend": [
+    {
+      "tag": "A",
+      "name": null,
+      "role": null,
+      "text": "Canonical action",
+      "href": "https://example.test/canonical",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "A",
+      "name": null,
+      "role": null,
+      "text": "Canonical action",
+      "href": "https://example.test/canonical",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "A",
+      "name": null,
+      "role": null,
+      "text": "First instance action",
+      "href": "https://example.test/first",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "A",
+      "name": null,
+      "role": null,
+      "text": "Second instance action",
+      "href": "https://example.test/second",
+      "outline": "rgb(104, 104, 104) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    }
+  ],
+  "editor": [
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": "tab",
+      "text": "Block",
+      "href": null,
+      "outline": "rgb(30, 30, 30) none 3px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": "Close Settings",
+      "role": null,
+      "text": "",
+      "href": null,
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": null,
+      "text": "Edit pattern",
+      "href": null,
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": "Content",
+      "role": "tab",
+      "text": "",
+      "href": null,
+      "outline": "rgb(30, 30, 30) none 3px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": null,
+      "text": "Content",
+      "href": null,
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    },
+    {
+      "tag": "BUTTON",
+      "name": null,
+      "role": null,
+      "text": "Image",
+      "href": null,
+      "outline": "rgb(56, 88, 233) solid 2px",
+      "boxShadow": "none",
+      "focusVisible": true
+    }
+  ],
+  "readingOrder": [
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Proof editor field"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version one."
+    },
+    {
+      "tag": "IMG",
+      "text": "Canonical image"
+    },
+    {
+      "tag": "A",
+      "text": "Canonical action"
+    },
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Canonical heading"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version one."
+    },
+    {
+      "tag": "IMG",
+      "text": "Canonical image"
+    },
+    {
+      "tag": "A",
+      "text": "Canonical action"
+    },
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Canonical fallback after reset"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version two."
+    },
+    {
+      "tag": "IMG",
+      "text": "First instance image"
+    },
+    {
+      "tag": "A",
+      "text": "First instance action"
+    },
+    {
+      "tag": "IMG",
+      "text": "Static SVG check mark"
+    },
+    {
+      "tag": "H2",
+      "text": "Second instance title"
+    },
+    {
+      "tag": "P",
+      "text": "Canonical layout version two."
+    },
+    {
+      "tag": "IMG",
+      "text": "Second instance image"
+    },
+    {
+      "tag": "A",
+      "text": "Second instance action"
+    }
+  ],
+  "screenshots": [
+    "frontend-focus-1.png",
+    "frontend-focus-2.png",
+    "frontend-focus-3.png",
+    "frontend-focus-4.png",
+    "editor-keyboard.png"
+  ],
+  "findings": [],
+  "editorKeyboardEdit": {
+    "original": "Proof editor field",
+    "restored": "Proof editor field",
+    "saved": false
+  }
+}

@@ -91,7 +91,6 @@ interface PluginWriteCliOptions extends PluginPreviewCliOptions {
   confirm?: string;
   approveReplace?: string[];
 }
-
 interface ProofCliOptions {
   profile?: string;
   fixture?: string;
@@ -148,8 +147,11 @@ addTokenOptions(
   .option('--name <namespace/slug>', 'registered block name, for example acme/hero')
   .option('--title <title>', 'block title (defaults from the slug)')
   .option('--category <category>', 'block category (default: widgets)')
-  .option('--out-dir <path>', 'write the generated package and copied assets to this directory')
+  .option('--out-dir <path>', 'unsupported: use author preview/write to confirm source publication')
   .action(async (htmlOrStdin: string, options: CliOptions) => {
+    if (options.outDir) {
+      program.error('error: HTML authoring is analysis-only; use --json, review package.canonicalPlan with author preview, then author write --confirm');
+    }
     if (!htmlOrStdin) {
       program.error('error: author needs exactly one design input');
     }
@@ -161,8 +163,8 @@ addTokenOptions(
     if (inputs.length !== 1) {
       program.error('error: author accepts exactly one design input because it generates exactly one registered block');
     }
-    if (!options.outDir && !options.json) {
-      program.error('error: author needs --out-dir <path> to write its package, or --json to inspect the generated package');
+    if (!options.json) {
+      program.error('error: HTML authoring needs --json to return its analysis and canonical plan; source publication uses author preview/write');
     }
     const input = inputs[0];
     if (!input) {
@@ -171,7 +173,6 @@ addTokenOptions(
     const report = await generateRegisteredBlock(input.content, {
       ...apiOptions,
       sourcePath: input.path,
-      outDir: options.outDir,
       author: {
         name: options.name,
         title: options.title,
@@ -422,6 +423,7 @@ program
     }
     process.exitCode = result.ok ? 0 : 1;
   });
+
 
 program
   .command('skill')

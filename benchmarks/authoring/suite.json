@@ -20,7 +20,7 @@
     "plan", "source", "native", "style", "warnings", "build", "editor",
     "frontend", "pattern", "fidelity", "accessibility"
   ],
-  "terminalStatuses": ["scored", "unsupported", "blocked", "engine-error"],
+  "terminalStatuses": ["scored", "unsupported", "blocked", "engine_error"],
   "environment": {
     "wordpress": "7.1",
     "theme": {
@@ -37,7 +37,7 @@
   },
   "integrity": {
     "prohibitCombinedScoreWith": ["../specs", "../results.jsonl"],
-    "invalidMeasurementStatuses": ["unsupported", "blocked", "engine-error"],
+    "invalidMeasurementStatuses": ["unsupported", "blocked", "engine_error"],
     "requiredProvenance": "provenance.template.json",
     "hashAlgorithm": "sha256",
     "hashInputs": "provenance.template.json#/hashInputs"
@@ -45,7 +45,7 @@
   "resultPolicy": {
     "unrunExecutableGate": "blocked",
     "missingReceipt": "blocked",
-    "toolOrModelFailure": "engine-error",
+    "toolOrModelFailure": "engine_error",
     "expectedNegative": "must-fail-closed-as-unsupported"
   }
 }

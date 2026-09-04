@@ -1,4 +1,4 @@
-import { mkdir, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { loadConfig } from '../config/load.js';
@@ -12,9 +12,19 @@ import {
   BlockRunnerReport,
   GeneratedBlockPackage,
   ReportItem,
-  WpBlock,
 } from '../types.js';
-import { classifyCssUrlReference, rewriteCssAssets, scanCssUrlReferences } from './assets.js';
+import {
+  fallbackUnlicensedFonts,
+  classifyCssUrlReference,
+  rewriteCssAssets,
+  scanCssUrlReferences,
+  scanFontFaces,
+  type FontAssetWarning,
+  type FontLicenseDecision,
+  type PreparedCssAsset,
+} from './assets.js';
+import { writeGeneratedRegisteredBlock } from '../authoring/destination.js';
+import { compileAnalyzedDesign, namespaceAuthoringFontReferences, prepareAuthoringFonts } from './plan.js';
 import {
   compileTailwindBuildGraph,
   createSelectorDependencyTransport,
@@ -37,17 +47,19 @@ import { sourceDeclarationKey, type StyleLedgerEntry } from '../styles/apply.js'
 export async function author(input: string, options: AuthorOptions = {}): Promise<BlockRunnerReport> {
   const config = await loadConfig(options);
   const definition = mergeAuthorConfig(config.author, options.author);
+  const source = { entry: options.sourcePath ?? '<inline>', sha256: createHash('sha256').update(input, 'utf8').digest('hex'), format: 'html' as const };
   const name = definition.name;
   if (!name || !isBlockName(name)) {
-    return authorFailure('author.name must be a registered block name such as "acme/hero"');
+    return authorFailure('author.name must be a registered block name such as "acme/hero"', source);
   }
   const behaviour = unsupportedBehaviour(input);
   if (behaviour) {
-    return authorFailure(behaviour);
+    return authorFailure(behaviour, source);
   }
   if (!definition.styles?.css && linkedStylesheets(input).length > 0) {
     return authorFailure(
       'external stylesheet input requires compiled CSS in author.styles.css; remote stylesheet fetching and implicit import graphs are disabled',
+      source,
     );
   }
 
@@ -57,16 +69,17 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   if (styleInput.trim() && styleMode !== 'css' && styleMode !== 'tailwind') {
     return authorFailure(
       'author.styles.mode must explicitly be "css" or "tailwind" whenever stylesheet input is supplied',
+      source,
     );
   }
   if (styleMode !== undefined && styleMode !== 'css' && styleMode !== 'tailwind') {
-    return authorFailure('author.styles.mode must be "css" or "tailwind"');
+    return authorFailure('author.styles.mode must be "css" or "tailwind"', source);
   }
   if (styleMode === 'css' && definition.styles?.tailwind) {
-    return authorFailure('author.styles.tailwind requires author.styles.mode to be "tailwind"');
+    return authorFailure('author.styles.tailwind requires author.styles.mode to be "tailwind"', source);
   }
   if (styleMode === 'css' && (hasTailwindSignal(styleInput) || hasTailwindRuntimeSignal(styleInput))) {
-    return authorFailure('Tailwind source or runtime CSS requires author.styles.mode to be "tailwind"');
+    return authorFailure('Tailwind source or runtime CSS requires author.styles.mode to be "tailwind"', source);
   }
   let buildGraph = validateCssBuildGraph(definition.styles?.tailwind, {
     css: styleInput,
@@ -104,6 +117,95 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       });
     }
   }
+  const destinationAssetDir = options.outDir
+    ? path.join(options.outDir, 'assets')
+    : path.join(process.cwd(), '.block-runner-unwritten-assets');
+  const preparedAssets = new Map<string, PreparedCssAsset>();
+  const prepareAsset = (asset: PreparedCssAsset): void => {
+    const existing = preparedAssets.get(asset.destination);
+    if (existing && existing.sha256 !== asset.sha256) throw new Error('Prepared asset destination collision');
+    preparedAssets.set(asset.destination, asset);
+  };
+  const fontLicenses = definition.styles?.fontLicenses ?? [];
+  const destinationFontFamilies = destinationFontFamilyNames(config.tokens?.fonts);
+  const licensedFamilies = licensedFontFamilies(styleInput, fontLicenses, options.sourcePath);
+  const sharedFallback = fallbackUnlicensedFonts(styleInput, {
+    sourcePath: options.sourcePath,
+    licensedFamilies,
+    destinationFamilies: destinationFontFamilies,
+    fallbackStack: definition.styles?.fallbackStack,
+  });
+  styleInput = sharedFallback.css;
+  const fontWarnings: Array<{ warning: FontAssetWarning; scope: 'shared' | 'editor' }> = sharedFallback.warnings
+    .map((warning) => ({ warning, scope: 'shared' as const }));
+  let editorStyleInput = definition.styles?.editorCss;
+  if (editorStyleInput !== undefined) {
+    const editorFallback = fallbackUnlicensedFonts(editorStyleInput, {
+      sourcePath: options.sourcePath,
+      licensedFamilies,
+      destinationFamilies: destinationFontFamilies,
+      fallbackStack: definition.styles?.fallbackStack,
+    });
+    editorStyleInput = editorFallback.css;
+    fontWarnings.push(...editorFallback.warnings.map((warning) => ({ warning, scope: 'editor' as const })));
+  }
+
+  // Rewriting is part of source identity: the native probe, declaration suppression, residual
+  // stylesheet, and final conversion must all read the same values. Preparation is in-memory and
+  // therefore safe before the report has crossed the explicit write boundary.
+  const processedSource = await rewriteCssAssets({
+    sourceCss: styleInput,
+    sourcePath: options.sourcePath,
+    destinationAssetDir,
+    assetUrlPrefix: './assets/',
+    prepareAsset,
+    allowFontLicense: false,
+    fontLicenses,
+  });
+  fontWarnings.push(...processedSource.warnings.map((warning) => ({ warning, scope: 'shared' as const })));
+  styleInput = processedSource.css;
+  const processedEditor = editorStyleInput === undefined ? undefined : await rewriteCssAssets({
+    sourceCss: editorStyleInput,
+    sourcePath: options.sourcePath,
+    destinationAssetDir,
+    assetUrlPrefix: './assets/',
+    prepareAsset,
+    allowFontLicense: false,
+    fontLicenses,
+  });
+  if (processedEditor) {
+    fontWarnings.push(...processedEditor.warnings.map((warning) => ({ warning, scope: 'editor' as const })));
+  }
+  editorStyleInput = processedEditor?.css;
+  let assets: AssetLedgerEntry[] = [
+    ...processedSource.assets.map(toAssetLedgerEntry),
+    ...(processedEditor?.assets.map(toAssetLedgerEntry) ?? []),
+  ];
+  let sharedFonts: ReturnType<typeof prepareAuthoringFonts>;
+  try {
+    // prepareAuthoringFonts reads the effective stylesheet after URL rewriting. Keep the public
+    // ledger's original reference for provenance, but give the binder a rewritten-reference view
+    // so it can join the CSS URL to the same prepared bytes without losing source identity.
+    const fontBindingAssets = assets.map((asset) => asset.kind === 'font' && asset.rewritten
+      ? { ...asset, reference: asset.rewritten }
+      : asset);
+    sharedFonts = prepareAuthoringFonts(styleInput, name, [...preparedAssets.values()], fontBindingAssets);
+  } catch (error) {
+    return authorFailure(error instanceof Error ? error.message : String(error), source);
+  }
+  styleInput = sharedFonts.css;
+  if (editorStyleInput !== undefined) {
+    // A font face is shared by the editor and frontend. Keeping it in editor.scss would make the
+    // generated package depend on editor-only loading order, so require it in the shared CSS.
+    if (scanFontFaces(editorStyleInput, options.sourcePath).length > 0) {
+      return authorFailure(
+        'Editor-only CSS must not declare @font-face; put licensed font faces in the shared stylesheet so style.scss serves both editor and frontend',
+        source,
+      );
+    }
+    editorStyleInput = namespaceAuthoringFontReferences(editorStyleInput, sharedFonts.familyNames);
+  }
+
   const safetyStylesheet = scanStylesheet(styleInput);
   const selectorTransport = createSelectorDependencyTransport();
   const safetyScopedStyles = scopeStylesheet(safetyStylesheet, {
@@ -114,6 +216,25 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const safetyLedger = safetyScopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath));
   const hardSafetyStyleFailure = safetyScopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || safetyScopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
+  const fontItems: ReportItem[] = fontWarnings.map(({ warning, scope }) => ({
+    block: name,
+    status: 'warning',
+    reason: `${scope} font: ${warning.reason}`,
+    ...(warning.source ? {
+      source: {
+        path: warning.source.path,
+        offset: warning.source.offset,
+        htmlLine: warning.source.line,
+        htmlColumn: warning.source.column,
+      },
+    } : {}),
+    details: {
+      kind: 'font',
+      scope,
+      family: warning.family,
+      reference: warning.reference,
+    },
+  }));
   const graphItems: ReportItem[] = [
     ...(buildGraph.tailwindDetected ? buildGraph.issues : []).map((issue) => ({
       block: name,
@@ -151,8 +272,9 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     return {
       ok: false,
       command: 'author',
-      summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length },
-      items: graphItems,
+      source,
+      summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length + fontItems.length },
+      items: [...fontItems, ...graphItems],
       styleLedger: safetyLedger,
     };
   }
@@ -163,34 +285,12 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     return {
       ok: false,
       command: 'author',
-      summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length },
-      items: graphItems,
+      source,
+      summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length + fontItems.length },
+      items: [...fontItems, ...graphItems],
       styleLedger: safetyLedger,
     };
   }
-  const sourceAssets = scanCssUrlReferences(styleInput, options.sourcePath).map((reference) =>
-    toAssetLedgerEntry(
-      classifyCssUrlReference(reference, {
-        sourcePath: options.sourcePath,
-        allowFontLicense: false,
-      }),
-    ),
-  );
-  const destinationAssetDir = options.outDir
-    ? path.join(options.outDir, 'assets')
-    : path.join(process.cwd(), '.block-runner-unwritten-assets');
-  // Rewriting is part of source identity: the native probe, declaration suppression, residual
-  // stylesheet, and final conversion must all read the same values. Probing the original source
-  // but emitting rewritten `url()` values makes a mixed native/scoped declaration miss its
-  // suppression key and land twice.
-  const processedSource = await rewriteCssAssets({
-    sourceCss: styleInput,
-    sourcePath: options.outDir ? options.sourcePath : undefined,
-    destinationAssetDir,
-    allowFontLicense: false,
-  });
-  let assets: AssetLedgerEntry[] = mergeAssetLedgers(sourceAssets, processedSource.assets.map(toAssetLedgerEntry));
-  styleInput = processedSource.css;
   const stylesheet = scanStylesheet(styleInput);
   // The converter's native-mapping probe must see the same compiled stylesheet as the CSS
   // scanner, including the final local-asset rewrites. A configured stylesheet otherwise has no
@@ -207,11 +307,12 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       ...nativeSource.conversion,
       ok: false,
       command: 'author',
+      source,
       summary: {
         ...nativeSource.conversion.summary,
-        warnings: nativeSource.conversion.summary.warnings + graphItems.length,
+        warnings: nativeSource.conversion.summary.warnings + graphItems.length + fontItems.length,
       },
-      items: [...nativeSource.conversion.items, ...graphItems],
+      items: [...nativeSource.conversion.items, ...fontItems, ...graphItems],
       styleLedger: preflightStyleLedger,
     };
   }
@@ -230,22 +331,22 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath));
   const hardStyleFailure = scopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || scopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
-  let css = scopedStyles.css;
 
   // Rewrite every concrete source asset before conversion. That makes assets inside Custom HTML
   // fallbacks just as accountable as assets that happen to map to a native media block.
   const rewrittenMarkup = await rewriteMarkupAssets(input, {
-      sourcePath: options.sourcePath,
+    sourcePath: options.sourcePath,
     destinationAssetDir,
-    write: Boolean(options.outDir),
+    prepareAsset,
+    fontLicenses,
     stylesheetAssetsAlreadyAccounted: definition.styles?.css === undefined,
   });
   assets = [...assets, ...rewrittenMarkup.assets];
 
   const inlineStyleLedger: AuthoredStyleLedgerEntry[] = [];
-  const conversion = await convert(withAuthorStyles(rewrittenMarkup.input, processedSource.css), {
+  const conversion = await convert(withAuthorStyles(rewrittenMarkup.input, styleInput), {
     ...options,
-    // The author package carries any unsupported authored selector/property in style.css; the
+    // The author package carries residual authored selectors/properties in style.scss; the
     // legacy open sidecar would duplicate it as a global post stylesheet.
     styling: 'relaxed',
     config,
@@ -267,14 +368,6 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const blocks = conversion.output ? await parseMarkup(conversion.output) : [];
   const styleLedger = [...stylesheetLedger, ...inlineStyleLedger];
   const hardInlineStyleFailure = inlineStyleLedger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned');
-  const packageSource = buildPackage({
-    definition,
-    name,
-    rootSelector,
-    css,
-    template: blocks.map(toTemplateNode),
-  });
-
   const assetItems = assets
     .filter((asset) => asset.outcome === 'unresolved' || asset.outcome === 'blocked')
     .map<ReportItem>((asset) => ({
@@ -285,24 +378,59 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       details: { outcome: asset.outcome, rewritten: asset.rewritten },
     }));
   const hardAssetFailure = assets.some((asset) => asset.outcome === 'unresolved' || asset.outcome === 'blocked');
+  let compiled: ReturnType<typeof compileAnalyzedDesign> | undefined;
+  const generationItems: ReportItem[] = [];
+  if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && conversion.ok) {
+    try {
+      compiled = compileAnalyzedDesign({
+        definition,
+        name,
+        source: input,
+        sourcePath: options.sourcePath,
+        blocks,
+        rules: scopedStyles.localRules,
+        preparedAssets: [...preparedAssets.values()],
+        assets,
+        styleLedger,
+        stylesheet: styleInput,
+        editorStylesheet: editorStyleInput,
+        fonts: sharedFonts.fonts,
+        fontWarnings,
+        fontLicenses,
+      });
+    } catch (error) {
+      generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+    }
+  }
+  const packageSource: GeneratedBlockPackage | undefined = compiled ? {
+    name, rootSelector, canonicalPlan: compiled.plan, manifest: compiled.generated.manifest,
+    files: Object.fromEntries(compiled.generated.files.map((file) => [file.path, file.content])),
+    assets: [...preparedAssets.values()].map(({ source, destination, sha256 }) => ({
+      source, path: `assets/${path.basename(destination)}`, sha256,
+    })),
+  } : undefined;
 
   // Do not leave a seemingly usable package on disk when a local asset/font could not be carried
-  // legally or safely. The in-memory package remains in the report for diagnosis.
-  if (options.outDir && !hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && conversion.ok) {
-    await writePackage(options.outDir, packageSource);
+  // legally or safely. Failed analysis retains its ledgers, not executable source.
+  if (options.outDir && compiled) {
+    await writeGeneratedRegisteredBlock(options.outDir, compiled.generated);
+    assets = assets.map((asset) => asset.outcome === 'prepared'
+      ? { ...asset, outcome: 'copied', reason: 'prepared asset published with the validated source package' }
+      : asset);
   }
 
   return {
-    ...conversion,
-    ok: conversion.ok && !hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure,
+      ...conversion,
+      ok: Boolean(compiled),
     command: 'author',
+    source,
     summary: {
       ...conversion.summary,
-      warnings: conversion.summary.warnings + graphItems.length + assetItems.length,
+      warnings: conversion.summary.warnings + fontItems.length + graphItems.length + assetItems.length + generationItems.length,
     },
-    items: [...conversion.items, ...graphItems, ...assetItems],
+    items: [...conversion.items, ...fontItems, ...graphItems, ...assetItems, ...generationItems],
     assets: assets.length > 0 ? assets : undefined,
-    styleLedger,
+    styleLedger: compiled ? [...styleLedger, ...compiled.editorStyleLedger] : styleLedger,
     package: packageSource,
   };
 }
@@ -317,7 +445,7 @@ function mergeAuthorConfig(configured: AuthorConfig | undefined, explicit: Autho
 
 /**
  * Prove a stylesheet declaration has exactly one native destination before omitting it from
- * style.css. The existing converter is the capability oracle: it only reports `mapped` when the
+ * residual CSS. The existing converter is the capability oracle: it only reports `mapped` when the
  * concrete emitted Core block declares the relevant support in the pinned/target registry.
  */
 interface NativeSourceCollection {
@@ -367,10 +495,11 @@ async function collectNativeSourceDeclarations(
   };
 }
 
-function authorFailure(reason: string): BlockRunnerReport {
+function authorFailure(reason: string, source?: BlockRunnerReport['source']): BlockRunnerReport {
   return {
     ok: false,
     command: 'author',
+    ...(source ? { source } : {}),
     summary: { blocks: 0, valid: 0, invalid: 0, warnings: 1 },
     items: [{ block: 'input', status: 'warning', reason }],
   };
@@ -463,7 +592,8 @@ function mergeAssetLedgers(
 interface RewriteMarkupAssetsOptions {
   sourcePath?: string;
   destinationAssetDir: string;
-  write: boolean;
+  prepareAsset: (asset: PreparedCssAsset) => void;
+  fontLicenses: readonly FontLicenseDecision[];
   /** True when styleInput already supplied ledger entries for every inline <style> URL. */
   stylesheetAssetsAlreadyAccounted: boolean;
 }
@@ -498,9 +628,12 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       sourceCss: kind === 'font'
         ? `@font-face{src:url(${JSON.stringify(reference)})}`
         : `x{background-image:url(${JSON.stringify(reference)})}`,
-      sourcePath: options.write ? options.sourcePath : undefined,
+      sourcePath: options.sourcePath,
       destinationAssetDir: options.destinationAssetDir,
+      assetUrlPrefix: './assets/',
+      prepareAsset: options.prepareAsset,
       allowFontLicense: false,
+      fontLicenses: options.fontLicenses,
     });
     const entry = processed.assets[0];
     if (!entry) {
@@ -510,7 +643,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     const record = toAssetLedgerEntry(entry);
     record.kind = kind;
     assets.push(record);
-    return entry.outcome === 'copied' ? entry.rewrittenUrl : undefined;
+    return entry.outcome === 'prepared' || entry.outcome === 'copied' ? entry.rewrittenUrl : undefined;
   };
 
   const processCssValue = async (
@@ -522,9 +655,12 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     // concrete URL gets the same copy/classification/ledger treatment as a stylesheet value.
     const processed = await rewriteCssAssets({
       sourceCss: value,
-      sourcePath: options.write ? options.sourcePath : undefined,
+      sourcePath: options.sourcePath,
       destinationAssetDir: options.destinationAssetDir,
+      assetUrlPrefix: './assets/',
+      prepareAsset: options.prepareAsset,
       allowFontLicense: false,
+      fontLicenses: options.fontLicenses,
     });
     for (const asset of processed.assets) {
       const record = toAssetLedgerEntry(asset);
@@ -542,9 +678,12 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       const sourceCss = element.textContent ?? '';
       const processed = await rewriteCssAssets({
         sourceCss,
-        sourcePath: options.write ? options.sourcePath : undefined,
+        sourcePath: options.sourcePath,
         destinationAssetDir: options.destinationAssetDir,
+        assetUrlPrefix: './assets/',
+        prepareAsset: options.prepareAsset,
         allowFontLicense: false,
+        fontLicenses: options.fontLicenses,
       });
       if (!options.stylesheetAssetsAlreadyAccounted) {
         assets.push(...processed.assets.map(toAssetLedgerEntry));
@@ -559,9 +698,12 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     if (style?.trim()) {
       const processed = await rewriteCssAssets({
         sourceCss: style,
-        sourcePath: options.write ? options.sourcePath : undefined,
+        sourcePath: options.sourcePath,
         destinationAssetDir: options.destinationAssetDir,
+        assetUrlPrefix: './assets/',
+        prepareAsset: options.prepareAsset,
         allowFontLicense: false,
+        fontLicenses: options.fontLicenses,
       });
       assets.push(...processed.assets.map(toAssetLedgerEntry));
       if (processed.css !== style) {
@@ -768,109 +910,81 @@ function srcsetCandidates(value: string): SrcsetCandidate[] {
   return candidates;
 }
 
-interface BuildPackageInput {
-  definition: AuthorConfig;
-  name: string;
-  rootSelector: string;
-  css: string;
-  template: unknown[];
-}
-
-function buildPackage(input: BuildPackageInput): GeneratedBlockPackage {
-  const { definition, name, rootSelector, css, template } = input;
-  const namespace = name.split('/')[0];
-  const title = definition.title ?? titleFromSlug(name.split('/')[1]);
-  const editorCss = definition.styles?.editorCss?.trim();
-  const blockJson: Record<string, unknown> = {
-    $schema: 'https://schemas.wp.org/trunk/block.json',
-    apiVersion: 3,
-    name,
-    title,
-    category: definition.category ?? 'widgets',
-    textdomain: namespace,
-    editorScript: 'file:./index.js',
-    // CSS which affects parity is deliberately registered here. WordPress loads `style` in both
-    // the editor and on the frontend; `editorStyle` is only for explicitly supplied affordances.
-    ...(css ? { style: 'file:./style.css' } : {}),
-    ...(editorCss ? { editorStyle: 'file:./editor.css' } : {}),
-    supports: { html: false, ...(definition.supports ?? {}) },
-  };
-
-  const files: Record<string, string> = {
-    'block.json': `${JSON.stringify(blockJson, null, 2)}\n`,
-    'index.js': renderIndexModule(template),
-  };
-  if (css) {
-    files['style.css'] = ensureTrailingNewline(css);
+/**
+ * Return only the family names for faces whose every source URL has a complete, local decision.
+ * The low-level asset pass still verifies bytes and the WOFF container; this preflight merely
+ * decides which faces may survive the fallback pass. In particular, a token family does not make
+ * a source-owned @font-face redistributable by itself.
+ */
+function licensedFontFamilies(
+  stylesheet: string,
+  decisions: readonly FontLicenseDecision[],
+  sourcePath?: string,
+): string[] {
+  if (!decisions.length || !sourcePath || sourcePath === '-' || /^<.*>$/.test(sourcePath)) return [];
+  const sourceDirectory = path.dirname(path.resolve(sourcePath));
+  const familyStatus = new Map<string, { name: string; complete: boolean }>();
+  for (const face of scanFontFaces(stylesheet, sourcePath)) {
+    const complete = face.families.length > 0 && face.sourceUrls.length > 0 && face.sourceUrls.every((reference) => {
+      const decision = decisions.find((candidate) => candidate.reference === reference);
+      if (!decision || !path.isAbsolute(decision.source)
+        || !/^[a-f0-9]{64}$/.test(decision.sha256)
+        || typeof decision.ownership !== 'string' || !decision.ownership.trim()
+        || typeof decision.license !== 'string' || !decision.license.trim()) return false;
+      const value = reference.trim();
+      if (!value || value.startsWith('#') || /^data:/i.test(value) || /^https?:\/\//i.test(value)
+        || value.startsWith('//') || /^blob:/i.test(value) || /^[A-Za-z][A-Za-z0-9+.-]*:/.test(value)
+        || value.startsWith('/') || value.startsWith('\\') || /^[A-Za-z]:[\\/]/.test(value)) return false;
+      const pathname = value.split(/[?#]/, 1)[0]!;
+      const extension = path.extname(pathname).toLowerCase();
+      if (extension !== '.woff' && extension !== '.woff2') return false;
+      return path.resolve(sourceDirectory, pathname) === path.resolve(decision.source);
+    });
+    for (const family of face.families) {
+      const key = family.replace(/\s+/g, ' ').trim().toLowerCase();
+      const previous = familyStatus.get(key);
+      familyStatus.set(key, { name: previous?.name ?? family, complete: (previous?.complete ?? true) && complete });
+    }
   }
-  if (editorCss) {
-    files['editor.css'] = ensureTrailingNewline(editorCss);
+  return [...familyStatus.values()].filter(({ complete }) => complete).map(({ name }) => name);
+}
+
+/** Flatten destination token stacks for declaration fallback without treating the whole stack as a family. */
+function destinationFontFamilyNames(tokens: Record<string, string> | undefined): string[] {
+  return Object.values(tokens ?? {}).flatMap((value) => splitFontFamilyNames(value));
+}
+
+function splitFontFamilyNames(value: string): string[] {
+  const families: string[] = [];
+  let start = 0;
+  let quote: string | undefined;
+  let parentheses = 0;
+  for (let index = 0; index <= value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (char === '\\') index += 1;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '"' || char === "'") {
+      quote = char;
+      continue;
+    }
+    if (char === '(') parentheses += 1;
+    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
+    if (index === value.length || (char === ',' && parentheses === 0)) {
+      const family = value.slice(start, index).trim();
+      if (family) families.push(
+        (family.startsWith('"') && family.endsWith('"')) || (family.startsWith("'") && family.endsWith("'"))
+          ? family.slice(1, -1)
+          : family,
+      );
+      start = index + 1;
+    }
   }
-  return { name, rootSelector, files };
+  return families;
 }
 
-function renderIndexModule(template: unknown[]): string {
-  // No JSX means this file can be consumed by the ordinary @wordpress/scripts build without a
-  // transform-specific source dependency. The template is data, not runtime source CSS/classes.
-  return `import { createElement } from '@wordpress/element';
-import { registerBlockType } from '@wordpress/blocks';
-import { InnerBlocks, useBlockProps } from '@wordpress/block-editor';
-import metadata from './block.json';
-
-const TEMPLATE = ${JSON.stringify(template, null, 2)};
-
-function Edit() {
-  return createElement('div', useBlockProps(), createElement(InnerBlocks, { template: TEMPLATE }));
-}
-
-function Save() {
-  return createElement('div', useBlockProps.save(), createElement(InnerBlocks.Content));
-}
-
-registerBlockType(metadata.name, { edit: Edit, save: Save });
-`;
-}
-
-function toTemplateNode(block: WpBlock): unknown[] {
-  return [
-    block.name,
-    block.name === 'core/html' && typeof block.originalContent === 'string'
-      ? { ...cleanAttributes(block.attributes), content: block.originalContent }
-      : cleanAttributes(block.attributes),
-    block.innerBlocks.map(toTemplateNode),
-  ];
-}
-
-function cleanAttributes(attributes: Record<string, unknown>): Record<string, unknown> {
-  // Sources are diagnostic data for this process, not serialized attributes of an authored block.
-  return Object.fromEntries(Object.entries(attributes).filter(([key]) => !key.startsWith('__blockRunner')));
-}
-
-function titleFromSlug(slug: string): string {
-  return slug.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase());
-}
-
-function ensureTrailingNewline(value: string): string {
-  return value.endsWith('\n') ? value : `${value}\n`;
-}
-
-async function writePackage(outDir: string, packageSource: GeneratedBlockPackage): Promise<void> {
-  const destination = path.resolve(outDir);
-  await mkdir(destination, { recursive: true });
-  // Individual, declared files only. We never clean the output directory or overwrite copied
-  // assets as a side effect of authoring; files are written atomically by the caller's explicit
-  // destination choice.
-  await Promise.all(
-    Object.entries(packageSource.files).map(async ([relativePath, content]) => {
-      const target = path.resolve(destination, relativePath);
-      if (!target.startsWith(`${destination}${path.sep}`)) {
-        throw new Error(`invalid generated package path: ${relativePath}`);
-      }
-      await mkdir(path.dirname(target), { recursive: true });
-      await writeFile(target, content, { encoding: 'utf8', flag: 'wx' });
-    }),
-  );
-}
 
 function toAssetLedgerEntry(asset: {
   url: string;

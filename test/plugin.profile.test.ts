@@ -1,14 +1,19 @@
 import { execFile } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import { chmod, mkdtemp, mkdir, readFile, stat, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
+import { compileRegisteredBlock, registeredBlockFontFamilyPrefix } from '../src/authoring/generate.js';
+import { PROOF_IMAGE_BASE64 } from '../src/proof/fixture-image.js';
 import {
   assertStandaloneZipEntries,
   detectWpScriptsPlugin,
   planExistingPluginOutput,
   planStandalonePluginOutput,
+  npmEnvironmentForGeneratedPlugin,
+  removeMatchingAllowScriptsProjection,
   UnsupportedPluginLayoutError,
   writePluginOutput,
 } from '../src/plugin/profile.js';
@@ -63,20 +68,40 @@ describe('wp-scripts plugin profile', () => {
     expect(await stat(path.join(root, 'src', 'blocks', 'notice', 'block.json'))).toBeTruthy();
   });
 
-  it('extends a named metadata collection with the output-root-relative manifest key', async () => {
+  it('extends selective metadata registration with a real WordPress API and leaf manifest key', async () => {
     const root = await existingCollectionPlugin(false);
     const plan = await planExistingPluginOutput(root, block);
     const php = plan.touchedFiles.find((file) => file.relativePath === 'plugin.php');
     const packageFile = plan.touchedFiles.find((file) => file.relativePath === 'package.json');
 
     expect(plan.profile?.metadataCollection).toEqual({
-      directory: path.join(root, 'build'),
+      directory: path.join(root, 'build/blocks'),
       manifest: path.join(root, 'build', 'blocks-manifest.php'),
-      key: 'blocks/notice',
+      key: 'notice',
     });
-    expect(php?.content.toString()).toContain("register_block_type_from_metadata_collection( $build_dir, 'blocks/notice' );");
+    expect(php?.content.toString()).toContain("register_block_type( $blocks_dir . '/notice' );");
     expect(packageFile?.content.toString()).toContain('--blocks-manifest');
     expect(plan.touchedFiles.every((file) => path.isAbsolute(file.path))).toBe(true);
+  });
+
+  it('plans font notice transport for an existing plugin without replacing its postbuild hook', async () => {
+    const root = await existingDirectPlugin();
+    const packagePath = path.join(root, 'package.json');
+    const pkg = JSON.parse(await readFile(packagePath, 'utf8'));
+    pkg.scripts.postbuild = 'node existing-check.mjs';
+    await writeFile(packagePath, JSON.stringify(pkg));
+    const plan = await planExistingPluginOutput(root, {
+      ...block, files: { ...block.files, 'font-licenses.txt': 'Retained font copyright and license.' },
+    });
+    const packageChange = plan.touchedFiles.find((file) => file.path === packagePath)!;
+    expect(JSON.parse(packageChange.content.toString()).scripts.postbuild)
+      .toBe('node existing-check.mjs && node scripts/block-runner-copy-font-licenses-notice.mjs');
+    await expect(writePluginOutput(plan)).rejects.toThrow('Separate explicit authorization');
+    await writePluginOutput(plan, { authorizedReplacements: plan.touchedFiles
+      .filter((file) => file.operation === 'modify').map((file) => file.path) });
+    await execFileAsync(process.execPath, ['scripts/block-runner-copy-font-licenses-notice.mjs'], { cwd: root });
+    expect(await readFile(path.join(root, 'build/blocks/notice/font-licenses.txt'), 'utf8'))
+      .toBe('Retained font copyright and license.');
   });
 
   it('does not edit a bulk metadata bootstrap and relies on the generated blocks manifest', async () => {
@@ -84,8 +109,21 @@ describe('wp-scripts plugin profile', () => {
     const plan = await planExistingPluginOutput(root, block);
 
     expect(plan.touchedFiles.some((file) => file.relativePath === 'plugin.php')).toBe(false);
-    expect(plan.profile?.metadataCollection?.key).toBe('blocks/notice');
+    expect(plan.profile?.metadataCollection?.key).toBe('notice');
     expect(plan.notes.join('\n')).toContain('blocks-manifest.php');
+  });
+
+  it('rejects the nonexistent singular metadata API and the wrong manifest base directory', async () => {
+    const singular = await existingCollectionPlugin(false);
+    const singularPhp = path.join(singular, 'plugin.php');
+    await writeFile(singularPhp, (await readFile(singularPhp, 'utf8'))
+      .replace("register_block_type( $blocks_dir . '/existing' );", "register_block_type_from_metadata_collection( $blocks_dir, 'existing' );"));
+    await expect(detectWpScriptsPlugin(singular)).resolves.toMatchObject({ kind: 'unsupported' });
+
+    const wrongRoot = await existingCollectionPlugin(true);
+    const php = path.join(wrongRoot, 'plugin.php');
+    await writeFile(php, (await readFile(php, 'utf8')).replaceAll('( $blocks_dir', '( $build_dir'));
+    await expect(detectWpScriptsPlugin(wrongRoot)).resolves.toMatchObject({ kind: 'unsupported' });
   });
 
   it('fails unsupported layouts before writes and exposes the standalone choice', async () => {
@@ -140,6 +178,23 @@ describe('wp-scripts plugin profile', () => {
 });
 
 describe('standalone plugin profile', () => {
+  it('removes only an exact npm user-config projection and preserves a different explicit policy', () => {
+    const userConfigValue = '@example/approved-script';
+    const projected = { ...process.env, npm_config_allow_scripts: userConfigValue };
+    const stripped = removeMatchingAllowScriptsProjection(projected, userConfigValue);
+    expect(stripped.npm_config_allow_scripts).toBeUndefined();
+
+    const explicit = `${userConfigValue}-explicit-different`;
+    const preserved = removeMatchingAllowScriptsProjection(
+      { ...process.env, npm_config_allow_scripts: explicit },
+      userConfigValue,
+    );
+    expect(preserved.npm_config_allow_scripts).toBe(explicit);
+
+    const missingConfig = removeMatchingAllowScriptsProjection(projected, 'undefined');
+    expect(missingConfig.npm_config_allow_scripts).toBe(userConfigValue);
+  });
+
   it('plans a pinned clean-install wrapper, ZIP policy, runtime bootstrap, and every generated source file', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-standalone-'));
     const output = path.join(root, 'notice-plugin');
@@ -168,6 +223,16 @@ describe('standalone plugin profile', () => {
       packages: { '': { name: 'acme-notice', devDependencies: { '@wordpress/scripts': '34.2.0' } } },
     });
     expect(bootstrap.toString()).toContain('wp_register_block_metadata_collection');
+    expect(bootstrap.toString()).toContain('Requires at least: 7.1');
+    expect(bootstrap.toString()).toContain('Requires PHP: 7.4');
+    const readme = plan.touchedFiles.find((file) => file.relativePath === 'readme.txt')!.content.toString();
+    expect(readme).toContain('Requires at least: 7.1');
+    expect(readme).toContain('Tested up to: 7.1');
+    expect(readme).toContain('Requires PHP: 7.4');
+    // wp-scripts keys its manifest by the leaf directory, while this profile
+    // emits blocks below build/blocks. Registering build alone loses asset paths.
+    expect(bootstrap.toString()).toContain("wp_register_block_metadata_collection( $build_dir . '/blocks', $manifest );");
+    expect(bootstrap.toString()).toContain("wp_register_block_types_from_metadata_collection( $build_dir . '/blocks', $manifest );");
     expect(bootstrap.toString()).toContain("register_block_type( $build_dir . '/blocks/notice' );");
     expect(packageJson.toString()).not.toContain('npx');
   });
@@ -204,7 +269,45 @@ describe('standalone plugin profile', () => {
   it('resolves, clean-installs, builds, and inspects the actual release archive', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-release-'));
     const output = path.join(root, 'notice-plugin');
-    const plan = await planStandalonePluginOutput(output, block);
+    const image = Buffer.from(PROOF_IMAGE_BASE64, 'base64');
+    const sourceImage = path.join(root, 'photo.png');
+    await writeFile(sourceImage, image);
+    const svg = Buffer.from('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 40"><path d="M0 0h80v40H0z" fill="#123456"/></svg>');
+    const sourceSvg = path.join(root, 'logo.svg');
+    await writeFile(sourceSvg, svg);
+    const sourceFont = path.resolve('test/fixtures/fonts/IBMPlexMono-Regular.woff2');
+    const font = await readFile(sourceFont);
+    const fontNotice = await readFile(path.resolve('test/fixtures/fonts/OFL.txt'), 'utf8');
+    const fontFamily = `${registeredBlockFontFamilyPrefix('acme/notice')}body`;
+    // Exercise the public compiler, not the small hand-written source stub used by profile unit tests.
+    const generated = compileRegisteredBlock({
+      version: 1, generatorVersion: '0.9.0', target: { name: 'acme/notice', title: 'Notice' },
+      structure: [{ block: 'core/group', attributes: { className: 'card' }, children: [
+        { block: 'core/paragraph', attributes: { content: 'Packaged native content' } },
+        { id: 'logo', block: 'core/image', attributes: { alt: 'Logo', className: 'logo' } },
+      ] }],
+      fields: [], locking: { mode: 'contentOnly' }, pattern: { ready: false, overrides: [] },
+      styles: { strategy: 'mixed', outcomes: [],
+        fonts: [{ assetId: 'body-font', family: fontFamily, fontWeight: '400', fontDisplay: 'swap' }], rules: [
+        { kind: 'style', selector: '.card', declarations: [{ property: 'font-family', value: `"${fontFamily}", monospace` }] },
+        { kind: 'style', selector: '.card', declarations: [{ property: 'background-image', value: 'url("./assets/photo.png")' }] },
+        { kind: 'style', selector: '.logo', declarations: [{ property: 'mask-image', value: 'url("./assets/logo.svg")' }] },
+        { kind: 'conditional', name: 'media', prelude: '(min-width: 48rem)', rules: [
+          { kind: 'style', selector: '.card:hover', declarations: [{ property: 'transform', value: 'translateY(-2px)' }] },
+        ] },
+      ], editorRules: [
+        { kind: 'style', selector: '.card:focus-within', declarations: [{ property: 'outline', value: '2px solid blue' }] },
+      ] },
+      assets: [{ id: 'photo', source: sourceImage, status: 'ready', destination: 'assets/photo.png',
+        sha256: createHash('sha256').update(image).digest('hex') },
+      { id: 'logo', source: sourceSvg, status: 'ready', destination: 'assets/logo.svg',
+        sha256: createHash('sha256').update(svg).digest('hex'), uses: [{ node: 'logo', attribute: 'url' }] },
+      { id: 'body-font', source: sourceFont, kind: 'font', status: 'ready', destination: 'assets/body.woff2',
+        sha256: createHash('sha256').update(font).digest('hex'),
+        fontLicense: { ownership: 'IBM Corp.', license: 'OFL-1.1', notice: fontNotice } }], files: [], warnings: [],
+    });
+    const plan = await planStandalonePluginOutput(output, { name: 'acme/notice',
+      files: Object.fromEntries([...generated.files, ...generated.assets].map((file) => [file.path, file.content])) });
 
     await writePluginOutput(plan);
     const lock = JSON.parse(await readFile(path.join(output, 'package-lock.json'), 'utf8')) as {
@@ -213,14 +316,101 @@ describe('standalone plugin profile', () => {
     expect(lock.packages['node_modules/@wordpress/scripts']?.version).toBe('34.2.0');
     await expect(stat(path.join(output, 'node_modules'))).rejects.toThrow();
 
-    await execFileAsync('npm', ['ci', '--no-audit', '--no-fund'], { cwd: output });
-    await execFileAsync('npm', ['run', 'zip'], { cwd: output });
+    const npmEnvironment = await npmEnvironmentForGeneratedPlugin(output);
+    await execFileAsync('npm', ['ci', '--include=dev', '--no-audit', '--no-fund'], {
+      cwd: output,
+      timeout: 120_000,
+      env: npmEnvironment,
+    });
+    await execFileAsync('npm', ['run', 'zip'], { cwd: output, timeout: 120_000,
+      env: { ...npmEnvironment, NODE_ENV: 'production' } });
     const archive = path.join(output, 'acme-notice.zip');
     expect(await stat(archive)).toBeTruthy();
-    await execFileAsync('npm', ['run', 'test:zip', '--', archive], { cwd: output });
+    await execFileAsync('npm', ['run', 'test:zip', '--', archive], { cwd: output, timeout: 30_000 });
 
     const { stdout } = await execFileAsync('unzip', ['-Z1', archive]);
-    expect(() => assertStandaloneZipEntries(stdout.split(/\r?\n/).filter(Boolean), 'notice', ['index.js'])).not.toThrow();
+    const entries = stdout.split(/\r?\n/).filter(Boolean);
+    expect(() => assertStandaloneZipEntries(entries, 'notice', ['index.js', 'style-index.css', 'index.css'])).not.toThrow();
+    const archiveBytes = async (entry: string): Promise<Buffer> =>
+      (await execFileAsync('unzip', ['-p', archive, entry], { encoding: 'buffer', timeout: 10_000 })).stdout;
+    const sharedCssPath = entries.find((entry) => entry.endsWith('/blocks/notice/style-index.css'))!;
+    const editorCssPath = entries.find((entry) => entry.endsWith('/blocks/notice/index.css'))!;
+    const css = (await archiveBytes(sharedCssPath)).toString('utf8');
+    expect(css).toContain('.wp-block-acme-notice .card');
+    expect(css).toMatch(/@media\s*\(min-width:\s*48rem\)/);
+    expect(css).toContain('translateY(-2px)');
+    expect(css).not.toContain('./assets/photo.png');
+    expect(css).not.toContain('focus-within');
+    expect(css).toContain('@font-face');
+    expect(css).toContain(fontFamily);
+    expect(css).not.toContain(sourceFont);
+    const noticePath = entries.find((entry) => entry.endsWith('/blocks/notice/font-licenses.txt'));
+    expect(noticePath).toBeDefined();
+    const notice = (await archiveBytes(noticePath!)).toString('utf8');
+    expect(notice).toContain('Copyright © 2017 IBM Corp.');
+    expect(notice).toContain('SIL OPEN FONT LICENSE Version 1.1');
+    expect(notice).toContain('OTHER DEALINGS IN THE FONT SOFTWARE.');
+    expect(notice).not.toContain(sourceFont);
+    const fonts = entries.filter((entry) => /\/build\/.*\.woff2$/.test(entry));
+    expect(fonts).toHaveLength(1);
+    expect(await archiveBytes(fonts[0]!)).toEqual(font);
+    expect(css).toContain(path.basename(fonts[0]!));
+    expect((await archiveBytes(editorCssPath)).toString('utf8')).not.toContain('@font-face');
+    expect((await archiveBytes(editorCssPath)).toString('utf8')).toContain('.card:focus-within');
+    const images = entries.filter((entry) => /\/build\/images\/.*\.png$/.test(entry));
+    expect(images).toHaveLength(1);
+    expect(await archiveBytes(images[0]!)).toEqual(image);
+    expect(css).toContain(path.basename(images[0]!));
+    expect(entries.some((entry) => entry.endsWith('.map'))).toBe(false);
+    // CSS SVGs can be inline. Native Image URLs must be emitted files because WordPress strips
+    // data: URLs from filtered post content, even when the source SVG itself is safe.
+    const svgData = /data:image\/svg\+xml(?:;charset=[^;,]+)?(?:;base64)?,[^)"'\s]+/.exec(css)?.[0];
+    expect(svgData).toBeDefined();
+    const [header, payload] = svgData!.split(',', 2);
+    const cssSvg = header!.includes(';base64') ? Buffer.from(payload!, 'base64') : Buffer.from(decodeURIComponent(payload!));
+    expect(cssSvg.toString()).toContain('viewBox="0 0 80 40"');
+    expect(cssSvg.toString()).toContain('#123456');
+    const scriptPath = entries.find((entry) => entry.endsWith('/blocks/notice/index.js'))!;
+    const script = (await archiveBytes(scriptPath)).toString('utf8');
+    const svgFiles = entries.filter((entry) => /\/build\/.*\.svg$/.test(entry));
+    expect(svgFiles).toHaveLength(1);
+    expect(await archiveBytes(svgFiles[0]!)).toEqual(svg);
+    expect(script).toContain(path.basename(svgFiles[0]!));
+    expect(script).not.toContain('data:image/svg+xml');
+    expect(script).not.toContain('./assets/logo.svg');
+
+    // Reuse this real installed wp-scripts host to exercise the other delivery profile.
+    // Adding a second block must retain the first block's source and produce both build leaves.
+    const existingSource = new Map(await Promise.all([...generated.files, ...generated.assets].map(async (file) => [
+      file.path, await readFile(path.join(output, 'src/blocks/notice', file.path)),
+    ] as const)));
+    const addition = compileRegisteredBlock({
+      version: 1, generatorVersion: '0.9.0', target: { name: 'acme/second-notice', title: 'Second notice' },
+      structure: [{ id: 'message', block: 'core/paragraph', attributes: { content: 'An independently registered second block.' } }],
+      fields: [{ id: 'message', node: 'message', attribute: 'content', label: 'Message', mode: 'editable' }],
+      locking: { mode: 'contentOnly' }, styles: { strategy: 'native', outcomes: [] },
+      pattern: { ready: false, overrides: [] }, assets: [], files: [], warnings: [],
+    });
+    const integration = await planExistingPluginOutput(output, { name: 'acme/second-notice',
+      files: Object.fromEntries(addition.files.map((file) => [file.path, file.content])) });
+    expect(integration.mode).toBe('existing');
+    await writePluginOutput(integration, { authorizedReplacements: integration.touchedFiles
+      .filter((file) => file.operation === 'modify').map((file) => file.path) });
+    for (const [relative, bytes] of existingSource) {
+      expect(await readFile(path.join(output, 'src/blocks/notice', relative))).toEqual(bytes);
+    }
+    await execFileAsync('npm', ['run', 'zip'], { cwd: output, timeout: 120_000,
+      env: { ...npmEnvironment, NODE_ENV: 'production' } });
+    await execFileAsync('npm', ['run', 'test:zip', '--', archive], { cwd: output, timeout: 30_000 });
+    const rebuiltEntries = (await execFileAsync('unzip', ['-Z1', archive])).stdout.split(/\r?\n/).filter(Boolean);
+    for (const leaf of ['notice', 'second-notice']) {
+      const metadataEntry = rebuiltEntries.find((entry) => entry.endsWith(`/build/blocks/${leaf}/block.json`));
+      expect(metadataEntry).toBeDefined();
+      expect(JSON.parse((await archiveBytes(metadataEntry!)).toString('utf8')).name).toBe(`acme/${leaf}`);
+    }
+    const manifest = await readFile(path.join(output, 'build/blocks-manifest.php'), 'utf8');
+    expect(manifest).toContain("'notice'");
+    expect(manifest).toContain("'second-notice'");
   }, 300_000);
 });
 
@@ -254,9 +444,9 @@ async function existingCollectionPlugin(bulk: boolean): Promise<string> {
     scripts: { build: 'wp-scripts build --source-path=src --output-path=build' },
   }, null, 2));
   const registration = bulk
-    ? `wp_register_block_metadata_collection( $build_dir, $manifest );\n\twp_register_block_types_from_metadata_collection( $build_dir );`
-    : `wp_register_block_metadata_collection( $build_dir, $manifest );\n\tregister_block_type_from_metadata_collection( $build_dir, 'acme/existing' );`;
-  await writeFile(path.join(root, 'plugin.php'), `<?php\nadd_action( 'init', function() {\n\t$build_dir = __DIR__ . '/build';\n\t$manifest = $build_dir . '/blocks-manifest.php';\n\t${registration}\n} );\n`);
+    ? `wp_register_block_metadata_collection( $blocks_dir, $manifest );\n\twp_register_block_types_from_metadata_collection( $blocks_dir );`
+    : `wp_register_block_metadata_collection( $blocks_dir, $manifest );\n\tregister_block_type( $blocks_dir . '/existing' );`;
+  await writeFile(path.join(root, 'plugin.php'), `<?php\nadd_action( 'init', function() {\n\t$build_dir = __DIR__ . '/build';\n\t$blocks_dir = $build_dir . '/blocks';\n\t$manifest = $build_dir . '/blocks-manifest.php';\n\t${registration}\n} );\n`);
   await writeSourceBlock(root, 'src/blocks/existing');
   return root;
 }

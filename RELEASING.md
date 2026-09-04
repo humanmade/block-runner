@@ -25,17 +25,29 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 
 `0.9.x` is a **testing** release line for registered-block authoring. Publish it with the
 `testing` npm dist-tag; it must not be described as the 1.0 stability promise. Before creating a
-release, run the release candidate gates from the candidate checkout:
+release, run the deterministic release candidate gates from the candidate checkout:
 
 ```sh
-npm run authoring:prove
-npm run release:check -- --receipt release/0.9-testing/receipts/<version>.json
+npm run release:check -- --manual-review proof/reviews/0.9-testing/manual-review.json --receipt release/0.9-testing/receipts/<version>.json
 ```
+
+The 13-fixture registered-block authoring benchmark is optional and does not
+participate in the deterministic testing-release status. Run it separately only
+when reviewed candidate plans and a WordPress/browser worker are available:
+
+```sh
+npm run authoring:prove -- --plans /absolute/path/to/saved-plans
+```
+
+The release checker never creates plans or calls a model. Its receipt records the
+optional benchmark as pending/unscored unless that separate work is supplied.
 
 Keep the resulting receipt with the release. It records the authoring suite/scorer/prompt/guide,
 template, dependency, WordPress, theme, and browser hashes; the workload, model/effort, invalid
 counts, and timing method; and the package, skill, and activation matrix. A browser or visual gate
-without a receipt is `blocked`, not passed. The detailed matrix and product-preview state live in
+without a receipt is `blocked`, not passed. The optional authoring benchmark is recorded as
+pending/unscored unless its separate plans and worker run is retained. The detailed matrix and
+product-preview state live in
 [`release/0.9-testing`](release/0.9-testing/README.md).
 
 1. Bump the version: `npm version patch|minor|major` (commits + tags).

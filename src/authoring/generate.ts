@@ -14,21 +14,31 @@ import {
   type JsonValue,
 } from './schema.js';
 import WORDPRESS_BLOCK_SCHEMA_7_1 from './vendor/wordpress-block.schema.7.1.json';
+import { patternOverrideName, supportedPatternOverrideAttributes } from './overrides.js';
+import { collectConfirmedAssets, fontOwnershipDecision, type GeneratedAssetFile } from './assets.js';
+import {
+  renderConfirmedStyleRules,
+  renderFontLicenseNotice,
+  renderFontLicenseText,
+  renderLicensedFontFaces,
+  type FontLicenseNotice,
+  type LicensedFontFace,
+} from './styles.js';
 
 /**
  * The owned source-template contract. Changing it changes every generated package and must be an
  * intentional, reviewed release decision.
  */
-export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v2' as const;
+export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v8' as const;
 /**
  * The declarative-style renderer is part of the owned template contract.  It never accepts a
- * stylesheet from the plan: its inputs are individual, validated style outcomes.
+ * stylesheet fragment from the plan: its inputs are validated outcomes and structured rules.
  */
-export const REGISTERED_BLOCK_STYLE_EMITTER_VERSION = '1' as const;
+export const REGISTERED_BLOCK_STYLE_EMITTER_VERSION = '3' as const;
 export const WORDPRESS_BLOCK_SCHEMA_VERSION = '7.1' as const;
 export const WORDPRESS_BLOCK_SCHEMA_URL = `https://schemas.wp.org/wp/${WORDPRESS_BLOCK_SCHEMA_VERSION}/block.json`;
 
-export type GeneratedSourceKind = 'json' | 'javascript' | 'scss' | 'php';
+export type GeneratedSourceKind = 'json' | 'javascript' | 'scss' | 'php' | 'text';
 
 export const GENERATED_REGISTERED_BLOCK_PATHS = [
   'block.json',
@@ -40,7 +50,9 @@ export const GENERATED_REGISTERED_BLOCK_PATHS = [
   'block.php',
 ] as const;
 
-export type GeneratedSourcePath = typeof GENERATED_REGISTERED_BLOCK_PATHS[number];
+const ASSET_URL_MODULE = 'asset-urls.mjs' as const;
+const FONT_LICENSES_FILE = 'font-licenses.txt' as const;
+export type GeneratedSourcePath = typeof GENERATED_REGISTERED_BLOCK_PATHS[number] | typeof ASSET_URL_MODULE | typeof FONT_LICENSES_FILE;
 
 export interface GeneratedSourceFile {
   path: GeneratedSourcePath;
@@ -51,8 +63,8 @@ export interface GeneratedSourceFile {
 }
 
 export interface GeneratedSourceManifestEntry {
-  path: GeneratedSourceFile['path'];
-  kind: GeneratedSourceKind;
+  path: string;
+  kind: GeneratedSourceKind | 'asset';
   contentHash: string;
   operation: AuthoringFileOperation;
   templateVersion: typeof REGISTERED_BLOCK_TEMPLATE_VERSION;
@@ -66,6 +78,9 @@ export interface GeneratedSourceManifest {
 }
 
 export interface GeneratedRegisteredBlock {
+  assets: GeneratedAssetFile[];
+  /** The exact native template emitted into edit.js, also used by runtime proof. */
+  template: TemplateNode[];
   templateVersion: typeof REGISTERED_BLOCK_TEMPLATE_VERSION;
   sourcePlanHash: string;
   files: GeneratedSourceFile[];
@@ -145,7 +160,7 @@ const TOKEN_PRESET_KINDS: Record<string, string> = {
  * while this one has a stricter code-generation boundary and its own parsers.
  */
 export interface RegisteredBlockOutputPlan {
-  files: ReadonlyArray<Pick<GeneratedSourceFile, 'path' | 'operation'>>;
+  files: ReadonlyArray<{ path: string; operation: AuthoringFileOperation }>;
 }
 
 /**
@@ -153,7 +168,8 @@ export interface RegisteredBlockOutputPlan {
  * Preview uses this to bind its destination fingerprint before confirmation.
  */
 export function planRegisteredBlockOutput(input: AuthoringPlan): RegisteredBlockOutputPlan {
-  return { files: outputFiles(prepareStaticPlan(input)) };
+  const plan = prepareStaticPlan(input);
+  return { files: [...outputFiles(plan), ...collectConfirmedAssets(plan).map(({ path, operation }) => ({ path, operation }))] };
 }
 
 /**
@@ -167,28 +183,39 @@ export function compileRegisteredBlock(input: AuthoringPlan): GeneratedRegistere
   const output = outputFiles(plan);
   const operations = new Map(output.map((file) => [file.path, file.operation]));
   const rootClass = blockRootClass(plan.target.name);
+  const assets = collectConfirmedAssets(plan);
+  const fontStyles = renderFontStyles(plan, assets);
 
-  const template = plan.structure.map((node, index) => toTemplateNode(node, `structure[${index}]`));
-  const allowedBlocks = unique(template.map(([name]) => name)).sort();
+  const template = compileConfirmedTemplate(plan);
+  const allowedBlocks = plan.allowedBlocks ?? unique(template.map(([name]) => name)).sort();
   const metadata = emitBlockJson(plan, allowedBlocks);
   const files: GeneratedSourceFile[] = [
     sourceFile('block.json', 'json', metadata, operations.get('block.json')!),
     sourceFile('index.js', 'javascript', emitIndexJs(), operations.get('index.js')!),
-    sourceFile('edit.js', 'javascript', emitEditJs(template, allowedBlocks, plan.locking.mode), operations.get('edit.js')!),
+    sourceFile('edit.js', 'javascript', emitEditJs(template, allowedBlocks, plan.locking.mode, assets), operations.get('edit.js')!),
     sourceFile('save.js', 'javascript', emitSaveJs(), operations.get('save.js')!),
-    sourceFile('style.scss', 'scss', emitScss(plan.styles.outcomes, rootClass), operations.get('style.scss')!),
+    sourceFile('style.scss', 'scss', fontStyles.css
+      + emitScss(plan.styles.outcomes, rootClass)
+      + stylesheetSuffix(plan.styles.rules, rootClass, plan), operations.get('style.scss')!),
     // Shared styles are loaded by WordPress in both contexts. The editor stylesheet is a stable,
-    // owned template seam for future editor-only declarative outcomes, not plan-authored CSS.
-    sourceFile('editor.scss', 'scss', emitScss([], rootClass), operations.get('editor.scss')!),
+    // owned template seam for explicitly confirmed editor-only affordances.
+    sourceFile('editor.scss', 'scss', emitScss([], rootClass)
+      + stylesheetSuffix(plan.styles.editorRules, rootClass, plan, 'styles.editorRules'), operations.get('editor.scss')!),
     sourceFile('block.php', 'php', emitPhp(), operations.get('block.php')!),
   ];
+  if (fontStyles.licenseText) {
+    files.push(sourceFile(FONT_LICENSES_FILE, 'text', fontStyles.licenseText, operations.get(FONT_LICENSES_FILE)!));
+  }
+  if (operations.has(ASSET_URL_MODULE)) {
+    files.push(sourceFile(ASSET_URL_MODULE, 'javascript', emitAssetUrls(template, assets), operations.get(ASSET_URL_MODULE)!));
+  }
 
   validateGeneratedSources(files);
 
   const manifest: GeneratedSourceManifest = {
     templateVersion: REGISTERED_BLOCK_TEMPLATE_VERSION,
     sourcePlanHash,
-    files: files.map((file) => ({
+    files: [...files, ...assets].map((file) => ({
       path: file.path,
       kind: file.kind,
       contentHash: file.hash,
@@ -197,7 +224,7 @@ export function compileRegisteredBlock(input: AuthoringPlan): GeneratedRegistere
       sourcePlanHash,
     })),
   };
-  return { templateVersion: REGISTERED_BLOCK_TEMPLATE_VERSION, sourcePlanHash, files, manifest };
+  return { template, templateVersion: REGISTERED_BLOCK_TEMPLATE_VERSION, sourcePlanHash, files, assets, manifest };
 }
 
 /** Readable alias for callers that call the compiler a generator. */
@@ -205,6 +232,119 @@ export const generateRegisteredBlock = compileRegisteredBlock;
 
 /** The confirmation boundary materializes an immutable, hash-bound source package. */
 export const materializeAuthoringPlan = compileRegisteredBlock;
+
+/**
+ * Font family names are global CSS identifiers. The authoring adapter must namespace source face
+ * names with this prefix, and canonical plans must retain that namespaced value in any native or
+ * residual `font-family` references. Requiring the prefix here keeps arbitrary plans from
+ * publishing a globally colliding `Inter`/`Roboto` face without adding a second rewrite system.
+ *
+ * This is intentionally the same namespace used by the HTML adapter: a safe target-name slug plus
+ * a short hash of the original target name. The hash means two otherwise similar block names do
+ * not share a CSS family by accident, while retaining a readable family in generated CSS.
+ */
+export function registeredBlockFontFamilyPrefix(blockName: string): string {
+  const slug = blockName
+    .replace(/\s+/g, ' ')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_-]+/g, '-')
+    .replace(/^-+|-+$/g, '') || 'font';
+  const digest = createHash('sha256').update(blockName, 'utf8').digest('hex').slice(0, 8);
+  return `block-runner-${slug}-${digest}-`;
+}
+
+function stylesheetSuffix(rules: AuthoringPlan['styles']['rules'], root: string, plan: AuthoringPlan, at?: string): string {
+  const { css } = renderConfirmedStyleRules(rules ?? [], root, plan.assets, at);
+  return css ? `${css}\n` : '';
+}
+
+/**
+ * Render the hash-confirmed font transport before ordinary component CSS. A face does not carry a
+ * caller-controlled URL: its asset ID is resolved against the copied package asset, so the same
+ * confirmation that permits the WOFF bytes also binds the generated `src`. Font faces are shared
+ * because WordPress loads `style.scss` in both the editor and frontend; `editor.scss` stays
+ * supplemental and never duplicates them.
+ */
+interface RenderedFontStyles {
+  css: string;
+  licenseText: string;
+}
+
+function renderFontStyles(plan: AuthoringPlan, assets: readonly GeneratedAssetFile[]): RenderedFontStyles {
+  const faces = plan.styles.fonts ?? [];
+  const fontAssets = plan.assets.filter((asset) => asset.kind?.toLowerCase() === 'font');
+  if (!faces.length) {
+    if (fontAssets.length) {
+      throw new AuthoringGenerationError(
+        'unresolved-font-face: every bundled font asset must have a confirmed styles.fonts descriptor',
+        'styles.fonts',
+      );
+    }
+    return { css: '', licenseText: '' };
+  }
+
+  const byId = new Map(plan.assets.map((asset) => [asset.id, asset] as const));
+  const generatedByPath = new Map(assets.map((asset) => [asset.path, asset] as const));
+  const renderedFaces: LicensedFontFace[] = [];
+  const notices: FontLicenseNotice[] = [];
+
+  for (const [index, face] of faces.entries()) {
+    const at = `styles.fonts[${index}]`;
+    const asset = byId.get(face.assetId);
+    if (!asset) {
+      throw new AuthoringGenerationError('unresolved-font-face: assetId does not name a plan asset', `${at}.assetId`);
+    }
+    if (asset.kind?.toLowerCase() !== 'font') {
+      throw new AuthoringGenerationError('unresolved-font-face: assetId must reference a font asset', `${at}.assetId`);
+    }
+    if (asset.status !== 'ready' || !asset.destination) {
+      throw new AuthoringGenerationError('unresolved-font-face: font asset must be a confirmed local package asset', `${at}.assetId`);
+    }
+    const generated = generatedByPath.get(asset.destination);
+    if (!generated || generated.assetKind !== 'font') {
+      throw new AuthoringGenerationError('unresolved-font-face: font asset was not materialized by the confirmed asset boundary', `${at}.assetId`);
+    }
+    const decision = fontOwnershipDecision(asset);
+    if (!decision) {
+      // collectConfirmedAssets normally catches this first; keep the font-face seam explicit so a
+      // future asset collector cannot accidentally emit a face without its rights record.
+      throw new AuthoringGenerationError('unresolved-font-face: font asset needs an ownership and license decision', `${at}.assetId`);
+    }
+    if (!face.family.trim().toLowerCase().startsWith(registeredBlockFontFamilyPrefix(plan.target.name))) {
+      throw new AuthoringGenerationError(
+        `unsafe-font-family: family must be explicitly block-owned with prefix ${JSON.stringify(registeredBlockFontFamilyPrefix(plan.target.name))}`,
+        `${at}.family`,
+      );
+    }
+    renderedFaces.push({
+      family: face.family,
+      src: `url("./${asset.destination}")`,
+      ...(face.fontStyle === undefined ? {} : { fontStyle: face.fontStyle }),
+      ...(face.fontWeight === undefined ? {} : { fontWeight: face.fontWeight }),
+      ...(face.fontStretch === undefined ? {} : { fontStretch: face.fontStretch }),
+      ...(face.fontDisplay === undefined ? {} : { fontDisplay: face.fontDisplay }),
+      ...(face.unicodeRange === undefined ? {} : { unicodeRange: face.unicodeRange }),
+    });
+    if (!notices.some((notice) => notice.source === `./${asset.destination}` && notice.family === face.family)) {
+      notices.push({
+        family: face.family,
+        // Keep the original path in the confirmed plan, but do not leak a user's local filesystem
+        // layout into the generated plugin. The package-relative destination is auditable after
+        // publication.
+        source: `./${asset.destination}`,
+        ownership: decision.ownership,
+        license: decision.license,
+        ...(decision.notice === undefined ? {} : { notice: decision.notice }),
+      });
+    }
+  }
+
+  const notice = renderFontLicenseNotice(notices);
+  const licenseText = renderFontLicenseText(notices);
+  const declarations = renderLicensedFontFaces(renderedFaces);
+  return { css: `${notice}${declarations ? `${declarations}\n` : ''}`, licenseText };
+}
 
 /** Typed JSON emitter for the API-v3 metadata document. */
 export function emitBlockJson(plan: Pick<AuthoringPlan, 'target'>, allowedBlocks: string[] = []): string {
@@ -248,11 +388,23 @@ registerBlockType( metadata.name, {
 }
 
 /** Typed JSX emitter for a static InnerBlocks editor surface. */
-export function emitEditJs(template: TemplateNode[], allowedBlocks: string[], lock: AuthoringPlan['locking']['mode']): string {
+export function emitEditJs(template: TemplateNode[], allowedBlocks: string[], lock: AuthoringPlan['locking']['mode'], assets: readonly GeneratedAssetFile[] = []): string {
   const templateLock = lock === 'none' ? false : lock;
+  const imports = referencedAssetIndices(template, assets).map((index) => /\.svg$/i.test(assets[index]!.path)
+    ? `import { asset${index} } from './${ASSET_URL_MODULE}';`
+    : `import asset${index} from ${JSON.stringify(`./${assets[index]!.path}`)};`).join('\n');
+  // Only native image URL attributes are substituted, never arbitrary text.
+  const renderTemplate = (nodes: TemplateNode[]): string => `[${nodes.map(([name, attrs, children]) => {
+    const entries = Object.entries(attrs).map(([key, value]) => {
+      const asset = name === 'core/image' && key === 'url' ? assets.findIndex((item) => `./${item.path}` === value) : -1;
+      return `${JSON.stringify(key)}: ${asset >= 0 ? `asset${asset}` : JSON.stringify(value)}`;
+    });
+    return `[${JSON.stringify(name)}, {${entries.join(', ')} }${children ? `, ${renderTemplate(children)}` : ''}]`;
+  }).join(',\n')}]`;
   return `import { InnerBlocks, useBlockProps } from '@wordpress/block-editor';
+${imports}
 
-const TEMPLATE = ${JSON.stringify(template, null, 2)};
+const TEMPLATE = ${assets.length ? renderTemplate(template) : JSON.stringify(template, null, 2)};
 const ALLOWED_BLOCKS = ${JSON.stringify(allowedBlocks, null, 2)};
 const TEMPLATE_LOCK = ${JSON.stringify(templateLock)};
 
@@ -335,6 +487,9 @@ export function validateGeneratedSources(files: readonly GeneratedSourceFile[]):
         case 'php':
           parsePhp(file.content);
           break;
+        case 'text':
+          if (!file.content.trim()) throw new Error('text source cannot be empty');
+          break;
       }
     } catch (error) {
       const message = error instanceof Error ? error.message : String(error);
@@ -361,25 +516,69 @@ function sourceFile(
   return { path, kind, content, hash: sha256(content), operation };
 }
 
+function referencedAssetIndices(template: TemplateNode[], assets: readonly GeneratedAssetFile[]): number[] {
+  const indices = new Set<number>();
+  const visit = (nodes: TemplateNode[]): void => {
+    for (const [name, attrs, children] of nodes) {
+      const index = name === 'core/image' ? assets.findIndex((asset) => `./${asset.path}` === attrs.url) : -1;
+      if (index >= 0) indices.add(index);
+      visit(children ?? []);
+    }
+  };
+  visit(template);
+  return [...indices].sort((a, b) => a - b);
+}
+
+function emitAssetUrls(template: TemplateNode[], assets: readonly GeneratedAssetFile[]): string {
+  // wp-scripts applies SVGR/url-loader to SVGs imported by .js, producing a data URL which
+  // WordPress strips on filtered saves. In an ESM .mjs module, webpack's standard URL asset
+  // dependency emits the original file instead. No custom webpack config or loader is needed.
+  return referencedAssetIndices(template, assets).filter((index) => /\.svg$/i.test(assets[index]!.path))
+    .map((index) => `export const asset${index} = new URL(${JSON.stringify(`./${assets[index]!.path}`)}, import.meta.url).href;`)
+    .join('\n') + '\n';
+}
+
 function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   const plan = canonicalizeAuthoringPlan(input);
   assertNoExecutableBehaviour(plan);
   assertSafePlanData(plan);
+  validateLockingOperations(plan.locking);
+  // Preview must refuse unsupported styles too, rather than promising an unwritable package.
+  emitScss(plan.styles.outcomes, blockRootClass(plan.target.name));
+  // Preview and writing reject the same unresolved editor decisions.
+  compileConfirmedTemplate(plan);
+  if (plan.allowedBlocks) {
+    if (new Set(plan.allowedBlocks).size !== plan.allowedBlocks.length) {
+      throw new AuthoringGenerationError('duplicate-allowed-block', 'allowedBlocks');
+    }
+    if (plan.structure.some((node) => !plan.allowedBlocks!.includes(node.block))) {
+      throw new AuthoringGenerationError('initial-template-not-allowed: every direct child must be in the insertion allowlist', 'allowedBlocks');
+    }
+  }
 
   for (const [index, file] of plan.files.entries()) {
     if (file.content !== undefined) {
       throw new AuthoringGenerationError('unsupported-executable-behaviour: plan file content is not accepted', `files[${index}].content`);
     }
-    if (!GENERATED_REGISTERED_BLOCK_PATHS.includes(file.path as GeneratedSourcePath)) {
+    if (!outputFiles(plan).some((output) => output.path === file.path) && !plan.assets.some((asset) => asset.destination === file.path)) {
       throw new AuthoringGenerationError('invalid-authoring-plan: file is outside the static registered-block package', `files[${index}].path`);
     }
   }
+  const assets = collectConfirmedAssets(plan);
+  // The same checked face/notice emitter runs during preview so an invalid font descriptor cannot
+  // survive the confirmation hash and fail only when source files are materialized.
+  renderFontStyles(plan, assets);
   return plan;
 }
 
 function outputFiles(plan: AuthoringPlan): Array<Pick<GeneratedSourceFile, 'path' | 'operation'>> {
   const operations = new Map(plan.files.map((file) => [file.path, file.operation ?? 'create'] as const));
-  return GENERATED_REGISTERED_BLOCK_PATHS.map((path) => ({
+  const paths: GeneratedSourcePath[] = [...GENERATED_REGISTERED_BLOCK_PATHS];
+  if (plan.styles.fonts?.length) paths.push(FONT_LICENSES_FILE);
+  if (plan.assets.some((asset) => asset.status === 'ready' && asset.uses?.length && /\.svg$/i.test(asset.destination ?? ''))) {
+    paths.push(ASSET_URL_MODULE);
+  }
+  return paths.map((path) => ({
     path,
     operation: operations.get(path) ?? 'create',
   }));
@@ -569,8 +768,201 @@ function parsePhp(source: string): void {
 
 function toTemplateNode(node: AuthoringStructureNode, path: string): TemplateNode {
   const attributes = sortJson((node.attributes ?? {}) as JsonValue) as Record<string, JsonValue>;
+  if (node.lock) {
+    const existingLock = attributes.lock;
+    attributes.lock = {
+      ...(existingLock && typeof existingLock === 'object' && !Array.isArray(existingLock)
+        ? existingLock as Record<string, JsonValue>
+        : {}),
+      ...node.lock,
+    };
+  }
   const children = (node.children ?? []).map((child, index) => toTemplateNode(child, `${path}.children[${index}]`));
   return children.length > 0 ? [node.block, attributes, children] : [node.block, attributes];
+}
+
+/** Resolve only the content fields and native bindings explicitly confirmed in the plan. */
+function compileConfirmedTemplate(plan: AuthoringPlan): TemplateNode[] {
+  const nodes = structuredClone(plan.structure);
+  const byId = new Map<string, AuthoringStructureNode>();
+  const visit = (items: AuthoringStructureNode[], parentPath = 'structure'): void => {
+    for (const [index, node] of items.entries()) {
+      const nodePath = `${parentPath}[${index}]`;
+      if (node.id) byId.set(node.id, node);
+      validateNativeLock(node.attributes?.lock, `${nodePath}.attributes.lock`);
+      const metadata = node.attributes?.metadata;
+      if (metadata && typeof metadata === 'object' && !Array.isArray(metadata) && metadata.bindings !== undefined) {
+        throw new AuthoringGenerationError('unconfirmed-bindings: declare pattern overrides through fields', `structure.${node.id ?? node.block}.attributes.metadata.bindings`);
+      }
+      visit(node.children ?? [], `${nodePath}.children`);
+    }
+  };
+  visit(nodes);
+  const overrideFields = new Set(plan.pattern.overrides.map(({ field }) => field));
+  if (overrideFields.size !== plan.pattern.overrides.length) {
+    throw new AuthoringGenerationError('duplicate-pattern-override', 'pattern.overrides');
+  }
+  if (overrideFields.size > 0 && !plan.pattern.ready) {
+    throw new AuthoringGenerationError('pattern-overrides-require-ready-pattern', 'pattern.ready');
+  }
+  const fieldsByNode = new Map<string, AuthoringPlan['fields']>();
+  for (const field of plan.fields) {
+    if (!field.node) continue;
+    const fields = fieldsByNode.get(field.node) ?? [];
+    fields.push(field);
+    fieldsByNode.set(field.node, fields);
+  }
+  const fixedNodeIds = new Set<string>();
+  const seen = new Set<string>();
+  for (const [index, field] of plan.fields.entries()) {
+    const at = `fields[${index}]`;
+    const node = field.node ? byId.get(field.node) : undefined;
+    if (!node || !field.attribute) {
+      throw new AuthoringGenerationError('unresolved-editor-field: node and native attribute are required', at);
+    }
+    const key = `${field.node}:${field.attribute}`;
+    if (seen.has(key)) throw new AuthoringGenerationError('duplicate-editor-field', at);
+    seen.add(key);
+    const attrs = node.attributes ??= {};
+    if (field.default !== undefined) attrs[field.attribute] = structuredClone(field.default);
+    const override = overrideFields.has(field.id);
+    const existingLock = validateNativeLock(attrs.lock, `${at}.node.attributes.lock`);
+    if (field.mode !== 'fixed' && existingLock?.edit === true) {
+      throw new AuthoringGenerationError(
+        'conflicting-editable-field: attributes.lock.edit=true makes this native node read-only',
+        at,
+      );
+    }
+    if (field.mode === 'fixed') {
+      if (override) {
+        throw new AuthoringGenerationError('unsupported-pattern-override: a fixed field cannot be a pattern override', at);
+      }
+      const peers = fieldsByNode.get(field.node!) ?? [];
+      if (peers.some((peer) => peer.id !== field.id && peer.mode !== 'fixed')) {
+        throw new AuthoringGenerationError(
+          'unsupported-fixed-field: WordPress lock.edit is block-level; a native node cannot mix fixed and editable fields',
+          at,
+        );
+      }
+      fixedNodeIds.add(field.node!);
+    }
+    if (field.mode === 'override' && !override) {
+      throw new AuthoringGenerationError('unconfirmed-pattern-override', at);
+    }
+    if (!override) continue;
+    if (field.mode === 'fixed' || !supportedPatternOverrideAttributes(node.block, { [field.attribute]: true }).includes(field.attribute)) {
+      throw new AuthoringGenerationError('unsupported-pattern-override: requires an editable native content attribute', at);
+    }
+    const metadata = attrs.metadata;
+    if (metadata !== undefined && (!metadata || typeof metadata !== 'object' || Array.isArray(metadata))) {
+      throw new AuthoringGenerationError('invalid-native-metadata', at);
+    }
+    const existing = (metadata ?? {}) as Record<string, JsonValue>;
+    const bindings = existing.bindings;
+    if (bindings !== undefined && (!bindings || typeof bindings !== 'object' || Array.isArray(bindings))) {
+      throw new AuthoringGenerationError('invalid-native-bindings', at);
+    }
+    const name = patternOverrideName(field.node!);
+    if (existing.name !== undefined && existing.name !== name) {
+      throw new AuthoringGenerationError('conflicting-pattern-override-name', at);
+    }
+    attrs.metadata = {
+      ...existing,
+      name,
+      bindings: { __default: { source: 'core/pattern-overrides' } },
+    };
+  }
+  for (const field of overrideFields) {
+    if (!plan.fields.some((candidate) => candidate.id === field)) {
+      throw new AuthoringGenerationError('unresolved-pattern-override-field', 'pattern.overrides');
+    }
+  }
+  for (const [id, node] of byId) {
+    const selected = plan.fields.filter((field) => field.node === id && overrideFields.has(field.id));
+    if (!selected.length) continue;
+    const unconfirmed = supportedPatternOverrideAttributes(node.block)
+      .filter((attribute) => !selected.some((field) => field.attribute === attribute));
+    if (unconfirmed.length) {
+      throw new AuthoringGenerationError(
+        `partial-pattern-override: WordPress enables a whole native content region; confirm these additional attributes or disable overrides: ${unconfirmed.join(', ')}`,
+        `structure.${id}`,
+      );
+    }
+  }
+  const mediaUses = new Set<string>();
+  for (const [index, asset] of plan.assets.entries()) {
+    for (const use of asset.uses ?? []) {
+      const node = byId.get(use.node);
+      if (!node || node.block !== 'core/image' || !asset.destination || asset.status !== 'ready') {
+        throw new AuthoringGenerationError('unsupported-asset-use: a copied image requires a native Image target', `assets[${index}]`);
+      }
+      const key = `${use.node}:${use.attribute}`;
+      if (mediaUses.has(key)) throw new AuthoringGenerationError('duplicate-asset-use', `assets[${index}]`);
+      mediaUses.add(key);
+      const attrs = node.attributes ??= {};
+      if (plan.fields.some((field) => field.node === use.node && field.attribute === use.attribute && field.default !== undefined)
+        || (attrs.url !== undefined && attrs.url !== asset.source && attrs.url !== `./${asset.destination}`)) {
+        throw new AuthoringGenerationError('conflicting-asset-default: choose the bundled image or a field URL, not both', `assets[${index}]`);
+      }
+      attrs.url = `./${asset.destination}`;
+      // Bundled files are not WordPress Media Library records.
+      if (attrs.id !== undefined) throw new AuthoringGenerationError('bundled-image-cannot-claim-media-id', `structure.${use.node}.attributes.id`);
+    }
+  }
+  for (const id of fixedNodeIds) {
+    const node = byId.get(id)!;
+    const attrs = node.attributes ??= {};
+    const lock = validateNativeLock(attrs.lock, `structure.${id}.attributes.lock`) ?? {};
+    if (lock.edit === false) {
+      throw new AuthoringGenerationError('conflicting-fixed-field: lock.edit=false contradicts a fixed field', `structure.${id}.attributes.lock.edit`);
+    }
+    attrs.lock = { ...lock, edit: true };
+  }
+  assertSafePlanData({ ...plan, structure: nodes });
+  return nodes.map((node, index) => toTemplateNode(node, `structure[${index}]`));
+}
+
+/** Gutenberg's lock attribute is an object with boolean operation switches. */
+function validateNativeLock(value: JsonValue | undefined, sourcePath: string): Record<string, JsonValue> | undefined {
+  if (value === undefined) return undefined;
+  if (!value || typeof value !== 'object' || Array.isArray(value)) {
+    throw new AuthoringGenerationError('invalid-native-lock: lock must be an object', sourcePath);
+  }
+  for (const operation of ['edit', 'move', 'remove'] as const) {
+    if (value[operation] !== undefined && typeof value[operation] !== 'boolean') {
+      throw new AuthoringGenerationError(`invalid-native-lock: lock.${operation} must be boolean`, `${sourcePath}.${operation}`);
+    }
+  }
+  return value as Record<string, JsonValue>;
+}
+
+/**
+ * `templateLock` is the only plan-level structural policy in the generated block. The optional
+ * operation flags are allowed-operation booleans (`true` means allowed) retained for
+ * backwards-compatible plan parsing; they must agree with Gutenberg's native baseline, otherwise
+ * accepting them would claim a global lock the generated InnerBlocks API cannot provide. Native
+ * per-child `structure[].lock` booleans use the opposite meaning (`true` means blocked).
+ */
+function validateLockingOperations(locking: AuthoringPlan['locking']): void {
+  const expected: Record<AuthoringPlan['locking']['mode'], { move: boolean; remove: boolean; insert: boolean }> = {
+    none: { move: true, remove: true, insert: true },
+    insert: { move: true, remove: false, insert: false },
+    all: { move: false, remove: false, insert: false },
+    contentOnly: { move: false, remove: false, insert: false },
+  };
+  const native = expected[locking.mode];
+  for (const operation of ['move', 'remove', 'insert'] as const) {
+    const requested = locking[operation];
+    if (requested !== undefined && requested !== native[operation]) {
+      const mechanism = operation === 'insert'
+        ? 'templateLock and allowedBlocks'
+        : 'templateLock (or a per-node structure.lock exception)';
+      throw new AuthoringGenerationError(
+        `unsupported-locking-policy: locking.${operation}=${String(requested)} conflicts with templateLock ${JSON.stringify(locking.mode)}; use ${mechanism}`,
+        `locking.${operation}`,
+      );
+    }
+  }
 }
 
 function blockRootClass(name: string): string {

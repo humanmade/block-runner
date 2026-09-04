@@ -52,6 +52,7 @@ export {
   validateGeneratedSources,
 } from './authoring/generate.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
+export { AuthoringStyleError, authoringRulesFromStylesheet, renderConfirmedStyleRules } from './authoring/styles.js';
 export { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringOutput, writeGeneratedRegisteredBlock } from './authoring/destination.js';
 export {
   assertStandaloneZipEntries,
@@ -82,6 +83,18 @@ export {
   prove,
 } from './proof/runner.js';
 export {
+  PATTERN_OVERRIDE_SOURCE,
+  applyPatternOverrides,
+  patternOverrideName,
+  supportedPatternOverrideAttributes,
+} from './authoring/overrides.js';
+export {
+  patternOverrideContent,
+  templateOverrideName,
+  validatePatternOverrideContract,
+} from './authoring/pattern-overrides.js';
+export type { PatternOverrideBinding, PatternOverrideContract } from './authoring/pattern-overrides.js';
+export {
   PROOF_GATE_IDS,
   PROOF_GATE_STATUSES,
   PROOF_PROFILE_NAMES,
@@ -99,6 +112,24 @@ export {
   reportProofProfile,
 } from './proof/profiles.js';
 export {
+  APPROVED_UPSTREAM_EXCEPTION_ID,
+  APPROVED_UPSTREAM_PARAGRAPH_EXCEPTION_ID,
+  evaluateReleaseAcceptance,
+  loadNativeHeadingControlEvidence,
+  loadNativeParagraphControlEvidence,
+  summarizeReleaseAcceptance,
+} from './proof/release-acceptance.js';
+export type {
+  AcceptedUpstreamFinding,
+  NativeBlockControlEvidence,
+  NativeHeadingControlEvidence,
+  NativeParagraphControlEvidence,
+  ReleaseAcceptanceBlocker,
+  ReleaseAcceptanceOptions,
+  ReleaseAcceptanceReport,
+  ReleaseAcceptanceStatus,
+} from './proof/release-acceptance.js';
+export {
   EvidenceStore,
   ImmutableContentError,
   ReceiptWriter,
@@ -109,6 +140,8 @@ export {
 } from './proof/receipt.js';
 export type { SiteContextOptions } from './context/run.js';
 export type {
+  AuthoringCssDeclaration,
+  AuthoringCssRule,
   AuthoringAsset,
   AuthoringAssetStatus,
   AuthoringField,
@@ -121,6 +154,14 @@ export type {
   AuthoringPattern,
   AuthoringPatternOverride,
   AuthoringPlan as GeneratedAuthoringPlan,
+  AuthoringCoverage,
+  AuthoringCoverageAsset,
+  AuthoringCoverageAssetOutcome,
+  AuthoringCoverageLocation,
+  AuthoringCoverageStyle,
+  AuthoringCoverageStyleOutcome,
+  AuthoringSource,
+  AuthoringSourceFormat,
   AuthoringStructureNode,
   AuthoringStyleOutcome,
   AuthoringStyleOutcomeKind,
@@ -201,11 +242,16 @@ export type {
   ProofGateResult,
   ProofGateRunner,
   ProofCommandResult,
+  ProofCommandOptions,
   ProofCommandRunner,
   ProofReceiptDocument,
   ProofRunOptions,
   ProofRunResult,
   WordPressPackagePin,
+  ProofPatternInstance,
+  ProofPatternNegativeBinding,
+  ProofPatternRequiredBinding,
+  PatternOverrideContent,
 } from './proof/runner.js';
 export type {
   GateId,

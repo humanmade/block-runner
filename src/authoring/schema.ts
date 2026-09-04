@@ -12,7 +12,71 @@ export type AuthoringStyleStrategy = 'native' | 'scoped-css' | 'mixed';
 export type AuthoringStyleOutcomeKind = 'native' | 'token' | 'scoped-css' | 'dropped';
 export type AuthoringAssetStatus = 'ready' | 'missing' | 'external';
 export type AuthoringFileOperation = 'create' | 'replace';
-export type AuthoringLockMode = 'all' | 'contentOnly' | 'none';
+export type AuthoringLockMode = 'insert' | 'all' | 'contentOnly' | 'none';
+
+/** The WordPress editor/runtime pin used by the 0.9 registered-block compiler. */
+export const AUTHORING_WORDPRESS_VERSION = '7.1' as const;
+
+/** The authored material that was actually analysed to produce a registered-block plan. */
+export type AuthoringSourceFormat = 'html' | 'directory';
+
+export interface AuthoringSource {
+  /** The source entry as supplied to the authoring run (or a stable stdin/inline label). */
+  entry: string;
+  /** SHA-256 of the exact source bytes analysed by Block Runner. */
+  sha256: string;
+  format: AuthoringSourceFormat;
+}
+
+/** A source position retained in the analysis ledger. */
+export interface AuthoringCoverageLocation {
+  path?: string;
+  selector?: string;
+  htmlLine?: number;
+  htmlColumn?: number;
+  offset?: number;
+}
+
+export type AuthoringCoverageStyleOutcome = 'native' | 'preset' | 'literal' | 'scoped-css' | 'warned' | 'blocked';
+
+/** One source declaration and its final destination disposition. */
+export interface AuthoringCoverageStyle {
+  property: string;
+  value: string;
+  outcome: AuthoringCoverageStyleOutcome;
+  /** Whether the declaration came from parity CSS or explicit editor-only CSS. */
+  scope: 'shared' | 'editor';
+  reason?: string;
+  atRules: string[];
+  source?: AuthoringCoverageLocation;
+}
+
+export type AuthoringCoverageAssetOutcome = 'prepared' | 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
+
+/** One concrete source asset reference and its final package/destination disposition. */
+export interface AuthoringCoverageAsset {
+  reference: string;
+  rewritten?: string;
+  kind: 'image' | 'font' | 'stylesheet' | 'media' | 'other';
+  outcome: AuthoringCoverageAssetOutcome;
+  reason?: string;
+  /** Hash of the local bytes when this reference resolved to a prepared package asset. */
+  sha256?: string;
+  destination?: string;
+  source?: AuthoringCoverageLocation;
+}
+
+/** Hashes and complete ledgers produced by the deterministic HTML analysis pass. */
+export interface AuthoringCoverage {
+  /** Effective stylesheet bytes scanned by the authoring pass. */
+  stylesheet?: { entry: string; sha256: string };
+  /** Explicit editor-only stylesheet bytes scanned by the authoring pass. */
+  editorStylesheet?: { entry: string; sha256: string };
+  /** One entry per source declaration observed by the authoring pass. */
+  styles: AuthoringCoverageStyle[];
+  /** One entry per concrete asset reference observed by the authoring pass. */
+  assets: AuthoringCoverageAsset[];
+}
 
 /**
  * The registered block this plan is intended to create. `directory` is a safe relative suggested
@@ -79,7 +143,54 @@ export interface AuthoringStyleOutcome {
 export interface AuthoringStyles {
   strategy: AuthoringStyleStrategy;
   outcomes: AuthoringStyleOutcome[];
+  /** Component-local selectors before the compiler adds its owned block root. */
+  rules?: AuthoringCssRule[];
+  /** Supplemental editor affordances, subject to the same scoping and asset checks. */
+  editorRules?: AuthoringCssRule[];
+  /**
+   * Hash-confirmed, licensed faces shared by the editor and frontend. Each face points at the
+   * corresponding `assets[]` entry; source paths and hashes stay in that one asset record. Font
+   * faces are deliberately not an editor-only field: `style.scss` is loaded in both contexts,
+   * while `editor.scss` is supplemental and must not duplicate a face.
+   */
+  fonts?: AuthoringFontFace[];
 }
+
+/** A checked @font-face descriptor whose source is resolved from a confirmed asset ID. */
+export interface AuthoringFontFace {
+  assetId: string;
+  family: string;
+  fontStyle?: string;
+  fontWeight?: string;
+  fontStretch?: string;
+  fontDisplay?: string;
+  unicodeRange?: string;
+}
+
+/** The explicit ownership/license decision attached to one bundled font asset. */
+export interface AuthoringFontLicense {
+  ownership: string;
+  license: string;
+  notice?: string;
+}
+
+export interface AuthoringCssDeclaration {
+  property: string;
+  value: string;
+  important?: boolean;
+}
+
+/** Structured CSS only: no imports, Sass, executable fragments, or unscoped output. */
+export type AuthoringCssRule = {
+  kind: 'style';
+  selector: string;
+  declarations: AuthoringCssDeclaration[];
+} | {
+  kind: 'conditional';
+  name: 'media' | 'supports' | 'container';
+  prelude: string;
+  rules: AuthoringCssRule[];
+};
 
 export interface AuthoringPatternOverride {
   field: string;
@@ -100,6 +211,12 @@ export interface AuthoringAsset {
   destination?: string;
   status?: AuthoringAssetStatus;
   required?: boolean;
+  /** SHA-256 of a local source file, required before it may be copied. */
+  sha256?: string;
+  /** Explicit ownership and license record required for a bundled WOFF/WOFF2 asset. */
+  fontLicense?: AuthoringFontLicense;
+  /** Explicit native media attributes which use this bundled image. */
+  uses?: Array<{ node: string; attribute: 'url' }>;
 }
 
 /**
@@ -126,7 +243,13 @@ export interface AuthoringPlan {
   version: typeof AUTHORING_PLAN_VERSION;
   generatorVersion: string;
   target: AuthoringTarget;
+  /** Present on plans produced by HTML analysis; absent on a hand-authored plan. */
+  source?: AuthoringSource;
+  /** Complete, hash-bound dispositions from the HTML analysis pass. */
+  coverage?: AuthoringCoverage;
   structure: AuthoringStructureNode[];
+  /** Explicit direct-child insertion policy; defaults to the initial template's direct children. */
+  allowedBlocks?: string[];
   fields: AuthoringField[];
   locking: AuthoringLocking;
   styles: AuthoringStyles;
@@ -220,7 +343,10 @@ function normalizePlan(input: unknown): AuthoringPlan {
       'version',
       'generatorVersion',
       'target',
+      'source',
+      'coverage',
       'structure',
+      'allowedBlocks',
       'fields',
       'locking',
       'styles',
@@ -250,22 +376,36 @@ function normalizePlan(input: unknown): AuthoringPlan {
   const assets = arrayAt(value.assets ?? [], '$.assets').map((asset, index) =>
     normalizeAsset(asset, `$.assets[${index}]`),
   );
+  const styles = normalizeStyles(value.styles ?? {}, '$.styles');
   const files = arrayAt(filesInput, '$.files').map((file, index) => normalizeFile(file, `$.files[${index}]`));
+  const source = value.source === undefined ? undefined : normalizeSource(value.source, '$.source');
+  const coverage = value.coverage === undefined ? undefined : normalizeCoverage(value.coverage, '$.coverage');
+  if (coverage !== undefined && source === undefined) {
+    throw invalid('$.coverage', 'requires a hash-bound $.source');
+  }
 
   unique(structureNodeIds(structure), '$.structure', 'node id');
   unique(fields.map((field) => field.id), '$.fields', 'field id');
   unique(assets.map((asset) => asset.id), '$.assets', 'asset id');
   unique(files.map((file) => file.path), '$.files', 'file path');
   rejectFilePathPrefixes(files.map((file) => file.path));
+  validateFontAssetBindings(styles, assets);
 
   return {
     version: AUTHORING_PLAN_VERSION,
     generatorVersion: nonEmptyString(value.generatorVersion, '$.generatorVersion'),
     target: normalizeTarget(value.target, '$.target'),
+    ...(source === undefined ? {} : { source }),
+    ...(coverage === undefined ? {} : { coverage }),
     structure,
+    ...(value.allowedBlocks === undefined ? {} : { allowedBlocks: arrayAt(value.allowedBlocks, '$.allowedBlocks').map((name, index) => {
+      const block = nonEmptyString(name, `$.allowedBlocks[${index}]`);
+      if (!/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/.test(block)) throw invalid(`$.allowedBlocks[${index}]`, 'must be a WordPress block name');
+      return block;
+    }) }),
     fields,
     locking: normalizeLocking(value.locking ?? {}, '$.locking'),
-    styles: normalizeStyles(value.styles ?? {}, '$.styles'),
+    styles,
     pattern: normalizePattern(value.pattern ?? {}, '$.pattern'),
     assets,
     files,
@@ -273,6 +413,98 @@ function normalizePlan(input: unknown): AuthoringPlan {
       nonEmptyString(warning, `$.warnings[${index}]`),
     ),
   };
+}
+
+function normalizeSource(input: unknown, location: string): AuthoringSource {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['entry', 'sha256', 'format']);
+  const sha256 = nonEmptyString(value.sha256, `${location}.sha256`);
+  if (!/^[a-f0-9]{64}$/.test(sha256)) {
+    throw invalid(`${location}.sha256`, 'must be a lower-case SHA-256 hexadecimal digest');
+  }
+  return {
+    entry: nonEmptyString(value.entry, `${location}.entry`),
+    sha256,
+    format: enumAt(value.format, `${location}.format`, ['html', 'directory'] as const),
+  };
+}
+
+function normalizeCoverage(input: unknown, location: string): AuthoringCoverage {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['stylesheet', 'editorStylesheet', 'styles', 'assets']);
+  const styles = arrayAt(value.styles ?? [], `${location}.styles`).map((entry, index) =>
+    normalizeCoverageStyle(entry, `${location}.styles[${index}]`),
+  );
+  const assets = arrayAt(value.assets ?? [], `${location}.assets`).map((entry, index) =>
+    normalizeCoverageAsset(entry, `${location}.assets[${index}]`),
+  );
+  return {
+    ...(value.stylesheet === undefined ? {} : { stylesheet: normalizeStylesheetFingerprint(value.stylesheet, `${location}.stylesheet`) }),
+    ...(value.editorStylesheet === undefined
+      ? {}
+      : { editorStylesheet: normalizeStylesheetFingerprint(value.editorStylesheet, `${location}.editorStylesheet`) }),
+    styles,
+    assets,
+  };
+}
+
+function normalizeStylesheetFingerprint(input: unknown, location: string): { entry: string; sha256: string } {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['entry', 'sha256']);
+  const sha256 = nonEmptyString(value.sha256, `${location}.sha256`);
+  if (!/^[a-f0-9]{64}$/.test(sha256)) {
+    throw invalid(`${location}.sha256`, 'must be a lower-case SHA-256 hexadecimal digest');
+  }
+  return { entry: nonEmptyString(value.entry, `${location}.entry`), sha256 };
+}
+
+function normalizeCoverageLocation(input: unknown, location: string): AuthoringCoverageLocation {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['path', 'selector', 'htmlLine', 'htmlColumn', 'offset']);
+  return withOptional({
+    path: optionalString(value.path, `${location}.path`),
+    selector: optionalString(value.selector, `${location}.selector`),
+    htmlLine: optionalNonNegativeInteger(value.htmlLine, `${location}.htmlLine`),
+    htmlColumn: optionalNonNegativeInteger(value.htmlColumn, `${location}.htmlColumn`),
+    offset: optionalNonNegativeInteger(value.offset, `${location}.offset`),
+  });
+}
+
+function normalizeCoverageStyle(input: unknown, location: string): AuthoringCoverageStyle {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source']);
+  return withOptional({
+    property: nonEmptyString(value.property, `${location}.property`),
+    value: stringAt(value.value, `${location}.value`),
+    outcome: enumAt(value.outcome, `${location}.outcome`, ['native', 'preset', 'literal', 'scoped-css', 'warned', 'blocked'] as const),
+    scope: value.scope === undefined ? 'shared' : enumAt(value.scope, `${location}.scope`, ['shared', 'editor'] as const),
+    reason: optionalString(value.reason, `${location}.reason`),
+    atRules: arrayAt(value.atRules ?? [], `${location}.atRules`).map((rule, index) => nonEmptyString(rule, `${location}.atRules[${index}]`)),
+    source: value.source === undefined ? undefined : normalizeCoverageLocation(value.source, `${location}.source`),
+  });
+}
+
+function normalizeCoverageAsset(input: unknown, location: string): AuthoringCoverageAsset {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['reference', 'rewritten', 'kind', 'outcome', 'reason', 'sha256', 'destination', 'source']);
+  const sha256 = optionalString(value.sha256, `${location}.sha256`);
+  if (sha256 !== undefined && !/^[a-f0-9]{64}$/.test(sha256)) {
+    throw invalid(`${location}.sha256`, 'must be a lower-case SHA-256 hexadecimal digest');
+  }
+  const destination = optionalString(value.destination, `${location}.destination`);
+  if (destination !== undefined && !isSafeAuthoringRelativePath(destination)) {
+    throw invalid(`${location}.destination`, 'must be a safe relative path');
+  }
+  return withOptional({
+    reference: nonEmptyString(value.reference, `${location}.reference`),
+    rewritten: optionalString(value.rewritten, `${location}.rewritten`),
+    kind: enumAt(value.kind, `${location}.kind`, ['image', 'font', 'stylesheet', 'media', 'other'] as const),
+    outcome: enumAt(value.outcome, `${location}.outcome`, ['prepared', 'copied', 'uploaded', 'reused', 'external', 'unresolved', 'blocked'] as const),
+    reason: optionalString(value.reason, `${location}.reason`),
+    sha256,
+    destination,
+    source: value.source === undefined ? undefined : normalizeCoverageLocation(value.source, `${location}.source`),
+  });
 }
 
 function normalizeTarget(input: unknown, location: string): AuthoringTarget {
@@ -286,6 +518,12 @@ function normalizeTarget(input: unknown, location: string): AuthoringTarget {
   if (directory !== undefined && !isSafeAuthoringRelativePath(directory, { allowDot: true })) {
     throw invalid(`${location}.directory`, 'must be a safe relative path');
   }
+  const wordpress = value.wordpress === undefined
+    ? AUTHORING_WORDPRESS_VERSION
+    : optionalString(value.wordpress, `${location}.wordpress`)!;
+  if (!/^7\.1(?:\.\d+)?$/.test(wordpress)) {
+    throw invalid(`${location}.wordpress`, `must target WordPress ${AUTHORING_WORDPRESS_VERSION}; this 0.9 compiler has no compatibility branch for ${JSON.stringify(wordpress)}`);
+  }
   return withOptional({
     name,
     title: nonEmptyString(value.title, `${location}.title`),
@@ -293,7 +531,7 @@ function normalizeTarget(input: unknown, location: string): AuthoringTarget {
     category: optionalString(value.category, `${location}.category`),
     icon: optionalString(value.icon, `${location}.icon`),
     textDomain: optionalString(value.textDomain, `${location}.textDomain`),
-    wordpress: optionalString(value.wordpress, `${location}.wordpress`),
+    wordpress,
     directory,
   });
 }
@@ -348,7 +586,7 @@ function normalizeLocking(input: unknown, location: string): AuthoringLocking {
   return withOptional({
     mode: value.mode === undefined
       ? 'none'
-      : enumAt(value.mode, `${location}.mode`, ['all', 'contentOnly', 'none'] as const),
+      : enumAt(value.mode, `${location}.mode`, ['insert', 'all', 'contentOnly', 'none'] as const),
     move: optionalBoolean(value.move, `${location}.move`),
     remove: optionalBoolean(value.remove, `${location}.remove`),
     insert: optionalBoolean(value.insert, `${location}.insert`),
@@ -357,7 +595,7 @@ function normalizeLocking(input: unknown, location: string): AuthoringLocking {
 
 function normalizeStyles(input: unknown, location: string): AuthoringStyles {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['strategy', 'outcomes']);
+  knownKeys(value, location, ['strategy', 'outcomes', 'rules', 'editorRules', 'fonts']);
   return {
     strategy: value.strategy === undefined
       ? 'native'
@@ -365,7 +603,71 @@ function normalizeStyles(input: unknown, location: string): AuthoringStyles {
     outcomes: arrayAt(value.outcomes ?? [], `${location}.outcomes`).map((outcome, index) =>
       normalizeStyleOutcome(outcome, `${location}.outcomes[${index}]`),
     ),
+    ...(value.rules === undefined ? {} : { rules: normalizeCssRules(value.rules, `${location}.rules`) }),
+    ...(value.editorRules === undefined ? {} : { editorRules: normalizeCssRules(value.editorRules, `${location}.editorRules`) }),
+    ...(value.fonts === undefined ? {} : {
+      fonts: arrayAt(value.fonts, `${location}.fonts`).map((face, index) =>
+        normalizeFontFace(face, `${location}.fonts[${index}]`),
+      ),
+    }),
   };
+}
+
+function normalizeFontFace(input: unknown, location: string): AuthoringFontFace {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['assetId', 'family', 'fontStyle', 'fontWeight', 'fontStretch', 'fontDisplay', 'unicodeRange']);
+  return withOptional({
+    assetId: nonEmptyString(value.assetId, `${location}.assetId`),
+    family: nonEmptyString(value.family, `${location}.family`),
+    fontStyle: optionalString(value.fontStyle, `${location}.fontStyle`),
+    fontWeight: optionalString(value.fontWeight, `${location}.fontWeight`),
+    fontStretch: optionalString(value.fontStretch, `${location}.fontStretch`),
+    fontDisplay: optionalString(value.fontDisplay, `${location}.fontDisplay`),
+    unicodeRange: optionalString(value.unicodeRange, `${location}.unicodeRange`),
+  });
+}
+
+/**
+ * A face is useful only when its source is one of the plan's confirmed font assets. Keeping this
+ * cross-reference at the schema boundary prevents a plan from looking complete while the
+ * generator has no byte/licence record from which to resolve its `src`.
+ */
+function validateFontAssetBindings(styles: AuthoringStyles, assets: AuthoringAsset[]): void {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  for (const [index, face] of (styles.fonts ?? []).entries()) {
+    const asset = byId.get(face.assetId);
+    if (!asset) {
+      throw invalid(`$.styles.fonts[${index}].assetId`, `must reference an asset in $.assets (received ${JSON.stringify(face.assetId)})`);
+    }
+    if (asset.kind?.toLowerCase() !== 'font') {
+      throw invalid(`$.styles.fonts[${index}].assetId`, `must reference an asset whose kind is "font" (received ${JSON.stringify(asset.kind ?? '')})`);
+    }
+  }
+}
+
+function normalizeCssRules(input: unknown, location: string, depth = 0): AuthoringCssRule[] {
+  if (depth > 16) throw invalid(location, 'conditional CSS nesting exceeds 16 levels');
+  return arrayAt(input, location).map((inputRule, index) => {
+    const at = `${location}[${index}]`;
+    const rule = objectAt(inputRule, at);
+    const kind = enumAt(rule.kind, `${at}.kind`, ['style', 'conditional'] as const);
+    if (kind === 'conditional') {
+      knownKeys(rule, at, ['kind', 'name', 'prelude', 'rules']);
+      return { kind, name: enumAt(rule.name, `${at}.name`, ['media', 'supports', 'container'] as const),
+        prelude: nonEmptyString(rule.prelude, `${at}.prelude`), rules: normalizeCssRules(rule.rules, `${at}.rules`, depth + 1) };
+    }
+    knownKeys(rule, at, ['kind', 'selector', 'declarations']);
+    return { kind, selector: nonEmptyString(rule.selector, `${at}.selector`),
+      declarations: arrayAt(rule.declarations, `${at}.declarations`).map((inputDeclaration, declarationIndex) => {
+        const declarationAt = `${at}.declarations[${declarationIndex}]`;
+        const declaration = objectAt(inputDeclaration, declarationAt);
+        knownKeys(declaration, declarationAt, ['property', 'value', 'important']);
+        return withOptional({ property: nonEmptyString(declaration.property, `${declarationAt}.property`),
+          value: nonEmptyString(declaration.value, `${declarationAt}.value`),
+          important: optionalBoolean(declaration.important, `${declarationAt}.important`) });
+      }),
+    };
+  });
 }
 
 function normalizeStyleOutcome(input: unknown, location: string): AuthoringStyleOutcome {
@@ -400,7 +702,7 @@ function normalizePattern(input: unknown, location: string): AuthoringPattern {
 
 function normalizeAsset(input: unknown, location: string): AuthoringAsset {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['id', 'source', 'kind', 'destination', 'status', 'required']);
+  knownKeys(value, location, ['id', 'source', 'kind', 'destination', 'status', 'required', 'sha256', 'fontLicense', 'uses']);
   const destination = optionalString(value.destination, `${location}.destination`);
   if (destination !== undefined && !isSafeAuthoringRelativePath(destination)) {
     throw invalid(`${location}.destination`, 'must be a safe relative path');
@@ -414,6 +716,24 @@ function normalizeAsset(input: unknown, location: string): AuthoringAsset {
       ? undefined
       : enumAt(value.status, `${location}.status`, ['ready', 'missing', 'external'] as const),
     required: optionalBoolean(value.required, `${location}.required`),
+    sha256: optionalString(value.sha256, `${location}.sha256`),
+    fontLicense: value.fontLicense === undefined ? undefined : normalizeFontLicense(value.fontLicense, `${location}.fontLicense`),
+    uses: value.uses === undefined ? undefined : arrayAt(value.uses, `${location}.uses`).map((use, index) => {
+      const at = `${location}.uses[${index}]`;
+      const item = objectAt(use, at);
+      knownKeys(item, at, ['node', 'attribute']);
+      return { node: nonEmptyString(item.node, `${at}.node`), attribute: enumAt(item.attribute, `${at}.attribute`, ['url'] as const) };
+    }),
+  });
+}
+
+function normalizeFontLicense(input: unknown, location: string): AuthoringFontLicense {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['ownership', 'license', 'notice']);
+  return withOptional({
+    ownership: nonEmptyString(value.ownership, `${location}.ownership`),
+    license: nonEmptyString(value.license, `${location}.license`),
+    notice: optionalString(value.notice, `${location}.notice`),
   });
 }
 
@@ -553,6 +873,16 @@ function optionalBoolean(input: unknown, location: string): boolean | undefined 
     return undefined;
   }
   return booleanAt(input, location);
+}
+
+function optionalNonNegativeInteger(input: unknown, location: string): number | undefined {
+  if (input === undefined) {
+    return undefined;
+  }
+  if (typeof input !== 'number' || !Number.isSafeInteger(input) || input < 0) {
+    throw invalid(location, 'must be a non-negative integer');
+  }
+  return input;
 }
 
 function booleanAt(input: unknown, location: string): boolean {

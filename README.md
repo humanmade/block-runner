@@ -90,11 +90,12 @@ lanes: **Direct** writes Gutenberg markup itself; **Block Runner** returns an in
 package assembles and validates. The dashed line is the deterministic rules converter running
 without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
 
-Registered-block authoring is measured by a separate corpus in
+Registered-block authoring has a separate, currently unscored corpus in
 [`benchmarks/authoring`](benchmarks/authoring/README.md). It has no combined score with this
 suite: it records editable plans, generated plugin source, native-block use, the style ledger,
 warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
-The 0.9 release gate publishes only receipt-backed results; a missing browser or WordPress gate is
+The authoring benchmark is optional for 0.9 testing and does not run automatically during release
+checks. Required package and WordPress proof remain separate: a missing required gate is
 `blocked`, never a pass.
 
 ## What it does
@@ -155,7 +156,7 @@ Gutenberg before it reaches the editor.
 | Command | What it does |
 | --- | --- |
 | `convert` | Authored HTML to native post-content blocks, including the legacy styling path. |
-| `author` | One authored design to a static, registered block package with scoped parity CSS and assets. |
+| `author <html> --json` | Analyze one authored design into a canonical registered-block plan, checked source, and style/asset ledgers. Does not write source. |
 | `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
 | `author preview <plan\|->` | Validate and render a versioned registered-block AuthoringPlan without writing files. |
 | `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write only the reviewed plan bound to its SHA-256 confirmation and destination. |
@@ -169,7 +170,7 @@ Gutenberg before it reaches the editor.
 
 ```sh
 block-runner convert hero.html                    # blocks to stdout
-block-runner author hero.html --name acme/hero --out-dir blocks/hero
+block-runner author hero.html --name acme/hero --json
 block-runner assemble intent.json                 # structure in, blocks out
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
@@ -191,6 +192,11 @@ separate replacement approvals, so their absolute preview paths must also be sup
 writing and the command offers the standalone form above.
 
 ### Registered-block authoring
+
+HTML analysis returns `package.canonicalPlan`. Save that object as your plan, review its
+native structure and editing policy, then use the same preview/write workflow below.
+Successful analysis uses the canonical source compiler; unresolved Custom HTML regions,
+unsafe assets, and unsupported CSS produce explicit failures, not a ready-to-install package.
 
 For a reusable registered block, first make a versioned **AuthoringPlan** rather than jumping
 from a description or design directly to source. The plan records the block target and native
@@ -340,6 +346,9 @@ model-agnostic: it works on the output of any model, from any vendor.
 
 ## Library
 
+The library is ESM-only and requires Node.js 20 or later. CommonJS callers should use
+`await import('block-runner')` rather than `require('block-runner')`.
+
 ```ts
 import { canonicalize, convert, validate } from 'block-runner';
 
@@ -347,6 +356,56 @@ const validation = await validate(markup);
 const fixed = await canonicalize(markup);
 const converted = await convert(html, { resolver: 'noop' });
 ```
+
+## Synced-pattern overrides (WordPress 7.1)
+
+`compileAuthoringPlan()` makes native content regions of a generated wrapper ready for
+WordPress's synced-pattern override flow. It adds a deterministic `metadata.name` and explicit
+`core/pattern-overrides` binding only to supported Core child attributes: rich text
+`content`, image `id`/`url`/`alt`, and button `text`/`url`. Layout remains the one canonical
+InnerBlocks template; the compiler never binds or synthesizes `innerBlocks`.
+
+Stable names derive from the reviewed plan path, so a synced pattern stores an instance's local
+values in the normal `core/block` `content` map. Use `templateLock: 'all'` or
+`'contentOnly'` when the pattern must retain canonical structure.
+
+The full proof route is intentionally fail-closed:
+
+```sh
+block-runner proof generated-plugin.zip \\
+  --profile full \\
+  --input design.html \\
+  --markup generated.blocks.html \\
+  --fixture proof-fixture.json
+```
+
+It starts a real WordPress 7.1 `wp-env`, records the canonical `wp_block` content and each
+`core/block.content` instance value in an immutable receipt, then verifies two instances,
+reopen, canonical update, reset, structural policy, a missing-binding negative, and frontend
+output. Consumer proofs require an installable plugin archive and reviewed visual/accessibility
+inputs for a passing full receipt.
+
+The repository builds its generated fixture plugin and native markup from
+`test/fixtures/authoring/pattern-overrides.plan.json`. Its WordPress visual assertion compares
+the completed page with the checked-in, reviewed
+`proof/wordpress-7.1-pattern-overrides.expected.png` golden; it never creates a baseline while
+evaluating one. The real receipt runs without a proof adapter or externally supplied artifacts:
+
+```sh
+npm run verify
+npm run test:proof:wordpress
+```
+
+`verify` runs repository and packaging checks; `test:proof:wordpress` runs the real editor and
+frontend lifecycle. The latter requires a working Docker CLI and daemon. Proof commands record bounded
+Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
+specific blocked or failed phase instead of exhausting the general test timeout.
+
+On GitHub Actions, the separate WordPress proof job uploads a
+`wordpress-7.1-pattern-overrides-receipt` artifact on success or failure, retained for 14 days. It contains
+`receipt-index.json`, the content-addressed `receipts/sha256` record, and its
+`evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
+the relevant build without committing environment-specific run output.
 
 ## Media Resolution
 
@@ -442,10 +501,15 @@ output.
 
 Non-native selectors are preserved only when they can be rooted beneath the generated block's
 deterministic `.wp-block-<namespace>-<slug>` class. Responsive, container-query, and pseudo-state
-rules retain their conditions. Preflight/global rules, escaping selectors, imports, keyframes, and
-font faces are ledgered and blocked rather than silently scoped. Local static asset references are
-copied into `assets/` and rewritten; remote URLs remain external by default, while font files
-remain unresolved pending an external licensing decision.
+rules retain their conditions. Preflight/global rules, escaping selectors, imports, and keyframes
+are ledgered and blocked rather than silently scoped. Confirmed local static assets are copied
+into `assets/` and rewritten; remote image URLs remain external by default.
+
+Local WOFF/WOFF2 fonts require an explicit source, SHA-256, ownership, and license decision.
+Approved font families get block-specific names and shared editor/frontend CSS. Full redistribution
+notices are retained separately in the production archive because minifiers can remove CSS comments.
+Unlicensed or unsupported faces use a safe fallback with a source-located warning. Destination
+theme font presets do not require copying font files.
 
 > Status: `strict`, `relaxed` and `open` are implemented. `source` is not built yet and is
 > rejected rather than silently downgraded — though the converter already falls back to a
@@ -469,10 +533,11 @@ for adding producers and engines.
 The registered-block authoring corpus is deliberately separate from that conversion suite:
 
 ```sh
-npm run authoring:prove  # validate the 0.9 authoring contract and WordPress-7.1 runtime proof
+npm run authoring:prove -- --plans ./candidate-plans
 ```
 
-Its output reports `scored`, `unsupported`, `blocked`, and `engine-error` separately. It does
+This requires saved canonical candidate plans and the configured WordPress runtime worker; see
+the corpus README. Without them it reports blocked work, not a benchmark result. It does
 not turn unrun browser/editor work or a model/tool failure into a zero product score. The 0.9
 testing-release package, installer, and activation checks are run with `npm run release:check`;
 see [`release/0.9-testing`](release/0.9-testing/README.md) for the receipt matrix and the

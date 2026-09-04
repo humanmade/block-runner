@@ -73,11 +73,12 @@ the arrays may be empty when a design genuinely has none of that item.
 | `generatorVersion` | Non-empty generator version string. |
 | `target` | `{ "name": "namespace/slug", "title": "…" }`; optional `description`, `category`, `icon`, `textDomain`, `wordpress`, and safe relative `directory`. |
 | `structure` | Ordered native nodes: `block`, optional stable `id`, `label`, JSON `attributes`, `lock`, and recursive `children`. Never HTML. |
+| `allowedBlocks` | Optional direct-child insertion allowlist. It must include every initial direct child; nested blocks are not added implicitly. |
 | `fields` | Ordered `{ "id", "label", "mode" }` records; `mode` is exactly `fixed`, `editable`, or `override`. Optional `node`, `attribute`, `type`, `default`, and `description` explain the editor surface. |
-| `locking` | `{ "mode": "all" | "contentOnly" | "none" }`, with optional boolean `move`, `remove`, and `insert`. |
-| `styles` | `{ "strategy": "native" | "scoped-css" | "mixed", "outcomes": [] }`; an outcome has `property`, `outcome` (`native`, `token`, `scoped-css`, or `dropped`) and optional `value`, `token`, and `reason`. |
+| `locking` | `{ "mode": "all" | "contentOnly" | "insert" | "none" }`. Use native per-node `lock` for movement/removal decisions. |
+| `styles` | `{ "strategy": "native" | "scoped-css" | "mixed", "outcomes": [] }`; an outcome has `property`, `outcome` (`native`, `token`, `scoped-css`, or `dropped`) and optional `value`, `token`, and `reason`. Optional `rules` and `editorRules` carry structured residual CSS as described below. |
 | `pattern` | `{ "ready": boolean, "overrides": [{ "field": "<field id>" }] }`, with optional override label and description. |
-| `assets` | `{ "id", "source" }` records with optional `kind`, safe relative `destination`, `status` (`ready`, `missing`, `external`), and `required`. |
+| `assets` | Local images require `id`, absolute `source`, `status: "ready"`, byte-level `sha256`, and an `assets/<filename>` destination. Declare native image references in `uses: [{ "node": "<image node id>", "attribute": "url" }]`, or reference the image in confirmed CSS. Supported bundled formats: PNG, JPEG, GIF, WebP, static SVG. An external HTTP(S) asset uses `status: "external"` without a destination or bundled uses. |
 | `files` | `{ "path" }` records with optional `kind` and `operation` (`create` or `replace`; default `create`). `plannedFiles` is accepted only as an input alias and canonicalizes to `files`. |
 | `warnings` | Ordered, non-empty warning strings; use `[]` when there are none. |
 
@@ -103,7 +104,6 @@ destination for the supplied design; do not copy its values blindly.
       "block": "core/group",
       "label": "Feature grid",
       "attributes": { "layout": { "type": "constrained" } },
-      "lock": { "move": false, "remove": false },
       "children": [
         {
           "id": "heading",
@@ -118,44 +118,79 @@ destination for the supplied design; do not copy its values blindly.
     {
       "id": "heading",
       "label": "Heading",
-      "mode": "editable",
+      "mode": "override",
       "type": "rich-text",
       "node": "heading",
-      "attribute": "content"
-    },
-    {
-      "id": "layout",
-      "label": "Layout",
-      "mode": "fixed",
-      "type": "layout"
-    },
-    {
-      "id": "accent",
-      "label": "Accent",
-      "mode": "override",
-      "type": "color"
+      "attribute": "content",
+      "default": "Our features"
     }
   ],
-  "locking": { "mode": "contentOnly", "move": false, "remove": false, "insert": false },
+  "locking": { "mode": "contentOnly" },
   "styles": {
-    "strategy": "mixed",
-    "outcomes": [
-      { "property": "color", "outcome": "token", "token": "accent" },
-      { "property": "display", "outcome": "scoped-css", "value": "grid", "reason": "No native support." }
-    ]
+    "strategy": "native",
+    "outcomes": []
   },
-  "pattern": { "ready": true, "overrides": [{ "field": "accent", "label": "Accent" }] },
-  "assets": [
-    { "id": "logo", "source": "assets/logo.svg", "kind": "svg", "destination": "assets/logo.svg", "status": "ready", "required": true }
-  ],
-  "files": [
-    { "path": "block.json", "kind": "metadata", "operation": "create" },
-    { "path": "index.js", "kind": "editor", "operation": "create" },
-    { "path": "style.css", "kind": "style", "operation": "create" }
-  ],
+  "pattern": { "ready": true, "overrides": [{ "field": "heading", "label": "Heading" }] },
+  "assets": [],
+  "files": [],
   "warnings": []
 }
 ```
+
+Every declared field must resolve to a real node and native attribute. Native pattern
+overrides enable the whole content region, not arbitrary style properties. Confirm all
+supported attributes of an overridden node: heading/paragraph/list-item `content`;
+image `id`, `url`, `title`, `alt`, `caption`; button `text`, `url`, `linkTarget`, `rel`.
+Partial regions are rejected. Background colours and layout are not native pattern
+content overrides. Generic Block Bindings are not supported by this authoring path.
+
+Bundled images are copied byte-for-byte only after confirmation. Hash the source bytes;
+do not invent a hash, media-library ID, or final site URL. The build resolves bundled
+image URLs. Missing, changed, symlinked, or unsupported bundled assets are rejected.
+Static SVGs may contain geometry, text, gradients, and self-contained fragment references.
+Scripts, animation, embedded HTML, external dependencies, and unresolved fragments are
+rejected rather than stripped. Native Image SVGs are emitted as files; CSS SVGs may be
+inlined by the build. Do not substitute a `data:` URL for a native image.
+An empty `files` list lets the compiler enumerate its complete
+source set in the preview; it does not mean no output. A native SVG adds an owned
+`asset-urls.mjs` source file, which is included in confirmation and the manifest.
+
+For existing HTML/CSS input, `author <html> --name <namespace/slug> --json` can analyze the
+source and return `package.canonicalPlan` with checked source and style/asset ledgers.
+It does not write source. Review that plan's structure and editing policy through the
+normal preview/write flow. An unresolved Custom HTML region is a failure to resolve,
+not permission to ship it inside a registered wrapper.
+
+Licensed local WOFF/WOFF2 fonts use an asset with `kind: "font"`, an absolute source,
+confirmed byte hash/destination, and `fontLicense: { ownership, license, notice? }`.
+Retain the complete required redistribution notice; Block Runner validates the declared
+decision and bytes, not legal permission. Add `styles.fonts: [{ assetId, family }]`, with
+optional `fontStyle`, `fontWeight`, `fontStretch`, `fontDisplay`, and `unicodeRange`.
+Use the namespaced families returned by HTML analysis. For a manually authored plan, compute
+the prefix `block-runner-<namespace>-<slug>-<first 8 hex characters of SHA-256(target.name)>-`
+and append a local family name; do not invent hashes. Use that exact family in every CSS/native
+reference. Faces load through shared CSS; `font-licenses.txt` retains notices in production
+archives. Remote fonts, other font formats, and editor-only font faces are not supported.
+Unlicensed HTML font faces fall back with explicit warnings; destination theme presets do not
+authorize copying font files. Keep the analyzer's `source` and `coverage` records in the plan.
+
+For styling that native block supports cannot express, use `styles.rules`. Each rule is
+either `{ "kind": "style", "selector": ".card:hover", "declarations": [
+{ "property": "transform", "value": "translateY(-2px)" } ] }`, or a conditional rule:
+`{ "kind": "conditional", "name": "media", "prelude": "(min-width: 48rem)",
+"rules": [ ... ] }`. Conditional names are `media`, `supports`, or `container`;
+conditions may nest. A declaration may explicitly include `"important": true`.
+
+Use component-local selectors, not a `wp-block-…` prefix. The compiler adds the owned
+wrapper selector to every branch. It preserves declaration order and hover/focus states.
+Put supplemental editor affordances in `styles.editorRules`; shared design styles belong
+in `rules`. Both appear in the confirmation preview and affect its hash. These are typed
+design decisions, not permission to supply a complete stylesheet or Sass program.
+Global selectors, imports, unsupported functions, and unsafe fragments are rejected.
+A local CSS URL must exactly match a confirmed asset destination, such as
+`url("./assets/photo.png")`. Remote CSS URLs must match a declared external asset.
+Do not treat these residual rules as a complete source-style ledger: retain the separate
+declaration-by-declaration accounting, including native mappings and explicit refusals.
 
 ### Preview the exact plan before asking
 
@@ -169,6 +204,10 @@ terminal output verbatim. Do not replace the structure tree or the `Warnings` se
 prose summary. The user must see the full confirmation SHA-256, destination, destination
 fingerprint, tree, planned files, replacement markers, and warnings — including the `Warnings`
 section when it says `- none`, and `No files written.`
+
+Confirmation also binds the installed compiler template, which is shown in the preview.
+After upgrading Block Runner, request a fresh preview and approval; an old confirmation
+is not portable across compiler changes.
 
 Only after showing that exact preview, ask a clear question such as: “Approve writing exactly
 plan `<full hash>` to `<destination>`?” If replacements are listed, name them and obtain a

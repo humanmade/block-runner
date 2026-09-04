@@ -7,6 +7,61 @@ import { promisify } from 'node:util';
 
 const execFileAsync = promisify(execFile);
 
+const ALLOW_SCRIPTS_ENV_KEYS = ['npm_config_allow_scripts', 'NPM_CONFIG_ALLOW_SCRIPTS'] as const;
+
+/**
+ * npm projects a user-level allow-scripts setting into every npm-run child process. A generated
+ * plugin is a separate package, so its lockfile resolution must not inherit that projection and
+ * accidentally reject ordinary WordPress dependencies with EALLOWSCRIPTS. Remove only an exact
+ * match; an explicit value that differs from the user config remains in force.
+ */
+export function removeMatchingAllowScriptsProjection(
+  environment: NodeJS.ProcessEnv,
+  userConfigValue: string,
+): NodeJS.ProcessEnv {
+  const projected = ALLOW_SCRIPTS_ENV_KEYS
+    .filter((key) => Object.prototype.hasOwnProperty.call(environment, key))
+    .map((key) => [key, environment[key]] as const)
+    .filter(([, value]) => value !== undefined);
+  if (projected.length === 0 || userConfigValue === '' || userConfigValue === 'undefined') {
+    return { ...environment };
+  }
+  if (!projected.every(([, value]) => value === userConfigValue)) {
+    return { ...environment };
+  }
+  const childEnvironment = { ...environment };
+  for (const key of ALLOW_SCRIPTS_ENV_KEYS) delete childEnvironment[key];
+  return childEnvironment;
+}
+
+/**
+ * Return the environment for a generated-plugin npm child. The readback runs in the same cwd as
+ * that child and with both projected keys absent, so a project-local config or an explicit caller
+ * override cannot be mistaken for the user-level projection. A failed readback preserves policy.
+ */
+export async function npmEnvironmentForGeneratedPlugin(
+  cwd: string,
+  environment: NodeJS.ProcessEnv = process.env,
+): Promise<NodeJS.ProcessEnv> {
+  const probeEnvironment = { ...environment };
+  const hasProjection = ALLOW_SCRIPTS_ENV_KEYS.some((key) => Object.prototype.hasOwnProperty.call(probeEnvironment, key));
+  if (!hasProjection) return { ...environment };
+  for (const key of ALLOW_SCRIPTS_ENV_KEYS) delete probeEnvironment[key];
+  try {
+    const { stdout } = await execFileAsync('npm', ['config', 'get', 'allow-scripts', '--location=user'], {
+      cwd,
+      env: probeEnvironment,
+      encoding: 'utf8',
+      timeout: 5_000,
+      maxBuffer: 16 * 1024,
+    });
+    return removeMatchingAllowScriptsProjection(environment, stdout.trim());
+  } catch {
+    // A failed readback is not permission to bypass an explicit environment policy.
+    return { ...environment };
+  }
+}
+
 /**
  * The single host profile this preview recognises.  Deliberately accepting only a small,
  * explainable shape is safer than putting a source directory into an arbitrary webpack build.
@@ -45,7 +100,7 @@ export interface WpScriptsPluginProfile {
   metadataCollection?: {
     directory: string;
     manifest: string;
-    /** The output-root-relative block directory used as the metadata collection key. */
+    /** The leaf block directory used by wp-scripts as the metadata collection key. */
     key: string;
   };
 }
@@ -209,7 +264,7 @@ export async function detectWpScriptsPlugin(rootDirectory: string): Promise<Plug
 
   const phpFiles = await findPhpFiles(root);
   const direct = await findDirectRegistration(root, phpFiles, buildRoot);
-  const collection = await findCollectionRegistration(root, phpFiles, buildRoot);
+  const collection = await findCollectionRegistration(root, phpFiles, buildRoot, buildDirectory);
   if (direct && collection) {
     return unsupported('ambiguous', root, 'Both direct registration and metadata-collection registration were found.');
   }
@@ -242,7 +297,7 @@ export async function detectWpScriptsPlugin(rootDirectory: string): Promise<Plug
     ...(collection
       ? {
           metadataCollection: {
-            directory: path.join(root, buildRoot),
+            directory: path.join(root, buildDirectory),
             manifest: path.join(root, buildRoot, 'blocks-manifest.php'),
             key: '',
           },
@@ -282,7 +337,7 @@ export async function planExistingPluginOutput(
 
   if (profile.registration === 'direct') {
     const bootstrap = (await readFile(profile.registrationFile)).toString('utf8');
-    const direct = directInsertion(bootstrap, profile.buildRoot, blockLeaf);
+    const direct = directInsertion(bootstrap, profile.buildDirectory, blockLeaf);
     if (!direct) {
       throw new UnsupportedPluginLayoutError(unsupported(
         'unsupported',
@@ -294,8 +349,8 @@ export async function planExistingPluginOutput(
     notes.push(`Direct registration target: ${buildDirectory}`);
   } else {
     const bootstrap = (await readFile(profile.registrationFile)).toString('utf8');
-    const metadataCollectionKey = metadataCollectionKeyFor(profile.buildRoot, profile.buildDirectory, blockLeaf);
-    const update = collectionBootstrapUpdate(bootstrap, profile.buildRoot, metadataCollectionKey);
+    const metadataCollectionKey = blockLeaf;
+    const update = collectionBootstrapUpdate(bootstrap, profile.root, profile.buildRoot, profile.buildDirectory, blockLeaf);
     if (!update) {
       throw new UnsupportedPluginLayoutError(unsupported(
         'unsupported',
@@ -320,14 +375,20 @@ export async function planExistingPluginOutput(
       notes.push('The existing build script gains --blocks-manifest so the collection includes the new build directory.');
     }
     const metadataCollection = {
-      directory: path.join(profile.root, profile.buildRoot),
+      directory: path.join(profile.root, profile.buildDirectory),
       manifest: path.join(profile.root, profile.buildRoot, 'blocks-manifest.php'),
       key: metadataCollectionKey,
     };
     profile.metadataCollection = metadataCollection;
     notes.push(
-      `Metadata collection: ${metadataCollection.manifest} (key ${JSON.stringify(block.name)}, directory ${buildDirectory})`,
+      `Metadata collection: ${metadataCollection.manifest} (key ${JSON.stringify(metadataCollectionKey)}, directory ${buildDirectory})`,
     );
+  }
+
+  if (block.files['font-licenses.txt'] !== undefined) {
+    await addFontLicenseBuildStep(profile.root, `${profile.blockDirectory}/${blockLeaf}`,
+      `${profile.buildDirectory}/${blockLeaf}`, blockLeaf, profile.packageFile, touchedFiles);
+    notes.push('A reviewed postbuild step retains the bundled font license notice in the runtime build.');
   }
 
   return finalizePlan({
@@ -364,7 +425,8 @@ export async function planStandalonePluginOutput(
     'scripts/verify-zip.mjs': standaloneZipVerifier(
       pluginSlug,
       blockLeaf,
-      runtimeFilesFromBlockMetadata(toBuffer(block.files['block.json']!)),
+      [...runtimeFilesFromBlockMetadata(toBuffer(block.files['block.json']!)),
+        ...(block.files['font-licenses.txt'] === undefined ? [] : ['font-licenses.txt'])],
     ),
   };
   for (const [relativePath, content] of Object.entries(files)) {
@@ -374,6 +436,10 @@ export async function planStandalonePluginOutput(
   for (const [relativePath, content] of Object.entries(block.files).sort(([left], [right]) => left.localeCompare(right))) {
     const target = path.join(sourceDirectory, ...relativePath.split('/'));
     touchedFiles.push(await makeTouchedFile(root, target, `src/blocks/${blockLeaf}/${relativePath}`, content));
+  }
+  if (block.files['font-licenses.txt'] !== undefined) {
+    await addFontLicenseBuildStep(root, `src/blocks/${blockLeaf}`, `build/blocks/${blockLeaf}`,
+      blockLeaf, path.join(root, 'package.json'), touchedFiles);
   }
 
   return finalizePlan({
@@ -686,19 +752,12 @@ async function findDirectRegistration(root: string, phpFiles: readonly string[],
   return candidates.length === 1 ? { file: candidates[0]! } : undefined;
 }
 
-async function findCollectionRegistration(root: string, phpFiles: readonly string[], buildRoot: string): Promise<{ file: string } | undefined> {
+async function findCollectionRegistration(root: string, phpFiles: readonly string[], buildRoot: string, buildDirectory: string): Promise<{ file: string } | undefined> {
   const candidates: string[] = [];
-  const buildLiteral = `/${buildRoot}`;
   for (const relative of phpFiles) {
     const file = path.join(root, ...relative.split('/'));
     const content = (await readFile(file)).toString('utf8');
-    if (
-      /wp_register_block_metadata_collection\s*\(/.test(content)
-      && content.includes(buildLiteral)
-      && /blocks-manifest\.php/.test(content)
-      && ( /wp_register_block_types_from_metadata_collection\s*\(/.test(content)
-        || /register_block_type_from_metadata_collection\s*\(/.test(content) )
-    ) candidates.push(file);
+    if (collectionBootstrapUpdate(content, path.dirname(file), buildRoot, buildDirectory, 'block-runner-discovery') !== undefined) candidates.push(file);
   }
   if (candidates.length > 1) return undefined;
   return candidates.length === 1 ? { file: candidates[0]! } : undefined;
@@ -736,15 +795,6 @@ function blockDirectoryName(blockName: string): string {
 
 function pluginDirectoryName(blockName: string): string {
   return `${blockName.split('/')[0]!}-${blockDirectoryName(blockName)}`;
-}
-
-function metadataCollectionKeyFor(buildRoot: string, buildDirectory: string, blockLeaf: string): string {
-  const outputDirectory = path.posix.join(buildDirectory, blockLeaf);
-  const key = path.posix.relative(buildRoot, outputDirectory);
-  if (!isSafeRelativeDirectory(key)) {
-    throw new Error(`Generated block build directory cannot be represented as a metadata collection key: ${outputDirectory}`);
-  }
-  return key;
 }
 
 /**
@@ -839,20 +889,43 @@ function directInsertion(bootstrap: string, buildRoot: string, blockLeaf: string
   return `${bootstrap.slice(0, last.index)}${insertion}${bootstrap.slice(last.index + last[0].length)}`;
 }
 
-function collectionBootstrapUpdate(bootstrap: string, buildRoot: string, blockName: string): string | undefined {
-  if (!/wp_register_block_metadata_collection\s*\(/.test(bootstrap) || !bootstrap.includes(`/${buildRoot}`) || !/blocks-manifest\.php/.test(bootstrap)) {
-    return undefined;
+function collectionBootstrapUpdate(bootstrap: string, root: string, buildRoot: string, buildDirectory: string, blockLeaf: string): string | undefined {
+  // Resolve only literal path concatenations, never execute host PHP. A more
+  // dynamic bootstrap is outside this deliberately narrow host profile.
+  const variables = new Map<string, string>();
+  const resolve = (expression: string): string | undefined => {
+    const parts = expression.trim().match(/__DIR__|\$[a-zA-Z_]\w*|'[^']*'|"[^"$]*"|\s+|\./g);
+    if (!parts || parts.join('') !== expression.trim()) return undefined;
+    const values = parts.filter((part) => part.trim() && part !== '.').map((part) => {
+      if (part === '__DIR__') return root;
+      if (part.startsWith('$')) return variables.get(part);
+      return part.slice(1, -1);
+    });
+    return values.every((value) => value !== undefined) ? values.join('') : undefined;
+  };
+  for (const match of bootstrap.matchAll(/(\$[a-zA-Z_]\w*)\s*=\s*([^;]+);/g)) {
+    const value = resolve(match[2]!);
+    if (value !== undefined && !variables.has(match[1]!)) variables.set(match[1]!, value);
+    else variables.delete(match[1]!);
   }
-  // The bulk 6.8 API receives all entries from the generated manifest, so no PHP change is
-  // needed. The manifest's key is the output-root-relative block directory calculated above.
-  if (/wp_register_block_types_from_metadata_collection\s*\(/.test(bootstrap)) return bootstrap;
-  const pattern = /register_block_type_from_metadata_collection\s*\(\s*([^,]+),\s*(['"])[^'"]+\2\s*\)\s*;?/g;
-  const matches = [...bootstrap.matchAll(pattern)];
-  const last = matches.at(-1);
+  const directory = path.join(root, buildDirectory);
+  const manifest = path.join(root, buildRoot, 'blocks-manifest.php');
+  const collections = [...bootstrap.matchAll(/\bwp_register_block_metadata_collection\s*\(\s*([^,]+),\s*([^,)]+)\s*\)\s*;/g)];
+  if (collections.length !== 1 || resolve(collections[0]![1]!) !== directory || resolve(collections[0]![2]!) !== manifest) return undefined;
+  const bulk = [...bootstrap.matchAll(/\bwp_register_block_types_from_metadata_collection\s*\(\s*([^,)]+)(?:,\s*([^,)]+))?\s*\)\s*;/g)];
+  if (bulk.length) {
+    return bulk.length === 1 && resolve(bulk[0]![1]!) === directory
+      && (!bulk[0]![2] || resolve(bulk[0]![2]!) === manifest) ? bootstrap : undefined;
+  }
+  // Selective registration uses register_block_type(path); there is no
+  // singular register_block_type_from_metadata_collection WordPress API.
+  const registrations = [...bootstrap.matchAll(/\bregister_block_type\s*\(\s*([^,)]+)\s*\)\s*;/g)]
+    .filter((match) => { const value = resolve(match[1]!); return value && path.dirname(value) === directory; });
+  const last = registrations.at(-1);
   if (!last || last.index === undefined) return undefined;
   const lineStart = bootstrap.lastIndexOf('\n', last.index) + 1;
   const indent = bootstrap.slice(lineStart, last.index).match(/^\s*/)?.[0] ?? '';
-  const insertion = `${last[0]}\n${indent}register_block_type_from_metadata_collection( ${last[1]!.trim()}, '${blockName}' );`;
+  const insertion = `${last[0]}\n${indent}register_block_type( ${collections[0]![1]!.trim()} . '/${blockLeaf}' );`;
   return `${bootstrap.slice(0, last.index)}${insertion}${bootstrap.slice(last.index + last[0].length)}`;
 }
 
@@ -950,11 +1023,46 @@ async function writeStandaloneDependencyLock(root: string): Promise<void> {
       '--ignore-scripts',
       '--no-audit',
       '--no-fund',
-    ], { cwd: root });
+    ], { cwd: root, env: await npmEnvironmentForGeneratedPlugin(root), timeout: 120_000 });
   } catch (error) {
     const detail = error instanceof Error ? error.message : String(error);
     throw new Error(`Could not resolve the standalone @wordpress/scripts dependency lock: ${detail}`);
   }
+}
+
+/** Keep font notices outside minified CSS, in both supported wp-scripts delivery profiles. */
+async function addFontLicenseBuildStep(
+  root: string, source: string, output: string, leaf: string, packageFile: string,
+  touchedFiles: PluginTouchedFile[],
+): Promise<void> {
+  const scriptRelative = `scripts/block-runner-copy-font-licenses-${leaf}.mjs`;
+  const command = `node ${scriptRelative}`;
+  const existingIndex = touchedFiles.findIndex((file) => file.path === packageFile);
+  const packageText = existingIndex >= 0
+    ? touchedFiles[existingIndex]!.content.toString()
+    : await readFile(packageFile, 'utf8');
+  const pkg = JSON.parse(packageText);
+  pkg.scripts ??= {};
+  const previous = pkg.scripts.postbuild;
+  if (previous !== undefined && typeof previous !== 'string') {
+    throw new Error('Existing postbuild must be a string before adding font notice transport.');
+  }
+  if (previous !== command && !previous?.endsWith(` && ${command}`)) {
+    pkg.scripts.postbuild = previous ? `${previous} && ${command}` : command;
+  }
+  const packageChange = await makeTouchedFile(root, packageFile, 'package.json', `${JSON.stringify(pkg, null, 2)}\n`);
+  if (existingIndex >= 0) touchedFiles[existingIndex] = packageChange;
+  else touchedFiles.push(packageChange);
+  const script = `import { copyFile, mkdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+const root = fileURLToPath(new URL('../', import.meta.url));
+const source = path.join(root, ${JSON.stringify(source)}, 'font-licenses.txt');
+const output = path.join(root, ${JSON.stringify(output)});
+await mkdir(output, { recursive: true });
+await copyFile(source, path.join(output, 'font-licenses.txt'));
+`;
+  touchedFiles.push(await makeTouchedFile(root, path.join(root, scriptRelative), scriptRelative, script));
 }
 
 function standalonePackageJson(pluginSlug: string): string {
@@ -999,11 +1107,11 @@ function standalonePackageLock(pluginSlug: string): string {
 }
 
 function standaloneBootstrap(input: { pluginSlug: string; displayName: string; textDomain: string; blockName: string; blockLeaf: string }): string {
-  return `<?php\n/**\n * Plugin Name: ${input.displayName}\n * Description: A registered block generated by Block Runner.\n * Version: 0.1.0\n * Requires at least: 6.8\n * Requires PHP: 7.2\n * Text Domain: ${input.textDomain}\n * License: GPL-2.0-or-later\n */\n\ndefined( 'ABSPATH' ) || exit;\n\nfunction ${input.pluginSlug.replace(/-/g, '_')}_register_blocks() {\n\t$build_dir = __DIR__ . '/build';\n\t$manifest = $build_dir . '/blocks-manifest.php';\n\n\tif ( function_exists( 'wp_register_block_metadata_collection' ) && file_exists( $manifest ) ) {\n\t\twp_register_block_metadata_collection( $build_dir, $manifest );\n\t\twp_register_block_types_from_metadata_collection( $build_dir, $manifest );\n\t\treturn;\n\t}\n\n\tregister_block_type( $build_dir . '/blocks/${input.blockLeaf}' );\n}\nadd_action( 'init', '${input.pluginSlug.replace(/-/g, '_')}_register_blocks' );\n`;
+  return `<?php\n/**\n * Plugin Name: ${input.displayName}\n * Description: A registered block generated by Block Runner.\n * Version: 0.1.0\n * Requires at least: 7.1\n * Requires PHP: 7.4\n * Text Domain: ${input.textDomain}\n * License: GPL-2.0-or-later\n */\n\ndefined( 'ABSPATH' ) || exit;\n\nfunction ${input.pluginSlug.replace(/-/g, '_')}_register_blocks() {\n\t$build_dir = __DIR__ . '/build';\n\t$manifest = $build_dir . '/blocks-manifest.php';\n\n\tif ( function_exists( 'wp_register_block_metadata_collection' ) && file_exists( $manifest ) ) {\n\t\twp_register_block_metadata_collection( $build_dir . '/blocks', $manifest );\n\t\twp_register_block_types_from_metadata_collection( $build_dir . '/blocks', $manifest );\n\t\treturn;\n\t}\n\n\tregister_block_type( $build_dir . '/blocks/${input.blockLeaf}' );\n}\nadd_action( 'init', '${input.pluginSlug.replace(/-/g, '_')}_register_blocks' );\n`;
 }
 
 function standaloneReadme(displayName: string, pluginSlug: string): string {
-  return `=== ${displayName} ===\nContributors: ${pluginSlug}\nTags: block, editor\nRequires at least: 6.8\nTested up to: 6.8\nRequires PHP: 7.2\nStable tag: 0.1.0\nLicense: GPL-2.0-or-later\n\nA standalone registered block plugin generated by Block Runner.\n\n== Build a release ==\n\nRun npm ci, npm run zip, then npm run test:zip. Upload the generated ZIP from a clean checkout.\n`;
+  return `=== ${displayName} ===\nContributors: ${pluginSlug}\nTags: block, editor\nRequires at least: 7.1\nTested up to: 7.1\nRequires PHP: 7.4\nStable tag: 0.1.0\nLicense: GPL-2.0-or-later\n\nA standalone registered block plugin generated by Block Runner.\n\n== Build a release ==\n\nRun npm ci, npm run zip, then npm run test:zip. Upload the generated ZIP from a clean checkout.\n`;
 }
 
 function standaloneDistIgnore(): string {

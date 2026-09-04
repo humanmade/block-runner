@@ -3,7 +3,7 @@
   "core": "WordPress/WordPress#7.1",
   "phpVersion": "8.3",
   "mappings": {
-    "wp-content/uploads/block-runner-proof": "../.block-runner-proof-stage"
+    "wp-content/block-runner-proof": ".block-runner-proof-stage"
   },
   "config": {
     "WP_DEBUG": true,

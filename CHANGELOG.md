@@ -1,18 +1,61 @@
 # Changelog
 
-## 0.9.0 — 2026-09-04 — testing release
+## 0.9.0 — 2026-09-04 — unreleased testing candidate
+
+This is the 0.9 testing candidate, not a published release. The last published npm version is
+0.8.0. Publish 0.9 only after the receipt-backed release matrix passes; 1.0 remains contingent
+on real-project feedback and resolved release-relevant failures.
 
 ### Added
 
-- A separate registered-block authoring benchmark and release matrix. Its fixture outcomes and
-  dimension scores are intentionally independent of the historical HTML-to-block benchmark.
-- Receipt-backed release-candidate checks for the package artifact, canonical skill, installer,
-  and activation smoke. Model/tool errors are invalid measurements, not zero product scores.
+- **Registered-block authoring.** A versioned `AuthoringPlan` can be reviewed in a deterministic
+  terminal preview and compiled into one static registered block whose content remains native
+  WordPress `InnerBlocks`. The preview is read-only; `author write --confirm` binds the canonical
+  plan, compiler contract, and destination fingerprint before publishing source.
+- **Authored HTML analysis.** `author <html> --name <namespace/slug> --json` analyses one authored
+  design and returns a canonical plan plus style and asset ledgers. It does not write source or
+  turn an unresolved `core/html` region into a registered-block substitute.
+- **Plugin output workflow.** `plugin inspect`, `plugin preview`, and `plugin write` inspect a
+  recognised `@wordpress/scripts` host or plan/write a standalone plugin wrapper. Existing files
+  require explicit replacement approval.
+- **Target metadata.** Standalone generated plugins declare the observed compatibility floor:
+  WordPress 7.1 and PHP 7.4.
+- **Destination-aware source transport.** The compiler carries confirmed native styles, scoped
+  declarative CSS, and hash-verified local PNG/JPEG/GIF/WebP/static-SVG assets. Native SVGs use an
+  owned URL helper so the built asset remains a real file rather than a data URL stripped on a
+  WordPress save.
+- **Bound source identity and editing policy.** Authored source hashes and style/asset coverage
+  flow into the canonical plan, generated files, and manifest. Fixed fields use Gutenberg's
+  native block-level `lock.edit: true`; mixed fixed/editable fields on one native node are
+  refused. This is an editor policy, not an immutable-content or security guarantee.
+- **Licensed local font transport.** Only local WOFF/WOFF2 files with an explicit source,
+  SHA-256, ownership/license decision, and optional redistribution notice are bundled. Faces are
+  namespaced in shared editor/frontend CSS; unlicensed or unsupported faces fall back safely with
+  a source-located warning. Full font notices are retained as a separate text file in production
+  archives, including when adding the block to a supported existing plugin.
+- **Pattern-override path.** Native Heading/Paragraph/List Item/Image/Button fields can be marked
+  for the WordPress 7.1 pattern-override flow through the generated plan. Generic Block Bindings,
+  dynamic PHP, and frontend interaction code remain outside this release's contract.
+- **Release proof and benchmark contracts.** Separate receipts cover package, skill, generated
+  plugin activation, WordPress editor/frontend lifecycle, pattern behavior, visual evidence, and
+  accessibility. The registered-block authoring suite is independent of the historical
+  HTML-to-page-block benchmark; model/tool failures are invalid measurements, never zero scores.
+- **Recoverable build cleanup.** `npm run build` moves this checkout's existing `dist/` to
+  macOS Trash (or `~/.Trash` when the `trash` CLI is unavailable) before running `tsup` with
+  cleanup disabled. The guard refuses target arguments and cannot silently delete another path.
 
 ### Release status
 
-`0.9.0` is configured for the `testing` dist-tag once its receipt-backed release gate passes. It
-is a testing release; 1.0 remains contingent on real-project feedback and resolved failures.
+The candidate is not release-certified. Local production font ZIP, existing-plugin second-block,
+and all four deliberate-mutation checks have passed. A keyboard and screenshot review is saved
+against the reproducible fixture's exact input and ZIP hashes. The narrow 0.9 testing exception
+covers separately reproduced native Heading and Paragraph accessibility findings; raw failures
+remain in the receipts, and the agent-assisted review is not human accessibility certification.
+
+The complete release matrix and WordPress CI must still pass before publication. Passing unit
+tests or historical page-content benchmark scores does not establish that release acceptance.
+The separate registered-block benchmark remains pending and unscored; no new model benchmark
+results are claimed for this candidate.
 
 ## 0.8.0 — 2026-09-02
 

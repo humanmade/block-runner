@@ -15,7 +15,7 @@
     "startedAt": { "type": "string", "format": "date-time" },
     "finishedAt": { "type": "string", "format": "date-time" },
     "durationMs": { "type": "number", "minimum": 0 },
-    "timingMethod": { "const": "monotonic-wall-clock-source-materialization-through-receipt-write" },
+    "timingMethod": { "const": "monotonic-wall-clock-source-materialization-through-evidence-finalization" },
     "provenance": {
       "type": "object",
       "required": [
@@ -25,7 +25,13 @@
       ],
       "properties": {
         "model": { "type": "string", "minLength": 1 },
-        "effort": { "type": "string", "minLength": 1 }
+        "effort": { "type": "string", "minLength": 1 },
+        "sourceHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "generatedSourceHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "dependencyHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "wordpressHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "themeHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+        "browserHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] }
       },
       "additionalProperties": true
     },
@@ -48,6 +54,22 @@
       }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "status": { "const": "scored" } }, "required": ["status"] },
+    "then": {
+      "properties": {
+        "provenance": { "properties": {
+          "sourceHash": { "$ref": "#/$defs/hash" },
+          "generatedSourceHash": { "$ref": "#/$defs/hash" },
+          "dependencyHash": { "$ref": "#/$defs/hash" },
+          "wordpressHash": { "$ref": "#/$defs/hash" },
+          "themeHash": { "$ref": "#/$defs/hash" },
+          "browserHash": { "$ref": "#/$defs/hash" }
+        } },
+        "artifacts": { "required": ["generatedSourceManifest", "dependencyLock", "dependencyInventory", "wordpressInventory", "themeInventory", "browserInventory"] }
+      }
+    }
+  }],
   "$defs": {
     "hash": { "type": "string", "pattern": "^sha256:[0-9a-f]{64}$" },
     "artifact": {

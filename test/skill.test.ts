@@ -1,8 +1,22 @@
 import { readFile } from 'node:fs/promises';
 import { describe, expect, it } from 'vitest';
 import { readCanonicalSkillGuide, validateCanonicalSkill } from '../src/skill.js';
+import { validateAuthoringPlan } from '../src/authoring/schema.js';
+import { compileRegisteredBlock } from '../src/authoring/generate.js';
 
 describe('canonical agent skill', () => {
+  it('compiles the complete registered-block plan taught to calling agents', async () => {
+    const guide = await readCanonicalSkillGuide();
+    const example = guide.match(/Here is a complete valid plan[\s\S]*?```json\n([\s\S]*?)\n```/);
+    expect(example).not.toBeNull();
+    const generated = compileRegisteredBlock(validateAuthoringPlan(JSON.parse(example![1]!)));
+    expect(generated.files).toHaveLength(7);
+    expect(generated.template[0]?.[2]?.[0]?.[1]).toMatchObject({
+      content: 'Our features',
+      metadata: { bindings: { __default: { source: 'core/pattern-overrides' } } },
+    });
+  });
+
   it('passes the portable Agent Skills invariants', async () => {
     await expect(validateCanonicalSkill()).resolves.toBeUndefined();
 

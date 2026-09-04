@@ -8,6 +8,9 @@ import type {
   CompiledAuthoringBlock,
   InnerBlocksLock,
 } from '../types.js';
+import { applyPatternOverrides, isPatternOverrideBinding, patternOverrideNameFor, supportedPatternOverrideAttributes } from './overrides.js';
+import { compileRegisteredBlock } from './generate.js';
+import { validateAuthoringPlan, type AuthoringPlan as CanonicalPlan, type AuthoringStructureNode, type JsonValue } from './schema.js';
 
 const ROLE_BLOCKS: Record<Exclude<AuthoringRole, 'wrapper' | 'custom'>, string> = {
   group: 'core/group',
@@ -36,6 +39,7 @@ const VALID_LOCKS = new Set<InnerBlocksLock>([false, 'insert', 'all', 'contentOn
 export function compileAuthoringPlan(plan: AuthoringPlan): CompiledAuthoringBlock {
   const diagnostics: AuthoringDiagnostic[] = [];
   const paths = new Set<string>();
+  const overrideNames = new Set<string>();
   const editableFields: AuthoringEditableField[] = [];
 
   // The wrapper does not own an editor field, but its path is still part of the same stable plan
@@ -51,7 +55,13 @@ export function compileAuthoringPlan(plan: AuthoringPlan): CompiledAuthoringBloc
     });
   }
 
-  const template = (plan.root.children ?? []).map((node) => compileNode(node, paths, editableFields, diagnostics));
+  const template = (plan.root.children ?? []).map((node) => compileNode(
+    node,
+    paths,
+    overrideNames,
+    editableFields,
+    diagnostics,
+  ));
   const allowedBlocks = unique(plan.allowedBlocks ?? template.map(([block]) => block));
   const templateLock = normalizeLock(plan.templateLock, diagnostics);
 
@@ -65,8 +75,20 @@ export function compileAuthoringPlan(plan: AuthoringPlan): CompiledAuthoringBloc
     });
   }
 
-  const files = sourceFiles({ plan, template, allowedBlocks, templateLock, editableFields, diagnostics });
-  return { files, template, allowedBlocks, templateLock, editableFields, diagnostics };
+  if (diagnostics.some((diagnostic) => diagnostic.level === 'error')) {
+    return { files: {}, template, allowedBlocks, templateLock, editableFields, diagnostics };
+  }
+  // The semantic format is an input adapter, not a second implementation of
+  // registered block source. Expose the exact plan callers can preview/confirm.
+  const canonicalPlan = toCanonicalPlan(plan, template, allowedBlocks, templateLock, diagnostics);
+  const generated = compileRegisteredBlock(canonicalPlan);
+  const files = Object.fromEntries(generated.files.map(({ path, content }) => [path, content]));
+  files['authoring.manifest.json'] = json({
+    version: 1, rootPath: plan.root.path, templateLock, allowedBlocks,
+    editableFields, diagnostics, generated: generated.manifest,
+  });
+  files['README.md'] = readme(templateLock);
+  return { files, template: generated.template, allowedBlocks, templateLock, editableFields, diagnostics, canonicalPlan };
 }
 
 /** Alias kept readable for consumers that call the authoring API a compiler rather than a generator. */
@@ -75,13 +97,21 @@ export const compileAuthoringBlock = compileAuthoringPlan;
 function compileNode(
   node: AuthoringNode,
   paths: Set<string>,
+  overrideNames: Set<string>,
   editableFields: AuthoringEditableField[],
   diagnostics: AuthoringDiagnostic[],
 ): [string, Record<string, unknown>, AuthoringTemplate?] {
   notePath(node, paths, diagnostics);
   const block = blockFor(node, diagnostics);
   const attributes = initialAttributes(node, block);
-  const children = childrenFor(node, block).map((child) => compileNode(child, paths, editableFields, diagnostics));
+  applyPatternOverrides(node, block, attributes, overrideNames, diagnostics);
+  const children = childrenFor(node, block).map((child) => compileNode(
+    child,
+    paths,
+    overrideNames,
+    editableFields,
+    diagnostics,
+  ));
   const template: [string, Record<string, unknown>, AuthoringTemplate?] =
     children.length > 0 ? [block, attributes, children] : [block, attributes];
 
@@ -215,6 +245,9 @@ function editorSurfaces(
     block,
     attribute,
     surface,
+    ...(patternOverrideNameFor(attributes, attribute)
+      ? { overrideName: patternOverrideNameFor(attributes, attribute) }
+      : {}),
   });
 
   switch (block) {
@@ -265,55 +298,63 @@ function normalizeLock(value: InnerBlocksLock | undefined, diagnostics: Authorin
   return false;
 }
 
-function sourceFiles({
-  plan,
-  template,
-  allowedBlocks,
-  templateLock,
-  editableFields,
-  diagnostics,
-}: {
-  plan: AuthoringPlan;
-  template: AuthoringTemplate;
-  allowedBlocks: string[];
-  templateLock: InnerBlocksLock;
-  editableFields: AuthoringEditableField[];
-  diagnostics: AuthoringDiagnostic[];
-}): Record<string, string> {
-  const metadata: Record<string, unknown> = {
-    $schema: 'https://schemas.wp.org/trunk/block.json',
-    apiVersion: 3,
-    name: plan.name,
-    title: plan.title,
-    category: plan.category ?? 'design',
-    icon: plan.icon ?? 'layout',
-    editorScript: 'file:./index.js',
-    style: 'file:./style-index.css',
-    allowedBlocks,
-    supports: { html: false },
-  };
-  if (plan.description) metadata.description = plan.description;
-  if (plan.textdomain) metadata.textdomain = plan.textdomain;
-
-  const manifest = {
-    version: 1,
-    rootPath: plan.root.path,
-    templateLock,
-    allowedBlocks,
-    editableFields,
-    diagnostics,
-  };
-
-  return {
-    'block.json': json(metadata),
-    'index.js': `import { registerBlockType } from '@wordpress/blocks';\nimport metadata from './block.json';\nimport Edit from './edit';\nimport save from './save';\nimport './style.scss';\n\nregisterBlockType( metadata.name, {\n  edit: Edit,\n  save,\n} );\n`,
-    'template.js': `export const TEMPLATE = ${json(template)};\nexport const ALLOWED_BLOCKS = ${json(allowedBlocks)};\nexport const TEMPLATE_LOCK = ${json(templateLock)};\n`,
-    'edit.js': `import { useBlockProps, useInnerBlocksProps } from '@wordpress/block-editor';\nimport { ALLOWED_BLOCKS, TEMPLATE, TEMPLATE_LOCK } from './template';\n\nexport default function Edit() {\n  const blockProps = useBlockProps();\n  const innerBlocksProps = useInnerBlocksProps( blockProps, {\n    allowedBlocks: ALLOWED_BLOCKS,\n    template: TEMPLATE,\n    templateLock: TEMPLATE_LOCK,\n  } );\n\n  return <div { ...innerBlocksProps } />;\n}\n`,
-    'save.js': `import { useBlockProps, useInnerBlocksProps } from '@wordpress/block-editor';\n\nexport default function save() {\n  const blockProps = useBlockProps.save();\n  const innerBlocksProps = useInnerBlocksProps.save( blockProps );\n\n  return <div { ...innerBlocksProps } />;\n}\n`,
-    'style.scss': `/* Generated wrapper styles belong here. Child content stays in native Core blocks. */\n`,
-    'authoring.manifest.json': json(manifest),
-    'README.md': readme(templateLock),
-  };
+function toCanonicalPlan(
+  plan: AuthoringPlan,
+  template: AuthoringTemplate,
+  allowedBlocks: string[],
+  templateLock: InnerBlocksLock,
+  diagnostics: AuthoringDiagnostic[],
+): CanonicalPlan {
+  const fields: CanonicalPlan['fields'] = [];
+  const overrides: CanonicalPlan['pattern']['overrides'] = [];
+  const structureFor = (tuples: AuthoringTemplate, sources: AuthoringNode[]): AuthoringStructureNode[] =>
+    tuples.map(([block, raw, children], index) => {
+      const node = sources[index]!;
+      const attributes = structuredClone(raw) as Record<string, JsonValue>;
+      const metadata = attributes.metadata;
+      if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        && metadata.bindings && typeof metadata.bindings === 'object' && !Array.isArray(metadata.bindings)
+        && Object.values(metadata.bindings).some((binding) => !isPatternOverrideBinding(binding))) {
+        throw new Error(`Unsupported native binding at ${node.path}; generic Block Bindings cannot be discarded during plan adaptation.`);
+      }
+      const bound = metadata && typeof metadata === 'object' && !Array.isArray(metadata)
+        && metadata.bindings && typeof metadata.bindings === 'object' && !Array.isArray(metadata.bindings)
+        && '__default' in metadata.bindings;
+      if (metadata && typeof metadata === 'object' && !Array.isArray(metadata)) {
+        delete metadata.bindings;
+      }
+      // The legacy boolean enables a whole native region. Expand that exact
+      // contract into individually reviewable canonical fields, including
+      // optional image/button attributes absent from the initial content.
+      const attributesToDeclare = bound ? supportedPatternOverrideAttributes(block)
+        : editorSurfaces(node, block, raw).map(({ attribute }) => attribute);
+      for (const attribute of attributesToDeclare) {
+        const id = `${node.path}:${attribute}`;
+        fields.push({ id, label: `${node.path} ${attribute}`, mode: bound ? 'override' : 'editable', node: node.path, attribute });
+        if (bound) overrides.push({ field: id });
+      }
+      return {
+        id: node.path, block, attributes,
+        ...(children?.length ? { children: structureFor(children, childrenFor(node, block)) } : {}),
+      };
+    });
+  const structure = structureFor(template, plan.root.children ?? []);
+  return validateAuthoringPlan({
+    version: 1, generatorVersion: '0.9.0',
+    target: {
+      name: plan.name, title: plan.title,
+      ...(plan.description ? { description: plan.description } : {}),
+      category: plan.category ?? 'design', icon: plan.icon ?? 'layout',
+      ...(plan.textdomain ? { textDomain: plan.textdomain } : {}),
+      wordpress: '7.1',
+    },
+    structure, allowedBlocks,
+    fields, locking: { mode: templateLock === false ? 'none' : templateLock },
+    styles: { strategy: 'native', outcomes: [] },
+    pattern: { ready: overrides.length > 0, overrides },
+    assets: [], files: [],
+    warnings: diagnostics.filter(({ level }) => level === 'warning').map(({ path, message }) => `${path ?? 'plan'}: ${message}`),
+  });
 }
 
 function readme(templateLock: InnerBlocksLock): string {

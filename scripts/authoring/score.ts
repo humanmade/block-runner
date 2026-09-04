@@ -14,9 +14,10 @@
  * that is excluded from all product reporting rather than scored as zero.
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { existsSync, lstatSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import Ajv2020 from 'ajv/dist/2020.js';
 
 /** The independently scored product qualities. Their order is stable for exports. */
 export const AUTHORING_DIMENSIONS = [
@@ -267,12 +268,14 @@ export function canonicalJson(value: unknown): string {
 }
 
 export function sha256(value: unknown): string {
-  const input = typeof value === 'string' ? value : canonicalJson(value);
+  const input = typeof value === 'string' || Buffer.isBuffer(value) ? value : canonicalJson(value);
   return `sha256:${createHash('sha256').update(input).digest('hex')}`;
 }
 
 export function hashFile(file: string): string {
-  return existsSync(file) ? sha256(readFileSync(file, 'utf8')) : sha256({ absent: path.resolve(file) });
+  // A missing artifact has no content identity. Propagate the read error rather than making a
+  // plausible SHA-256 from its pathname and storing it as if bytes had been observed.
+  return sha256(readFileSync(file));
 }
 
 function filesBelow(directory: string): string[] {
@@ -291,7 +294,7 @@ function filesBelow(directory: string): string[] {
  * source dependencies, and configuration files in run provenance even when a
  * fixture index itself did not change.
  */
-function treeHash(directory: string, include: (relative: string) => boolean): string {
+export function hashCorpusTree(directory: string, include: (relative: string) => boolean): string {
   return sha256(
     filesBelow(directory)
       .map((file) => path.relative(directory, file).split(path.sep).join('/'))
@@ -316,13 +319,13 @@ function manifestValue(directory: string, key: string): string | undefined {
 }
 
 /** The checked-in manifest is part of the contract, so reject stale manifests. */
-export function corpusHashes(directory: string): Pick<AuthoringHashes, 'corpusHash' | 'fixtureManifestHash' | 'sourceSetHash' | 'sourceDependencyHash' | 'expectedPlanHash'> {
+export function corpusHashes(directory: string, options: { verifyManifest?: boolean } = {}): Pick<AuthoringHashes, 'corpusHash' | 'fixtureManifestHash' | 'sourceSetHash' | 'sourceDependencyHash' | 'expectedPlanHash'> {
   const normalizedDirectory = path.resolve(directory);
-  const corpusHash = treeHash(normalizedDirectory, (relative) => relative !== 'hashes.json' && !relative.startsWith('runs/'));
-  const fixtureManifestHash = treeHash(normalizedDirectory, (relative) =>
+  const corpusHash = hashCorpusTree(normalizedDirectory, (relative) => relative !== 'hashes.json' && !relative.startsWith('runs/'));
+  const fixtureManifestHash = hashCorpusTree(normalizedDirectory, (relative) =>
     relative === 'fixtures.json' || relative === 'suite.json' || relative === 'schema.json' || relative.startsWith('fixtures/'),
   );
-  const sourceSetHash = treeHash(normalizedDirectory, (relative) => relative.startsWith('sources/'));
+  const sourceSetHash = hashCorpusTree(normalizedDirectory, (relative) => relative.startsWith('sources/'));
   const sourceDependencyHash = sha256(
     JSON.parse(readFileSync(path.join(normalizedDirectory, 'fixtures.json'), 'utf8')).fixtures.map((fixture: AuthoringFixture) => {
       const dependencies = [fixture.source, ...(Array.isArray(fixture.sourceDependencies) ? fixture.sourceDependencies : [])]
@@ -335,9 +338,9 @@ export function corpusHashes(directory: string): Pick<AuthoringHashes, 'corpusHa
       return { id: fixture.id, dependencies };
     }),
   );
-  const expectedPlanHash = treeHash(normalizedDirectory, (relative) => relative.endsWith('/expected-plan.json'));
+  const expectedPlanHash = hashCorpusTree(normalizedDirectory, (relative) => relative.endsWith('/expected-plan.json'));
   const recorded = manifestValue(normalizedDirectory, 'suiteHash');
-  if (recorded && recorded !== corpusHash.replace(/^sha256:/, '')) {
+  if (options.verifyManifest !== false && recorded && recorded !== corpusHash.replace(/^sha256:/, '')) {
     throw new Error(`authoring corpus hash manifest is stale: hashes.json suiteHash=${recorded}, computed=${corpusHash.replace(/^sha256:/, '')}`);
   }
   return { corpusHash, fixtureManifestHash, sourceSetHash, sourceDependencyHash, expectedPlanHash };
@@ -390,7 +393,11 @@ export function authoringHashes(suite: AuthoringSuite, inputs: HashInputs = {}):
     promptHash: hashInput(prompt, directory),
     guideHash: hashInput(guide, directory),
     promptGuideHash: sha256({ prompt: hashInput(prompt, directory), guide: hashInput(guide, directory) }),
-    templateHash: hashInput(template, directory),
+    templateHash: sha256({
+      compiler: hashCorpusTree(path.join(ROOT, 'src', 'authoring'), () => true),
+      plugin: hashFile(path.join(ROOT, 'src', 'plugin', 'profile.ts')),
+      contract: hashInput(template, directory),
+    }),
     dependencyHash: dependency === undefined ? hashFile(path.join(ROOT, 'package-lock.json')) : hashInput(dependency, directory),
     wordpressHash: hashInput(wordpress, directory),
     themeHash: hashInput(theme, directory),
@@ -448,12 +455,14 @@ function resultStatus(receipt: AuthoringReceipt | undefined): AuthoringStatus {
   if (!receipt) return 'blocked';
   if (receipt.status === 'engine_error' || (receipt.status as string) === 'engine-error') return 'engine_error';
   if (receipt.error?.kind === 'model' || receipt.error?.kind === 'tool' || receipt.error?.kind === 'engine') return 'engine_error';
-  return receipt.status ?? 'blocked';
+  if (receipt.status === undefined) return 'blocked';
+  if (!['scored', 'unsupported', 'blocked', 'engine_error'].includes(receipt.status)) return 'engine_error';
+  return receipt.status;
 }
 
 /**
  * Score an already-collected receipt. Product dimensions are only populated for
- * `scored` receipts; unsupported, blocked, and engine-error outcomes use nulls
+ * `scored` receipts; unsupported, blocked, and engine_error outcomes use nulls
  * to preserve the distinction in JSON and in reports.
  */
 export function scoreAuthoringFixture(fixture: AuthoringFixture, receipt?: AuthoringReceipt): FixtureScore {
@@ -545,6 +554,14 @@ export function summarizeAuthoringScores(scores: readonly FixtureScore[]): RunSu
 
 const HASH = /^sha256:[0-9a-f]{64}$/;
 
+/** Receipt hashes name observed runtime artifacts, never the requested suite configuration. */
+export const AUTHORING_RUNTIME_ARTIFACTS = {
+  dependencyHash: 'dependencyInventory',
+  wordpressHash: 'wordpressInventory',
+  themeHash: 'themeInventory',
+  browserHash: 'browserInventory',
+} as const;
+
 function isRecord(value: unknown): value is Record<string, unknown> {
   return Boolean(value) && typeof value === 'object' && !Array.isArray(value);
 }
@@ -564,14 +581,100 @@ function artifactFailure(artifact: ReceiptArtifact, receiptDirectory: string): s
   const file = path.resolve(root, artifact.path);
   if (!file.startsWith(`${root}${path.sep}`)) return `artifact path escapes receipt directory: ${artifact.path}`;
   if (!existsSync(file) || !statSync(file).isFile()) return `artifact is missing: ${artifact.path}`;
+  if (lstatSync(file).isSymbolicLink() || !realpathSync(file).startsWith(`${realpathSync(root)}${path.sep}`)) {
+    return `artifact is linked outside its retained evidence boundary: ${artifact.path}`;
+  }
   if (hashFile(file) !== artifact.sha256) return `artifact hash mismatch: ${artifact.path}`;
   return undefined;
+}
+
+function runtimeObservationFailures(artifacts: Record<string, unknown>, suiteDirectory: string, receiptDirectory: string): string[] {
+  const failures: string[] = [];
+  const observation = (name: string): Record<string, unknown> | undefined => {
+    const reference = artifacts[name];
+    if (!isRecord(reference) || typeof reference.path !== 'string' || typeof reference.sha256 !== 'string') {
+      failures.push(`runtime observation requires artifact ${name}`);
+      return;
+    }
+    if (artifactFailure({ path: reference.path, sha256: reference.sha256 }, receiptDirectory)) return;
+    try {
+      const value = JSON.parse(readFileSync(path.resolve(receiptDirectory, reference.path), 'utf8'));
+      if (isRecord(value)) return value;
+    } catch { /* A trace, free-form log, or malformed JSON is not an environment inventory. */ }
+    failures.push(`${name} must contain an observed JSON inventory`);
+  };
+  const dependency = observation('dependencyInventory');
+  const lock = observation('dependencyLock');
+  if (dependency) {
+    if (!isRecord(artifacts.dependencyLock) || dependency.lockSha256 !== artifacts.dependencyLock.sha256) {
+      failures.push('dependencyInventory must name the exact retained dependencyLock hash');
+    }
+    if (!Array.isArray(dependency.packages) || dependency.packages.length === 0
+      || dependency.packages.some((item) => !isRecord(item) || typeof item.name !== 'string' || !item.name
+        || typeof item.version !== 'string' || !item.version)) {
+      failures.push('dependencyInventory requires installed package names and versions');
+    }
+  }
+  if (lock && (!isRecord(lock.packages) || Object.keys(lock.packages).length < 2)) {
+    failures.push('dependencyLock must contain the resolved candidate dependency tree, not a seed');
+  }
+  const wordpress = observation('wordpressInventory');
+  if (wordpress && (typeof wordpress.version !== 'string' || !/^7\.1(?:\.\d+)?$/.test(wordpress.version)
+    || typeof wordpress.coreHash !== 'string' || !HASH.test(wordpress.coreHash) || !Array.isArray(wordpress.plugins))) {
+    failures.push('wordpressInventory requires observed WordPress 7.1 version, core hash, and installed plugin inventory');
+  }
+  const theme = observation('themeInventory');
+  if (theme) {
+    const expected = JSON.parse(readFileSync(path.join(suiteDirectory, 'fixtures', 'theme.json'), 'utf8'));
+    if (theme.slug !== 'twentytwentyfive' || typeof theme.version !== 'string' || !theme.version
+      || canonicalJson(theme.configuration) !== canonicalJson(expected)) {
+      failures.push('themeInventory must contain the observed theme version and exact fixture theme configuration');
+    }
+  }
+  const browser = observation('browserInventory');
+  if (browser && (browser.name !== 'chromium' || typeof browser.version !== 'string' || !browser.version
+    || !isRecord(browser.viewport) || browser.viewport.width !== 1440 || browser.viewport.height !== 1024
+    || browser.deviceScaleFactor !== 1)) {
+    failures.push('browserInventory requires the observed Chromium version and 1440x1024 viewport at deviceScaleFactor 1');
+  }
+  return failures;
 }
 
 function requiredWarningCode(fixture: AuthoringFixture): string | undefined {
   const warnings = fixture.assertions?.warnings;
   if (!isRecord(warnings) || !Array.isArray(warnings.expectedCodes)) return undefined;
   return warnings.expectedCodes.find((code): code is string => typeof code === 'string');
+}
+
+const STYLE_LEDGER_OWNERS = new Set(['block', 'theme', 'pattern', 'asset', 'unsupported']);
+
+function styleLedgerFailures(file: string): string[] {
+  let ledger: unknown;
+  try {
+    ledger = JSON.parse(readFileSync(file, 'utf8'));
+  } catch (error) {
+    return [`style-ledger.json is not valid JSON: ${error instanceof Error ? error.message : String(error)}`];
+  }
+  if (!isRecord(ledger) || ledger.version !== 1 || !Array.isArray(ledger.entries)) {
+    return ['style-ledger.json requires version 1 and an entries array'];
+  }
+  const failures: string[] = [];
+  for (const [index, entry] of ledger.entries.entries()) {
+    if (!isRecord(entry)) {
+      failures.push(`style-ledger entry ${index} must be an object`);
+      continue;
+    }
+    for (const key of ['selector', 'property', 'value', 'editorControl']) {
+      if (typeof entry[key] !== 'string' || !entry[key].trim()) failures.push(`style-ledger entry ${index} requires ${key}`);
+    }
+    if (typeof entry.owner !== 'string' || !STYLE_LEDGER_OWNERS.has(entry.owner)) {
+      failures.push(`style-ledger entry ${index} has an invalid owner`);
+    }
+    if (entry.source === undefined || entry.source === null || entry.source === '') {
+      failures.push(`style-ledger entry ${index} requires source provenance`);
+    }
+  }
+  return failures;
 }
 
 /**
@@ -587,6 +690,15 @@ export function validateAuthoringReceipt(
   receiptDirectory: string,
 ): string[] {
   const failures: string[] = [];
+  try {
+    const schema = JSON.parse(readFileSync(path.join(suiteDirectory, 'receipt.schema.json'), 'utf8'));
+    // Timestamp parsing below supplies format validation; do not silently depend on a
+    // transitive ajv-formats package being installed in the benchmark environment.
+    const validate = new Ajv2020({ strict: false, allErrors: true, validateFormats: false }).compile(schema);
+    if (!validate(receipt)) failures.push(...(validate.errors ?? []).map((error) => `receipt schema ${error.instancePath || '$'}: ${error.message}`));
+  } catch (error) {
+    failures.push(`could not validate receipt schema: ${error instanceof Error ? error.message : String(error)}`);
+  }
   const requireString = (key: keyof AuthoringReceipt): void => {
     if (typeof receipt[key] !== 'string' || !(receipt[key] as string).trim()) failures.push(`receipt requires ${String(key)}`);
   };
@@ -599,7 +711,7 @@ export function validateAuthoringReceipt(
   if (typeof receipt.durationMs !== 'number' || !Number.isFinite(receipt.durationMs) || receipt.durationMs < 0) {
     failures.push('receipt requires a non-negative durationMs');
   }
-  if (receipt.timingMethod !== 'monotonic-wall-clock-source-materialization-through-receipt-write') {
+  if (receipt.timingMethod !== 'monotonic-wall-clock-source-materialization-through-evidence-finalization') {
     failures.push('receipt timingMethod is not the corpus timing method');
   }
   for (const timestamp of [receipt.startedAt, receipt.finishedAt]) {
@@ -634,8 +746,10 @@ export function validateAuthoringReceipt(
       'generatedSourceHash',
     ]) {
       const value = provenance[key];
+      const runtime = key in AUTHORING_RUNTIME_ARTIFACTS;
+      if ((runtime || key === 'generatedSourceHash') && receipt.status !== 'scored' && value === null) continue;
       if (typeof value !== 'string' || !HASH.test(value)) failures.push(`receipt provenance requires hash ${key}`);
-      else if (hashes && key !== 'generatedSourceHash' && key in hashes && value !== hashes[key as keyof AuthoringHashes]) {
+      else if (hashes && !runtime && key !== 'generatedSourceHash' && key in hashes && value !== hashes[key as keyof AuthoringHashes]) {
         failures.push(`receipt provenance ${key} does not match this corpus`);
       }
     }
@@ -661,11 +775,24 @@ export function validateAuthoringReceipt(
       const failure = artifactFailure(artifact, receiptDirectory);
       if (failure) failures.push(failure);
     }
-    if (!artifacts.generatedSourceManifest) failures.push('receipt requires generatedSourceManifest artifact');
+    if (receipt.status === 'scored' && !artifacts.generatedSourceManifest) {
+      failures.push('scored receipt requires generatedSourceManifest artifact');
+    }
   }
   if (isRecord(provenance) && isRecord(artifacts) && isRecord(artifacts.generatedSourceManifest)) {
     const generated = artifacts.generatedSourceManifest as ReceiptArtifact;
     if (provenance.generatedSourceHash !== generated.sha256) failures.push('generatedSourceHash must equal generatedSourceManifest hash');
+  } else if (isRecord(provenance) && receipt.status !== 'scored' && provenance.generatedSourceHash !== null) {
+    failures.push('non-scored receipt must use null generatedSourceHash when no generated source exists');
+  }
+  if (receipt.status === 'scored' && isRecord(provenance) && isRecord(artifacts)) {
+    for (const [hash, name] of Object.entries(AUTHORING_RUNTIME_ARTIFACTS)) {
+      const retained = artifacts[name];
+      if (!isRecord(retained) || provenance[hash] !== retained.sha256) {
+        failures.push(`${hash} must identify the retained ${name} observation, not the requested configuration`);
+      }
+    }
+    failures.push(...runtimeObservationFailures(artifacts, suiteDirectory, receiptDirectory));
   }
 
   const requirements = assertionsFor(fixture);
@@ -787,8 +914,16 @@ export function fixtureContractFailures(fixture: AuthoringFixture, suiteDirector
   const artifactRoot = fixture.candidate?.artifactRoot;
   if (artifactRoot) {
     const root = path.isAbsolute(artifactRoot) ? artifactRoot : path.resolve(suiteDirectory, artifactRoot);
+    const resolvedRoot = existsSync(root) ? realpathSync(root) : undefined;
     for (const relative of fixture.candidate?.requiredFiles ?? []) {
-      if (!existsSync(path.resolve(root, relative))) failures.push(`generated file missing: ${path.join(artifactRoot, relative)}`);
+      const file = path.resolve(root, relative);
+      if (path.isAbsolute(relative) || !file.startsWith(`${path.resolve(root)}${path.sep}`)
+        || !existsSync(file) || !statSync(file).isFile()
+        || lstatSync(file).isSymbolicLink() || (resolvedRoot && !realpathSync(file).startsWith(`${resolvedRoot}${path.sep}`))) {
+        failures.push(`generated file missing or unsafe: ${path.join(artifactRoot, relative)}`);
+        continue;
+      }
+      if (relative === 'style-ledger.json') failures.push(...styleLedgerFailures(file));
     }
   }
   return failures;
@@ -875,7 +1010,7 @@ export function loadAuthoringSuite(directory = path.join(ROOT, 'benchmarks', 'au
 
   const ids = new Set<string>();
   for (const fixture of suite.fixtures) {
-    if (!fixture.id || !fixture.family) throw new Error('authoring fixture requires non-empty id and family');
+    if (!/^[a-z0-9-]+$/.test(fixture.id) || !fixture.family) throw new Error('authoring fixture requires a safe lowercase id and non-empty family');
     if (ids.has(fixture.id)) throw new Error(`duplicate authoring fixture id: ${fixture.id}`);
     ids.add(fixture.id);
   }
