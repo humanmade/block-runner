@@ -127,7 +127,10 @@ function retainLogs(id, stdout, stderr) {
 
 function runRow(id, command, args, options = {}) {
   const start = performance.now();
-  const result = spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', env: process.env, ...options });
+  // Full proof JSON includes retained DOM observations and can exceed Node's
+  // 1 MiB default. Keep capture bounded without truncating ordinary receipts.
+  const result = spawnSync(command, args, { cwd: ROOT, encoding: 'utf8', env: process.env,
+    maxBuffer: 32 * 1024 * 1024, ...options });
   const row = {
     id, status: result.error ? 'engine_error' : result.status === 0 ? 'passed' : 'failed', command: [command, ...args].join(' '),
     elapsedMs: Math.round(performance.now() - start), detail: result.error?.message ?? (result.status === 0 ? undefined : `exit ${result.status ?? 'unknown'}`),

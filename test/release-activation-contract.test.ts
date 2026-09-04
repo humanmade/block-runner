@@ -1,5 +1,6 @@
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
+import { spawnSync } from 'node:child_process';
 import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
@@ -14,6 +15,22 @@ const required = ['zip_installation', 'plugin_activation', 'php_registry', 'rest
 const receipt = () => ({
   environment: { plugin: { zip: { sha256: hash } }, wordpress: { version: '7.1' } },
   gates: required.map((gate) => ({ gate, status: 'pass', details: { block: 'block-runner/pattern-overrides-fixture' } })),
+});
+
+describe('release command capture', () => {
+  it('retains proof output larger than the default child-process buffer', () => {
+    const begin = source.indexOf('function runRow(');
+    const finish = source.indexOf('\nfunction ', begin + 1);
+    let retainedBytes = 0;
+    const run = runInNewContext(`(${source.slice(begin, finish)})`, {
+      ROOT: process.cwd(), spawnSync, performance: { now: () => 0 }, rows: [],
+      process: { env: process.env, stdout: { write: () => {} }, stderr: { write: () => {} } },
+      retainLogs: (_id: string, stdout: string) => { retainedBytes = stdout.length; return {}; },
+    }) as (id: string, command: string, args: string[]) => { status: string };
+    const row = run('large-proof', process.execPath, ['-e', 'process.stdout.write("x".repeat(2 * 1024 * 1024))']);
+    expect(row.status).toBe('passed');
+    expect(retainedBytes).toBe(2 * 1024 * 1024);
+  });
 });
 
 describe('release ZIP activation claim', () => {
