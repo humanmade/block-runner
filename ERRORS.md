@@ -21,7 +21,6 @@ None.
 **Remedy:** Run `uvx --from skills-ref agentskills validate ./skills/block-runner`; it validates the canonical bundle successfully.
 
 ---
-
 ### ERR-004: Concurrent wp-env commands can erase the active runtime marker
 
 **Kind:** error | **Resolution:** workaround
@@ -32,7 +31,6 @@ None.
 **Remedy:** Run wp-env subprocesses sequentially. The integrated proof runner does this, and its follow-up WordPress run completed the same runtime observations successfully. Keep failed-run logs and ZIPs with the receipt; do not parallelize wp-env calls sharing one configuration.
 
 ---
-
 ### ERR-005: Standalone lock resolution can fail when a transitive registry version is unavailable
 
 **Kind:** error | **Resolution:** workaround
@@ -43,15 +41,14 @@ None.
 **Remedy:** Inspect the exact npm failure before rerunning. A subsequent registry lookup found the exact version; rerunning only the failed package test under the npm 11 toolchain passed in 18.25 seconds. Keep the initial failed result and the focused rerun separate. Do not change expected assertions or claim a root-cause fix: the initial registry inconsistency remains unproven, and clean dependency resolution still relies on registry availability.
 
 ---
-
-### ERR-009: Inherited npm allow-scripts settings can block isolated packaging tests
+### ERR-010: Local Docker credential helper must be on PATH for wp-env
 
 **Kind:** error | **Resolution:** workaround
 **Recorded:** 2026-09-04
 
-**Context:** npm run and npm exec exported a user-level allow-scripts setting as npm_config_allow_scripts. A nested npm install --package-lock-only then failed with EALLOWSCRIPTS because that environment setting is not permitted for project-scoped installs. The full verification test phase passed 460 tests with four skips and failed only this packaging setup.
+**Context:** The native WordPress control could not start because Docker Compose could not find docker-credential-osxkeychain. Docker was installed; its bundled credential helper was absent from the command environment PATH.
 
-**Remedy:** Do not change global npm settings or weaken test assertions. Launch the focused packaging test directly with node node_modules/vitest/vitest.mjs under the pinned npm 11 PATH, outside the npm run/exec environment. That clean-process rerun passed the full production archive and second-block checks in 121.20 seconds. Build, private-reference check, package inspection, and packed consumer checks also passed separately; retain the original failed verify result rather than calling it a single green run.
+**Remedy:** Verify the installed Docker helper exists and prepend its containing binary directory for the local proof command. Do not inspect credentials, modify Docker authentication, or reset the environment. The rerun then collected both standalone WordPress 7.1 controls successfully. Keep the original startup failure separate from successful control evidence.
 
 ---
 
@@ -67,7 +64,6 @@ None.
 **Remedy:** `vitest.config.ts` now disables file parallelism, so one Gutenberg runtime boots at a time. The normal `npm run verify` subsequently passed 13 files and 217 tests. Continue to avoid competing with live multi-arm model benchmarks because they add unrelated host load.
 
 ---
-
 ### ERR-003: Benchmark model CLIs were launched with write-capable bypass modes
 
 **Kind:** warning | **Resolution:** permanent
@@ -78,7 +74,6 @@ None.
 **Remedy:** All benchmark engines now launch from the operating-system temporary directory. Codex uses a read-only sandbox, ignores user configuration, and does not persist sessions; Claude uses safe, restricted, non-persistent mode without bypass permissions. `test/benchmark.test.ts` locks this launch contract.
 
 ---
-
 ### ERR-006: wp-scripts inherits test mode when building a release fixture
 
 **Kind:** warning | **Resolution:** permanent
@@ -89,7 +84,6 @@ None.
 **Remedy:** Force NODE_ENV=production for ZIP builds in the standalone packaging test, WordPress fixture builder, and mutation rebuilds. Explicitly include development dependencies during npm ci because they contain the build toolchain. The packaging test now compiles a canonical plan, checks responsive and editor-only CSS inside the actual ZIP, verifies the bundled image bytes, and rejects source maps. The focused follow-up passed all 45 tests, including the clean install and production ZIP check. Real WordPress proof of the new artifact is still a separate gate.
 
 ---
-
 ### ERR-007: Default SVG imports build successfully but break filtered WordPress image saves
 
 **Kind:** warning | **Resolution:** permanent
@@ -100,7 +94,6 @@ None.
 **Remedy:** The owned compiler emits native SVG URL dependencies in asset-urls.mjs, where webpack emits the original SVG file rather than applying the JavaScript SVG loader. Preview and manifest include the helper; CSS-only SVGs retain normal CSS inlining. Tests inspect the exact SVG bytes and emitted filename in the production ZIP. The real WordPress fixture now includes an SVG: editor save/reopen and frontend decoding passed, as did a separate filtered post save and byte-for-byte HTTP asset check. The full profile still records its unrelated visual/manual-review gaps and upstream editor accessibility findings.
 
 ---
-
 ### ERR-008: Production CSS minification removes bundled font license comments
 
 **Kind:** warning | **Resolution:** permanent
@@ -109,5 +102,15 @@ None.
 **Context:** The real wp-scripts 34.2.0 production ZIP test removed the entire /*! font redistribution notice even though source-generation tests passed. A font file reached the archive without its required full notice.
 
 **Remedy:** The canonical compiler emits font-licenses.txt with full notices and package-relative asset paths. Both standalone and supported existing-plugin profiles plan an explicit postbuild copy into the block build directory; existing hooks and replacement approval are preserved. The production ZIP test now verifies the real WOFF2 bytes and complete retained notice, then adds a second block and verifies both builds without changing the first source. The focused production test passed.
+
+---
+### ERR-009: Inherited npm allow-scripts settings can block isolated packaging tests
+
+**Kind:** error | **Resolution:** permanent
+**Recorded:** 2026-09-04
+
+**Context:** npm run and npm exec exported a user-level allow-scripts setting as npm_config_allow_scripts. A nested npm install --package-lock-only then failed with EALLOWSCRIPTS because that environment setting is not permitted for project-scoped installs. The full verification test phase passed 460 tests with four skips and failed only this packaging setup.
+
+**Remedy:** Generated-plugin npm children now read back only allow-scripts in the same working directory with its environment projections absent. They remove a projected value only when it exactly matches that effective configuration. Explicit different policies and failed probes remain unchanged; no npm configuration is modified. The public writer, fixture builder and mutation ZIP rebuilds share this boundary. Focused lifecycle checks and the full npm run verify passed: 475 tests, four opt-in mutation skips, typecheck, build, private-reference check and package dry run. Earlier failed evidence remains retained.
 
 ---
