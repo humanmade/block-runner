@@ -29,6 +29,9 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 npm install block-runner          # requires Node 20+
 ```
 
+For the **0.9 registered-block authoring testing release**, use
+`npm install block-runner@testing`. The stable `latest` channel remains on 0.8.0.
+
 Then just ask your coding agent:
 
 > Use block-runner to convert this hero into a native Gutenberg block.

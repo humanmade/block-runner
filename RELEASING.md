@@ -55,7 +55,7 @@ product-preview state live in
 3. Draft a **GitHub Release** for that tag and **Publish** it.
 4. The Release workflow runs the complete release candidate check then publishes 0.9 tags with
    `npm publish --provenance --access public --tag testing`.
-5. Confirm afterward: `npm view block-runner` shows the new version, and
+5. Confirm afterward: `npm view block-runner@testing version` shows the new 0.9 version, and
    `npm audit signatures` passes (provenance attestation present).
 
 ## Pre-1.0 note

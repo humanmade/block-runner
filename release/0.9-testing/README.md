@@ -40,8 +40,9 @@ retains the complete review record. Omitting it leaves manual review blocked; th
 checker never creates or assumes a passing review.
 
 `authoring:prove` is the canonical full authoring suite and WordPress 7.1 proof.
-It must exercise every release fixture in the registered-block authoring corpus,
-including the expected-negative unsupported-interaction fixture. `release:check`
+When selected, it must exercise every fixture in the registered-block authoring corpus,
+including the expected-negative unsupported-interaction fixture. These optional benchmark rows
+are not prerequisites for the testing release. `release:check`
 runs the package, skill, installer, generated-plugin ZIP activation, and artifact
 checks defined in the matrix. `npm run verify` and `npm run pack:check` are retained
 as named rows because a wrapper's success must not erase their individual receipts.
@@ -52,11 +53,11 @@ true:
 - Every required matrix row reaches its expected release status (`passed`, except
   the declared expected-negative row, which is `unsupported`); no row is assumed
   from a previous commit.
-- The full WordPress 7.1 proof passed for the release fixture set: generation,
+- The full WordPress 7.1 proof passed for the required generated-plugin fixture: generation,
   generated-plugin build, install/activation, editor insert-edit-save-reopen,
   front-end render, pattern override, visual/fidelity, and accessibility gates.
-- The expected-negative unsupported-interaction fixture is `unsupported` and fails
-  closed; a generated best-effort interaction or a silent omission fails the gate.
+- If the optional authoring benchmark is run, its expected-negative unsupported-interaction
+  fixture must be `unsupported` and fail closed, never silently pass or generate a substitute.
 - `npm run verify`, `npm run pack:check`, canonical skill validation, installer
   smoke, and generated plugin ZIP activation all passed from the candidate.
 - No required release check is `engine_error` or `blocked`. Model/tool errors

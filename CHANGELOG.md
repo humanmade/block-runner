@@ -1,10 +1,11 @@
 # Changelog
 
-## 0.9.0 — 2026-09-04 — unreleased testing candidate
+## 0.9.0 — 2026-09-04 — testing release
 
-This is the 0.9 testing candidate, not a published release. The last published npm version is
-0.8.0. Publish 0.9 only after the receipt-backed release matrix passes; 1.0 remains contingent
-on real-project feedback and resolved release-relevant failures.
+This is the 0.9 testing release line, distributed through the `testing` npm tag. The stable
+`latest` channel remains on 0.8.0. The release workflow requires the receipt-backed matrix to
+pass before publication; 1.0 remains contingent on real-project feedback and resolved
+release-relevant failures.
 
 ### Added
 
@@ -46,14 +47,16 @@ on real-project feedback and resolved release-relevant failures.
 
 ### Release status
 
-The candidate is not release-certified. Local production font ZIP, existing-plugin second-block,
-and all four deliberate-mutation checks have passed. A keyboard and screenshot review is saved
+Node 20, 22 and 24 verification and the WordPress 7.1 automated proof passed in
+[CI](https://github.com/humanmade/block-runner/actions/runs/33879578421). Local production font
+ZIP, existing-plugin second-block, and all four deliberate-mutation checks also passed.
+A keyboard and screenshot review is saved
 against the reproducible fixture's exact input and ZIP hashes. The narrow 0.9 testing exception
 covers separately reproduced native Heading and Paragraph accessibility findings; raw failures
 remain in the receipts, and the agent-assisted review is not human accessibility certification.
 
-The complete release matrix and WordPress CI must still pass before publication. Passing unit
-tests or historical page-content benchmark scores does not establish that release acceptance.
+The publishing workflow runs the complete release matrix before uploading the package. Passing
+unit tests or historical page-content benchmark scores does not establish that release acceptance.
 The separate registered-block benchmark remains pending and unscored; no new model benchmark
 results are claimed for this candidate.
 
