@@ -49,20 +49,6 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       outputDir,
     });
 
-    // `runProof` reports the raw profile. A raw upstream editor finding or a
-    // pending manual review is deliberately not rewritten as a pass here.
-    expect(result.ok).toBe(result.receipt.profile.ok);
-    expect(result.receipt.ok).toBe(result.receipt.profile.ok);
-    expect(result.receipt.environment.wordpress).toMatchObject({
-      requestedVersion: '7.1',
-      coreSource: 'WordPress/WordPress#7.1',
-    });
-    expect(result.receipt.environment.wordpress.version).toMatch(/^7\.1(?:\.\d+)?$/);
-    expect(result.receipt.gates).toHaveLength(PROOF_PROFILES.full.requiredGates.length);
-    expect(new Set(result.receipt.gates.map((gate) => gate.gate)).size)
-      .toBe(PROOF_PROFILES.full.requiredGates.length);
-    expect(existsSync(built.fixture.visual!.expectedPath)).toBe(true);
-
     // Keep the raw receipt and the acceptance decision side by side. The
     // latter may be blocked: this test proves that the result is reported
     // honestly, while the release checker owns the publishable decision.
@@ -76,6 +62,26 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       environment: result.receipt.environment,
       acceptance: { path: 'acceptance.json', summary: acceptanceSummary },
     }, null, 2)}\n`, 'utf8');
+
+    process.stderr.write(`${JSON.stringify({
+      receipt: result.receiptReference.path,
+      failures: result.receipt.gates.filter(({ status }) => status !== 'pass' && status !== 'not_applicable')
+        .map(({ gate, status, reason }) => ({ gate, status, reason })),
+    })}\n`);
+
+    // Retain the index and failure reasons before any assertion can stop the test.
+    // Raw upstream editor findings and pending manual review remain unchanged.
+    expect(result.ok).toBe(result.receipt.profile.ok);
+    expect(result.receipt.ok).toBe(result.receipt.profile.ok);
+    expect(result.receipt.environment.wordpress).toMatchObject({
+      requestedVersion: '7.1',
+      coreSource: 'WordPress/WordPress#7.1',
+    });
+    expect(result.receipt.environment.wordpress.version).toMatch(/^7\.1(?:\.\d+)?$/);
+    expect(result.receipt.gates).toHaveLength(PROOF_PROFILES.full.requiredGates.length);
+    expect(new Set(result.receipt.gates.map((gate) => gate.gate)).size)
+      .toBe(PROOF_PROFILES.full.requiredGates.length);
+    expect(existsSync(built.fixture.visual!.expectedPath)).toBe(true);
 
     // Assert acceptance only after the raw receipt, acceptance summary, and
     // receipt index have been retained. A failed release gate must not discard

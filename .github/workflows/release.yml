@@ -56,6 +56,7 @@ jobs:
           name: release-receipts-${{ github.event.release.tag_name }}
           path: |
             release/0.9-testing/receipts/
+            !release/0.9-testing/receipts/**/node_modules/**
             ${{ runner.temp }}/block-runner-wordpress-7.1-release-control/
           if-no-files-found: warn
       - name: Publish 0.9 testing release

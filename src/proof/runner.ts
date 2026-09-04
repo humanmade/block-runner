@@ -664,7 +664,10 @@ function createRuntime(
       return startupFailure;
     }
     const staged = await stagePluginZip();
-    if (staged.status !== 'pass') return staged;
+    if (staged.status !== 'pass') {
+      startupFailure = staged;
+      return startupFailure;
+    }
     const result = await wpEnv(['start'], 'wp-env-start');
     const log = await logged(result);
     if (result.exitCode !== 0) {
