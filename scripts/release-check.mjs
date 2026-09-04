@@ -19,6 +19,7 @@ const { evaluateReleaseAcceptance, loadNativeHeadingControlEvidence, loadNativeP
   await import('../src/proof/release-acceptance.ts');
 
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
+const NPM_ALLOW_SCRIPTS_ENV_KEYS = ['npm_config_allow_scripts', 'NPM_CONFIG_ALLOW_SCRIPTS'];
 const selected = valueFor('--matrix') ?? 'full-release-matrix';
 const requestedReceipt = valueFor('--receipt');
 const startedAt = new Date().toISOString();
@@ -34,7 +35,7 @@ if (!allowed.has(selected)) throw new Error(`unknown --matrix value ${JSON.strin
 const receiptFile = requestedReceipt
   ? path.resolve(ROOT, requestedReceipt)
   : path.join(mkdtempSync(path.join(tmpdir(), 'block-runner-release-receipt-')), 'receipt.json');
-const evidenceDirectory = `${receiptFile}.artifacts`;
+const evidenceDirectory = artifactDirectoryForReceipt(receiptFile);
 if (requestedReceipt && existsSync(receiptFile)) throw new Error(`refusing to overwrite immutable release receipt: ${receiptFile}`);
 if (existsSync(evidenceDirectory)) throw new Error(`refusing to overwrite immutable release evidence: ${evidenceDirectory}`);
 mkdirSync(evidenceDirectory, { recursive: true });
@@ -150,6 +151,43 @@ function pendingRow(id, command, detail) {
   return undefined;
 }
 
+function artifactDirectoryForReceipt(file) {
+  const extension = path.extname(file);
+  const stem = path.basename(file, extension);
+  return path.join(path.dirname(file), `${stem}.artifacts`);
+}
+
+/**
+ * npm projects a user-level allow-scripts setting into every npm child. A packed candidate is a
+ * fresh consumer package, so remove only an exact projection after reading the config in that
+ * same consumer cwd. Explicit values, project policy, and failed readback remain in force.
+ */
+function npmEnvironmentForPackedConsumer(cwd, environment = process.env) {
+  const projected = NPM_ALLOW_SCRIPTS_ENV_KEYS
+    .filter((key) => Object.prototype.hasOwnProperty.call(environment, key))
+    .map((key) => [key, environment[key]])
+    .filter(([, value]) => value !== undefined);
+  if (!projected.length) return { ...environment };
+
+  const probeEnvironment = { ...environment };
+  for (const key of NPM_ALLOW_SCRIPTS_ENV_KEYS) delete probeEnvironment[key];
+  const probe = spawnSync('npm', ['config', 'get', 'allow-scripts', '--location=user'], {
+    cwd,
+    env: probeEnvironment,
+    encoding: 'utf8',
+    timeout: 5_000,
+    maxBuffer: 16 * 1024,
+  });
+  if (probe.error || probe.status !== 0 || typeof probe.stdout !== 'string') return { ...environment };
+  const userConfigValue = probe.stdout.trim();
+  if (!userConfigValue || userConfigValue === 'undefined' || !projected.every(([, value]) => value === userConfigValue)) {
+    return { ...environment };
+  }
+  const childEnvironment = { ...environment };
+  for (const key of NPM_ALLOW_SCRIPTS_ENV_KEYS) delete childEnvironment[key];
+  return childEnvironment;
+}
+
 function packCandidate() {
   const directory = mkdtempSync(path.join(tmpdir(), 'block-runner-rc-pack-'));
   if (runRow('candidate-package-dry-run', 'npm', ['run', 'pack:check']).status !== 'passed') return undefined;
@@ -165,7 +203,10 @@ function packCandidate() {
 }
 function installPackedCandidate(candidate, rowId = 'packed-candidate-smoke') {
   const consumer = mkdtempSync(path.join(tmpdir(), 'block-runner-rc-consumer-'));
-  const row = runRow(rowId, 'npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', candidate.tarball], { cwd: consumer });
+  const row = runRow(rowId, 'npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', candidate.tarball], {
+    cwd: consumer,
+    env: npmEnvironmentForPackedConsumer(consumer),
+  });
   const cli = path.join(consumer, 'node_modules', 'block-runner', 'dist', 'cli.js');
   if (row.status === 'passed' && !existsSync(cli)) { row.status = 'failed'; row.detail = `packed CLI missing: ${cli}`; }
   if (row.status === 'passed') {

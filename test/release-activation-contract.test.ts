@@ -33,6 +33,56 @@ describe('release command capture', () => {
   });
 });
 
+describe('release evidence paths', () => {
+  it('keeps receipt artifacts beside an extensionless receipt stem', () => {
+    const begin = source.indexOf('function artifactDirectoryForReceipt(');
+    const finish = source.indexOf('\nfunction ', begin + 1);
+    const directory = runInNewContext(`(${source.slice(begin, finish)})`, { path }) as (file: string) => string;
+    expect(directory('/tmp/release/b311e6e.json')).toBe('/tmp/release/b311e6e.artifacts');
+    expect(directory('/tmp/release/release.0.9.json')).toBe('/tmp/release/release.0.9.artifacts');
+    expect(source).toContain('const evidenceDirectory = artifactDirectoryForReceipt(receiptFile);');
+  });
+});
+
+describe('release packed consumer npm policy', () => {
+  const helperStart = source.indexOf('function npmEnvironmentForPackedConsumer(');
+  const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
+
+  function evaluate(
+    environment: Record<string, string>,
+    result: { status: number | null; stdout: string; error?: unknown },
+  ): { child: Record<string, string | undefined>; cwd: string; probe: Record<string, string | undefined> } {
+    let cwd = '';
+    let probe: Record<string, string | undefined> = {};
+    const run = runInNewContext(`(${source.slice(helperStart, helperEnd)})`, {
+      NPM_ALLOW_SCRIPTS_ENV_KEYS: ['npm_config_allow_scripts', 'NPM_CONFIG_ALLOW_SCRIPTS'],
+      process: { env: environment },
+      spawnSync: (_command: string, _args: string[], options: { cwd: string; env: Record<string, string | undefined> }) => {
+        cwd = options.cwd;
+        probe = options.env;
+        return result;
+      },
+    }) as (directory: string, env: Record<string, string>) => Record<string, string | undefined>;
+    return { child: run('/tmp/packed-consumer', environment), cwd, probe };
+  }
+
+  it('removes only an exact inherited allow-scripts projection after same-cwd readback', () => {
+    const projected = { PATH: '/usr/bin', npm_config_allow_scripts: '@example/approved-script' };
+    const observed = evaluate(projected, { status: 0, stdout: '@example/approved-script\n' });
+    expect(observed.cwd).toBe('/tmp/packed-consumer');
+    expect(observed.probe.npm_config_allow_scripts).toBeUndefined();
+    expect(observed.child.npm_config_allow_scripts).toBeUndefined();
+    expect(observed.child.PATH).toBe('/usr/bin');
+
+    const explicit = { ...projected, npm_config_allow_scripts: '@example/explicit-different' };
+    expect(evaluate(explicit, { status: 0, stdout: '@example/approved-script\n' }).child.npm_config_allow_scripts)
+      .toBe('@example/explicit-different');
+    expect(evaluate(projected, { status: 1, stdout: '' }).child.npm_config_allow_scripts)
+      .toBe('@example/approved-script');
+    expect(source).toContain('env: npmEnvironmentForPackedConsumer(consumer)');
+  });
+});
+
 describe('release ZIP activation claim', () => {
   it.each(['7.1', '7.1.1'])('accepts actual WordPress %s only with all activation evidence', (version) => {
     const input = receipt();
