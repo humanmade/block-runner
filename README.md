@@ -390,14 +390,16 @@ evaluating one. The real receipt runs without a proof adapter or externally supp
 
 ```sh
 npm run verify
+npm run test:proof:wordpress
 ```
 
-The WordPress phase requires a working Docker CLI and daemon. Proof commands record bounded
+`verify` runs repository and packaging checks; `test:proof:wordpress` runs the real editor and
+frontend lifecycle. The latter requires a working Docker CLI and daemon. Proof commands record bounded
 Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
 specific blocked or failed phase instead of exhausting the general test timeout.
 
-On GitHub Actions, every verification-matrix job uploads a
-`wordpress-7.1-pattern-overrides-receipt-node-*` artifact retained for 14 days. It contains
+On GitHub Actions, the separate WordPress proof job uploads a
+`wordpress-7.1-pattern-overrides-receipt` artifact on success or failure, retained for 14 days. It contains
 `receipt-index.json`, the content-addressed `receipts/sha256` record, and its
 `evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
 the relevant build without committing environment-specific run output.
