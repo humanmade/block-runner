@@ -3,6 +3,9 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import Ajv2020 from 'ajv/dist/2020.js';
+import { createAuthoringHashManifest } from '../scripts/authoring-hashes.js';
+import { GENERATED_REGISTERED_BLOCK_PATHS } from '../src/authoring/generate.js';
 import {
   AUTHORING_DIMENSIONS,
   AUTHORING_BENCHMARK_CONTRACT,
@@ -34,8 +37,21 @@ function fixture(overrides: Partial<AuthoringFixture> = {}): AuthoringFixture {
 }
 
 describe('authoring benchmark contract', () => {
+  it('records every current corpus hash and the production compiler file contract', () => {
+    expect(JSON.parse(readFileSync(path.join(AUTHORING_ROOT, 'hashes.json'), 'utf8')))
+      .toEqual(createAuthoringHashManifest(AUTHORING_ROOT));
+    const contract = JSON.parse(readFileSync(path.join(AUTHORING_ROOT, 'candidate-contract.json'), 'utf8'));
+    expect(contract.requiredFiles).toEqual(expect.arrayContaining([...GENERATED_REGISTERED_BLOCK_PATHS]));
+    expect(contract.requiredFiles).not.toContain('style-ledger.json');
+    expect(contract.workerRequiredFiles).toContain('style-ledger.json');
+    expect(contract.plan.required).toEqual(expect.arrayContaining(['target', 'structure', 'fields']));
+    expect(contract.blockJson.required).not.toContain('attributes');
+    expect(contract.receipt.statuses).toEqual(['scored', 'unsupported', 'blocked', 'engine_error']);
+  });
+
   it('loads the independent 13-fixture corpus with its source and plan contracts intact', () => {
     const suite = loadAuthoringSuite(AUTHORING_ROOT);
+    const validate = new Ajv2020({ strict: false }).compile(JSON.parse(readFileSync(path.join(AUTHORING_ROOT, 'schema.json'), 'utf8')));
 
     expect(suite.fixtures).toHaveLength(13);
     expect(new Set(suite.fixtures.map((item) => item.family))).toEqual(
@@ -53,6 +69,7 @@ describe('authoring benchmark contract', () => {
     );
 
     for (const fixture of suite.fixtures) {
+      expect(validate(fixture), `${fixture.id}: ${JSON.stringify(validate.errors)}`).toBe(true);
       expect(fixture.requiredDimensions).toEqual(AUTHORING_DIMENSIONS);
       for (const dimension of AUTHORING_DIMENSIONS) {
         expect(fixture.assertions?.[dimension]).toEqual(expect.objectContaining({ required: expect.any(Boolean) }));
@@ -66,13 +83,16 @@ describe('authoring benchmark contract', () => {
       expect(fixture.source?.sha256).toMatch(/^[a-f0-9]{64}$/);
       expect(fixture.plan).toEqual(expect.any(String));
       expect(fixture.prompt).toEqual(expect.any(String));
-      expect(fixture.candidate?.requiredFiles).toEqual(expect.arrayContaining([
-        'block.json',
-        'src/edit.tsx',
-        'src/save.tsx',
-        'src/style-ledger.json',
-        'authoring-plan.json',
-      ]));
+      if (fixture.expectedStatus === 'scored') {
+        expect(fixture.candidate?.requiredFiles).toEqual(expect.arrayContaining([
+          'block.json', 'index.js', 'edit.js', 'save.js', 'style.scss', 'editor.scss', 'block.php',
+          'style-decisions.json', 'style-ledger.json', 'compiler-manifest.json', 'authoring-plan.json',
+          'generated-source-manifest.json',
+        ]));
+      } else {
+        // Refusing an unsupported interaction must not require emitting a fake implementation.
+        expect(fixture.candidate?.requiredFiles).toEqual([]);
+      }
 
       const source = path.join(AUTHORING_ROOT, fixture.source!.path!);
       expect(existsSync(source), `${fixture.id} source must exist`).toBe(true);

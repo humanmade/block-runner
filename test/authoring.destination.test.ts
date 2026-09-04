@@ -1,9 +1,11 @@
 import { mkdtemp, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { describe, expect, it } from 'vitest';
-import { inspectAuthoringDestination, writeAuthoringOutput } from '../src/authoring/destination.js';
-import { validateAuthoringPlan } from '../src/authoring/schema.js';
+import { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringOutput } from '../src/authoring/destination.js';
+import { hashAuthoringPlan, validateAuthoringPlan } from '../src/authoring/schema.js';
+import { REGISTERED_BLOCK_STYLE_EMITTER_VERSION, REGISTERED_BLOCK_TEMPLATE_VERSION, WORDPRESS_BLOCK_SCHEMA_VERSION } from '../src/authoring/generate.js';
 
 function plan(files: unknown[]) {
   return validateAuthoringPlan({
@@ -22,6 +24,18 @@ function plan(files: unknown[]) {
 }
 
 describe('authoring destination', () => {
+  it('binds confirmation to the actual compiler contract as well as the plan and destination', () => {
+    const input = plan([]);
+    const destination = { directory: '/tmp/block-runner-confirmed-package', fingerprint: 'sha256:example' };
+    // Key order is the canonical recursively sorted order used by the confirmation boundary.
+    const confirmation = (template: string) => createHash('sha256').update(JSON.stringify({
+      compiler: { styles: REGISTERED_BLOCK_STYLE_EMITTER_VERSION, template, wordpressSchema: WORDPRESS_BLOCK_SCHEMA_VERSION },
+      destination, planHash: hashAuthoringPlan(input),
+    })).digest('hex');
+    expect(hashAuthoringConfirmation(input, destination)).toBe(confirmation(REGISTERED_BLOCK_TEMPLATE_VERSION));
+    expect(hashAuthoringConfirmation(input, destination)).not.toBe(confirmation('old-template'));
+  });
+
   it('fingerprints a destination without creating it', async () => {
     const parent = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
     const destination = path.join(parent, 'does-not-exist');

@@ -1,4 +1,5 @@
 import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -42,6 +43,35 @@ describe('WordPress proof profiles', () => {
 });
 
 describe('content-addressed proof receipts', () => {
+  it('requires retained input/ZIP-bound evidence for a manual accessibility pass', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-manual-proof-'));
+    const input = path.join(root, 'input.json');
+    const zip = path.join(root, 'plugin.zip');
+    const reviewPath = path.join(root, 'review.json');
+    await writeFile(input, 'input');
+    await writeFile(zip, 'zip');
+    const options = {
+      profile: 'full' as const, inputPath: input, pluginZip: zip, outputDir: root,
+      fixture: { blockName: 'acme/proof', accessibility: { manualReview: 'pass' as const, manualReviewPath: reviewPath } },
+      gateRunner: async () => ({ status: 'pass' as const }),
+    };
+    const missing = await runProof(options);
+    expect(missing.receipt.gates.find((gate) => gate.gate === 'accessibility_manual_review')?.status).toBe('blocked');
+    const hash = (value: string) => `sha256:${createHash('sha256').update(value).digest('hex')}`;
+    await writeFile(reviewPath, JSON.stringify({
+      schemaVersion: 1, reviewer: 'Fixture reviewer', reviewedAt: '2026-09-04T00:00:00Z',
+      inputHash: hash('input'), pluginZipHash: hash('zip'), status: 'pass', findings: [],
+      checks: { 'editor-keyboard': 'Recorded editor interaction.', 'frontend-keyboard': 'Recorded link focus.', 'focus-visibility': 'Recorded focus indicator.', 'content-reading-order': 'Recorded reading order.' },
+    }));
+    const recorded = await runProof(options);
+    const manual = recorded.receipt.gates.find((gate) => gate.gate === 'accessibility_manual_review');
+    expect(manual?.status).toBe('pass');
+    expect(manual?.evidence?.length).toBeGreaterThan(0);
+    await writeFile(zip, 'different zip');
+    const stale = await runProof(options);
+    expect(stale.receipt.gates.find((gate) => gate.gate === 'accessibility_manual_review')?.status).toBe('blocked');
+  });
+
   it('stores canonical evidence and receipt bytes at immutable SHA-256 addresses', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-proof-store-'));
     const evidence = new EvidenceStore(root);

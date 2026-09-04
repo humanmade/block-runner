@@ -1,11 +1,11 @@
 {
   "version": "1",
   "timingMethod": {
-    "id": "monotonic-wall-clock-source-materialization-through-receipt-write",
-    "start": "immediately before the fixture source is copied into the fresh candidate workspace",
-    "end": "immediately after the fixture receipt is atomically written",
+    "id": "monotonic-wall-clock-source-materialization-through-evidence-finalization",
+    "start": "immediately before reading and compiling the saved candidate plan",
+    "end": "after worker execution and evidence retention, immediately before receipt serialization",
     "unit": "milliseconds",
-    "excludes": ["queue time", "human review time"]
+    "excludes": ["queue time", "human review time", "receipt serialization and file write", "model interpretation before the saved plan"]
   },
   "requiredRunFields": [
     "suiteHash",

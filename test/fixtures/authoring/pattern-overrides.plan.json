@@ -1,0 +1,170 @@
+{
+  "version": 1,
+  "generatorVersion": "0.9.0",
+  "target": {
+    "name": "block-runner/pattern-overrides-fixture",
+    "title": "Pattern overrides fixture"
+  },
+  "structure": [
+    {
+      "id": "hero.layout",
+      "block": "core/group",
+      "attributes": {
+        "className": "block-runner-pattern-layout",
+        "templateLock": "contentOnly",
+        "style": {
+          "color": {
+            "background": "#dcecff"
+          },
+          "spacing": {
+            "padding": {
+              "top": "1.5rem",
+              "right": "1.5rem",
+              "bottom": "1.5rem",
+              "left": "1.5rem"
+            }
+          }
+        }
+      },
+      "children": [
+        {
+          "id": "hero.logo",
+          "block": "core/image",
+          "attributes": { "alt": "Static SVG check mark", "width": "80px", "height": "40px" }
+        },
+        {
+          "id": "hero.title",
+          "block": "core/heading",
+          "attributes": {
+            "content": "Canonical heading"
+          }
+        },
+        {
+          "id": "hero.layout-note",
+          "block": "core/paragraph",
+          "attributes": {
+            "content": "Canonical layout version one."
+          }
+        },
+        {
+          "id": "hero.image",
+          "block": "core/image",
+          "attributes": {
+            "alt": "Canonical image"
+          }
+        },
+        {
+          "id": "hero.actions",
+          "block": "core/buttons",
+          "attributes": {},
+          "children": [
+            {
+              "id": "hero.cta",
+              "block": "core/button",
+              "attributes": {
+                "text": "Canonical action",
+                "url": "https://example.test/canonical"
+              }
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "fields": [
+    { "id": "hero.image.title", "label": "Image title", "mode": "override", "node": "hero.image", "attribute": "title" },
+    { "id": "hero.image.caption", "label": "Image caption", "mode": "override", "node": "hero.image", "attribute": "caption" },
+    { "id": "hero.cta.linkTarget", "label": "Button link target", "mode": "override", "node": "hero.cta", "attribute": "linkTarget" },
+    { "id": "hero.cta.rel", "label": "Button link relationship", "mode": "override", "node": "hero.cta", "attribute": "rel" },
+    {
+      "id": "hero.title.content",
+      "label": "hero.title content",
+      "mode": "override",
+      "node": "hero.title",
+      "attribute": "content"
+    },
+    {
+      "id": "hero.image.id",
+      "label": "hero.image id",
+      "mode": "override",
+      "node": "hero.image",
+      "attribute": "id"
+    },
+    {
+      "id": "hero.image.url",
+      "label": "hero.image url",
+      "mode": "override",
+      "node": "hero.image",
+      "attribute": "url"
+    },
+    {
+      "id": "hero.image.alt",
+      "label": "hero.image alt",
+      "mode": "override",
+      "node": "hero.image",
+      "attribute": "alt"
+    },
+    {
+      "id": "hero.cta.text",
+      "label": "hero.cta text",
+      "mode": "override",
+      "node": "hero.cta",
+      "attribute": "text"
+    },
+    {
+      "id": "hero.cta.url",
+      "label": "hero.cta url",
+      "mode": "override",
+      "node": "hero.cta",
+      "attribute": "url"
+    }
+  ],
+  "locking": {
+    "mode": "contentOnly"
+  },
+  "styles": {
+    "strategy": "mixed",
+    "outcomes": [
+      {
+        "property": "border",
+        "outcome": "scoped-css",
+        "value": "2px solid #174ea6"
+      },
+      {
+        "property": "border-radius",
+        "outcome": "scoped-css",
+        "value": "8px"
+      }
+    ]
+  },
+  "pattern": {
+    "ready": true,
+    "overrides": [
+      { "field": "hero.image.title" },
+      { "field": "hero.image.caption" },
+      { "field": "hero.cta.linkTarget" },
+      { "field": "hero.cta.rel" },
+      {
+        "field": "hero.title.content"
+      },
+      {
+        "field": "hero.image.id"
+      },
+      {
+        "field": "hero.image.url"
+      },
+      {
+        "field": "hero.image.alt"
+      },
+      {
+        "field": "hero.cta.text"
+      },
+      {
+        "field": "hero.cta.url"
+      }
+    ]
+  },
+  "assets": [],
+  "files": [],
+  "warnings": []
+}

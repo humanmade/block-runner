@@ -2,6 +2,8 @@ import { describe, expect, it } from 'vitest';
 import {
   AuthoringGenerationError,
   compileRegisteredBlock,
+  REGISTERED_BLOCK_STYLE_EMITTER_VERSION,
+  REGISTERED_BLOCK_TEMPLATE_VERSION,
   type GeneratedSourceFile,
   validateBlockMetadata,
 } from '../src/authoring/generate.js';
@@ -63,6 +65,7 @@ describe('registered-block source compiler', () => {
     const second = await compileRegisteredBlock(plan());
 
     expect(first).toEqual(second);
+    expect(first.templateVersion).toBe(REGISTERED_BLOCK_TEMPLATE_VERSION);
     expect(first.templateVersion).toBe(second.templateVersion);
     expect(first.sourcePlanHash).toBe(hashAuthoringPlan(plan()));
     expect(first.manifest.sourcePlanHash).toBe(first.sourcePlanHash);
@@ -119,7 +122,7 @@ describe('registered-block source compiler', () => {
     expect(php).toContain('__DIR__');
 
     const style = sourceFile(first.files, 'style.scss').content;
-    expect(style).toContain('style emitter v1');
+    expect(style).toContain(`style emitter v${REGISTERED_BLOCK_STYLE_EMITTER_VERSION}`);
     expect(style).toContain('border: 1px solid #111;');
     expect(style).toContain('color: var(--wp--preset--color--primary);');
     expect(sourceFile(first.files, 'editor.scss').content).not.toContain('border: 1px solid #111;');

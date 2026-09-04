@@ -5,7 +5,8 @@ export default defineConfig({
   format: ['esm'],
   dts: true,
   sourcemap: false,
-  clean: true,
+  // The build script first moves the previous dist to Trash; tsup must not delete it.
+  clean: false,
   splitting: false,
   target: 'node20',
 });

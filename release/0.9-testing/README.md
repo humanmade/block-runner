@@ -17,9 +17,18 @@ replace any command with an equivalent-looking local check: the command, artifac
 and environment in its receipt are the evidence.
 
 ```sh
-npm run authoring:prove
+npm run proof:control
 npm run release:check
 ```
+
+The CI WordPress job first runs `npm run proof:control` to collect the standalone
+native Heading control against the pinned `proof/wp-env.json`, records the observed
+core version before and after the browser run, and passes the resulting content hash
+to the generated-block acceptance test. This is deterministic WordPress/browser
+evidence and does not invoke a model or the paid benchmark lanes.
+For a local release-check run, export the three `BLOCK_RUNNER_NATIVE_HEADING_CONTROL_*`
+values written to `github-env.txt`; without them, a raw generated Heading failure
+remains unexcepted.
 
 `authoring:prove` is the canonical full authoring suite and WordPress 7.1 proof.
 It must exercise every release fixture in the registered-block authoring corpus,
@@ -41,20 +50,71 @@ true:
   closed; a generated best-effort interaction or a silent omission fails the gate.
 - `npm run verify`, `npm run pack:check`, canonical skill validation, installer
   smoke, and generated plugin ZIP activation all passed from the candidate.
-- No measurement is `engine_error` or `blocked`. Model/tool errors invalidate that
-  measurement; they are never recorded as zero product points.
+- No required release check is `engine_error` or `blocked`. Model/tool errors
+  invalidate that check; they are never recorded as zero product points. The
+  optional authoring benchmark may remain `pending` and unscored.
 - The corpus provenance and every release artifact hash are present in the receipts.
 
 An unrun browser, visual, accessibility, editor, front-end, or activation gate is
 `blocked`/`pending`, not a pass. A `skipped` field or missing receipt is likewise
 not evidence of success.
 
-The release environment supplies two executable paths, not shell fragments:
-`BLOCK_RUNNER_AUTHORING_RUNNER` for each authoring fixture and
-`BLOCK_RUNNER_WP_ZIP_ACTIVATION_RUNNER` for ZIP activation. The latter receives
-the generated ZIP, expected WordPress version, expected registered block, result
-path, and log directory. It must return proof of WordPress 7.1, activation,
-editor-visible registration, and clean logs; exit status alone is insufficient.
+The WordPress proof receipt is the raw record and is never rewritten for release
+reporting. The release checker stores a separate `acceptance` summary: `rawProfileOk`
+describes the unmodified 27-gate profile, `automatedOk` evaluates the runnable gates
+without treating the human review gate as automated evidence, and `releaseOk` is the
+actual 0.9 decision. A raw Heading Axe finding may appear in `acceptedUpstreamFindings`
+only when it matches the documented native-control exception and a retained WordPress
+7.1 control-evidence hash is supplied. The retained control JSON must also carry
+that observed 7.1 version and the passing insert/edit/save/reopen control gates. The
+control may either retain the same documented Heading findings or be clean; a clean
+control is valid evidence but supplies no exception, so a generated-block Axe failure
+remains a blocker. The generated proof must observe the same supported WordPress 7.1
+version as the control. A Paragraph finding, an unknown Axe rule, a missing visual
+golden, or missing manual review remains a blocker.
+
+The only approved exception is the [native WordPress Heading editor accessibility
+finding](./accessibility-exception.md), limited to 0.9 testing. Its raw gate remains
+failed, with the upstream exception explicitly reported. It does not waive frontend
+accessibility, manual review, or any other proof gate.
+
+The 13-fixture registered-block authoring benchmark is optional for 0.9 testing
+readiness. The default release check leaves `benchmarkReadiness.status` as `pending`,
+sets `scored` to `false`, and excludes that work from the deterministic release
+status. It is reported separately so a passing package/runtime check cannot be
+mistaken for a model benchmark result. To opt into the authoring proof, supply
+reviewed canonical plans with `--plans <dir>` and a fixture proof executable at
+`BLOCK_RUNNER_AUTHORING_RUNNER`:
+
+```sh
+npm run authoring:prove -- --plans /path/to/saved-plans
+```
+
+The runner never creates plans by calling a model or copying expected answers. A
+later scored benchmark needs its own retained receipt.
+
+The release checker builds its activation ZIP through the production compiler and
+standalone-plugin builder, then uses the built-in WordPress proof runner. ZIP
+activation is a narrower claim than a passing full proof.
+
+The CI WordPress job sets `BLOCK_RUNNER_PROOF_ACCEPTANCE=required`, so it fails on
+any unapproved automated blocker even though it uploads the raw receipt on failure.
+Local diagnostic runs may omit that variable, but their acceptance summary must not
+be described as a release pass.
+
+To use the approved native Heading exception in a release-check run, provide the
+separately retained control result and verify its bytes before invoking the checker:
+
+```sh
+BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_PATH=/path/to/native-heading-control.json \
+BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_SHA256=sha256:<64-hex-digits> \
+BLOCK_RUNNER_NATIVE_HEADING_CONTROL_WORDPRESS_VERSION=7.1 \
+npm run release:check -- --matrix full-release-matrix --plans /path/to/candidate-plans
+```
+
+If any of those values is absent or the declared hash does not match the file, the
+exception is unavailable and the raw Heading failure remains in the acceptance
+blockers. The control file is copied into the immutable release receipt artifacts.
 
 ## Matrix and receipts
 

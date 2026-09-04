@@ -1,267 +1,141 @@
 import { execFile as execFileCallback } from 'node:child_process';
-import { mkdtemp, mkdir, rm, writeFile } from 'node:fs/promises';
+import { copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
-import { runProof, type ProofFixture, type ProofGateId, type ProofRunResult } from '../src/index.js';
+import { beforeAll, describe, expect, it } from 'vitest';
+import { buildPatternOverridesFixture, type BuiltPatternOverridesFixture } from '../scripts/build-pattern-overrides-fixture.js';
+import { runProof, type ProofGateId, type ProofRunResult } from '../src/index.js';
+import { evaluateReleaseAcceptance, loadNativeHeadingControlEvidence, summarizeReleaseAcceptance,
+  type NativeHeadingControlEvidence } from '../src/proof/release-acceptance.js';
 
 const execFile = promisify(execFileCallback);
 const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
 
 /**
- * These intentionally use the production proof runner with wp-env and the
- * Playwright helper. They do not use `gateRunner`: each ZIP is a valid plugin
- * baseline with exactly one changed behavior. Enable deliberately in a
- * Docker-capable job because each case boots a real WordPress 7.1/MySQL runtime.
+ * Build the actual CLI output once. Every automated baseline gate must pass
+ * acceptance before a mutation can count as a detector test. Manual review is
+ * a separate release requirement; accepted upstream findings retain raw failures.
+ * Keep the archives, complete
+ * status matrix, and failed-run evidence; never delete the only receipt.
  */
 (enabled ? describe.sequential : describe.skip)('real WordPress proof mutations', () => {
+  let root: string;
+  let built: BuiltPatternOverridesFixture;
+  let baseline: ProofRunResult;
+  let nativeHeadingControlEvidence: NativeHeadingControlEvidence | undefined;
+  beforeAll(async () => {
+    const parent = process.env.BLOCK_RUNNER_PROOF_OUTPUT_DIR ?? tmpdir();
+    await mkdir(parent, { recursive: true });
+    root = await mkdtemp(path.join(parent, 'block-runner-mutations-'));
+    built = await buildPatternOverridesFixture(root);
+    const baselineZip = path.join(root, 'baseline.zip');
+    await copyFile(built.pluginZip, baselineZip);
+    const controlPath = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_PATH;
+    const controlHash = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_SHA256;
+    const controlVersion = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_WORDPRESS_VERSION;
+    if (controlPath || controlHash || controlVersion) {
+      if (!controlPath || !controlHash || !controlVersion || !/^sha256:[a-f0-9]{64}$/.test(controlHash)) {
+        throw new Error('All native Heading control evidence fields, including its SHA-256, must be supplied together.');
+      }
+      nativeHeadingControlEvidence = loadNativeHeadingControlEvidence({ wordpressVersion: controlVersion,
+        evidence: { path: controlPath, sha256: controlHash as `sha256:${string}` } });
+    }
+    baseline = await prove(baselineZip, 'baseline');
+    const acceptance = evaluateReleaseAcceptance(baseline.receipt, { nativeHeadingControlEvidence });
+    await writeFile(path.join(root, 'baseline-acceptance.json'), JSON.stringify(summarizeReleaseAcceptance(acceptance), null, 2));
+    expect(acceptance.automated.blockers, 'Every automated baseline gate must pass; only verified, approved upstream exceptions are accepted').toEqual([]);
+    expect(acceptance.automated.ok).toBe(true);
+  }, 480_000);
+
   const cases: Array<{
-    mutation: Mutation;
-    profile: 'runtime' | 'editor' | 'full';
-    gate: ProofGateId;
-    prerequisiteGates: readonly ProofGateId[];
+    name: string;
+    file: string;
+    mutate: (source: string) => string;
+    target: ProofGateId;
+    downstream: ProofGateId[];
   }> = [
     {
-      mutation: 'registration',
-      profile: 'runtime',
-      gate: 'php_registry',
-      prerequisiteGates: ['headless_validation', 'zip_installation', 'plugin_activation', 'environment_observation'],
+      name: 'registration',
+      file: 'plugin.php',
+      mutate: (source) => source.replace(/add_action\( 'init', '[^']+' \);/, '// Deliberate registration mutation.'),
+      target: 'php_registry',
+      downstream: ['rest_block_type', 'client_registry', 'editor_inserter', 'editor_field_editing', 'editor_save', 'editor_reopen',
+        'pattern_overrides', 'frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_media', 'frontend_assets',
+        'frontend_runtime_errors', 'visual_regression', 'accessibility_editor', 'accessibility_frontend',
+        'static_deactivation_html', 'static_deactivation_assets', 'static_deactivation_editor_controls'],
     },
     {
-      mutation: 'save',
-      profile: 'editor',
-      gate: 'editor_save',
-      prerequisiteGates: [
-        'headless_validation', 'zip_installation', 'plugin_activation', 'php_registry', 'rest_block_type',
-        'client_registry', 'environment_observation', 'editor_inserter', 'editor_field_editing',
-      ],
+      name: 'save',
+      file: 'src/blocks/pattern-overrides-fixture/save.js',
+      mutate: (source) => source.replace('<InnerBlocks.Content />', '<p>Deliberately lost native content</p>'),
+      target: 'editor_save',
+      downstream: ['editor_reopen', 'pattern_overrides', 'frontend_links', 'frontend_media', 'visual_regression'],
     },
     {
-      mutation: 'stylesheet',
-      profile: 'full',
-      gate: 'frontend_assets',
-      prerequisiteGates: [
-        'headless_validation', 'zip_installation', 'plugin_activation', 'php_registry', 'rest_block_type',
-        'client_registry', 'environment_observation', 'editor_inserter', 'editor_field_editing', 'editor_save',
-        'editor_reopen', 'frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_runtime_errors',
-      ],
+      name: 'stylesheet',
+      file: 'src/blocks/pattern-overrides-fixture/block.json',
+      mutate: (source) => {
+        const metadata = JSON.parse(source);
+        delete metadata.style;
+        delete metadata.editorStyle;
+        return JSON.stringify(metadata, null, 2);
+      },
+      target: 'frontend_assets',
+      downstream: ['visual_regression', 'static_deactivation_assets'],
     },
     {
-      mutation: 'pattern',
-      profile: 'full',
-      gate: 'pattern_overrides',
-      prerequisiteGates: [
-        'headless_validation', 'zip_installation', 'plugin_activation', 'php_registry', 'rest_block_type',
-        'client_registry', 'environment_observation', 'editor_inserter', 'editor_field_editing', 'editor_save',
-        'editor_reopen', 'frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_assets',
-        'frontend_runtime_errors', 'php_logs', 'static_deactivation_html', 'static_deactivation_registration',
-        'static_deactivation_assets', 'static_deactivation_editor_controls',
-      ],
+      name: 'pattern',
+      file: 'src/blocks/pattern-overrides-fixture/edit.js',
+      mutate: (source) => source.replaceAll('core/pattern-overrides', 'missing/pattern-source'),
+      target: 'pattern_overrides',
+      downstream: ['frontend_links', 'frontend_media', 'visual_regression'],
     },
   ];
 
-  for (const testCase of cases) {
-    it(`isolates ${testCase.gate} for a deliberately broken ${testCase.mutation} artifact`, async () => {
-      const root = await mkdtemp(path.join(tmpdir(), `block-runner-${testCase.mutation}-mutation-`));
+  for (const candidate of cases) {
+    it('detects ' + candidate.name + ' without accepting unrelated failures', async () => {
+      const file = path.join(built.pluginDirectory, candidate.file);
+      const original = await readFile(file, 'utf8');
+      const changed = candidate.mutate(original);
+      expect(changed, 'Mutation must actually change the production artifact').not.toBe(original);
+      let mutatedZip: string;
       try {
-        const baseline = await runMutationProof(root, testCase, 'baseline');
-        expectPassingGates(baseline, [...testCase.prerequisiteGates, testCase.gate]);
-
-        const mutated = await runMutationProof(root, testCase, testCase.mutation);
-        expectGate(mutated, testCase.gate).toBe('fail');
-        // These gates are independent prerequisites of the target assertion;
-        // a failure here must not be allowed to satisfy the mutation test.
-        expectPassingGates(mutated, testCase.prerequisiteGates);
+        await writeFile(file, changed);
+        await execFile('npm', ['run', 'zip'], { cwd: built.pluginDirectory, timeout: 180_000,
+          env: { ...process.env, NODE_ENV: 'production' } });
+        mutatedZip = path.join(root, candidate.name + '.zip');
+        await copyFile(built.pluginZip, mutatedZip);
       } finally {
-        await rm(root, { recursive: true, force: true });
+        await writeFile(file, original);
       }
+      const mutated = await prove(mutatedZip!, candidate.name);
+      const acceptance = evaluateReleaseAcceptance(mutated.receipt, { nativeHeadingControlEvidence });
+      await writeFile(path.join(root, candidate.name + '-acceptance.json'), JSON.stringify(summarizeReleaseAcceptance(acceptance), null, 2));
+      const allowed = new Set([candidate.target, ...candidate.downstream]);
+      const matrix = baseline.receipt.gates.map((gate) => ({
+        gate: gate.gate,
+        baseline: gate.status,
+        mutation: mutated.receipt.gates.find((record) => record.gate === gate.gate)?.status ?? 'missing',
+        expectedImpact: allowed.has(gate.gate as ProofGateId),
+      }));
+      await writeFile(path.join(root, candidate.name + '-matrix.json'), JSON.stringify(matrix, null, 2));
+      expect(matrix.find((row) => row.gate === candidate.target)?.baseline).toBe('pass');
+      expect(matrix.find((row) => row.gate === candidate.target)?.mutation).toBe('fail');
+      expect(matrix.filter((row) => !row.expectedImpact && row.mutation !== row.baseline),
+        'Every gate outside the explicit causal impact set must match the passing baseline').toEqual([]);
+      expect(acceptance.automated.blockers.filter(({ gate }) => !allowed.has(gate as ProofGateId)),
+        'An unchanged raw failure status must not hide a new, unapproved finding outside the causal impact set').toEqual([]);
+      expect(mutated.ok).toBe(false);
     }, 480_000);
   }
-});
 
-type Mutation = 'registration' | 'save' | 'stylesheet' | 'pattern';
-type Variant = 'baseline' | Mutation;
-
-async function runMutationProof(
-  root: string,
-  testCase: { mutation: Mutation; profile: 'runtime' | 'editor' | 'full' },
-  variant: Variant,
-): Promise<ProofRunResult> {
-  const pluginZip = await createMutationPlugin(root, testCase.mutation, variant);
-  const inputPath = path.join(root, `${testCase.mutation}-${variant}-input.html`);
-  await writeFile(inputPath, '<section><p>Proof input</p></section>');
-
-  return runProof({
-    profile: testCase.profile,
-    pluginZip,
-    inputPath,
-    markup: '<!-- wp:paragraph --><p>Proof input</p><!-- /wp:paragraph -->',
-    fixture: mutationFixture(testCase.mutation, variant),
-    outputDir: path.join(root, `${variant}-receipt`),
-  });
-}
-
-function mutationFixture(mutation: Mutation, variant: Variant): ProofFixture {
-  const slug = mutationSlug(mutation, variant);
-  const label = `Proof mutation ${mutation} ${variant}`;
-  const savedLink = `https://example.com/saved-${slug}`;
-  const patternLink = `https://example.com/pattern-${slug}`;
-  return {
-    blockName: `block-runner-proof/${slug}`,
-    pluginSlug: slug,
-    blockTitle: label,
-    // The initial block leaves its media control empty while the inserted
-    // pattern exercises every supported surface. It is a competing control
-    // for the old media/alt selector's unscoped placeholder branch.
-    editableFields: editableFields(`Saved ${mutation} ${variant} value`, savedLink, `Saved ${slug} alt`)
-      .filter((field) => field.surface !== 'media'),
-    patternOverrides: {
-      title: `${label} pattern`,
-      editableFields: editableFields(`Pattern ${mutation} ${variant} value`, patternLink, `Pattern ${slug} alt`, `https://example.com/pattern-${slug}.png`),
-    },
-    frontend: {
-      // The runner always navigates to the post it creates; this is the
-      // explicit, reviewed scope required by the frontend proof gates.
-      url: 'http://localhost:8888/',
-      subtreeSelector: 'main',
-      expectedLinks: [savedLink, patternLink],
-    },
-  };
-}
-
-function editableFields(content: string, link: string, alt: string, media?: string) {
-  return [
-    { path: 'content', surface: 'richText' as const, value: content },
-    { path: 'url', surface: 'link' as const, value: link },
-    { path: 'alt', surface: 'altText' as const, value: alt },
-    ...(media ? [{ path: 'mediaUrl', surface: 'media' as const, value: media }] : []),
-  ] as const;
-}
-
-async function createMutationPlugin(root: string, mutation: Mutation, variant: Variant): Promise<string> {
-  const slug = mutationSlug(mutation, variant);
-  const plugin = path.join(root, slug);
-  await mkdir(plugin, { recursive: true });
-  const blockName = `block-runner-proof/${slug}`;
-  const title = `Proof mutation ${mutation} ${variant}`;
-  const patternTitle = `${title} pattern`;
-  const style = variant === 'stylesheet' ? '' : ',"style":"file:./style.css"';
-  const registration = variant === 'registration'
-    ? ''
-    : `add_action( 'init', function() { register_block_type( __DIR__ ); } );`;
-  const pattern = `add_action( 'init', function() {
-      register_block_pattern( 'block-runner-proof/${slug}-pattern', array(
-        'title' => '${escapePhp(patternTitle)}',
-        'content' => '<!-- wp:${blockName} --><div class="proof-mutation" data-proof-alt="Pattern original alt" data-proof-media-url="https://example.com/pattern-original.png"><p class="proof-mutation__content">Pattern original value</p><a class="proof-mutation__link" href="https://example.com/pattern-original">Proof link</a></div><!-- /wp:${blockName} -->',
-      ) );
-    } );`;
-  const savedContent = variant === 'save' ? JSON.stringify('Broken save output') : 'props.attributes.content';
-  const contentChange = variant === 'pattern'
-    ? `if ( props.attributes.content === 'Pattern original value' ) return;\n          props.setAttributes( { content: content } );`
-    : 'props.setAttributes( { content: content } );';
-
-  await Promise.all([
-    writeFile(path.join(plugin, `${slug}.php`), `<?php
-/**
- * Plugin Name: ${title}
- * Version: 1.0.0
- */
-${registration}
-${pattern}
-`),
-    writeFile(path.join(plugin, 'block.json'), `{
-  "apiVersion": 3,
-  "name": "${blockName}",
-  "title": "${title}",
-  "category": "widgets",
-  "editorScript": "file:./index.js"${style},
-  "attributes": {
-    "content": { "type": "string", "source": "html", "selector": ".proof-mutation__content" },
-    "url": { "type": "string", "source": "attribute", "selector": ".proof-mutation__link", "attribute": "href" },
-    "alt": { "type": "string", "source": "attribute", "selector": ".proof-mutation", "attribute": "data-proof-alt" },
-    "mediaUrl": { "type": "string", "source": "attribute", "selector": ".proof-mutation", "attribute": "data-proof-media-url" }
+  async function prove(pluginZip: string, variant: string): Promise<ProofRunResult> {
+    return runProof({
+      profile: 'full', pluginZip, inputPath: built.inputPath,
+      markup: built.nativeContainerMarkup, fixture: built.fixture,
+      outputDir: path.join(root, variant + '-receipt'),
+      keepEnvironment: true,
+    });
   }
-}`),
-    writeFile(path.join(plugin, 'index.js'), `( function( blocks, blockEditor, element ) {
-  var RichText = blockEditor.RichText;
-  var createElement = element.createElement;
-  blocks.registerBlockType( ${JSON.stringify(blockName)}, {
-    title: ${JSON.stringify(title)},
-    edit: function( props ) {
-      return createElement( 'div', { className: 'proof-mutation' },
-        createElement( RichText, {
-          tagName: 'p',
-          className: 'proof-mutation__content',
-          value: props.attributes.content,
-          onChange: function( content ) {
-            ${contentChange}
-          },
-          placeholder: 'Proof content'
-        } ),
-        createElement( 'input', {
-          type: 'url',
-          'aria-label': 'Proof link URL',
-          disabled: !props.isSelected,
-          value: props.attributes.url || '',
-          onChange: function( event ) { props.setAttributes( { url: event.target.value } ); }
-        } ),
-        createElement( 'input', {
-          type: 'text',
-          'aria-label': 'Proof alt text',
-          disabled: !props.isSelected,
-          value: props.attributes.alt || '',
-          onChange: function( event ) { props.setAttributes( { alt: event.target.value } ); }
-        } ),
-        createElement( 'input', {
-          type: 'url',
-          'aria-label': 'Proof media URL',
-          disabled: !props.isSelected,
-          value: props.attributes.mediaUrl || '',
-          onChange: function( event ) { props.setAttributes( { mediaUrl: event.target.value } ); }
-        } ),
-        props.attributes.url ? createElement( 'a', { href: props.attributes.url }, 'Proof link' ) : null,
-        props.attributes.mediaUrl
-          ? createElement( 'img', { src: props.attributes.mediaUrl, alt: props.attributes.alt || '' } )
-          : createElement( 'div', { className: 'components-placeholder' } )
-      );
-    },
-    save: function( props ) {
-      return createElement( 'div', {
-        className: 'proof-mutation',
-        'data-proof-alt': props.attributes.alt,
-        'data-proof-media-url': props.attributes.mediaUrl
-      },
-      createElement( RichText.Content, { tagName: 'p', className: 'proof-mutation__content', value: ${savedContent} } ),
-      props.attributes.url ? createElement( 'a', { className: 'proof-mutation__link', href: props.attributes.url }, 'Proof link' ) : null
-      );
-    }
-  } );
-} )( window.wp.blocks, window.wp.blockEditor, window.wp.element );
-`),
-    writeFile(path.join(plugin, 'index.asset.php'), "<?php return array( 'dependencies' => array( 'wp-blocks', 'wp-block-editor', 'wp-element' ), 'version' => '1.0.0' );\n"),
-    writeFile(path.join(plugin, 'style.css'), '.proof-mutation { color: rgb(12, 34, 56); }\n'),
-  ]);
-
-  const zip = path.join(root, `${slug}.zip`);
-  await execFile('zip', ['-qr', zip, slug], { cwd: root });
-  return zip;
-}
-
-function mutationSlug(mutation: Mutation, variant: Variant): string {
-  return `proof-mutation-${mutation}-${variant}`;
-}
-
-function expectGate(result: ProofRunResult, gate: ProofGateId) {
-  const record = result.receipt.gates.find((candidate) => candidate.gate === gate);
-  expect(record, `Missing ${gate} receipt record`).toBeDefined();
-  return expect(record?.status);
-}
-
-function expectPassingGates(result: ProofRunResult, gates: readonly ProofGateId[]): void {
-  for (const gate of gates) expectGate(result, gate).toBe('pass');
-}
-
-function escapePhp(value: string): string {
-  return value.replace(/\\/g, '\\\\').replace(/'/g, "\\'");
-}
+});

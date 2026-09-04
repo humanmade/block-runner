@@ -1,4 +1,5 @@
 import { hashAuthoringPlan, type AuthoringPlan } from './schema.js';
+import { REGISTERED_BLOCK_TEMPLATE_VERSION } from './generate.js';
 
 /**
  * Extra facts collected by the caller for a particular destination.  They deliberately live
@@ -44,8 +45,17 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   heading(lines, 'Authoring plan preview', width, '=');
   addKeyValue(lines, 'Plan version', value.version, width);
   addKeyValue(lines, 'Generator version', value.generatorVersion, width);
+  addKeyValue(lines, 'Compiler template', REGISTERED_BLOCK_TEMPLATE_VERSION, width);
   addKeyValue(lines, 'Plan SHA-256', options.hash ?? hashAuthoringPlan(plan), width);
   addKeyValue(lines, 'Confirmation SHA-256', options.confirmationHash, width);
+
+  const source = asRecord(value.source);
+  if (Object.keys(source).length > 0) {
+    section(lines, 'Source', width);
+    addKeyValue(lines, 'Entry', source.entry, width);
+    addKeyValue(lines, 'Format', source.format, width);
+    addKeyValue(lines, 'Source SHA-256', source.sha256, width);
+  }
 
   section(lines, 'Target', width);
   const namespace = readString(target, ['namespace']);
@@ -93,6 +103,18 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   } else {
     outcomes.forEach((outcome, index) => bullet(lines, describeStyleOutcome(outcome, index), width));
   }
+  for (const key of ['rules', 'editorRules']) {
+    const rules = asArray(styles[key]);
+    if (rules.length) {
+      bullet(lines, key === 'rules' ? 'Shared CSS (scoped beneath the block root):' : 'Editor-only CSS (scoped beneath the block root):', width);
+      renderCssRules(lines, rules, width);
+    }
+  }
+  const fonts = asArray(styles.fonts);
+  if (fonts.length) {
+    bullet(lines, 'Licensed fonts (shared by editor and frontend):', width);
+    fonts.forEach((font, index) => bullet(lines, describeFont(font, index), width));
+  }
 
   section(lines, 'Assets', width);
   const assets = asArray(value.assets);
@@ -100,6 +122,21 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     bullet(lines, 'none', width);
   } else {
     assets.forEach((asset, index) => bullet(lines, describeAsset(asset, index), width));
+  }
+
+  const coverage = asRecord(value.coverage);
+  if (Object.keys(coverage).length > 0) {
+    section(lines, 'Analysis coverage', width);
+    const coveredStyles = asArray(coverage.styles);
+    const coveredAssets = asArray(coverage.assets);
+    bullet(lines, `styles: ${coveredStyles.length} (${dispositionCounts(coveredStyles) || 'none'})`, width);
+    coveredStyles.forEach((style, index) => bullet(lines, describeCoverageStyle(style, index), width));
+    bullet(lines, `assets: ${coveredAssets.length} (${dispositionCounts(coveredAssets) || 'none'})`, width);
+    coveredAssets.forEach((asset, index) => bullet(lines, describeCoverageAsset(asset, index), width));
+    const stylesheet = asRecord(coverage.stylesheet);
+    addKeyValue(lines, 'Effective stylesheet SHA-256', stylesheet.sha256, width);
+    const editorStylesheet = asRecord(coverage.editorStylesheet);
+    addKeyValue(lines, 'Editor stylesheet SHA-256', editorStylesheet.sha256, width);
   }
 
   section(lines, 'Pattern readiness', width);
@@ -137,6 +174,21 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
 
 /** Alias kept concise for programmatic consumers. */
 export const previewAuthoringPlan = renderAuthoringPreview;
+
+function renderCssRules(lines: string[], rules: unknown[], width: number, prefix = ''): void {
+  for (const input of rules) {
+    const rule = asRecord(input);
+    if (rule.kind === 'conditional') {
+      renderCssRules(lines, asArray(rule.rules), width, `${prefix}@${plain(rule.name)} ${plain(rule.prelude)} > `);
+    } else {
+      const declarations = asArray(rule.declarations).map((inputDeclaration) => {
+        const declaration = asRecord(inputDeclaration);
+        return `${plain(declaration.property)}: ${plain(declaration.value)}${declaration.important === true ? ' !important' : ''}`;
+      }).join('; ');
+      bullet(lines, `${prefix}${plain(rule.selector)} { ${declarations} }`, width);
+    }
+  }
+}
 
 function renderStructureNode(lines: string[], value: unknown, prefix: string, last: boolean, width: number): void {
   const node = asRecord(value);
@@ -178,10 +230,10 @@ function structureAnnotations(node: RecordValue): string[] {
   if (Object.keys(lock).length > 0) {
     const operations: string[] = [];
     if (typeof lock.move === 'boolean') {
-      operations.push(`move=${lock.move ? 'allowed' : 'blocked'}`);
+      operations.push(`move=${lock.move ? 'blocked' : 'allowed'}`);
     }
     if (typeof lock.remove === 'boolean') {
-      operations.push(`remove=${lock.remove ? 'allowed' : 'blocked'}`);
+      operations.push(`remove=${lock.remove ? 'blocked' : 'allowed'}`);
     }
     if (operations.length > 0) {
       annotations.push(`[${operations.join(',')}]`);
@@ -251,14 +303,66 @@ function describeAsset(value: unknown, index: number): string {
   const kind = readString(asset, ['kind', 'type']);
   const status = readString(asset, ['status']);
   const required = asset.required === true ? 'required' : asset.required === false ? 'optional' : undefined;
+  const license = asRecord(asset.fontLicense);
+  const licenseRecord = Object.keys(license).length > 0
+    ? `license ${readString(license, ['license']) ?? 'recorded'}${readString(license, ['ownership']) ? ` (${readString(license, ['ownership'])})` : ''}`
+    : undefined;
   return [
     kind ? `[${kind}] ${source}` : source,
     destination ? `-> ${destination}` : undefined,
     status ? `[${status}]` : undefined,
     required ? `[${required}]` : undefined,
+    licenseRecord,
+    readString(asset, ['sha256']) ? `sha256:${readString(asset, ['sha256'])}` : undefined,
+    ...asArray(asset.uses).map((use) => {
+      const value = asRecord(use);
+      return `${readString(value, ['node'])}.${readString(value, ['attribute'])}`;
+    }),
   ]
     .filter(Boolean)
     .join(' ');
+}
+
+function describeFont(value: unknown, index: number): string {
+  const font = asRecord(value);
+  const family = readString(font, ['family']) ?? `font ${index + 1}`;
+  const assetId = readString(font, ['assetId', 'asset']) ?? 'unbound asset';
+  const descriptors = ['fontStyle', 'fontWeight', 'fontStretch', 'fontDisplay', 'unicodeRange']
+    .map((key) => {
+      const value = readString(font, [key]);
+      return value ? `${key} ${value}` : undefined;
+    })
+    .filter((value): value is string => Boolean(value));
+  return `${family} <- ${assetId}${descriptors.length ? ` (${descriptors.join('; ')})` : ''}`;
+}
+
+function describeCoverageStyle(value: unknown, index: number): string {
+  const style = asRecord(value);
+  const scope = readString(style, ['scope']) ?? 'shared';
+  const property = readString(style, ['property']) ?? `style ${index + 1}`;
+  const styleValue = readString(style, ['value']);
+  const outcome = readString(style, ['outcome']) ?? 'unclassified';
+  const reason = readString(style, ['reason']);
+  return `${scope}: ${property}${styleValue !== undefined ? `: ${styleValue}` : ''} -> ${outcome}${reason ? ` (${reason})` : ''}`;
+}
+
+function describeCoverageAsset(value: unknown, index: number): string {
+  const asset = asRecord(value);
+  const reference = readString(asset, ['reference']) ?? `asset ${index + 1}`;
+  const outcome = readString(asset, ['outcome']) ?? 'unclassified';
+  const rewritten = readString(asset, ['rewritten']);
+  const destination = readString(asset, ['destination']);
+  const reason = readString(asset, ['reason']);
+  return `${reference} -> ${outcome}${rewritten ? ` (${rewritten})` : ''}${destination ? ` [${destination}]` : ''}${reason ? ` — ${reason}` : ''}`;
+}
+
+function dispositionCounts(values: unknown[]): string {
+  const counts = new Map<string, number>();
+  for (const value of values) {
+    const outcome = readString(asRecord(value), ['outcome']) ?? 'unclassified';
+    counts.set(outcome, (counts.get(outcome) ?? 0) + 1);
+  }
+  return [...counts].map(([outcome, count]) => `${outcome} ${count}`).join(', ');
 }
 
 function describeFile(value: unknown, index: number): string {

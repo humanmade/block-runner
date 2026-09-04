@@ -1,9 +1,12 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
 import { classifyCssUrlReference, rewriteCssAssets, scanCssUrlReferences } from '../src/author/assets.js';
 import { author } from '../src/author/index.js';
+import { PROOF_IMAGE_BASE64 } from '../src/proof/fixture-image.js';
 import {
   compileTailwindBuildGraph,
   createSelectorDependencyTransport,
@@ -15,7 +18,12 @@ import {
 const scratch: string[] = [];
 
 afterEach(async () => {
-  await Promise.all(scratch.splice(0).map((directory) => rm(directory, { recursive: true, force: true })));
+  // Preserve generated scratch files recoverably; never recursively delete a directory.
+  const directories = scratch.splice(0);
+  // CI containers dispose of their temporary filesystem outside the test process.
+  if (process.platform === 'darwin') {
+    await Promise.all(directories.map((directory) => promisify(execFile)('trash', [directory])));
+  }
 });
 
 describe('registered-block stylesheet graph', () => {
@@ -171,7 +179,7 @@ describe('registered-block stylesheet graph', () => {
       author: { name: 'acme/notice', styles: { mode: 'tailwind', tailwind: graph } },
     });
     expect(authoredFromSource.ok).toBe(true);
-    expect(authoredFromSource.package?.files['index.js']).toContain('"text": "red"');
+    expect(authoredFromSource.package?.files['edit.js']).toContain('"text": "red"');
 
     const rejected = await author('<p class="notice">Hello</p>', {
       sourcePath: path.join(directory, 'design.html'),
@@ -307,8 +315,8 @@ describe('registered-block authoring parity ledger', () => {
 
     expect(report.ok).toBe(true);
     expect(report.styleLedger).toContainEqual(expect.objectContaining({ property: 'color', outcome: 'native' }));
-    expect(report.package?.files['style.css']).toBeUndefined();
-    expect(report.package?.files['index.js']).toContain('"color"');
+    expect(report.package?.files['style.scss']).not.toContain('color:');
+    expect(report.package?.files['edit.js']).toContain('"color"');
   });
 
   it('refuses to write a package after dropping a blocked selector or declaration', async () => {
@@ -332,9 +340,9 @@ describe('registered-block authoring parity ledger', () => {
     );
 
     expect(report.ok).toBe(true);
-    expect(report.package?.files['style.css']).toContain('.\\32xl\\:open:is(#hero, .block-runner-selector-id-');
-    expect(report.package?.files['index.js']).toContain('"className": "2xl:open block-runner-selector-id-');
-    expect(report.package?.files['index.js']).toContain('block-runner-selector-attribute-');
+    expect(report.package?.files['style.scss']).toContain('.\\32xl\\:open:is(#hero, .block-runner-selector-id-');
+    expect(report.package?.files['edit.js']).toContain('"className": "2xl:open block-runner-selector-id-');
+    expect(report.package?.files['edit.js']).toContain('block-runner-selector-attribute-');
   });
 
   it('preserves stylesheet ownership when one selector maps natively for only some matching elements', async () => {
@@ -347,8 +355,8 @@ describe('registered-block authoring parity ledger', () => {
     expect(report.styleLedger?.filter((entry) => entry.property === 'color')).toEqual([
       expect.objectContaining({ outcome: 'scoped-css' }),
     ]);
-    expect(report.package?.files['style.css']).toContain('.wp-block-acme-notice .notice { color: red; }');
-    expect(report.package?.files['index.js']).not.toContain('"color": "red"');
+    expect(report.package?.files['style.scss']).toContain('.wp-block-acme-notice .notice { color: red; }');
+    expect(report.package?.files['edit.js']).not.toContain('"color": "red"');
   });
 
   it('keeps an identical conditional declaration in residual CSS instead of aliasing a native top-level rule', async () => {
@@ -362,8 +370,8 @@ describe('registered-block authoring parity ledger', () => {
       expect.objectContaining({ property: 'color', outcome: 'native', atRules: [] }),
       expect.objectContaining({ property: 'color', outcome: 'scoped-css', atRules: ['@media (min-width: 40rem)'] }),
     ]));
-    expect(report.package?.files['style.css']).toContain('@media (min-width: 40rem)');
-    expect(report.package?.files['style.css']).toContain('.wp-block-acme-notice .notice { color: red; }');
+    expect(report.package?.files['style.scss']).toContain('@media (min-width: 40rem)');
+    expect(report.package?.files['style.scss']).toContain('.wp-block-acme-notice .notice { color: red; }');
   });
 
   it('suppresses rewritten mixed declarations with the same identity used by final conversion', async () => {
@@ -372,17 +380,17 @@ describe('registered-block authoring parity ledger', () => {
     const design = path.join(directory, 'design.html');
     const outDir = path.join(directory, 'package');
     await writeFile(design, '');
-    await writeFile(path.join(directory, 'photo.png'), 'photo');
+    await writeFile(path.join(directory, 'photo.png'), Buffer.from(PROOF_IMAGE_BASE64, 'base64'));
 
     const report = await author(
-      '<style>.notice { background-image: url("photo.png"); }</style><div class="notice"><p>Hero</p></div><span class="notice">Fallback</span>',
+      '<style>.notice { background-image: url("photo.png"); }</style><div class="notice"><p>Hero</p></div><p><span class="notice">Fallback</span></p>',
       { sourcePath: design, outDir, author: { name: 'acme/notice', styles: { mode: 'css' } } },
     );
 
     expect(report.ok).toBe(true);
     expect(report.styleLedger).toContainEqual(expect.objectContaining({ property: 'background-image', outcome: 'scoped-css' }));
-    expect(report.package?.files['style.css']).toContain('./assets/');
-    expect(report.package?.files['index.js']).not.toContain('"url": "./assets/');
+    expect(report.package?.files['style.scss']).toContain('./assets/');
+    expect(report.package?.files['edit.js']).not.toContain('"url": "./assets/');
   });
 
   it('blocks invalid attribute selectors before emitting a marker dependency and retains ID specificity', () => {
@@ -403,7 +411,7 @@ describe('registered-block authoring parity ledger', () => {
     expect(invalidTransport.dependencies).toEqual([]);
   });
 
-  it('accounts for inline CSS and rewrites srcset assets retained in Custom HTML', async () => {
+  it('retains the inline CSS and srcset ledger but refuses unresolved Custom HTML source', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
     scratch.push(directory);
     const design = path.join(directory, 'design.html');
@@ -421,13 +429,13 @@ describe('registered-block authoring parity ledger', () => {
       },
     );
 
-    expect(report.ok).toBe(true);
+    expect(report.ok).toBe(false);
+    expect(report.items.some((item) => item.reason.includes('Unresolved native structure'))).toBe(true);
     expect(report.styleLedger).toContainEqual(expect.objectContaining({ property: 'color', outcome: 'native' }));
     expect(report.styleLedger).toContainEqual(expect.objectContaining({ property: 'background-image', outcome: 'literal' }));
     expect(report.assets?.filter((asset) => asset.reference === 'photo.png')).toHaveLength(4);
-    expect(report.package?.files['index.js']).toContain('srcset=');
-    expect(report.package?.files['index.js']).toContain('image-set(');
-    expect(await readFile(path.join(outDir, 'block.json'), 'utf8')).toContain('acme/notice');
+    expect(report.package).toBeUndefined();
+    await expect(readFile(path.join(outDir, 'block.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
   it('accounts for object data and SVG href asset forms', async () => {
@@ -444,7 +452,9 @@ describe('registered-block authoring parity ledger', () => {
     );
 
     expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png'))).toHaveLength(3);
-    expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png')).every((asset) => asset.outcome === 'copied')).toBe(true);
+    expect(report.ok).toBe(false);
+    expect(report.package).toBeUndefined();
+    expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png')).every((asset) => asset.outcome === 'prepared')).toBe(true);
   });
 
   it('accounts for SVG presentation URLs, SVG href variants, and link href asset forms', async () => {
@@ -463,10 +473,11 @@ describe('registered-block authoring parity ledger', () => {
       },
     );
 
-    expect(report.ok).toBe(true);
+    expect(report.ok).toBe(false);
+    expect(report.package).toBeUndefined();
     const assetReferences = report.assets?.filter((asset) => asset.reference.startsWith('photo.png')) ?? [];
     expect(assetReferences).toHaveLength(8);
-    expect(assetReferences.every((asset) => asset.outcome === 'copied')).toBe(true);
+    expect(assetReferences.every((asset) => asset.outcome === 'prepared')).toBe(true);
     expect(assetReferences.map((asset) => asset.kind)).toEqual(expect.arrayContaining(['image', 'stylesheet', 'other']));
   });
 
@@ -492,17 +503,17 @@ describe('registered-block authoring parity ledger', () => {
       { sourcePath: design, outDir, author: { name: 'acme/assets' } },
     );
 
-    expect(report.ok).toBe(true);
+    expect(report.ok).toBe(false);
+    expect(report.package).toBeUndefined();
     const assets = report.assets ?? [];
     expect(assets).toHaveLength(8);
-    expect(assets.filter((asset) => asset.reference.startsWith('gradients.svg')).every((asset) => asset.outcome === 'copied')).toBe(true);
+    expect(assets.filter((asset) => asset.reference.startsWith('gradients.svg')).every((asset) => asset.outcome === 'prepared')).toBe(true);
     expect(assets).toContainEqual(expect.objectContaining({
       reference: 'https://cdn.example/gradients.svg#radial',
       outcome: 'external',
     }));
     expect(assets).toContainEqual(expect.objectContaining({ reference: '#pattern', outcome: 'external' }));
     expect(assets.some((asset) => asset.reference === 'guide.pdf')).toBe(false);
-    expect(report.package?.files['index.js']).toContain('./assets/');
   });
 
   it('blocks an unrecognized SVG href form instead of silently leaving it source-relative', async () => {

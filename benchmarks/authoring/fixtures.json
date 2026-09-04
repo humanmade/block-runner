@@ -43,10 +43,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -125,11 +131,17 @@
         "artifactRoot": "runs/<run-id>/candidates/hero-semantic",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/hero-semantic.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/hero-semantic.json"
       },
@@ -174,10 +186,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -260,11 +278,17 @@
         "artifactRoot": "runs/<run-id>/candidates/hero-utility",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/hero-utility.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/hero-utility.json"
       },
@@ -309,10 +333,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -391,11 +421,17 @@
         "artifactRoot": "runs/<run-id>/candidates/split-feature-semantic",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/split-feature-semantic.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/split-feature-semantic.json"
       },
@@ -440,10 +476,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -526,11 +568,17 @@
         "artifactRoot": "runs/<run-id>/candidates/split-feature-utility",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/split-feature-utility.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/split-feature-utility.json"
       },
@@ -575,10 +623,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -657,11 +711,17 @@
         "artifactRoot": "runs/<run-id>/candidates/cards-semantic",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/cards-semantic.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/cards-semantic.json"
       },
@@ -706,10 +766,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -792,11 +858,17 @@
         "artifactRoot": "runs/<run-id>/candidates/cards-utility",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/cards-utility.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/cards-utility.json"
       },
@@ -841,10 +913,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -923,11 +1001,17 @@
         "artifactRoot": "runs/<run-id>/candidates/repeater-semantic",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/repeater-semantic.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/repeater-semantic.json"
       },
@@ -972,10 +1056,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -1058,11 +1148,17 @@
         "artifactRoot": "runs/<run-id>/candidates/repeater-utility",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/repeater-utility.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/repeater-utility.json"
       },
@@ -1113,10 +1209,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -1208,11 +1310,17 @@
         "artifactRoot": "runs/<run-id>/candidates/tailwind-responsive",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/tailwind-responsive.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/tailwind-responsive.json"
       },
@@ -1263,10 +1371,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -1355,11 +1469,17 @@
         "artifactRoot": "runs/<run-id>/candidates/pseudo-states",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/pseudo-states.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/pseudo-states.json"
       },
@@ -1409,7 +1529,17 @@
         "source": {
           "required": true,
           "expectedFiles": [
-            "assets/aurora-dashboard.svg"
+            "block.json",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
+            "authoring-plan.json",
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "remote media URL",
@@ -1492,11 +1622,17 @@
         "artifactRoot": "runs/<run-id>/candidates/local-assets",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/local-assets.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/local-assets.json"
       },
@@ -1541,10 +1677,16 @@
           "required": true,
           "expectedFiles": [
             "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
+            "index.js",
+            "edit.js",
+            "save.js",
+            "style.scss",
+            "editor.scss",
+            "block.php",
+            "style-decisions.json",
+            "compiler-manifest.json",
             "authoring-plan.json",
-            "src/style-ledger.json"
+            "generated-source-manifest.json"
           ],
           "forbid": [
             "core/html",
@@ -1641,11 +1783,17 @@
         "artifactRoot": "runs/<run-id>/candidates/pattern-overrides",
         "requiredFiles": [
           "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
+          "index.js",
+          "edit.js",
+          "save.js",
+          "style.scss",
+          "editor.scss",
+          "block.php",
+          "style-decisions.json",
+          "compiler-manifest.json",
           "authoring-plan.json",
-          "receipts/pattern-overrides.json"
+          "generated-source-manifest.json",
+          "style-ledger.json"
         ],
         "receipt": "receipts/pattern-overrides.json"
       },
@@ -1694,13 +1842,7 @@
         },
         "source": {
           "required": true,
-          "expectedFiles": [
-            "block.json",
-            "src/edit.tsx",
-            "src/save.tsx",
-            "authoring-plan.json",
-            "src/style-ledger.json"
-          ],
+          "expectedFiles": [],
           "forbid": [
             "core/html",
             "dangerouslySetInnerHTML",
@@ -1709,9 +1851,8 @@
         },
         "native": {
           "required": true,
-          "mustInclude": [
-            "block-runner/authoring-warning"
-          ],
+          "mustInclude": [],
+          "expectedNoGeneratedSource": true,
           "forbid": [
             "core/html"
           ]
@@ -1784,14 +1925,7 @@
       "expectedStatus": "unsupported",
       "candidate": {
         "artifactRoot": "runs/<run-id>/candidates/unsupported-interaction",
-        "requiredFiles": [
-          "block.json",
-          "src/edit.tsx",
-          "src/save.tsx",
-          "src/style-ledger.json",
-          "authoring-plan.json",
-          "receipts/unsupported-interaction.json"
-        ],
+        "requiredFiles": [],
         "receipt": "receipts/unsupported-interaction.json"
       },
       "notes": "Expected negative: only an explicit unsupported warning is a successful fixture result."

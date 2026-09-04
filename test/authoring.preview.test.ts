@@ -12,7 +12,13 @@ const plan = validateAuthoringPlan({
     description: 'A reusable feature grid.',
     category: 'design',
     textDomain: 'example',
-    wordpress: '6.8',
+    wordpress: '7.1',
+  },
+  source: { entry: 'design.html', sha256: 'a'.repeat(64), format: 'html' },
+  coverage: {
+    stylesheet: { entry: 'design.html', sha256: 'b'.repeat(64) },
+    styles: [{ property: 'color', value: 'red', outcome: 'native', scope: 'shared', atRules: [] }],
+    assets: [{ reference: 'logo.svg', kind: 'image', outcome: 'prepared', sha256: 'c'.repeat(64) }],
   },
   structure: [
     {
@@ -20,7 +26,7 @@ const plan = validateAuthoringPlan({
       block: 'core/group',
       label: 'Feature grid',
       attributes: { layout: { type: 'constrained' } },
-      lock: { move: false, remove: false },
+      lock: { move: true, remove: false },
       children: [{ id: 'heading', block: 'core/heading', label: 'Heading' }],
     },
   ],
@@ -54,7 +60,10 @@ describe('authoring preview', () => {
     expect(first).toBe(second);
     expect(first).toContain('Authoring plan preview');
     expect(first).toContain('Target');
+    expect(first).toContain('Source SHA-256: ' + 'a'.repeat(64));
     expect(first).toContain('Structure');
+    expect(first).toContain('[move=blocked,remove=allowed]');
+    expect(first).toContain('locking: contentOnly (move=blocked, remove=blocked, insert=blocked)');
     expect(first).toContain('attributes:');
     expect(first).toContain('  `- core/heading');
     expect(first).toContain('Editable fields');
@@ -63,6 +72,9 @@ describe('authoring preview', () => {
     expect(first).toContain('[override] Accent');
     expect(first).toContain('Style outcomes');
     expect(first).toContain('Assets');
+    expect(first).toContain('Analysis coverage');
+    expect(first).toContain('styles: 1 (native 1)');
+    expect(first).toContain('assets: 1 (prepared 1)');
     expect(first).toContain('Pattern readiness');
     expect(first).toContain('Planned files');
     expect(first).toContain('Warnings');
@@ -77,5 +89,24 @@ describe('authoring preview', () => {
       const output = renderAuthoringPreview(plan, { width });
       expect(output.split('\n').every((line) => line.length <= width)).toBe(true);
     }
+  });
+
+  it('shows the asset binding and license record for a confirmed font face', () => {
+    const fontPlan = validateAuthoringPlan({
+      ...plan,
+      styles: {
+        ...plan.styles,
+        fonts: [{ assetId: 'body-font', family: 'block-runner-example-feature-grid-inter', fontDisplay: 'swap' }],
+      },
+      assets: [{
+        id: 'body-font', source: '/design/Inter.woff2', kind: 'font', destination: 'assets/Inter.woff2', status: 'ready',
+        sha256: 'd'.repeat(64), fontLicense: { ownership: 'Example', license: 'OFL-1.1', notice: 'Keep this notice.' },
+      }],
+    });
+    const output = renderAuthoringPreview(fontPlan, { width: 100 });
+
+    expect(output).toContain('Licensed fonts (shared by editor and frontend):');
+    expect(output).toContain('block-runner-example-feature-grid-inter <- body-font (fontDisplay swap)');
+    expect(output).toContain('[font] /design/Inter.woff2 -> assets/Inter.woff2 [ready] license OFL-1.1 (Example)');
   });
 });

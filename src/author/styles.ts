@@ -590,6 +590,8 @@ export interface ScopeStylesheetOptions {
 export interface ScopedStylesheet {
   root: string;
   rules: CssRule[];
+  /** The same retained rules before adding the root, for the confirmed-plan compiler. */
+  localRules: CssRule[];
   ledger: SourceStyleLedgerEntry[];
   ruleRecords: CssRuleRecord[];
   css: string;
@@ -606,6 +608,7 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
   const ledgerByDeclaration = new Map(ledger.map((entry) => [entry.declarationId, entry]));
   const ruleRecords = stylesheet.ruleRecords.map((record) => ({ ...record }));
   const recordsByRule = new Map(ruleRecords.map((record) => [record.ruleId, record]));
+  const localSelectors = new Map<string, string>();
   const rootProblem = validateScopeRoot(options.root);
 
   const blockRule = (rule: CssRule, reason: string): void => {
@@ -698,11 +701,15 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
     if (record) {
       record.outcome = 'scoped-css';
     }
+    localSelectors.set(rule.id, transformedSelector);
     return { ...rule, selector: scoped.selector, declarations };
   };
 
   const rules = stylesheet.rules.map(scopeRule).filter((rule): rule is CssRule => Boolean(rule));
-  const result: ScopedStylesheet = { root: options.root.trim(), rules, ledger, ruleRecords, css: '' };
+  const localRule = (rule: CssRule): CssRule => rule.kind === 'style'
+    ? { ...rule, selector: localSelectors.get(rule.id)! }
+    : { ...rule, rules: rule.rules.map(localRule) };
+  const result: ScopedStylesheet = { root: options.root.trim(), rules, localRules: rules.map(localRule), ledger, ruleRecords, css: '' };
   result.css = renderResidualCss(result);
   return result;
 }

@@ -74,10 +74,10 @@
         "promptGuideHash": { "$ref": "#/$defs/hash" },
         "templateHash": { "$ref": "#/$defs/hash" },
         "dependencyHash": { "$ref": "#/$defs/hash" },
-        "wordpressHash": { "$ref": "#/$defs/hash" },
-        "themeHash": { "$ref": "#/$defs/hash" },
-        "browserHash": { "$ref": "#/$defs/hash" },
-        "generatedSourceHash": { "$ref": "#/$defs/hash" },
+        "wordpressHash": { "$ref": "#/$defs/observedHash" },
+        "themeHash": { "$ref": "#/$defs/observedHash" },
+        "browserHash": { "$ref": "#/$defs/observedHash" },
+        "generatedSourceHash": { "$ref": "#/$defs/observedHash" },
         "model": { "type": "string", "minLength": 1 },
         "effort": { "type": "string", "minLength": 1 }
       }
@@ -122,6 +122,8 @@
         }
       }
     },
+    "acceptance": { "$ref": "#/$defs/acceptance" },
+    "benchmarkReadiness": { "$ref": "#/$defs/benchmarkReadiness" },
     "gates": {
       "type": "object",
       "additionalProperties": false,
@@ -147,7 +149,15 @@
       }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "status": { "const": "passed" }, "matrixRowId": { "enum": ["full-release-matrix", "zip-activation"] } } },
+    "then": { "properties": { "provenance": { "properties": {
+      "wordpressHash": { "$ref": "#/$defs/hash" }, "themeHash": { "$ref": "#/$defs/hash" },
+      "browserHash": { "$ref": "#/$defs/hash" }, "generatedSourceHash": { "$ref": "#/$defs/hash" }
+    } } } }
+  }],
   "$defs": {
+    "observedHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
     "hash": {
       "type": "string",
       "pattern": "^sha256:[0-9a-f]{64}$"
@@ -160,6 +170,83 @@
         "state": { "enum": ["passed", "failed", "unsupported", "blocked", "engine_error"] },
         "evidence": { "type": "string", "minLength": 1 },
         "detail": { "type": "string" }
+      }
+    },
+    "acceptanceBlocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "status", "reason"],
+      "properties": {
+        "gate": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "acceptedUpstreamFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exceptionId", "gate", "violationId", "target", "basis"],
+      "properties": {
+        "exceptionId": { "const": "wordpress-7.1-native-heading-editor-a11y" },
+        "gate": { "const": "accessibility_editor" },
+        "violationId": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "basis": { "type": "string", "minLength": 1 }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawProfileOk",
+        "automatedOk",
+        "releaseOk",
+        "releaseStatus",
+        "rawFailures",
+        "automatedBlockers",
+        "releaseBlockers",
+        "acceptedUpstreamFindings"
+      ],
+      "properties": {
+        "rawProfileOk": { "type": "boolean" },
+        "automatedOk": { "type": "boolean" },
+        "releaseOk": { "type": "boolean" },
+        "releaseStatus": { "enum": ["passed", "failed", "blocked", "engine_error"] },
+        "rawFailures": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "automatedBlockers": { "type": "array", "items": { "$ref": "#/$defs/acceptanceBlocker" } },
+        "releaseBlockers": { "type": "array", "items": { "$ref": "#/$defs/acceptanceBlocker" } },
+        "acceptedUpstreamFindings": { "type": "array", "items": { "$ref": "#/$defs/acceptedUpstreamFinding" } },
+        "nativeHeadingControlEvidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["wordpressVersion", "evidence"],
+          "properties": {
+            "wordpressVersion": { "type": "string", "pattern": "^7\\.1(?:\\.\\d+)?$" },
+            "evidence": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["path", "sha256"],
+              "properties": {
+                "path": { "type": "string", "minLength": 1 },
+                "sha256": { "$ref": "#/$defs/hash" }
+              }
+            }
+          }
+        }
+      }
+    },
+    "benchmarkReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "scored", "requiredForRelease", "proofStatus", "command", "detail", "evidence"],
+      "properties": {
+        "status": { "enum": ["pending", "failed", "blocked", "engine_error"] },
+        "scored": { "const": false },
+        "requiredForRelease": { "const": false },
+        "proofStatus": { "enum": ["pending", "passed", "failed", "blocked", "engine_error"] },
+        "command": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 }
       }
     }
   }

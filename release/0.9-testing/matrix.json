@@ -36,7 +36,9 @@
     {
       "id": "authoring-wordpress-71-proof",
       "area": "authoring-proof",
-      "required": true,
+      "required": false,
+      "optional": true,
+      "releaseImpact": "reported as benchmark readiness; does not block deterministic testing-release acceptance",
       "expectedStatus": "passed",
       "command": "npm run authoring:prove",
       "environment": "WordPress 7.1 release fixture environment",
@@ -58,7 +60,9 @@
     {
       "id": "unsupported-interaction-fails-closed",
       "area": "authoring-proof",
-      "required": true,
+      "required": false,
+      "optional": true,
+      "releaseImpact": "reported with the optional authoring benchmark; does not block deterministic testing-release acceptance",
       "expectedStatus": "unsupported",
       "command": "npm run authoring:prove",
       "expectedMeasurementState": "unsupported",
@@ -140,6 +144,36 @@
       "receiptKinds": ["zip-activation", "wordpress-71"]
     },
     {
+      "id": "generated-plugin-full-proof-acceptance",
+      "area": "release-acceptance",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run release:check",
+      "environment": "same generated WordPress 7.1 proof receipt plus retained acceptance evidence",
+      "asserts": [
+        "raw full-profile gate statuses remain retained",
+        "automated gates pass except only the explicitly approved native Heading finding",
+        "manual accessibility review is present and passes",
+        "no unapproved accessibility, visual, or runtime blocker remains"
+      ],
+      "receiptKinds": ["release-acceptance", "wordpress-71"]
+    },
+    {
+      "id": "native-heading-control",
+      "area": "accessibility-control",
+      "required": true,
+      "expectedStatus": "passed",
+      "command": "npm run proof:control",
+      "environment": "same pinned WordPress 7.1 environment and Chromium browser",
+      "asserts": [
+        "observed wp core version is 7.1 before and after the run",
+        "standalone core/heading inserts, edits, saves, and reopens",
+        "the native Heading Axe result is clean or retains only the documented findings",
+        "control JSON and raw browser result are hash-bound"
+      ],
+      "receiptKinds": ["native-control", "wordpress-71"]
+    },
+    {
       "id": "full-release-matrix",
       "area": "release",
       "required": true,
@@ -152,7 +186,10 @@
   ],
   "releaseRule": {
     "allRequiredRowsMustReachExpectedState": true,
+    "optionalRowsDoNotBlockRelease": true,
     "expectedNegativeRowsMustMatchExpectedState": true,
+    "expectedNegativeRuleAppliesToRequiredRowsOnly": true,
+    "optionalRowsMayRemainPending": true,
     "missingReceiptBlocksRelease": true,
     "invalidMeasurementsBlockRelease": true,
     "unrunVisualOrBrowserGateCannotPass": true

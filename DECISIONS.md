@@ -11,6 +11,8 @@ This file is auto-generated from `decisions.jsonl`. Edit records there, then run
 | DEC-002 | Use one canonical cross-harness skill bundle | accepted | 2026-09-02 |
 | DEC-003 | Generate one registered block per input design | accepted | 2026-09-03 |
 | DEC-004 | Make registered-block authoring the 0.9 preview | accepted | 2026-09-03 |
+| DEC-005 | Retain a narrow WordPress editor exception for 0.9 testing | accepted | 2026-09-04 |
+| DEC-006 | Keep live model benchmarks explicitly scoped | accepted | 2026-09-04 |
 
 ## Records
 
@@ -25,7 +27,7 @@ A single exact expected tree produced false negatives when authored HTML visibly
 
 #### Decision
 
-A benchmark spec may list a small number of explicit `acceptedTrees`. Each entry is a complete reviewed tree, is available to every producer and engine, and is scored with the same structure and attribute assertions as the canonical tree. Producer-specific branches and global wrapper forgiveness are prohibited.
+A benchmark spec may list a small number of explicit acceptedTrees. Each entry is a complete reviewed tree, is available to every producer and engine, and is scored with the same structure and attribute assertions as the canonical tree. Producer-specific branches and global wrapper forgiveness are prohibited.
 
 #### Consequences
 
@@ -40,11 +42,11 @@ Source-driven equivalent structures can score correctly without weakening strict
 
 #### Context
 
-The shipped skill source lived under a parent directory that did not match its frontmatter name, while the installer defaulted only to Claude Code despite the guide being harness-neutral. Current clients converge on `.agents/skills`, but Claude Code still documents `.claude/skills`, and unknown harnesses may use arbitrary roots.
+The shipped skill source lived under a parent directory that did not match its frontmatter name, while the installer defaulted only to Claude Code despite the guide being harness-neutral. Current clients converge on .agents/skills, but Claude Code still documents .claude/skills, and unknown harnesses may use arbitrary roots.
 
 #### Decision
 
-Keep one specification-valid source at `skills/block-runner` with detailed material under `references`. The skill installer recursively copies that bundle to project-scoped `.agents/skills` and `.claude/skills` by default, supports explicit target, scope, and directory overrides, and never detects models or calls an LLM. Installed runtime commands pin the invoking package version while the explicit update command stays on `@latest`; managed hashes permit safe updates while local or unmanaged changes require `--force`.
+Keep one specification-valid source at skills/block-runner with detailed material under references. The skill installer recursively copies that bundle to project-scoped .agents/skills and .claude/skills by default, supports explicit target, scope, and directory overrides, and never detects models or calls an LLM. Installed runtime commands pin the invoking package version while the explicit update command stays on @latest; managed hashes permit safe updates while local or unmanaged changes require --force.
 
 #### Consequences
 
@@ -87,5 +89,43 @@ Ship the one-design-to-registered-block capability as the defining 0.9 preview o
 #### Consequences
 
 The 0.9 acceptance gate must cover both implementation quality and a testing-ready product narrative. Forward-looking documentation must label itself as an assumed completed 0.9 state and must not be confused with the current npm release. The rules walker remains an offline path and benchmark control, not the headline definition of Block Runner.
+
+---
+
+### DEC-005: Retain a narrow WordPress editor exception for 0.9 testing
+
+**Status:** accepted
+**Date:** 2026-09-04
+
+#### Context
+
+Axe reports aria-allowed-attr and aria-allowed-role on the WordPress 7.1 native Heading editing surface. A retained control run reproduced both findings with core/heading and no generated Block Runner wrapper, while native insert, edit, save and reopen passed.
+
+#### Decision
+
+Accept these verified upstream native Heading editor findings as an explicit exception for the 0.9 testing release only, as approved by the project owner. Keep the raw accessibility_editor gate failed and retain both control and generated-block evidence. Do not disable the Axe rules or call the full proof profile passed.
+
+#### Consequences
+
+Release reporting must identify the accepted upstream exception and archive its evidence. Other elements or findings, frontend accessibility, missing manual review, visual proof and all other release gates remain outside the exception. Recheck on WordPress upgrades and before 1.0; do not carry the exception forward automatically.
+
+---
+
+### DEC-006: Keep live model benchmarks explicitly scoped
+
+**Status:** accepted
+**Date:** 2026-09-04
+
+#### Context
+
+Registered-block integration needs regression and WordPress runtime proof, but a new live model benchmark matrix has a separate token and time cost. Preparing benchmark infrastructure must not silently authorize repeated provider runs.
+
+#### Decision
+
+Use deterministic tests, reviewed fixed inputs, and retained runtime evidence first. Run live model benchmarks only within the project owner's current model, effort, and scope authorization; prefer the smallest focused run that can answer an unresolved question. Do not start a provider matrix or tuner loop merely to complete implementation.
+
+#### Consequences
+
+Regression and release receipts must state what actually ran. An unrun registered-block model benchmark remains pending and produces no score; historical page-content scores are not evidence for registered-block generation. The current per-model operating restrictions are maintained in the local handover.
 
 ---

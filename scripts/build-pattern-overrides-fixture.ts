@@ -1,0 +1,273 @@
+/**
+ * Build the repository's WordPress 7.1 synced-pattern fixture from the
+ * compiler output. The proof must never depend on an opaque plugin archive or
+ * a Core-only pattern which happens to have similar bindings.
+ */
+import { execFile } from 'node:child_process';
+import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import process from 'node:process';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { promisify } from 'node:util';
+import { compileRegisteredBlock } from '../src/authoring/generate.js';
+import { patternOverrideName } from '../src/authoring/overrides.js';
+import { planStandalonePluginOutput, writePluginOutput } from '../src/plugin/profile.js';
+import type { AuthoringPlan } from '../src/authoring/schema.js';
+import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
+import { getWp } from '../src/headless/wp.js';
+import type { AuthoringTemplate, WpBlock } from '../src/types.js';
+import type { ProofFixture, ProofPatternRequiredBinding } from '../src/proof/runner.js';
+import { PROOF_IMAGE_BASE64, PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
+
+const execFileAsync = promisify(execFile);
+const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
+const projectRoot = path.resolve(scriptDirectory, '..');
+const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'pattern-overrides.plan.json');
+const visualGoldenPath = path.join(projectRoot, 'proof', 'wordpress-7.1-pattern-overrides.expected.png');
+const pluginSlug = 'block-runner-pattern-overrides-fixture';
+const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z');
+
+export interface BuiltPatternOverridesFixture {
+  inputPath: string;
+  pluginDirectory: string;
+  pluginZip: string;
+  /** Complete custom-block markup used as each synced pattern's wp_block content. */
+  generatedBlockMarkup: string;
+  /** Native Core subtree used by the inexpensive headless validation gate. */
+  nativeContainerMarkup: string;
+  fixture: ProofFixture;
+}
+
+/**
+ * The plugin, native serialization, canonical wp_block values, and runtime
+ * visual-baseline location all derive from the checked-in authoring plan.
+ */
+export async function buildPatternOverridesFixture(outputDir: string): Promise<BuiltPatternOverridesFixture> {
+  const root = path.resolve(outputDir);
+  const inputPath = path.join(root, 'pattern-overrides.plan.json');
+  const pluginDirectory = path.join(root, pluginSlug);
+  const pluginZip = path.join(pluginDirectory, `${pluginSlug}.zip`);
+  const plan = JSON.parse(await readFile(planPath, 'utf8')) as AuthoringPlan;
+  const sourceImage = path.join(root, 'source', 'canonical.png');
+  const imageBytes = Buffer.from(PROOF_IMAGE_BASE64, 'base64');
+  await mkdir(path.dirname(sourceImage), { recursive: true });
+  await writeFile(sourceImage, imageBytes);
+  const sourceSvg = path.join(root, 'source', 'logo.svg');
+  const svgBytes = Buffer.from(PROOF_SVG_SOURCE);
+  await writeFile(sourceSvg, svgBytes);
+  plan.assets = [{ id: 'canonical-image', source: sourceImage, status: 'ready', destination: 'assets/canonical.png',
+    sha256: createHash('sha256').update(imageBytes).digest('hex'), uses: [{ node: 'hero.image', attribute: 'url' }] },
+  { id: 'static-logo', source: sourceSvg, status: 'ready', destination: 'assets/logo.svg',
+    sha256: createHash('sha256').update(svgBytes).digest('hex'), uses: [{ node: 'hero.logo', attribute: 'url' }] }];
+  const compiled = compileRegisteredBlock(plan);
+  const contract = validatePatternOverrideContract(compiled.template, []);
+  const errors = contract.errors;
+  if (errors.length > 0) throw new Error(`The generated pattern fixture plan is invalid: ${errors.join('; ')}`);
+
+  const updatedPlan = canonicalUpdatePlan(plan);
+  const updated = compileRegisteredBlock(updatedPlan);
+  const updatedContract = validatePatternOverrideContract(updated.template, []);
+  const updatedErrors = updatedContract.errors;
+  if (updatedErrors.length > 0) throw new Error(`The updated generated pattern fixture plan is invalid: ${updatedErrors.join('; ')}`);
+
+  await mkdir(pluginDirectory, { recursive: true });
+  await writeFixed(inputPath, `${JSON.stringify(plan, null, 2)}\n`);
+  const packagePlan = await planStandalonePluginOutput(pluginDirectory, {
+    name: plan.target.name,
+    files: Object.fromEntries([...compiled.files, ...compiled.assets].map((file) => [file.path, file.content])),
+  });
+  await writePluginOutput(packagePlan);
+  await execFileAsync('npm', ['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'], { cwd: pluginDirectory, timeout: 180_000 });
+  // wp-scripts preserves an inherited NODE_ENV. In Vitest that otherwise builds a development ZIP.
+  await execFileAsync('npm', ['run', 'zip'], { cwd: pluginDirectory, timeout: 180_000,
+    env: { ...process.env, NODE_ENV: 'production' } });
+  await execFileAsync('npm', ['run', 'test:zip', '--', pluginZip], { cwd: pluginDirectory, timeout: 30_000 });
+
+  // Observe real webpack-emitted files instead of predicting a content hash or inlining a URL.
+  const buildRoot = path.join(pluginDirectory, 'build');
+  const builtFiles = await readdir(buildRoot, { recursive: true });
+  const assetUrls = new Map<string, string>();
+  for (const asset of compiled.assets) {
+    const matching: string[] = [];
+    for (const file of builtFiles.filter((file) => path.extname(file) === path.extname(asset.path))) {
+      if ((await readFile(path.join(buildRoot, file))).equals(asset.content)) matching.push(file);
+    }
+    if (matching.length !== 1) throw new Error(`The generated build must emit the exact confirmed ${asset.path} once.`);
+    assetUrls.set(`./${asset.path}`, `http://localhost:8888/wp-content/plugins/${pluginSlug}/build/${matching[0]!.split(path.sep).join('/')}`);
+  }
+  const runtimeTemplate = (template: AuthoringTemplate): AuthoringTemplate => template.map(([name, attrs, children]) => [
+    name, { ...attrs, ...(name === 'core/image' && typeof attrs.url === 'string' && assetUrls.has(attrs.url) ? { url: assetUrls.get(attrs.url)! } : {}) },
+    ...(children ? [runtimeTemplate(children)] : []),
+  ] as AuthoringTemplate[number]);
+  const nativeContainerMarkup = await serializeNativeTemplate(runtimeTemplate(compiled.template));
+  assertBackgroundClass(nativeContainerMarkup, 'initial');
+  const generatedBlockMarkup = wrapGeneratedBlock(plan.target.name, nativeContainerMarkup);
+  const updatedNativeMarkup = await serializeNativeTemplate(runtimeTemplate(updated.template));
+  assertBackgroundClass(updatedNativeMarkup, 'updated');
+  const updatedBlockMarkup = wrapGeneratedBlock(plan.target.name, updatedNativeMarkup);
+
+  const fixture = proofFixture({
+    plan,
+    canonicalContent: generatedBlockMarkup,
+    canonicalUpdateContent: updatedBlockMarkup,
+    requiredBindings: contract.bindings.map(({ name, attribute }) => ({ name, attribute })),
+    visualGoldenPath,
+  });
+  await Promise.all([
+    writeFixed(path.join(root, 'proof-pattern-overrides.fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`),
+    writeFixed(path.join(root, 'native-container.blocks.html'), `${nativeContainerMarkup}\n`),
+    writeFixed(path.join(root, 'generated-pattern.blocks.html'), `${generatedBlockMarkup}\n`),
+  ]);
+
+  return { inputPath, pluginDirectory, pluginZip, generatedBlockMarkup, nativeContainerMarkup, fixture };
+}
+
+async function serializeNativeTemplate(template: AuthoringTemplate): Promise<string> {
+  const wp = await getWp();
+  return wp.serialize(template.map((node) => blockFromTemplate(wp.createBlock, node)));
+}
+
+function blockFromTemplate(
+  createBlock: (name: string, attributes?: Record<string, unknown>, innerBlocks?: WpBlock[]) => WpBlock,
+  [name, attributes, children]: AuthoringTemplate[number],
+): WpBlock {
+  return createBlock(name, attributes, children?.map((child) => blockFromTemplate(createBlock, child)) ?? []);
+}
+
+function assertBackgroundClass(markup: string, version: string): void {
+  if (!/\bhas-background\b/.test(markup)) {
+    throw new Error(`The ${version} native group serialization lost Gutenberg's required has-background class.`);
+  }
+}
+
+function wrapGeneratedBlock(blockName: string, nativeMarkup: string): string {
+  const wrapperClass = `wp-block-${blockName.replace('/', '-')}`;
+  return `<!-- wp:${blockName} -->\n<div class="${wrapperClass}">\n${nativeMarkup}\n</div>\n<!-- /wp:${blockName} -->`;
+}
+
+function proofFixture({
+  plan,
+  canonicalContent,
+  canonicalUpdateContent,
+  requiredBindings,
+  visualGoldenPath,
+}: {
+  plan: AuthoringPlan;
+  canonicalContent: string;
+  canonicalUpdateContent: string;
+  requiredBindings: ProofPatternRequiredBinding[];
+  visualGoldenPath: string;
+}): ProofFixture {
+  const nameFor = (pathName: string, attribute: string): string => {
+    const field = plan.fields.find((candidate) => candidate.node === pathName && candidate.attribute === attribute);
+    if (!field?.node) throw new Error(`Generated fixture is missing ${pathName}.${attribute}.`);
+    return patternOverrideName(field.node);
+  };
+  const title = nameFor('hero.title', 'content');
+  const image = nameFor('hero.image', 'url');
+  const cta = nameFor('hero.cta', 'url');
+  const firstImage = { id: 101, url: 'https://example.test/first.jpg', alt: 'First instance image' };
+  const secondImage = { id: 202, url: 'https://example.test/second.jpg', alt: 'Second instance image' };
+
+  return {
+    blockName: plan.target.name,
+    pluginSlug,
+    blockTitle: plan.target.title,
+    // This separate insertion proves the generated wrapper itself exposes a
+    // native editor surface before its exact markup becomes a synced pattern.
+    editableFields: [{ path: 'hero.title', metadataName: title, surface: 'richText', value: 'Proof editor field' }],
+    patternOverrides: {
+      title: 'Block Runner generated pattern overrides lifecycle',
+      canonicalContent,
+      instances: [
+        {
+          label: 'first',
+          content: {
+            [title]: { content: 'First instance title' },
+            [image]: firstImage,
+            [cta]: { text: 'First instance action', url: 'https://example.test/first', linkTarget: '', rel: '' },
+          },
+        },
+        {
+          label: 'second',
+          content: {
+            [title]: { content: 'Second instance title' },
+            [image]: secondImage,
+            [cta]: { text: 'Second instance action', url: 'https://example.test/second', linkTarget: '', rel: '' },
+          },
+        },
+      ],
+      canonicalUpdate: {
+        marker: 'Canonical layout version two.',
+        content: canonicalUpdateContent,
+      },
+      reset: {
+        instance: 0,
+        name: title,
+        attribute: 'content',
+        fallback: 'Canonical fallback after reset',
+      },
+      requiredBindings,
+      structuralPolicy: 'contentOnly',
+      negative: {
+        name: title,
+        attribute: 'content',
+        value: 'This missing binding must not persist',
+        fallback: 'Canonical heading',
+      },
+    },
+    frontend: {
+      url: 'http://localhost:8888/',
+      subtreeSelector: '.wp-block-post-content',
+      expectedLinks: ['https://example.test/first', 'https://example.test/second'],
+      expectedMedia: [firstImage.url, secondImage.url],
+    },
+    visual: {
+      expectedPath: visualGoldenPath,
+      threshold: 0,
+      selector: '.wp-block-post-content',
+    },
+    accessibility: {
+      editorSelector: `.wp-block-${plan.target.name.replace('/', '-')}`,
+      frontendSelector: '.wp-block-post-content',
+      manualReview: 'blocked',
+    },
+  };
+}
+
+function canonicalUpdatePlan(plan: AuthoringPlan): AuthoringPlan {
+  const updated = JSON.parse(JSON.stringify(plan)) as AuthoringPlan;
+  const layout = updated.structure[0];
+  if (!layout) throw new Error('The generated fixture has no native layout container.');
+  layout.attributes = { ...layout.attributes, className: 'block-runner-pattern-layout block-runner-layout-v2' };
+  const title = layout.children?.find((child) => child.id === 'hero.title');
+  const note = layout.children?.find((child) => child.id === 'hero.layout-note');
+  if (!title || !note) throw new Error('The generated fixture is missing its title or layout marker.');
+  title.attributes = { ...title.attributes, content: 'Canonical fallback after reset' };
+  note.attributes = { ...note.attributes, content: 'Canonical layout version two.' };
+  return updated;
+}
+
+async function writeFixed(destination: string, contents: string): Promise<void> {
+  await mkdir(path.dirname(destination), { recursive: true });
+  await writeFile(destination, contents, 'utf8');
+  await utimes(destination, fixedTimestamp, fixedTimestamp);
+}
+
+async function main(): Promise<void> {
+  const output = process.argv[2] ?? path.join(tmpdir(), `block-runner-pattern-overrides-${process.pid}`);
+  const built = await buildPatternOverridesFixture(output);
+  process.stdout.write(`${JSON.stringify({
+    inputPath: built.inputPath,
+    pluginZip: built.pluginZip,
+    generatedBlockMarkup: path.join(output, 'generated-pattern.blocks.html'),
+    nativeContainerMarkup: path.join(output, 'native-container.blocks.html'),
+    fixture: path.join(output, 'proof-pattern-overrides.fixture.json'),
+  }, null, 2)}\n`);
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) {
+  await main();
+}

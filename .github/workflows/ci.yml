@@ -24,4 +24,41 @@ jobs:
       # avoid `npm@latest` floating across majors on the matrix).
       - run: npm install -g npm@11
       - run: npm ci
-      - run: npm run verify
+      - name: Verify
+        run: npm run verify
+
+  wordpress-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Collect native WordPress Heading control
+        env:
+          BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-control
+          BLOCK_RUNNER_NATIVE_HEADING_CONTROL_KEEP: '1'
+        run: npm run proof:control -- --output-dir "$BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR"
+      - name: Bind native control evidence to the acceptance test
+        run: cat "${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-control/github-env.txt" >> "$GITHUB_ENV"
+      - name: Verify generated-plugin automated acceptance in WordPress 7.1
+        env:
+          BLOCK_RUNNER_PROOF_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt
+          BLOCK_RUNNER_PROOF_ACCEPTANCE: required
+        run: npm run test:proof:wordpress
+      - name: Stop WordPress proof environment
+        if: always()
+        run: npx --no-install wp-env --config=proof/wp-env.json stop
+      - name: Upload WordPress 7.1 pattern-overrides receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-7.1-pattern-overrides-receipt
+          path: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt
+          if-no-files-found: warn
+          retention-days: 14

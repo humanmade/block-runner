@@ -47,4 +47,52 @@ describe('AuthoringPlan schema', () => {
     }
     expect(() => validateAuthoringPlan(plan({ files: [{ path: 'src' }, { path: 'src/edit.ts' }] }))).toThrow(/descendant/);
   });
+
+  it('validates and hash-binds source identity and the complete analysis ledger', () => {
+    const sourced = validateAuthoringPlan(plan({
+      source: { entry: 'design.html', sha256: 'a'.repeat(64), format: 'html' },
+      coverage: {
+        stylesheet: { entry: 'design.html', sha256: 'b'.repeat(64) },
+        styles: [{ property: 'color', value: 'red', outcome: 'native', scope: 'shared', atRules: [] }],
+        assets: [{ reference: 'logo.svg', kind: 'image', outcome: 'prepared', sha256: 'c'.repeat(64), destination: 'assets/logo.svg' }],
+      },
+    }));
+    expect(sourced.source?.sha256).toBe('a'.repeat(64));
+    expect(sourced.coverage?.styles[0]).toMatchObject({ scope: 'shared', outcome: 'native' });
+    expect(hashAuthoringPlan(sourced)).not.toBe(hashAuthoringPlan(plan()));
+    expect(() => validateAuthoringPlan(plan({ coverage: { styles: [], assets: [] } }))).toThrow(/requires a hash-bound/);
+    expect(() => validateAuthoringPlan(plan({ source: { entry: 'design.html', sha256: 'not-a-hash', format: 'html' } }))).toThrow(/SHA-256/);
+  });
+
+  it('pins registered-block plans to WordPress 7.1 and defaults omitted targets to that pin', () => {
+    expect(validateAuthoringPlan(plan()).target.wordpress).toBe('7.1');
+    expect(validateAuthoringPlan(plan({ target: { name: 'example/notice', title: 'Notice', wordpress: '7.1.1' } })).target.wordpress)
+      .toBe('7.1.1');
+    expect(() => validateAuthoringPlan(plan({ target: { name: 'example/notice', title: 'Notice', wordpress: '6.8' } })))
+      .toThrow(/must target WordPress 7\.1/);
+  });
+
+  it('keeps font faces bound to a licensed plan asset rather than a duplicated source path', () => {
+    const input = plan({
+      styles: {
+        strategy: 'mixed',
+        outcomes: [],
+        fonts: [{ assetId: 'inter', family: 'block-runner-example-notice-inter', fontDisplay: 'swap' }],
+      },
+      assets: [{
+        id: 'inter', source: '/design/Inter.woff2', kind: 'font', destination: 'assets/Inter.woff2', status: 'ready',
+        sha256: 'c'.repeat(64), fontLicense: { ownership: 'Fixture rights holder', license: 'OFL-1.1', notice: 'Keep this record.' },
+      }],
+    });
+    expect(validateAuthoringPlan(input).styles.fonts?.[0]).toMatchObject({ assetId: 'inter', family: 'block-runner-example-notice-inter' });
+    expect(hashAuthoringPlan(input)).not.toBe(hashAuthoringPlan(plan()));
+    expect(() => validateAuthoringPlan({ ...input, styles: { strategy: 'mixed', outcomes: [], fonts: [{ family: 'Inter' }] } })).toThrow(/assetId/);
+    expect(() => validateAuthoringPlan({ ...input, styles: { strategy: 'mixed', outcomes: [], fonts: [{ assetId: 'missing', family: 'block-runner-example-notice-inter' }] } }))
+      .toThrow(/must reference an asset/);
+    expect(() => validateAuthoringPlan({ ...input, assets: [{
+      id: 'inter', source: '/design/Inter.woff2', kind: 'image', destination: 'assets/Inter.woff2', status: 'ready',
+      sha256: 'c'.repeat(64), fontLicense: { ownership: 'Fixture rights holder', license: 'OFL-1.1', notice: 'Keep this record.' },
+    }] }))
+      .toThrow(/must reference an asset whose kind is "font"/);
+  });
 });

@@ -155,7 +155,7 @@ Gutenberg before it reaches the editor.
 | Command | What it does |
 | --- | --- |
 | `convert` | Authored HTML to native post-content blocks, including the legacy styling path. |
-| `author` | One authored design to a static, registered block package with scoped parity CSS and assets. |
+| `author <html> --json` | Analyze one authored design into a canonical registered-block plan, checked source, and style/asset ledgers. Does not write source. |
 | `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
 | `author preview <plan\|->` | Validate and render a versioned registered-block AuthoringPlan without writing files. |
 | `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write only the reviewed plan bound to its SHA-256 confirmation and destination. |
@@ -169,7 +169,7 @@ Gutenberg before it reaches the editor.
 
 ```sh
 block-runner convert hero.html                    # blocks to stdout
-block-runner author hero.html --name acme/hero --out-dir blocks/hero
+block-runner author hero.html --name acme/hero --json
 block-runner assemble intent.json                 # structure in, blocks out
 block-runner validate "content/**/*.html" --json
 block-runner fix post-content.html --out post-content.fixed.html
@@ -191,6 +191,11 @@ separate replacement approvals, so their absolute preview paths must also be sup
 writing and the command offers the standalone form above.
 
 ### Registered-block authoring
+
+HTML analysis returns `package.canonicalPlan`. Save that object as your plan, review its
+native structure and editing policy, then use the same preview/write workflow below.
+Successful analysis uses the canonical source compiler; unresolved Custom HTML regions,
+unsafe assets, and unsupported CSS produce explicit failures, not a ready-to-install package.
 
 For a reusable registered block, first make a versioned **AuthoringPlan** rather than jumping
 from a description or design directly to source. The plan records the block target and native
@@ -347,6 +352,54 @@ const validation = await validate(markup);
 const fixed = await canonicalize(markup);
 const converted = await convert(html, { resolver: 'noop' });
 ```
+
+## Synced-pattern overrides (WordPress 7.1)
+
+`compileAuthoringPlan()` makes native content regions of a generated wrapper ready for
+WordPress's synced-pattern override flow. It adds a deterministic `metadata.name` and explicit
+`core/pattern-overrides` binding only to supported Core child attributes: rich text
+`content`, image `id`/`url`/`alt`, and button `text`/`url`. Layout remains the one canonical
+InnerBlocks template; the compiler never binds or synthesizes `innerBlocks`.
+
+Stable names derive from the reviewed plan path, so a synced pattern stores an instance's local
+values in the normal `core/block` `content` map. Use `templateLock: 'all'` or
+`'contentOnly'` when the pattern must retain canonical structure.
+
+The full proof route is intentionally fail-closed:
+
+```sh
+block-runner proof generated-plugin.zip \\
+  --profile full \\
+  --input design.html \\
+  --markup generated.blocks.html \\
+  --fixture proof-fixture.json
+```
+
+It starts a real WordPress 7.1 `wp-env`, records the canonical `wp_block` content and each
+`core/block.content` instance value in an immutable receipt, then verifies two instances,
+reopen, canonical update, reset, structural policy, a missing-binding negative, and frontend
+output. Consumer proofs require an installable plugin archive and reviewed visual/accessibility
+inputs for a passing full receipt.
+
+The repository builds its generated fixture plugin and native markup from
+`test/fixtures/authoring/pattern-overrides.plan.json`. Its WordPress visual assertion compares
+the completed page with the checked-in, reviewed
+`proof/wordpress-7.1-pattern-overrides.expected.png` golden; it never creates a baseline while
+evaluating one. The real receipt runs without a proof adapter or externally supplied artifacts:
+
+```sh
+npm run verify
+```
+
+The WordPress phase requires a working Docker CLI and daemon. Proof commands record bounded
+Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
+specific blocked or failed phase instead of exhausting the general test timeout.
+
+On GitHub Actions, every verification-matrix job uploads a
+`wordpress-7.1-pattern-overrides-receipt-node-*` artifact retained for 14 days. It contains
+`receipt-index.json`, the content-addressed `receipts/sha256` record, and its
+`evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
+the relevant build without committing environment-specific run output.
 
 ## Media Resolution
 

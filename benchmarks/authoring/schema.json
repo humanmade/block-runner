@@ -40,10 +40,15 @@
       "required": ["artifactRoot", "requiredFiles", "receipt"],
       "properties": {
         "artifactRoot": { "type": "string" },
-        "requiredFiles": { "type": "array", "minItems": 1, "items": { "type": "string" } },
+        "requiredFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
         "receipt": { "type": "string" }
       }
     }
   },
+  "allOf": [{
+    "if": { "properties": { "expectedStatus": { "const": "unsupported" } } },
+    "then": { "properties": { "candidate": { "properties": { "requiredFiles": { "maxItems": 0 } } } } },
+    "else": { "properties": { "candidate": { "properties": { "requiredFiles": { "minItems": 1 } } } } }
+  }],
   "additionalProperties": true
 }

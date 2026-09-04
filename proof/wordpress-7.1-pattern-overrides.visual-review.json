@@ -1,0 +1,17 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "Codex visual inspection",
+  "reviewedAt": "2026-09-04",
+  "kind": "fixture-regression-baseline",
+  "image": "wordpress-7.1-pattern-overrides.expected.png",
+  "sha256": "bf61f3e4de7ff02181c4dc67e37beed8611cc308c8a0c20f3d166c3b975f2878",
+  "sourceInputSha256": "0ab4eeef85c22597db36f89b8f0d0170c55f2d263d96840a162cd4c356880600",
+  "sourcePluginZipSha256": "f748c892b95b1df7f05b292da2121a1b3b72298921792eb20dfbdb1fa859cf95",
+  "observations": [
+    "Four separate native content sections have the expected light-blue background, blue border, padding, and vertical spacing.",
+    "Every section displays the static check-mark SVG and raster image without clipping or missing-media indicators.",
+    "Headings show the edited standalone value, canonical value, first-instance reset fallback, and second-instance override in order.",
+    "Canonical and instance-specific button labels remain visible, with no text overlap or horizontal content clipping."
+  ],
+  "scope": "Reviewed screenshot of the deterministic WordPress 7.1 fixture after its editing and pattern lifecycle. This is a regression baseline, not a source-design fidelity measurement, accessibility certification, or approval of untested viewports."
+}

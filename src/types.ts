@@ -1,5 +1,6 @@
 import type { StyleLedgerEntry } from './styles/apply.js';
 import type { Declaration } from './styles/parse.js';
+import type { FontLicenseDecision } from './author/assets.js';
 
 export type CommandName = 'validate' | 'fix' | 'convert' | 'assemble' | 'author';
 
@@ -45,6 +46,8 @@ export interface BlockRunnerReport {
   command: CommandName;
   summary: ReportSummary;
   items: ReportItem[];
+  /** Exact source identity for the registered-block HTML authoring pass, when available. */
+  source?: import('./authoring/schema.js').AuthoringSource;
   /** Advisory guidance only; never affects `ok` or summary counts. */
   hint?: string;
   output?: string;
@@ -78,7 +81,7 @@ export interface AuthoredStyleLedgerEntry {
 }
 
 /** The terminal disposition of a source asset. */
-export type AssetOutcome = 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
+export type AssetOutcome = 'prepared' | 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
 
 export interface AssetLedgerEntry {
   /** The source spelling, before any package-relative rewrite. */
@@ -147,6 +150,10 @@ export interface AuthorStyleConfig {
   tailwind?: TailwindBuildGraph;
   /** Explicitly supplied editor-only affordances. Parity CSS is always emitted through `style`. */
   editorCss?: string;
+  /** Reference-bound local WOFF/WOFF2 decisions; a boolean cannot establish redistribution rights. */
+  fontLicenses?: readonly FontLicenseDecision[];
+  /** Optional destination-approved fallback stack for fonts which cannot be redistributed. */
+  fallbackStack?: string;
 }
 
 export interface AuthorConfig {
@@ -156,6 +163,8 @@ export interface AuthorConfig {
   category?: string;
   /** Optional known supports of the generated block. Values are never assumed from a slug. */
   supports?: Record<string, unknown>;
+  /** Proposed native structure policy, exposed in the returned canonical plan. */
+  locking?: import('./authoring/schema.js').AuthoringLocking;
   styles?: AuthorStyleConfig;
 }
 
@@ -163,6 +172,11 @@ export interface GeneratedBlockPackage {
   name: string;
   rootSelector: string;
   files: Record<string, string>;
+  /** Review or modify this plan through author preview/write before publishing source. */
+  canonicalPlan?: import('./authoring/schema.js').AuthoringPlan;
+  manifest?: import('./authoring/generate.js').GeneratedSourceManifest;
+  /** Hash-bound local files prepared without writing; executable source remains separate. */
+  assets?: Array<{ source: string; path: string; sha256: string }>;
 }
 
 export type ResolverKind = 'noop' | 'map' | 'wpcli' | 'rest';
@@ -394,6 +408,8 @@ export interface AuthoringNode {
   level?: number;
   /** Nested native block template. */
   children?: AuthoringNode[];
+  /** Enable native pattern overrides for supported content fields. */
+  patternOverrides?: boolean;
   /**
    * A custom child that needs its own InnerBlocks region is allowed only with an explicit reason.
    * This keeps the generated wrapper at exactly one InnerBlocks region by default.
@@ -432,6 +448,8 @@ export interface AuthoringEditableField {
   attribute: string;
   /** The native WordPress editor surface that owns the field. */
   surface: 'richText' | 'media' | 'link' | 'altText';
+  /** Stable native pattern override name. */
+  overrideName?: string;
 }
 
 export interface AuthoringDiagnostic {
@@ -441,6 +459,8 @@ export interface AuthoringDiagnostic {
     | 'missing-path'
     | 'invalid-root'
     | 'unsupported-role'
+    | 'unsupported-pattern-override'
+    | 'duplicate-override-name'
     | 'custom-child-justification-required'
     | 'multiple-innerblocks-regions'
     | 'gutenberg-76794';
@@ -453,6 +473,8 @@ export type AuthoringTemplate = Array<[string, Record<string, unknown>, Authorin
 
 /** The deterministic source package emitted from an AuthoringPlan. */
 export interface CompiledAuthoringBlock {
+  /** The actual versioned plan used by the shared source compiler and CLI confirmation flow. */
+  canonicalPlan?: import('./authoring/schema.js').AuthoringPlan;
   files: Record<string, string>;
   template: AuthoringTemplate;
   allowedBlocks: string[];
@@ -548,6 +570,9 @@ export type {
   ProofRunOptions,
   ProofRunResult,
   WordPressPackagePin,
+  ProofPatternInstance,
+  ProofPatternRequiredBinding,
+  PatternOverrideContent,
 } from './proof/runner.js';
 export type {
   GateId,
