@@ -90,11 +90,12 @@ lanes: **Direct** writes Gutenberg markup itself; **Block Runner** returns an in
 package assembles and validates. The dashed line is the deterministic rules converter running
 without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
 
-Registered-block authoring is measured by a separate corpus in
+Registered-block authoring has a separate, currently unscored corpus in
 [`benchmarks/authoring`](benchmarks/authoring/README.md). It has no combined score with this
 suite: it records editable plans, generated plugin source, native-block use, the style ledger,
 warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
-The 0.9 release gate publishes only receipt-backed results; a missing browser or WordPress gate is
+The authoring benchmark is optional for 0.9 testing and does not run automatically during release
+checks. Required package and WordPress proof remain separate: a missing required gate is
 `blocked`, never a pass.
 
 ## What it does
@@ -495,10 +496,15 @@ output.
 
 Non-native selectors are preserved only when they can be rooted beneath the generated block's
 deterministic `.wp-block-<namespace>-<slug>` class. Responsive, container-query, and pseudo-state
-rules retain their conditions. Preflight/global rules, escaping selectors, imports, keyframes, and
-font faces are ledgered and blocked rather than silently scoped. Local static asset references are
-copied into `assets/` and rewritten; remote URLs remain external by default, while font files
-remain unresolved pending an external licensing decision.
+rules retain their conditions. Preflight/global rules, escaping selectors, imports, and keyframes
+are ledgered and blocked rather than silently scoped. Confirmed local static assets are copied
+into `assets/` and rewritten; remote image URLs remain external by default.
+
+Local WOFF/WOFF2 fonts require an explicit source, SHA-256, ownership, and license decision.
+Approved font families get block-specific names and shared editor/frontend CSS. Full redistribution
+notices are retained separately in the production archive because minifiers can remove CSS comments.
+Unlicensed or unsupported faces use a safe fallback with a source-located warning. Destination
+theme font presets do not require copying font files.
 
 > Status: `strict`, `relaxed` and `open` are implemented. `source` is not built yet and is
 > rejected rather than silently downgraded — though the converter already falls back to a
@@ -522,10 +528,11 @@ for adding producers and engines.
 The registered-block authoring corpus is deliberately separate from that conversion suite:
 
 ```sh
-npm run authoring:prove  # validate the 0.9 authoring contract and WordPress-7.1 runtime proof
+npm run authoring:prove -- --plans ./candidate-plans
 ```
 
-Its output reports `scored`, `unsupported`, `blocked`, and `engine-error` separately. It does
+This requires saved canonical candidate plans and the configured WordPress runtime worker; see
+the corpus README. Without them it reports blocked work, not a benchmark result. It does
 not turn unrun browser/editor work or a model/tool failure into a zero product score. The 0.9
 testing-release package, installer, and activation checks are run with `npm run release:check`;
 see [`release/0.9-testing`](release/0.9-testing/README.md) for the receipt matrix and the

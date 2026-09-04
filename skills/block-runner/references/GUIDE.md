@@ -150,8 +150,8 @@ image URLs. Missing, changed, symlinked, or unsupported bundled assets are rejec
 Static SVGs may contain geometry, text, gradients, and self-contained fragment references.
 Scripts, animation, embedded HTML, external dependencies, and unresolved fragments are
 rejected rather than stripped. Native Image SVGs are emitted as files; CSS SVGs may be
-inlined by the build. Do not substitute a `data:` URL for a native image or promise font
-transport through this path. An empty `files` list lets the compiler enumerate its complete
+inlined by the build. Do not substitute a `data:` URL for a native image.
+An empty `files` list lets the compiler enumerate its complete
 source set in the preview; it does not mean no output. A native SVG adds an owned
 `asset-urls.mjs` source file, which is included in confirmation and the manifest.
 
@@ -160,6 +160,19 @@ source and return `package.canonicalPlan` with checked source and style/asset le
 It does not write source. Review that plan's structure and editing policy through the
 normal preview/write flow. An unresolved Custom HTML region is a failure to resolve,
 not permission to ship it inside a registered wrapper.
+
+Licensed local WOFF/WOFF2 fonts use an asset with `kind: "font"`, an absolute source,
+confirmed byte hash/destination, and `fontLicense: { ownership, license, notice? }`.
+Retain the complete required redistribution notice; Block Runner validates the declared
+decision and bytes, not legal permission. Add `styles.fonts: [{ assetId, family }]`, with
+optional `fontStyle`, `fontWeight`, `fontStretch`, `fontDisplay`, and `unicodeRange`.
+Use the namespaced families returned by HTML analysis. For a manually authored plan, compute
+the prefix `block-runner-<namespace>-<slug>-<first 8 hex characters of SHA-256(target.name)>-`
+and append a local family name; do not invent hashes. Use that exact family in every CSS/native
+reference. Faces load through shared CSS; `font-licenses.txt` retains notices in production
+archives. Remote fonts, other font formats, and editor-only font faces are not supported.
+Unlicensed HTML font faces fall back with explicit warnings; destination theme presets do not
+authorize copying font files. Keep the analyzer's `source` and `coverage` records in the plan.
 
 For styling that native block supports cannot express, use `styles.rules`. Each rule is
 either `{ "kind": "style", "selector": ".card:hover", "declarations": [
