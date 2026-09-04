@@ -174,16 +174,41 @@ function installProjectSkill(candidate) {
   const { consumer, cli } = installPackedCandidate(candidate);
   const project = path.join(consumer, 'project'); mkdirSync(project);
   const row = runRow('project-skill-installer-smoke', process.execPath, [cli, 'skill', '--install'], { cwd: project });
-  if (row.status === 'passed') for (const destination of [path.join(project, '.agents', 'skills', 'block-runner', '.block-runner-install.json'), path.join(project, '.claude', 'skills', 'block-runner', '.block-runner-install.json')]) {
-    if (!existsSync(destination)) { row.status = 'failed'; row.detail = `project skill installer did not create ${destination}`; }
+  if (row.status === 'passed') {
+    try {
+      const bundle = path.join(consumer, 'node_modules', 'block-runner', 'skills', 'block-runner');
+      for (const target of ['.agents', '.claude']) validateInstalledSkill(path.join(project, target, 'skills', 'block-runner'), bundle);
+      const before = treeHash(project);
+      const repeat = runRow('project-skill-installer-idempotence', process.execPath, [cli, 'skill', '--install'], { cwd: project });
+      if (repeat.status !== 'passed' || before !== treeHash(project)) throw new Error('Second skill install failed or changed the installed files.');
+    } catch (error) { row.status = 'failed'; row.detail = error.message; }
   }
 }
 function installUserSkill(candidate) {
   const { consumer, cli } = installPackedCandidate(candidate);
   const home = path.join(consumer, 'home'); const project = path.join(consumer, 'project'); mkdirSync(home); mkdirSync(project);
   const row = runRow('user-skill-installer-smoke', process.execPath, [cli, 'skill', '--install', '--scope', 'user', '--target', 'agents'], { cwd: project, env: { ...process.env, HOME: home } });
-  const manifest = path.join(home, '.agents', 'skills', 'block-runner', '.block-runner-install.json');
-  if (row.status === 'passed' && !existsSync(manifest)) { row.status = 'failed'; row.detail = `user skill installer did not create ${manifest}`; }
+  if (row.status === 'passed') {
+    try {
+      validateInstalledSkill(path.join(home, '.agents', 'skills', 'block-runner'), path.join(consumer, 'node_modules', 'block-runner', 'skills', 'block-runner'));
+      if (existsSync(path.join(home, '.claude')) || filesBelow(project).length) throw new Error('User-target skill install wrote outside the selected target.');
+    } catch (error) { row.status = 'failed'; row.detail = error.message; }
+  }
+}
+
+function validateInstalledSkill(destination, bundle) {
+  const manifest = JSON.parse(readFileSync(path.join(destination, '.block-runner-install.json'), 'utf8'));
+  const version = JSON.parse(readFileSync(path.resolve(bundle, '../../package.json'), 'utf8')).version;
+  if (manifest.packageVersion !== version) throw new Error('Installed skill version does not match the packed package.');
+  const names = filesBelow(bundle).map((file) => path.relative(bundle, file).split(path.sep).join('/')).sort();
+  if (JSON.stringify(Object.keys(manifest.files ?? {}).sort()) !== JSON.stringify(names)) throw new Error('Installed skill manifest does not describe the packed bundle.');
+  for (const name of names) {
+    const bytes = readFileSync(path.join(bundle, name));
+    const expected = hash(name.endsWith('.md') ? bytes.toString('utf8').replace(/block-runner@latest(?!\s+skill\b)/g, `block-runner@${version}`) : bytes);
+    if (manifest.files[name].sha256 !== expected || hashFile(path.join(destination, name)) !== expected) {
+      throw new Error(`Installed skill hash mismatch: ${name}`);
+    }
+  }
 }
 
 function createGeneratedPluginZip() {
@@ -201,6 +226,15 @@ function createGeneratedPluginZip() {
 function activateGeneratedPluginZip() {
   pluginZip = createGeneratedPluginZip();
   if (!pluginZip) return undefined;
+  const manualReview = valueFor('--manual-review');
+  if (manualReview) {
+    const reviewPath = path.resolve(manualReview);
+    const review = JSON.parse(readFileSync(reviewPath, 'utf8'));
+    validateManualReviewBinding(review, hashFile(pluginZip.inputPath), pluginZip.sha256);
+    const fixture = JSON.parse(readFileSync(pluginZip.fixture, 'utf8'));
+    fixture.accessibility = { ...fixture.accessibility, manualReviewPath: reviewPath };
+    writeFileSync(pluginZip.fixture, `${JSON.stringify(fixture, null, 2)}\n`, 'utf8');
+  }
   const work = path.join(evidenceDirectory, 'wordpress-proof');
   const row = runRow('generated-plugin-zip-activation', process.execPath, [
     '--import', 'tsx', path.join(ROOT, 'src/cli.ts'), 'proof', pluginZip.zip,
@@ -242,6 +276,14 @@ function activateGeneratedPluginZip() {
     row.detail = error instanceof Error ? error.message : String(error);
     return undefined;
   }
+}
+
+function validateManualReviewBinding(review, inputHash, pluginZipHash) {
+  if (!review || review.inputHash !== inputHash || review.pluginZipHash !== pluginZipHash) {
+    throw new Error('Manual review describes a different generated input or plugin ZIP; review this candidate before release.');
+  }
+  // The production proof reader validates the complete review and retains its
+  // bytes. This early check prevents an expensive run against stale evidence.
 }
 
 /**

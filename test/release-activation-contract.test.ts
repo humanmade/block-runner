@@ -1,4 +1,6 @@
 import { readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import path from 'node:path';
 import { runInNewContext } from 'node:vm';
 import { describe, expect, it } from 'vitest';
 
@@ -59,5 +61,56 @@ describe('release benchmark boundary', () => {
     expect(matrix.releaseRule.optionalRowsDoNotBlockRelease).toBe(true);
     expect(source).toContain('benchmarkReadiness');
     expect(source).toContain('optional benchmark must remain unscored and non-blocking');
+  });
+});
+
+describe('release manual review binding', () => {
+  const reviewStart = source.indexOf('function validateManualReviewBinding(');
+  const reviewEnd = source.indexOf('\nfunction ', reviewStart + 1);
+  const bind = runInNewContext(`(${source.slice(reviewStart, reviewEnd)})`) as
+    (review: unknown, inputHash: string, zipHash: string) => void;
+
+  it('accepts only the exact generated input and ZIP', () => {
+    expect(() => bind({ inputHash: hash, pluginZipHash: hash }, hash, hash)).not.toThrow();
+    expect(() => bind({ inputHash: 'stale', pluginZipHash: hash }, hash, hash)).toThrow('different');
+    expect(() => bind({ inputHash: hash, pluginZipHash: 'stale' }, hash, hash)).toThrow('different');
+    expect(() => bind(null, hash, hash)).toThrow('different');
+    expect(source).toContain("valueFor('--manual-review')");
+    expect(source).toContain('manualReviewPath: reviewPath');
+  });
+});
+
+describe('release installed skill verification', () => {
+  const helperStart = source.indexOf('function validateInstalledSkill(');
+  const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
+  const digest = (bytes: string | Buffer) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+  function fixture() {
+    const original = 'npx block-runner@latest assemble; npx block-runner@latest skill';
+    const installed = 'npx block-runner@0.9.0 assemble; npx block-runner@latest skill';
+    const files: Record<string, string> = {
+      '/pkg/package.json': JSON.stringify({ version: '0.9.0' }),
+      '/pkg/skills/block-runner/SKILL.md': original,
+      '/installed/SKILL.md': installed,
+      '/installed/.block-runner-install.json': JSON.stringify({ packageVersion: '0.9.0', files: { 'SKILL.md': { sha256: digest(installed) } } }),
+    };
+    const validate = runInNewContext(`(${source.slice(helperStart, helperEnd)})`, {
+      path, hash: digest,
+      readFileSync: (file: string, encoding?: string) => {
+        if (!(file in files)) throw new Error('missing file');
+        return encoding ? files[file] : Buffer.from(files[file]!);
+      },
+      hashFile: (file: string) => digest(files[file]!),
+      filesBelow: () => ['/pkg/skills/block-runner/SKILL.md'],
+    }) as (destination: string, bundle: string) => void;
+    return { files, run: () => validate('/installed', '/pkg/skills/block-runner') };
+  }
+  it('checks the version-pinned bytes while preserving the installer update command', () => {
+    expect(fixture().run).not.toThrow();
+  });
+  it('rejects changed installed bytes and incomplete manifests', () => {
+    const modified = fixture(); modified.files['/installed/SKILL.md'] = 'changed';
+    expect(modified.run).toThrow('hash mismatch');
+    const missing = fixture(); missing.files['/installed/.block-runner-install.json'] = JSON.stringify({ packageVersion: '0.9.0', files: {} });
+    expect(missing.run).toThrow('packed bundle');
   });
 });
