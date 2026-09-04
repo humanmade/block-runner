@@ -46,14 +46,16 @@ on real-project feedback and resolved release-relevant failures.
 
 ### Release status
 
-The candidate is not release-certified. The latest retained WordPress proof has 25/27 gates
-passing; the corrected manual-review record still needs a fresh full proof against v8, and the
-production font ZIP plus existing-plugin second-block check are still pending. The accepted
-upstream editor exception is Heading-only; the Paragraph decision remains pending. Do not
-present the candidate's unit tests, visual golden, or historical page-block benchmark as
-evidence that the 0.9 release gate has passed. No new paid model benchmarks are part of this
-candidate unless explicitly limited to Luna low or Terra low; Sol 5.6 and Claude lanes are not
-authorized.
+The candidate is not release-certified. Local production font ZIP, existing-plugin second-block,
+and all four deliberate-mutation checks have passed. A keyboard and screenshot review is saved
+against the reproducible fixture's exact input and ZIP hashes. The narrow 0.9 testing exception
+covers separately reproduced native Heading and Paragraph accessibility findings; raw failures
+remain in the receipts, and the agent-assisted review is not human accessibility certification.
+
+The complete release matrix and WordPress CI must still pass before publication. Passing unit
+tests or historical page-content benchmark scores does not establish that release acceptance.
+The separate registered-block benchmark remains pending and unscored; no new model benchmark
+results are claimed for this candidate.
 
 ## 0.8.0 — 2026-09-02
 
