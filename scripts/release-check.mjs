@@ -160,9 +160,9 @@ function packCandidate() {
   row.artifact = { path: relativeArtifact(retained), sha256: hashFile(retained) };
   return { tarball: tarballs[0], sha256: row.artifact.sha256 };
 }
-function installPackedCandidate(candidate) {
+function installPackedCandidate(candidate, rowId = 'packed-candidate-smoke') {
   const consumer = mkdtempSync(path.join(tmpdir(), 'block-runner-rc-consumer-'));
-  const row = runRow('packed-candidate-smoke', 'npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', candidate.tarball], { cwd: consumer });
+  const row = runRow(rowId, 'npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', candidate.tarball], { cwd: consumer });
   const cli = path.join(consumer, 'node_modules', 'block-runner', 'dist', 'cli.js');
   if (row.status === 'passed' && !existsSync(cli)) { row.status = 'failed'; row.detail = `packed CLI missing: ${cli}`; }
   if (row.status === 'passed') {
@@ -176,7 +176,7 @@ function validateCanonicalSkill() {
   runRow('canonical-skill-validation', process.execPath, [path.join(ROOT, 'dist', 'cli.js'), 'skill', '--install', '--dry-run', '--dir', mkdtempSync(path.join(tmpdir(), 'block-runner-skill-validate-'))]);
 }
 function installProjectSkill(candidate) {
-  const { consumer, cli } = installPackedCandidate(candidate);
+  const { consumer, cli } = installPackedCandidate(candidate, 'project-skill-package-install');
   const project = path.join(consumer, 'project'); mkdirSync(project);
   const row = runRow('project-skill-installer-smoke', process.execPath, [cli, 'skill', '--install'], { cwd: project });
   if (row.status === 'passed') {
@@ -190,7 +190,7 @@ function installProjectSkill(candidate) {
   }
 }
 function installUserSkill(candidate) {
-  const { consumer, cli } = installPackedCandidate(candidate);
+  const { consumer, cli } = installPackedCandidate(candidate, 'user-skill-package-install');
   const home = path.join(consumer, 'home'); const project = path.join(consumer, 'project'); mkdirSync(home); mkdirSync(project);
   const row = runRow('user-skill-installer-smoke', process.execPath, [cli, 'skill', '--install', '--scope', 'user', '--target', 'agents'], { cwd: project, env: { ...process.env, HOME: home } });
   if (row.status === 'passed') {

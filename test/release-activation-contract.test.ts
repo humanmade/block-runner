@@ -81,6 +81,11 @@ describe('release manual review binding', () => {
 });
 
 describe('release installed skill verification', () => {
+  it('keeps package-install logs distinct for the two installer consumers', () => {
+    expect(source).toContain("installPackedCandidate(candidate, 'project-skill-package-install')");
+    expect(source).toContain("installPackedCandidate(candidate, 'user-skill-package-install')");
+    expect(source).toContain("const row = runRow(rowId, 'npm'");
+  });
   const helperStart = source.indexOf('function validateInstalledSkill(');
   const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
   const digest = (bytes: string | Buffer) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
