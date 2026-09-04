@@ -7,7 +7,8 @@
     "Repair the unexpected or invalid content errors in this Gutenberg markup.",
     "Create an editable pricing section for a WordPress page without Custom HTML.",
     "Check that these Gutenberg wp:cover and wp:columns comments are editor-valid.",
-    "Write this generated block markup to WordPress, but verify it first."
+    "Write this generated block markup to WordPress, but verify it first.",
+    "Create a reusable named Gutenberg block in my existing WordPress plugin."
   ],
   "shouldNotTrigger": [
     "Create a WordPress administrator account.",

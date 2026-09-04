@@ -33,7 +33,7 @@ import {
   type Spec,
   type Result,
 } from './tuner/score.js';
-import { readCache, writeCache, type CacheKeyParts } from './tuner/cache.js';
+import { readCache, writeCache, type CacheKeyParts, type InstructionProvenance } from './tuner/cache.js';
 import { selectSmoke, printSmokeReasons } from './tuner/smoke.js';
 import { attribute, printAttribution } from './tuner/attribute.js';
 import { readBaseline, baselineStatus, detectRegressions, updateBaseline, captureRegressions, printRatchet } from './tuner/ratchet.js';
@@ -46,6 +46,7 @@ interface LoadedEngine {
   label: string;
   split: boolean;
   promptHash: string;
+  instructionProvenance?: InstructionProvenance;
   convert?: (html: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
   propose?: (html: string, options?: ConvertOptions) => Promise<{ raw: string; error?: string }>;
   realize?: (raw: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
@@ -97,6 +98,16 @@ function guardModelAlias(): void {
   console.error(`warning: model alias "${model}" is ambiguous; its meaning changes as new models ship. Pass a full id such as claude-opus-5.`);
 }
 
+function readInstructionProvenance(value: unknown): InstructionProvenance | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const provenance: InstructionProvenance = {};
+  for (const key of ['guideHash', 'authoringCommandHash', 'authoringSchemaHash'] as const) {
+    if (typeof candidate[key] === 'string') provenance[key] = candidate[key];
+  }
+  return Object.keys(provenance).length > 0 ? provenance : undefined;
+}
+
 async function loadEngine(): Promise<LoadedEngine> {
   const p = enginePath();
   const label = engineLabel();
@@ -117,6 +128,7 @@ async function loadEngine(): Promise<LoadedEngine> {
     label,
     split: true,
     promptHash: typeof mod.promptHash === 'string' ? mod.promptHash : '',
+    instructionProvenance: readInstructionProvenance(mod.agentSkillProvenance),
     propose: mod.propose,
     realize: mod.realize,
   };
@@ -189,6 +201,7 @@ async function runFixture(
     effort: effortLabel(),
     inputHtml,
     promptHash: engine.promptHash,
+    instructionProvenance: engine.instructionProvenance,
   };
 
   // T0 replays the cache, never calling the engine. Missing/stale cache is reported loudly,
@@ -292,6 +305,7 @@ function printTiming(timings: FixtureTiming[]): void {
 function recordTimings(
   engineLabel: string,
   promptHash: string,
+  instructionProvenance: InstructionProvenance | undefined,
   model: string,
   effort: string,
   hash: string,
@@ -309,6 +323,7 @@ function recordTimings(
     suiteHash: hash,
     scorerHash: currentScorerHash,
     promptHash,
+    ...(instructionProvenance ?? {}),
     wordpressVersion: WORDPRESS_TARGET,
     blockLibraryVersion: gutenbergVersion(),
     fixtures: live.length,
@@ -372,7 +387,16 @@ async function main(): Promise<void> {
     return;
   }
   if (tierName === 't2') {
-    recordTimings(engine.label, engine.promptHash, modelLabel(), effortLabel(), hash, currentScorerHash, timings);
+    recordTimings(
+      engine.label,
+      engine.promptHash,
+      engine.instructionProvenance,
+      modelLabel(),
+      effortLabel(),
+      hash,
+      currentScorerHash,
+      timings,
+    );
   }
 
   // Honest attribution — per-class deltas, overfit detection, miss aggregation.

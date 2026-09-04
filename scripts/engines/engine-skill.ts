@@ -13,7 +13,7 @@
  *     --producer claude-impeccable --layouts hero-cover,pricing-table
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -23,6 +23,41 @@ import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from './harness.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GUIDE = readFileSync(path.join(ROOT, 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
+
+export interface AgentSkillProvenance {
+  guideHash: string;
+  authoringCommandHash: string;
+  authoringSchemaHash: string;
+}
+
+function hash(value: string): string {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+/** Hash the implemented command and plan contract which the guide directs models to use. */
+function hashSourceSet(paths: string[]): string {
+  return hash(paths.map((relativePath) => {
+    const sourcePath = path.join(ROOT, relativePath);
+    if (!existsSync(sourcePath)) {
+      throw new Error(`authoring provenance source is missing: ${relativePath}`);
+    }
+    const content = readFileSync(sourcePath, 'utf8');
+    return `${relativePath}\0${content}`;
+  }).join('\0'));
+}
+
+// The guide tells the model which authoring command and schema it must use. Record all three
+// components individually as well as in promptHash: the aggregate invalidates the tuner cache;
+// named values make a historical benchmark run independently auditable.
+export const agentSkillProvenance: AgentSkillProvenance = Object.freeze({
+  guideHash: hash(GUIDE),
+  authoringCommandHash: hashSourceSet(['src/cli.ts']),
+  authoringSchemaHash: hashSourceSet([
+    'src/authoring/schema.ts',
+    'src/authoring/preview.ts',
+    'src/authoring/destination.ts',
+  ]),
+});
 
 // The framing an agent supplies around the guide when it has been handed a design to convert.
 // Deliberately thin: any lifting here is lifting the guide is not doing.
@@ -37,9 +72,15 @@ Do not run any commands, write any files, or output block markup.
 HTML:
 `;
 
-// The shipped guide is itself an engine prompt. Hash the exact guide + framing so guide edits
-// invalidate tuner cache entries and make recorded runs attributable to one instruction set.
-export const promptHash = `skill-${createHash('sha256').update(GUIDE + TASK).digest('hex').slice(0, 10)}`;
+// The shipped guide is itself an engine prompt. Include the authoring command/schema revisions:
+// a guide sentence that names an old plan shape or write workflow is not reproducible against a
+// newer deterministic implementation. Tuner cache keys and benchmark records use this value.
+export const promptHash = `skill-${createHash('sha256')
+  .update(GUIDE)
+  .update(TASK)
+  .update(JSON.stringify(agentSkillProvenance))
+  .digest('hex')
+  .slice(0, 10)}`;
 
 function flag(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(name);
