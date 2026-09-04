@@ -165,6 +165,11 @@ function installPackedCandidate(candidate) {
   const row = runRow('packed-candidate-smoke', 'npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', candidate.tarball], { cwd: consumer });
   const cli = path.join(consumer, 'node_modules', 'block-runner', 'dist', 'cli.js');
   if (row.status === 'passed' && !existsSync(cli)) { row.status = 'failed'; row.detail = `packed CLI missing: ${cli}`; }
+  if (row.status === 'passed') {
+    const smoke = runRow(`packed-candidate-runtime-${rows.length}`, process.execPath, ['--input-type=module', '-e',
+      "import { convert, author, compileAuthoringPlan } from 'block-runner'; import { createRequire } from 'node:module'; import { execFileSync } from 'node:child_process'; const require=createRequire(import.meta.url); const pkg=require('block-runner/package.json'); if (![convert,author,compileAuthoringPlan].every(fn=>typeof fn==='function')) throw new Error('Missing public exports'); const actual=execFileSync(process.execPath,[process.argv[1],'--version'],{encoding:'utf8'}).trim(); if(actual!==pkg.version) throw new Error('CLI version mismatch'); console.log(JSON.stringify({version:actual,exports:'ok'}));", cli], { cwd: consumer });
+    if (smoke.status !== 'passed') { row.status = 'failed'; row.detail = 'Packed CLI or ESM consumer failed.'; }
+  }
   return { consumer, cli };
 }
 function validateCanonicalSkill() {
