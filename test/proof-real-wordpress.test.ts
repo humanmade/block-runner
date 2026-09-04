@@ -10,11 +10,16 @@ import {
   PROOF_PROFILES,
   canonicalJson,
   evaluateReleaseAcceptance,
-  loadNativeHeadingControlEvidence,
   runProof,
   summarizeReleaseAcceptance,
-  type NativeHeadingControlEvidence,
 } from '../src/index.js';
+import {
+  loadNativeHeadingControlEvidence,
+  loadNativeParagraphControlEvidence,
+  type NativeHeadingControlEvidence,
+  type NativeParagraphControlEvidence,
+  type ReleaseAcceptanceOptions,
+} from '../src/proof/release-acceptance.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -61,10 +66,8 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     // Keep the raw receipt and the acceptance decision side by side. The
     // latter may be blocked: this test proves that the result is reported
     // honestly, while the release checker owns the publishable decision.
-    const nativeHeadingControlEvidence = controlEvidenceFromEnvironment();
-    const acceptance = evaluateReleaseAcceptance(result.receipt, nativeHeadingControlEvidence
-      ? { nativeHeadingControlEvidence }
-      : {});
+    const nativeControlEvidence = controlEvidenceFromEnvironment();
+    const acceptance = evaluateReleaseAcceptance(result.receipt, nativeControlEvidence);
     const acceptanceSummary = summarizeReleaseAcceptance(acceptance);
     await writeFile(path.join(outputDir, 'acceptance.json'), `${JSON.stringify(acceptanceSummary, null, 2)}\n`, 'utf8');
     await writeFile(path.join(outputDir, 'receipt-index.json'), `${JSON.stringify({
@@ -107,7 +110,14 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
   }, 480_000);
 });
 
-function controlEvidenceFromEnvironment(): NativeHeadingControlEvidence | undefined {
+function controlEvidenceFromEnvironment(): ReleaseAcceptanceOptions {
+  return {
+    nativeHeadingControlEvidence: headingControlEvidenceFromEnvironment(),
+    nativeParagraphControlEvidence: paragraphControlEvidenceFromEnvironment(),
+  };
+}
+
+function headingControlEvidenceFromEnvironment(): NativeHeadingControlEvidence | undefined {
   const sourcePath = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_PATH;
   const sha256 = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_EVIDENCE_SHA256;
   const wordpressVersion = process.env.BLOCK_RUNNER_NATIVE_HEADING_CONTROL_WORDPRESS_VERSION;
@@ -116,6 +126,20 @@ function controlEvidenceFromEnvironment(): NativeHeadingControlEvidence | undefi
     throw new Error('native Heading exception requires evidence path, SHA-256, and observed WordPress version');
   }
   return loadNativeHeadingControlEvidence({
+    wordpressVersion,
+    evidence: { path: path.resolve(sourcePath), sha256: sha256 as `sha256:${string}` },
+  });
+}
+
+function paragraphControlEvidenceFromEnvironment(): NativeParagraphControlEvidence | undefined {
+  const sourcePath = process.env.BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_EVIDENCE_PATH;
+  const sha256 = process.env.BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_EVIDENCE_SHA256;
+  const wordpressVersion = process.env.BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_WORDPRESS_VERSION;
+  if (!sourcePath && !sha256 && !wordpressVersion) return undefined;
+  if (!sourcePath || !sha256 || !wordpressVersion) {
+    throw new Error('native Paragraph exception requires evidence path, SHA-256, and observed WordPress version');
+  }
+  return loadNativeParagraphControlEvidence({
     wordpressVersion,
     evidence: { path: path.resolve(sourcePath), sha256: sha256 as `sha256:${string}` },
   });

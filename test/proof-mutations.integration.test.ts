@@ -6,8 +6,14 @@ import { promisify } from 'node:util';
 import { beforeAll, describe, expect, it } from 'vitest';
 import { buildPatternOverridesFixture, type BuiltPatternOverridesFixture } from '../scripts/build-pattern-overrides-fixture.js';
 import { runProof, type ProofGateId, type ProofRunResult } from '../src/index.js';
-import { evaluateReleaseAcceptance, loadNativeHeadingControlEvidence, summarizeReleaseAcceptance,
-  type NativeHeadingControlEvidence } from '../src/proof/release-acceptance.js';
+import {
+  evaluateReleaseAcceptance,
+  loadNativeHeadingControlEvidence,
+  loadNativeParagraphControlEvidence,
+  summarizeReleaseAcceptance,
+  type NativeHeadingControlEvidence,
+  type NativeParagraphControlEvidence,
+} from '../src/proof/release-acceptance.js';
 
 const execFile = promisify(execFileCallback);
 const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
@@ -24,6 +30,7 @@ const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
   let built: BuiltPatternOverridesFixture;
   let baseline: ProofRunResult;
   let nativeHeadingControlEvidence: NativeHeadingControlEvidence | undefined;
+  let nativeParagraphControlEvidence: NativeParagraphControlEvidence | undefined;
   beforeAll(async () => {
     const parent = process.env.BLOCK_RUNNER_PROOF_OUTPUT_DIR ?? tmpdir();
     await mkdir(parent, { recursive: true });
@@ -41,8 +48,21 @@ const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
       nativeHeadingControlEvidence = loadNativeHeadingControlEvidence({ wordpressVersion: controlVersion,
         evidence: { path: controlPath, sha256: controlHash as `sha256:${string}` } });
     }
+    const paragraphControlPath = process.env.BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_EVIDENCE_PATH;
+    const paragraphControlHash = process.env.BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_EVIDENCE_SHA256;
+    const paragraphControlVersion = process.env.BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_WORDPRESS_VERSION;
+    if (paragraphControlPath || paragraphControlHash || paragraphControlVersion) {
+      if (!paragraphControlPath || !paragraphControlHash || !paragraphControlVersion || !/^sha256:[a-f0-9]{64}$/.test(paragraphControlHash)) {
+        throw new Error('All native Paragraph control evidence fields, including its SHA-256, must be supplied together.');
+      }
+      nativeParagraphControlEvidence = loadNativeParagraphControlEvidence({ wordpressVersion: paragraphControlVersion,
+        evidence: { path: paragraphControlPath, sha256: paragraphControlHash as `sha256:${string}` } });
+    }
     baseline = await prove(baselineZip, 'baseline');
-    const acceptance = evaluateReleaseAcceptance(baseline.receipt, { nativeHeadingControlEvidence });
+    const acceptance = evaluateReleaseAcceptance(baseline.receipt, {
+      nativeHeadingControlEvidence,
+      nativeParagraphControlEvidence,
+    });
     await writeFile(path.join(root, 'baseline-acceptance.json'), JSON.stringify(summarizeReleaseAcceptance(acceptance), null, 2));
     expect(acceptance.automated.blockers, 'Every automated baseline gate must pass; only verified, approved upstream exceptions are accepted').toEqual([]);
     expect(acceptance.automated.ok).toBe(true);
@@ -110,7 +130,10 @@ const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
         await writeFile(file, original);
       }
       const mutated = await prove(mutatedZip!, candidate.name);
-      const acceptance = evaluateReleaseAcceptance(mutated.receipt, { nativeHeadingControlEvidence });
+      const acceptance = evaluateReleaseAcceptance(mutated.receipt, {
+        nativeHeadingControlEvidence,
+        nativeParagraphControlEvidence,
+      });
       await writeFile(path.join(root, candidate.name + '-acceptance.json'), JSON.stringify(summarizeReleaseAcceptance(acceptance), null, 2));
       const allowed = new Set([candidate.target, ...candidate.downstream]);
       const matrix = baseline.receipt.gates.map((gate) => ({
