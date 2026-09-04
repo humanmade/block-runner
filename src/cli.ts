@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { lstat, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -15,6 +15,14 @@ import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
 import { installCanonicalSkill, readCanonicalSkillGuide, SkillScope, SkillTarget } from './skill.js';
+import {
+  detectWpScriptsPlugin,
+  planExistingPluginOutput,
+  planStandalonePluginOutput,
+  UnsupportedPluginLayoutError,
+  writePluginOutput,
+  type GeneratedBlockPackage,
+} from './plugin/profile.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 import { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
@@ -64,6 +72,21 @@ interface AuthorWriteCliOptions {
   confirm?: string;
   outputDir?: string;
   json?: boolean;
+}
+
+interface PluginInspectCliOptions {
+  json?: boolean;
+}
+
+interface PluginPreviewCliOptions {
+  host?: string;
+  standalone?: string;
+  json?: boolean;
+}
+
+interface PluginWriteCliOptions extends PluginPreviewCliOptions {
+  confirm?: string;
+  approveReplace?: string[];
 }
 
 const program = new Command();
@@ -272,6 +295,70 @@ program
     if (!manifest.endsWith('\n')) {
       process.stdout.write('\n');
     }
+  });
+
+const plugin = program
+  .command('plugin')
+  .description('Inspect or package a generated registered block for a supported wp-scripts plugin.');
+
+plugin
+  .command('inspect <hostDirectory>')
+  .description('Report a read-only @wordpress/scripts host profile and its registration strategy.')
+  .option('--json', 'emit a machine-readable profile')
+  .action(async (hostDirectory: string, options: PluginInspectCliOptions) => {
+    const profile = await detectWpScriptsPlugin(hostDirectory);
+    if (options.json) {
+      console.log(JSON.stringify(profile, null, 2));
+      process.exitCode = profile.kind === 'recognized' ? 0 : 1;
+      return;
+    }
+    if (profile.kind !== 'recognized') {
+      console.error(`plugin inspect: ${profile.reason}`);
+      console.error('No files written. Use plugin preview <block-dir> --standalone <output-dir> to create a standalone plugin.');
+      process.exitCode = 1;
+      return;
+    }
+    console.log([
+      'plugin inspect: recognised',
+      `@wordpress/scripts=${profile.wpScriptsVersion}`,
+      `source root=${profile.sourceRoot}`,
+      `build root=${profile.buildRoot}`,
+      `entry discovery=${profile.entryDiscovery}`,
+      `registration=${profile.registration} (${profile.registrationFile})`,
+    ].join('\n'));
+  });
+
+plugin
+  .command('preview <blockDirectory>')
+  .description('List every generated and bootstrap file that would be touched; writes nothing.')
+  .option('--host <directory>', 'recognised existing wp-scripts plugin root')
+  .option('--standalone <directory>', 'plan a complete standalone plugin wrapper instead')
+  .option('--json', 'emit the machine-readable plan')
+  .action(async (blockDirectory: string, options: PluginPreviewCliOptions) => {
+    const plan = await pluginPlanForCli(blockDirectory, options);
+    emitPluginPlan(plan, options.json ?? false);
+  });
+
+plugin
+  .command('write <blockDirectory>')
+  .description('Write exactly a previewed plugin plan after its fingerprint and replacement approvals are supplied.')
+  .requiredOption('--confirm <fingerprint>', 'exact fingerprint printed by plugin preview')
+  .option('--host <directory>', 'recognised existing wp-scripts plugin root')
+  .option('--standalone <directory>', 'write a complete standalone plugin wrapper instead')
+  .option('--approve-replace <path...>', 'absolute preview paths explicitly approved for replacement')
+  .option('--json', 'emit a machine-readable write result')
+  .action(async (blockDirectory: string, options: PluginWriteCliOptions) => {
+    const plan = await pluginPlanForCli(blockDirectory, options);
+    if (options.confirm !== plan.fingerprint) {
+      throw new Error('plugin confirmation does not match the reviewed preview; no files written');
+    }
+    const result = await writePluginOutput(plan, { authorizedReplacements: options.approveReplace });
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      return;
+    }
+    console.log(`plugin write: ${result.written.length} file${result.written.length === 1 ? '' : 's'} written to ${result.directory}`);
+    for (const file of result.written) console.log(`- ${file}`);
   });
 
 program
@@ -689,6 +776,79 @@ function ensureSafeOutputTarget(
 
 function looksLikeInlineHtml(value: string): boolean {
   return /<([a-z][\w:-]*)(\s|>|\/>)/i.test(value) || /<!--\s+wp:/.test(value);
+}
+
+async function pluginPlanForCli(
+  blockDirectory: string,
+  options: Pick<PluginPreviewCliOptions, 'host' | 'standalone'>,
+) {
+  if (Boolean(options.host) === Boolean(options.standalone)) {
+    throw new Error('Pass exactly one of --host <plugin-root> or --standalone <output-dir>.');
+  }
+  const generated = await readGeneratedBlockPackage(blockDirectory);
+  if (options.standalone) {
+    return planStandalonePluginOutput(options.standalone, generated);
+  }
+  try {
+    return await planExistingPluginOutput(options.host!, generated);
+  } catch (error) {
+    if (error instanceof UnsupportedPluginLayoutError) {
+      throw new Error(`${error.message} Offer: plugin preview ${JSON.stringify(blockDirectory)} --standalone <output-dir>.`);
+    }
+    throw error;
+  }
+}
+
+function emitPluginPlan(
+  plan: Awaited<ReturnType<typeof pluginPlanForCli>>,
+  json = false,
+): void {
+  if (json) {
+    console.log(JSON.stringify({ ok: true, ...plan, noFilesWritten: true }, null, 2));
+    return;
+  }
+  console.log(`plugin preview: ${plan.mode}`);
+  console.log(`target directory: ${plan.targetDirectory}`);
+  console.log(`confirmation: ${plan.fingerprint}`);
+  for (const note of plan.notes) console.log(`- ${note}`);
+  console.log('touched files:');
+  for (const file of plan.touchedFiles) {
+    console.log(`- ${file.operation}${file.requiresSeparateAuthorization ? ' (separate authorization required)' : ''}: ${file.path}`);
+  }
+  console.log('No files written.');
+}
+
+async function readGeneratedBlockPackage(directory: string): Promise<GeneratedBlockPackage> {
+  const root = path.resolve(directory);
+  const metadataFile = path.join(root, 'block.json');
+  if (!existsSync(metadataFile)) {
+    throw new Error(`Generated block directory must contain block.json: ${root}`);
+  }
+  const files: Record<string, Buffer> = {};
+  async function walk(current: string, prefix = ''): Promise<void> {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Generated block directory must not contain symbolic links: ${path.join(current, entry.name)}`);
+      }
+      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(absolute, relative);
+      else if (entry.isFile()) files[relative] = await readFile(absolute);
+    }
+  }
+  await walk(root);
+  let metadata: { name?: unknown };
+  try {
+    metadata = JSON.parse(files['block.json']!.toString('utf8')) as { name?: unknown };
+  } catch {
+    throw new Error(`Generated block metadata is not valid JSON: ${metadataFile}`);
+  }
+  if (typeof metadata.name !== 'string') {
+    throw new Error(`Generated block metadata has no name: ${metadataFile}`);
+  }
+  return { name: metadata.name, files };
 }
 
 await main();
