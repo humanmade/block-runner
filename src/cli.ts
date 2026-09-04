@@ -26,8 +26,8 @@ import {
 import { runProof, type ProofFixture } from './proof/runner.js';
 import { isProofProfileName } from './proof/profiles.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
-import { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
-import { materializeAuthoringPlan } from './authoring/generate.js';
+import { hashAuthoringConfirmation, inspectAuthoringDestination, writeGeneratedRegisteredBlock } from './authoring/destination.js';
+import { materializeAuthoringPlan, planRegisteredBlockOutput } from './authoring/generate.js';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
 import { renderAuthoringPreview } from './authoring/preview.js';
 
@@ -471,11 +471,12 @@ author
   .action(async (planOrStdin: string, options: AuthorPreviewCliOptions) => {
     const plan = validateAuthoringPlan(await readAuthoringPlan(planOrStdin));
     const hash = hashAuthoringPlan(plan);
+    const outputPlan = planRegisteredBlockOutput(plan);
     const destination = authoringDestination(options.outputDir, plan.target.directory);
-    const inspection = await inspectAuthoringDestination(destination, plan);
+    const inspection = await inspectAuthoringDestination(destination, outputPlan);
     const confirmation = hashAuthoringConfirmation(plan, inspection);
     const width = parsePreviewWidth(options.width);
-    const preview = renderAuthoringPreview(plan, {
+    const preview = renderAuthoringPreview({ ...plan, files: outputPlan.files.map((file) => ({ ...file })) }, {
       hash,
       confirmationHash: confirmation,
       width,
@@ -508,7 +509,7 @@ author
 
 author
   .command('write <planOrStdin>')
-  .description('Materialize content already supplied by a confirmed authoring plan.')
+  .description('Generate and write a sealed registered-block package from a confirmed authoring plan.')
   .requiredOption('--confirm <hash>', 'exact destination-bound SHA-256 from author preview')
   .requiredOption('--output-dir <dir>', 'exact destination directory')
   .option('--json', 'emit a machine-readable write result')
@@ -518,15 +519,20 @@ author
     if (!options.outputDir) {
       throw new Error('--output-dir is required');
     }
+    const outputPlan = planRegisteredBlockOutput(plan);
     const destination = authoringDestination(options.outputDir, plan.target.directory);
-    const inspection = await inspectAuthoringDestination(destination, plan);
+    const inspection = await inspectAuthoringDestination(destination, outputPlan);
     const confirmation = hashAuthoringConfirmation(plan, inspection);
     // Inspection is read-only. The write boundary receives the same snapshot and checks it again
     // before creating a directory or establishing any new filesystem baseline.
     if (options.confirm !== confirmation) {
       throw new Error('authoring confirmation does not match the reviewed plan and destination; no files written');
     }
-    const result = await writeAuthoringPlan(destination, materializeAuthoringPlan(plan), inspection);
+    const generated = materializeAuthoringPlan(plan);
+    if (generated.sourcePlanHash !== planHash) {
+      throw new Error('generated registered-block package does not match the confirmed plan; no files written');
+    }
+    const result = await writeGeneratedRegisteredBlock(destination, generated, inspection);
     const output = {
       ok: true,
       command: 'author write',

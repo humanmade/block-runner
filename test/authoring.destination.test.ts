@@ -2,7 +2,7 @@ import { mkdtemp, mkdir, readFile, stat, symlink, writeFile } from 'node:fs/prom
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
-import { inspectAuthoringDestination, writeAuthoringPlan } from '../src/authoring/destination.js';
+import { inspectAuthoringDestination, writeAuthoringOutput } from '../src/authoring/destination.js';
 import { validateAuthoringPlan } from '../src/authoring/schema.js';
 
 function plan(files: unknown[]) {
@@ -36,7 +36,7 @@ describe('authoring destination', () => {
     const existing = path.join(destination, 'block.json');
     await writeFile(existing, 'original\n');
 
-    await expect(writeAuthoringPlan(destination, plan([{ path: 'block.json', content: 'new\n' }]))).rejects.toThrow(/already exists/);
+    await expect(writeAuthoringOutput(destination, plan([{ path: 'block.json', content: 'new\n' }]))).rejects.toThrow(/already exists/);
     expect(await readFile(existing, 'utf8')).toBe('original\n');
   });
 
@@ -45,7 +45,7 @@ describe('authoring destination', () => {
     const existing = path.join(destination, 'block.json');
     await writeFile(existing, 'original\n');
 
-    const result = await writeAuthoringPlan(
+    const result = await writeAuthoringOutput(
       destination,
       plan([{ path: 'block.json', content: 'replacement\n', operation: 'replace' }]),
     );
@@ -62,7 +62,7 @@ describe('authoring destination', () => {
     const approval = await inspectAuthoringDestination(destination, reviewedPlan);
     await writeFile(existing, 'changed after preview\n');
 
-    await expect(writeAuthoringPlan(destination, reviewedPlan, approval)).rejects.toThrow(/no longer matches the reviewed preview/);
+    await expect(writeAuthoringOutput(destination, reviewedPlan, approval)).rejects.toThrow(/no longer matches the reviewed preview/);
     expect(await readFile(existing, 'utf8')).toBe('changed after preview\n');
   });
 
@@ -72,7 +72,7 @@ describe('authoring destination', () => {
     await symlink(outside, path.join(destination, 'src'));
     await mkdir(path.join(outside, 'nested'));
 
-    await expect(writeAuthoringPlan(destination, plan([{ path: 'src/edit.ts', content: 'export {};\n' }]))).rejects.toThrow(/symbolic-link/);
+    await expect(writeAuthoringOutput(destination, plan([{ path: 'src/edit.ts', content: 'export {};\n' }]))).rejects.toThrow(/symbolic-link/);
     await expect(stat(path.join(outside, 'edit.ts'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
@@ -84,7 +84,7 @@ describe('authoring destination', () => {
     await symlink(outside, redirected);
 
     await expect(inspectAuthoringDestination(destination, plan([{ path: 'block.json' }]))).rejects.toThrow(/symbolic-link/);
-    await expect(writeAuthoringPlan(destination, plan([{ path: 'block.json', content: 'new\n' }]))).rejects.toThrow(/symbolic-link/);
+    await expect(writeAuthoringOutput(destination, plan([{ path: 'block.json', content: 'new\n' }]))).rejects.toThrow(/symbolic-link/);
     await expect(stat(path.join(outside, 'generated'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 });

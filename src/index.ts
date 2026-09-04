@@ -32,9 +32,27 @@ export {
   serializeAuthoringPlan,
   validateAuthoringPlan,
 } from './authoring/schema.js';
-export { materializeAuthoringPlan } from './authoring/generate.js';
+export {
+  AuthoringGenerationError,
+  GENERATED_REGISTERED_BLOCK_PATHS,
+  REGISTERED_BLOCK_TEMPLATE_VERSION,
+  WORDPRESS_BLOCK_SCHEMA_URL,
+  WORDPRESS_BLOCK_SCHEMA_VERSION,
+  compileRegisteredBlock,
+  emitBlockJson,
+  emitEditJs,
+  emitIndexJs,
+  emitPhp,
+  emitSaveJs,
+  emitScss,
+  generateRegisteredBlock,
+  materializeAuthoringPlan,
+  planRegisteredBlockOutput,
+  validateBlockMetadata,
+  validateGeneratedSources,
+} from './authoring/generate.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
-export { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
+export { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringOutput, writeGeneratedRegisteredBlock } from './authoring/destination.js';
 export {
   assertStandaloneZipEntries,
   detectWpScriptsPlugin,
@@ -113,7 +131,16 @@ export type {
   JsonValue,
 } from './authoring/schema.js';
 export type { AuthoringPreviewContext, AuthoringPreviewOptions } from './authoring/preview.js';
-export type { AuthoringDestinationApproval, DestinationEntry, DestinationInspection } from './authoring/destination.js';
+export type { AuthoringDestinationApproval, AuthoringOutputFile, AuthoringOutputPlan, DestinationEntry, DestinationInspection } from './authoring/destination.js';
+export type {
+  GeneratedRegisteredBlock,
+  GeneratedSourceFile,
+  GeneratedSourceKind,
+  GeneratedSourceManifest,
+  GeneratedSourceManifestEntry,
+  GeneratedSourcePath,
+  RegisteredBlockOutputPlan,
+} from './authoring/generate.js';
 export type {
   AssembleOptions,
   AuthoringDiagnostic,

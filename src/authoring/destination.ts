@@ -1,7 +1,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { link, lstat, mkdir, open, readFile, readlink, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import { hashAuthoringPlan, type AuthoringPlan } from './schema.js';
+import type { GeneratedRegisteredBlock } from './generate.js';
+import { hashAuthoringPlan, type AuthoringPlan, type AuthoringFileOperation } from './schema.js';
 
 /** A read-only representation of the filesystem state relevant to a plan. */
 export interface DestinationInspection {
@@ -38,6 +39,16 @@ interface MaterializedFile {
   replace: boolean;
 }
 
+export interface AuthoringOutputFile {
+  path: string;
+  content?: unknown;
+  operation?: AuthoringFileOperation;
+}
+
+export interface AuthoringOutputPlan {
+  files: ReadonlyArray<AuthoringOutputFile>;
+}
+
 interface PlannedOutput {
   path: string;
   content?: unknown;
@@ -51,10 +62,10 @@ interface PlannedOutput {
  */
 export async function inspectAuthoringDestination(
   outputDirectory: string,
-  plan: AuthoringPlan,
+  output: AuthoringOutputPlan,
 ): Promise<DestinationInspection> {
   const directory = await canonicalizeTrustedSystemAlias(outputDirectory);
-  const files = plannedFiles(plan);
+  const files = plannedFiles(output);
   const entries = new Map<string, DestinationEntry>();
 
   await inspectDirectoryPath(directory, entries);
@@ -88,19 +99,17 @@ export function hashAuthoringConfirmation(
 }
 
 /**
- * Materialize only file content already present in a reviewed plan.  This is deliberately not a
- * source generator: plans which only describe future files are a successful no-op.  New files
- * are published through an exclusive hard-link, while replacements require the plan's separate
- * hash-bound decision.
+ * Publish immutable, generated source through an exclusive hard-link. Replacements require the
+ * separate, hash-bound operation carried by the sealed output package.
  */
-export async function writeAuthoringPlan(
+export async function writeAuthoringOutput(
   outputDirectory: string,
-  plan: AuthoringPlan,
+  output: AuthoringOutputPlan,
   approval?: AuthoringDestinationApproval,
 ): Promise<{ directory: string; fingerprint: string; written: string[] }> {
-  const allFiles = plannedFiles(plan);
+  const allFiles = plannedFiles(output);
   const files = allFiles.filter((file): file is MaterializedFile => typeof file.content === 'string');
-  const before = await inspectAuthoringDestination(outputDirectory, plan);
+  const before = await inspectAuthoringDestination(outputDirectory, output);
   if (approval && (before.directory !== path.resolve(approval.directory) || before.fingerprint !== approval.fingerprint)) {
     throw new Error('authoring destination no longer matches the reviewed preview; no files written');
   }
@@ -119,7 +128,7 @@ export async function writeAuthoringPlan(
 
   // Re-run every safety decision after creating the directory tree and immediately before any
   // content reaches disk. This catches a changed target, link insertion, or collision.
-  const preflight = await inspectAuthoringDestination(before.directory, plan);
+  const preflight = await inspectAuthoringDestination(before.directory, output);
   assertCollisions(preflight, files, before.directory);
 
   const staged: Array<{ file: MaterializedFile; target: string; temporary: string }> = [];
@@ -139,7 +148,7 @@ export async function writeAuthoringPlan(
 
     // Staging changes directory mtimes, so the fingerprint deliberately tracks directory
     // identity but not those mutable timestamps. Re-inspect paths and target identities here.
-    const immediatelyBeforePublish = await inspectAuthoringDestination(preflight.directory, plan);
+    const immediatelyBeforePublish = await inspectAuthoringDestination(preflight.directory, output);
     if (immediatelyBeforePublish.fingerprint !== preflight.fingerprint) {
       throw new Error('authoring destination changed before files could be written');
     }
@@ -166,7 +175,7 @@ export async function writeAuthoringPlan(
       }
     }
 
-    const after = await inspectAuthoringDestination(preflight.directory, plan);
+    const after = await inspectAuthoringDestination(preflight.directory, output);
     return { directory: after.directory, fingerprint: after.fingerprint, written: files.map((file) => file.path) };
   } finally {
     await Promise.all(
@@ -181,6 +190,15 @@ export async function writeAuthoringPlan(
       }),
     );
   }
+}
+
+/** Write a sealed registered-block package; callers never pass a mutable plan to this boundary. */
+export function writeGeneratedRegisteredBlock(
+  outputDirectory: string,
+  generated: GeneratedRegisteredBlock,
+  approval?: AuthoringDestinationApproval,
+): Promise<{ directory: string; fingerprint: string; written: string[] }> {
+  return writeAuthoringOutput(outputDirectory, generated, approval);
 }
 
 /** Validate again at the filesystem boundary; schema validation alone must never be trusted for writes. */
@@ -337,8 +355,8 @@ function assertCollisions(inspection: DestinationInspection, files: Array<Pick<P
   }
 }
 
-function plannedFiles(plan: AuthoringPlan): PlannedOutput[] {
-  const maybeFiles = (plan as unknown as { files?: unknown }).files;
+function plannedFiles(output: AuthoringOutputPlan): PlannedOutput[] {
+  const maybeFiles = output.files;
   if (!Array.isArray(maybeFiles)) {
     return [];
   }
