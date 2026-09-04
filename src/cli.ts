@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -15,6 +15,9 @@ import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
 import { installCanonicalSkill, readCanonicalSkillGuide, SkillScope, SkillTarget } from './skill.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
+import { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringPlan } from './authoring/destination.js';
+import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
+import { renderAuthoringPreview } from './authoring/preview.js';
 
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
@@ -44,6 +47,18 @@ interface SkillCliOptions {
   target?: SkillTarget;
   dryRun?: boolean;
   force?: boolean;
+}
+
+interface AuthorPreviewCliOptions {
+  json?: boolean;
+  outputDir?: string;
+  width?: string;
+}
+
+interface AuthorWriteCliOptions {
+  confirm?: string;
+  outputDir?: string;
+  json?: boolean;
 }
 
 const program = new Command();
@@ -246,6 +261,99 @@ program
     }
   });
 
+const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
+
+author
+  .command('preview <planOrStdin>')
+  .description('Validate and render an authoring plan without writing files.')
+  .option('--output-dir <dir>', 'exact destination directory to fingerprint (default: plan directory or current directory)')
+  .option('--width <columns>', 'preview width in terminal columns')
+  .option('--json', 'emit a machine-readable preview')
+  .action(async (planOrStdin: string, options: AuthorPreviewCliOptions) => {
+    const plan = validateAuthoringPlan(await readAuthoringPlan(planOrStdin));
+    const hash = hashAuthoringPlan(plan);
+    const destination = authoringDestination(options.outputDir, plan.target.directory);
+    const inspection = await inspectAuthoringDestination(destination, plan);
+    const confirmation = hashAuthoringConfirmation(plan, inspection);
+    const width = parsePreviewWidth(options.width);
+    const preview = renderAuthoringPreview(plan, {
+      hash,
+      confirmationHash: confirmation,
+      width,
+      // Rendering itself contains no ANSI. Explicitly force the plain policy when NO_COLOR is
+      // set so a caller cannot accidentally enable colour through a shared option object later.
+      color: !process.env.NO_COLOR,
+      destination: inspection.directory,
+      destinationFingerprint: inspection.fingerprint,
+    });
+    const result = {
+      ok: true,
+      command: 'author preview',
+      // `hash` remains the copy-and-paste confirmation value for backwards-compatible CLI use.
+      // `planHash` is included separately for consumers that only need plan identity.
+      hash: confirmation,
+      planHash: hash,
+      confirmation,
+      canonicalJson: serializeAuthoringPlan(plan),
+      plan,
+      destination: { directory: inspection.directory, fingerprint: inspection.fingerprint },
+      preview,
+      noFilesWritten: true,
+    };
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    process.stdout.write(preview);
+  });
+
+author
+  .command('write <planOrStdin>')
+  .description('Materialize content already supplied by a confirmed authoring plan.')
+  .requiredOption('--confirm <hash>', 'exact destination-bound SHA-256 from author preview')
+  .requiredOption('--output-dir <dir>', 'exact destination directory')
+  .option('--json', 'emit a machine-readable write result')
+  .action(async (planOrStdin: string, options: AuthorWriteCliOptions) => {
+    const plan = validateAuthoringPlan(await readAuthoringPlan(planOrStdin));
+    const planHash = hashAuthoringPlan(plan);
+    if (!options.outputDir) {
+      throw new Error('--output-dir is required');
+    }
+    const destination = authoringDestination(options.outputDir, plan.target.directory);
+    const inspection = await inspectAuthoringDestination(destination, plan);
+    const confirmation = hashAuthoringConfirmation(plan, inspection);
+    // Inspection is read-only. The write boundary receives the same snapshot and checks it again
+    // before creating a directory or establishing any new filesystem baseline.
+    if (options.confirm !== confirmation) {
+      throw new Error('authoring confirmation does not match the reviewed plan and destination; no files written');
+    }
+    const result = await writeAuthoringPlan(destination, plan, inspection);
+    const output = {
+      ok: true,
+      command: 'author write',
+      hash: confirmation,
+      planHash,
+      destination: { directory: result.directory, fingerprint: result.fingerprint },
+      written: result.written,
+      noFilesWritten: result.written.length === 0,
+    };
+    if (options.json) {
+      console.log(JSON.stringify(output, null, 2));
+      return;
+    }
+    console.log(`Plan SHA-256: ${planHash}`);
+    console.log(`Confirmation SHA-256: ${confirmation}`);
+    console.log(`Destination: ${result.directory}`);
+    console.log(`Destination fingerprint: ${result.fingerprint}`);
+    if (result.written.length === 0) {
+      console.log('No files written.');
+      return;
+    }
+    for (const file of result.written) {
+      console.log(`Wrote: ${file}`);
+    }
+  });
+
 async function main(): Promise<void> {
   try {
     rejectAssembleStylingOptions(process.argv);
@@ -338,6 +446,68 @@ async function readInputs(
   }
 
   return Promise.all(files.map(async (file) => ({ path: file, content: await readFile(file, 'utf8') })));
+}
+
+/** Read an authoring plan from exactly one safe relative regular file or stdin. */
+async function readAuthoringPlan(target: string): Promise<string> {
+  if (target === '-') {
+    return readStdin();
+  }
+  if (!isSafePlanPath(target)) {
+    throw new Error(`authoring plan path must be a safe relative path: ${JSON.stringify(target)}`);
+  }
+  let current = path.resolve(process.cwd());
+  const segments = target.split('/');
+  for (const [index, segment] of segments.entries()) {
+    current = path.join(current, segment);
+    const stats = await lstat(current);
+    if (stats.isSymbolicLink()) {
+      throw new Error(`authoring plan path must not contain a symbolic link: ${target}`);
+    }
+    if (index < segments.length - 1 && !stats.isDirectory()) {
+      throw new Error(`authoring plan path has a non-directory parent: ${target}`);
+    }
+    if (index === segments.length - 1 && !stats.isFile()) {
+      throw new Error(`authoring plan path is not a regular file: ${target}`);
+    }
+  }
+  return readFile(current, 'utf8');
+}
+
+function isSafePlanPath(value: string): boolean {
+  if (
+    !value ||
+    value.includes('\0') ||
+    value.includes('\\') ||
+    path.posix.isAbsolute(value) ||
+    path.win32.isAbsolute(value) ||
+    /^[A-Za-z]:/.test(value)
+  ) {
+    return false;
+  }
+  return value.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
+function authoringDestination(outputDirectory: string | undefined, packageDirectory: string | undefined): string {
+  // `--output-dir` names the exact package destination, so the directory printed by preview can
+  // be passed unchanged to write. A plan directory is only the preview default when no explicit
+  // destination was selected.
+  if (outputDirectory !== undefined) {
+    return path.resolve(outputDirectory);
+  }
+  return packageDirectory && packageDirectory !== '.'
+    ? path.resolve(process.cwd(), ...packageDirectory.split('/'))
+    : path.resolve(process.cwd());
+}
+
+function parsePreviewWidth(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!/^[0-9]+$/.test(value) || Number(value) < 1) {
+    throw new Error('--width must be a positive integer');
+  }
+  return Number(value);
 }
 
 function rejectAssembleStylingOptions(argv: string[]): void {

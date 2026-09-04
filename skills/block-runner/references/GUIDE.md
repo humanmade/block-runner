@@ -16,6 +16,7 @@ access to fetch the package. **You** are the model in this pipeline.
 
 | You have | Use | Why |
 |---|---|---|
+| A reusable registered block to author — before source exists | **`author preview`** → user confirmation → **`author write`** | A versioned AuthoringPlan makes the consequential implementation choices reviewable and hash-binds the write. |
 | A design in your head, or HTML you are about to write | **`assemble`** | You describe the structure; Block Runner builds valid blocks from it. Best structural results. |
 | Authored source HTML — a design tool export, source file, or paste | **`convert`** | Rule-based translation of existing markup, and the only path that carries CSS. Do not use frontend-scraped render output. |
 | Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Proves the editor will accept it. |
@@ -32,7 +33,98 @@ unsure whether the styling matters, ask the user rather than silently flattening
 
 ---
 
-## 2. `assemble` — describe the structure, get valid blocks
+## 2. Registered-block authoring — preview the plan before a write
+
+Use this path when the requested result is a reusable, registered WordPress block source
+package. It is not an HTML conversion path and it does not let a prose description stand in for
+implementation decisions. First make an **`AuthoringPlan`**: a versioned JSON contract that
+names the target block and records its native child structure, editable fields, locking, style
+outcomes, pattern overrides, assets, planned files, and warnings. A plan is the thing being
+reviewed and, eventually, written.
+
+AuthoringPlan v1 has these top-level fields. Omitted optional sections canonicalize to their
+documented empty/default form; object keys are recursively sorted for canonical JSON, while
+array order remains material.
+
+| Field | Contract |
+|---|---|
+| `version` | Required literal `1`. |
+| `generatorVersion` | Required generator identity/version; it participates in the confirmation hash. |
+| `target` | Required `{ "name": "namespace/slug", "title": "…" }`; `directory`, when present, is a safe relative package path. |
+| `structure` | Native block nodes: `block`, optional stable `id`, `label`, `attributes`, per-node `lock`, and `children`. Never HTML. |
+| `fields` | Editor values with `id`, `label`, and explicit `mode`: `fixed`, `editable`, or `override`; may identify a structure `node`, `attribute`, type, default, and description. |
+| `locking` | Whole-block lock mode (`all`, `contentOnly`, or `none`) and optional move/remove/insert permissions. |
+| `styles` | Strategy (`native`, `scoped-css`, or `mixed`) plus a disposition for each source property: `native`, `token`, `scoped-css`, or `dropped`. |
+| `pattern` | Readiness flag and overrides that name their field. |
+| `assets` | Identified sources with optional safe relative destinations, availability status, and required flag. |
+| `files` | Planned safe relative paths, optional materialized `content`, optional kind, and `operation: create|replace` (omitted means `create`). `plannedFiles` is only accepted as an input alias and canonicalizes to `files`. |
+| `warnings` | Any unresolved or deliberate caveats. |
+
+The plan must make every material choice explicit. In particular, label fields as **fixed**,
+**editable**, or **override**; say which styles map to native or theme support and which need a
+different outcome; and identify every replacement as `replace` (new files default to `create`).
+Do not hide those choices in generated code, HTML, a chat summary, or an implied default.
+
+### Preview, then talk to the user
+
+```bash
+npx -y block-runner@latest author preview authoring-plan.json --output-dir generated/feature-grid
+```
+
+`author preview` is read-only. It validates and canonicalizes the plan, computes a SHA-256
+confirmation value bound to both the plan and the selected destination fingerprint, and prints a
+deterministic plain-text review. It includes the target, structure, editable fields, style
+outcomes, assets, pattern readiness, planned files, warnings, destination fingerprint, and the
+unambiguous line **`No files written.`** It labels fixed, editable, and override fields in text,
+so colour is never needed to understand it. Terminal width affects wrapping only; `NO_COLOR` is
+honoured and the preview never inserts ANSI escape sequences into JSON.
+
+Read this preview before asking for consent. Summarize the decisions in ordinary language and
+show the complete 64-character, lower-case hexadecimal confirmation SHA-256. The installed skill
+owns the conversation: ask a clear yes/no
+question such as “Approve writing exactly this plan, identified by `<hash>`, to `<directory>`?”
+Do not ask the CLI to prompt, and do not consider an earlier or general “go ahead” to approve a
+changed plan.
+
+If any planned file is a replacement, ask separately and name the affected files. Replacing an
+existing file is a distinct decision from creating the plan; no affirmative replacement answer
+means no `author write`.
+
+### Write only the previewed plan
+
+After the user has affirmatively approved the displayed confirmation hash (and any replacements), run:
+
+```bash
+npx -y block-runner@latest author write authoring-plan.json \
+  --confirm '<full-sha-256-from-preview>' \
+  --output-dir '<the-previewed-directory>'
+```
+
+Pass the full confirmation hash exactly as the preview displayed it; `--output-dir` names the
+exact package destination, rather than a parent directory. The command is intentionally
+non-interactive: it never opens a prompt and never consumes stdin as confirmation. This also
+applies with `--json` and when stdout is redirected. A missing, stale, or incorrect hash must
+be treated as a no-write result, not as a reason to retry with a looser invocation.
+
+`-` may supply the plan on stdin (`author preview -` or `author write -`); it is only plan input,
+never confirmation input. For a write, provide the same canonical plan that was previewed, the
+same destination, and the confirmation hash from that preview. If any changes, preview it again
+and obtain fresh consent.
+
+Do not work around a rejected write. Unsafe relative paths, absolute paths, `..` traversal,
+destination changes, collisions, or a symlink in the selected output directory's prefix
+are failures before any write. The command rechecks the destination fingerprint, paths,
+symlinks, and collisions immediately before it uses exclusive, atomic file writes. Surface the
+failure, revise the plan or destination safely, then start again at preview.
+
+Generation of source is deliberately separate from this review loop. `author write` can
+materialize only `files[].content` already present in the exact reviewed plan; a plan that only
+describes future files is a valid no-op. Do not pretend that `author preview` generated files,
+parse its display back into JSON, or use `author write` to fill decisions the plan omitted.
+
+---
+
+## 3. `assemble` — describe the structure, get valid blocks
 
 You emit a JSON tree describing *what blocks and where*. Deterministic code turns that into
 markup. You never write `<!-- wp:... -->` markup yourself — that is the whole point. Writing
@@ -173,7 +265,7 @@ not registered produces a warning naming that node.
 
 ---
 
-## 3. `convert` — someone else's HTML
+## 4. `convert` — someone else's HTML
 
 ```bash
 printf '%s' "$PASTED_HTML" | npx -y block-runner@latest convert - --json
@@ -200,7 +292,7 @@ design yourself and describing it as an intent tree instead.
 
 ---
 
-## 4. The pre-flight loop — before anything is saved
+## 5. The pre-flight loop — before anything is saved
 
 Run this on block markup before you write it to WordPress:
 
@@ -243,7 +335,7 @@ Read `.ok` and `.summary.invalid` for the verdict, `.items[].source.htmlLine` fo
 
 ---
 
-## 5. Where the blocks go
+## 6. Where the blocks go
 
 Producing valid markup is not the end of the job. Every run ends in one of three places, and
 you pick based on what is available — never leave the markup sitting in a temp file or scroll
@@ -273,7 +365,7 @@ Custom HTML. A silent success is indistinguishable from a silent failure.
 
 ---
 
-## 6. Matching the user's site
+## 7. Matching the user's site
 
 Optional, and worth it when you know the target site.
 
@@ -288,7 +380,7 @@ Optional, and worth it when you know the target site.
 
 ---
 
-## 7. Failure posture
+## 8. Failure posture
 
 Block Runner is an assist, not a gate that can strand the user.
 
@@ -305,7 +397,7 @@ harmless. Read results from stdout or `--json`. Users who run this often can
 
 ---
 
-## 8. Installing this as a skill
+## 9. Installing this as a skill
 
 If your harness supports skills, install the canonical skill into the current project:
 

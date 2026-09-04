@@ -17,8 +17,16 @@ package.
 
 ## The short version
 
-Three paths. Pick by what you have:
+Four paths. Pick by what you have:
 
+- **You are authoring a reusable, registered block** → first make a versioned `AuthoringPlan`
+  that captures the block identity, native structure, editable and locked parts, style outcomes,
+  pattern overrides, assets, and planned files. Run `author preview` and show its plain-text
+  result to the user. The preview's confirmation SHA-256 is bound to the exact plan and destination
+  snapshot that may be written. The installed
+  skill—not the CLI—asks for a clear conversational confirmation after the user has seen that
+  preview. Only then run `author write` with that full confirmation hash and an explicit output directory.
+  Do not generate source during the conversation or treat a prose description as a plan.
 - **You are inventing the structure** → do not write HTML. Emit an intent tree (JSON
   describing which blocks and how they nest) and pipe it to
   `npx -y block-runner@latest assemble - --json`. Deterministic code builds the markup, so it
@@ -44,6 +52,13 @@ Three paths. Pick by what you have:
 - **If the CSS matters, use `convert`, not `assemble`.** An intent tree carries structure and
   content, not styling. Ask the user rather than silently flattening their design.
 - **Passwords go in `--wp-app-password-env <NAME>`, never in argv.**
+- **Registered-block authoring is preview first.** `author preview` writes no files; never
+  invoke `author write` until the user has seen the matching preview and affirmatively approved
+  it. Pass the confirmation hash displayed there with `--confirm`; the core deliberately never prompts.
+- **Replacement needs its own yes.** If the preview says any planned file will replace an
+  existing file, name those files and obtain an explicit replacement decision in addition to
+  approval of the plan. A collision or unsafe destination is a stop, not something to work
+  around.
 - **It is an assist, not a gate.** If the tool is unavailable, fall back to your own checks and
   say so — never block the user on it.
 
