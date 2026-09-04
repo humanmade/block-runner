@@ -4,7 +4,7 @@
  * a Core-only pattern which happens to have similar bindings.
  */
 import { execFile } from 'node:child_process';
-import { mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
+import { chmod, lstat, mkdir, readFile, readdir, utimes, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -32,6 +32,7 @@ const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'patter
 const visualGoldenPath = path.join(projectRoot, 'proof', 'wordpress-7.1-pattern-overrides.expected.png');
 const pluginSlug = 'block-runner-pattern-overrides-fixture';
 const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z');
+const fixedZipMode = 0o644;
 
 const RETAINED_FIXTURE_ASSET_SOURCES = new Map([
   ['canonical-image', 'source/canonical.png'],
@@ -115,13 +116,11 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
     timeout: 180_000,
     env: npmEnvironment,
   });
-  // wp-scripts preserves an inherited NODE_ENV. In Vitest that otherwise builds a development ZIP.
-  await execFileAsync('npm', ['run', 'zip'], { cwd: pluginDirectory, timeout: 180_000,
-    env: { ...npmEnvironment, NODE_ENV: 'production' } });
+  await buildDeterministicPluginZip(pluginDirectory, npmEnvironment);
   await execFileAsync('npm', ['run', 'test:zip', '--', pluginZip], {
     cwd: pluginDirectory,
     timeout: 30_000,
-    env: npmEnvironment,
+    env: { ...npmEnvironment, TZ: 'UTC' },
   });
 
   // Observe real webpack-emitted files instead of predicting a content hash or inlining a URL.
@@ -161,6 +160,54 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
   ]);
 
   return { inputPath, pluginDirectory, pluginZip, generatedBlockMarkup, nativeContainerMarkup, fixture };
+}
+
+/**
+ * Build with the real wp-scripts plugin-zip implementation, but leave a deterministic seam
+ * between its build and archive phases. Calling the generated `zip` script would rebuild and
+ * restore wall-clock mtimes immediately before AdmZip reads them.
+ */
+export async function buildDeterministicPluginZip(
+  pluginDirectory: string,
+  npmEnvironment: NodeJS.ProcessEnv,
+): Promise<void> {
+  const environment = { ...npmEnvironment, NODE_ENV: 'production', TZ: 'UTC' };
+  await execFileAsync('npm', ['run', 'build'], {
+    cwd: pluginDirectory,
+    timeout: 180_000,
+    env: environment,
+  });
+  await normalizePluginZipInputs(pluginDirectory);
+  const wpScripts = path.join(pluginDirectory, 'node_modules', '@wordpress', 'scripts', 'bin', 'wp-scripts.js');
+  await execFileAsync(process.execPath, [wpScripts, 'plugin-zip'], {
+    cwd: pluginDirectory,
+    timeout: 180_000,
+    env: environment,
+  });
+}
+
+/** Normalize precisely the regular files selected by the generated package's `files` allowlist. */
+export async function normalizePluginZipInputs(pluginDirectory: string): Promise<void> {
+  const root = path.resolve(pluginDirectory);
+  const buildRoot = path.join(root, 'build');
+  const buildEntries = await readdir(buildRoot, { recursive: true });
+  const selected = [
+    path.join(root, 'package.json'),
+    path.join(root, 'plugin.php'),
+    path.join(root, 'readme.txt'),
+    ...buildEntries.map((entry) => path.join(buildRoot, entry)),
+  ];
+  for (const file of selected) {
+    const stats = await lstat(file);
+    if (!stats.isFile() || stats.isSymbolicLink()) {
+      // A directory is not an archive member; all other non-regular entries would make the
+      // generated package depend on host filesystem metadata and are refused explicitly.
+      if (stats.isDirectory()) continue;
+      throw new Error(`Generated ZIP input is not a regular file: ${file}`);
+    }
+    await chmod(file, fixedZipMode);
+    await utimes(file, fixedTimestamp, fixedTimestamp);
+  }
 }
 
 async function serializeNativeTemplate(template: AuthoringTemplate): Promise<string> {
