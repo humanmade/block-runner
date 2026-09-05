@@ -194,6 +194,11 @@ separate replacement approvals, so their absolute preview paths must also be sup
 `--approve-replace <path...>` before they can change. An unrecognised host is refused without
 writing and the command offers the standalone form above.
 
+Standalone previews include the complete, versioned npm lock for their pinned local
+`@wordpress/scripts` toolchain. Confirmed writes only materialize the reviewed source and lock
+bytes: they do not resolve dependencies, contact a registry, or run npm. Run `npm ci` separately
+when preparing the generated plugin to build or package it.
+
 ### Registered-block authoring
 
 HTML analysis returns `package.canonicalPlan`. Save that object as your plan, review its

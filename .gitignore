@@ -27,6 +27,7 @@ benchmarks/presentation/scoreboard.html
 # Immutable proof-run evidence is an output artifact, not a source fixture.
 proof-receipts/
 .block-runner-proof-stage/
+.block-runner-trash/
 
 # tuner: cached propose artifacts + captured regressions (smoke.seed.json + baselines/ stay committed)
 benchmarks/.cache/
