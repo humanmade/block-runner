@@ -253,23 +253,61 @@ async function login(page, baseUrl) {
   ]);
 }
 
-async function waitForEditorReady(page) {
+async function waitForEditorReady(page, { requireCurrentBlocks = false } = {}) {
   await page.waitForFunction(
     () => Boolean(globalThis.wp?.data?.select('core/block-editor')?.getBlocks),
     undefined,
     { timeout: 20_000 },
   );
-  // Depending on the registered block set, WordPress hosts the writing flow
-  // in the API-v3 iframe or directly in the page.
+  // The block-editor data store comes up before either canvas arrangement is
+  // guaranteed. Wait for the first observable canvas surface so we do not
+  // decide on top-level rendering just because the API-v3 iframe is a moment
+  // behind the store.
   await page.locator('iframe[name="editor-canvas"], .block-editor-writing-flow, .editor-styles-wrapper').first()
     .waitFor({ state: 'visible', timeout: 20_000 });
+  // WordPress creates the editor-canvas element before its document has
+  // mounted the writing flow. In particular, a reopened post can expose a
+  // fresh block-store tree while that iframe is still rendering the previous
+  // document. Wait inside the frame before retaining the canvas locator, so
+  // native block client IDs and their editable DOM controls belong to the
+  // same editor instance.
+  const iframe = page.locator('iframe[name="editor-canvas"]');
+  let canvas;
+  if (await iframe.count()) {
+    canvas = page.frameLocator('iframe[name="editor-canvas"]');
+    await canvas.locator('.block-editor-writing-flow, .editor-styles-wrapper').first()
+      .waitFor({ state: 'visible', timeout: 20_000 });
+  } else {
+    // Older WordPress editor configurations render the writing flow directly
+    // in the top-level page.
+    canvas = page;
+    await page.locator('.block-editor-writing-flow, .editor-styles-wrapper').first()
+      .waitFor({ state: 'visible', timeout: 20_000 });
+  }
+  // A visible writing-flow wrapper alone is not proof that this is the
+  // document currently represented by the block store: during a post reopen,
+  // the previous iframe can remain visible while the new store is ready.
+  // Capture the current store's client IDs and require one in this canvas
+  // before it is retained for native-control interactions.
+  const clientIds = await page.waitForFunction((requireBlocks) => {
+    const selector = globalThis.wp?.data?.select('core/block-editor');
+    const visit = (blocks) => blocks.flatMap((block) => [block, ...visit(block.innerBlocks ?? [])]);
+    const ids = visit(selector?.getBlocks?.() ?? [])
+      .map((block) => block.clientId)
+      .filter((clientId) => typeof clientId === 'string' && clientId.length > 0);
+    return !requireBlocks || ids.length > 0 ? ids : false;
+  }, requireCurrentBlocks, { timeout: 20_000 }).then((handle) => handle.jsonValue());
+  if (clientIds.length > 0) {
+    const currentBlockSelector = clientIds
+      .map((clientId) => `[data-block=${JSON.stringify(clientId)}]`)
+      .join(', ');
+    await canvas.locator(currentBlockSelector).first().waitFor({ state: 'visible', timeout: 20_000 });
+  }
+  editorCanvas = canvas;
   const welcome = page.getByRole('dialog', { name: /welcome to the editor/i });
   if (await welcome.isVisible().catch(() => false)) {
     await welcome.getByRole('button', { name: /close/i }).click();
   }
-  editorCanvas = await page.locator('iframe[name="editor-canvas"]').count()
-    ? page.frameLocator('iframe[name="editor-canvas"]')
-    : page;
 }
 async function insertThroughVisibleInserter(page, fixture) {
   const search = await openVisibleInserter(page);
@@ -423,7 +461,7 @@ async function reopenPost(page) {
     const id = await page.evaluate(() => globalThis.wp.data.select('core/editor').getCurrentPostId());
     if (!Number.isInteger(Number(id)) || Number(id) <= 0) return false;
     await page.goto(`${baseUrl}/wp-admin/post.php?post=${Number(id)}&action=edit`, { waitUntil: 'domcontentloaded' });
-    await waitForEditorReady(page);
+    await waitForEditorReady(page, { requireCurrentBlocks: true });
     return true;
   } catch {
     return false;
