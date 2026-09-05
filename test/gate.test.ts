@@ -52,6 +52,15 @@ describe('gate', () => {
     expect(report.summary.invalid).toBe(0);
     expect(report.output).toContain('wp-block-image');
     expect(report.output).toContain('https://example.com/a.jpg');
+    expect(report.items).toContainEqual(expect.objectContaining({ status: 'warning', reason: expect.stringContaining('rebuilt from parsed attributes') }));
+  });
+
+  it('does not silently discard text outside the attributes recognised by the native block', async () => {
+    const markup = '<!-- wp:image --><figure><img src="https://example.com/a.jpg" alt="A"/><p>Important caption</p></figure><!-- /wp:image -->';
+    const report = await canonicalize(markup);
+    expect(report.ok).toBe(false);
+    expect(report.output).toContain('Important caption');
+    expect(report.items).toContainEqual(expect.objectContaining({ status: 'warning', reason: expect.stringContaining('left unchanged') }));
   });
 
   it('leaves unregistered blocks untouched while repairing invalid core blocks', async () => {
