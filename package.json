@@ -57,13 +57,13 @@
     "proof/wp-env.json"
   ],
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
   },
   "scripts": {
     "build": "npm run clean && tsup",
     "clean": "node scripts/clean-dist.mjs",
-    "dev": "tsx src/cli.ts",
-    "proof": "tsx src/cli.ts proof",
+    "dev": "tsx src/bin.ts",
+    "proof": "tsx src/bin.ts proof",
     "proof:fixture": "tsx scripts/build-pattern-overrides-fixture.ts",
     "proof:control": "node scripts/collect-native-heading-control.mjs",
     "bench": "tsx scripts/bench.ts",
@@ -79,9 +79,12 @@
     "test:package": "node scripts/package-boundary-check.mjs",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run --ignore-scripts",
+    "check:node-support": "node scripts/check-node-support.mjs",
+    "smoke:package": "node scripts/smoke-packed-cli.mjs",
+    "smoke:package:unsupported-node": "node scripts/smoke-packed-cli-unsupported-node.mjs",
     "check:private": "node scripts/check-private-refs.mjs",
     "release:check": "node scripts/release-check.mjs",
-    "verify": "npm run typecheck && node --import tsx scripts/authoring-hashes.ts --check && npm test && npm run build && npm run check:private && npm run pack:check",
+    "verify": "npm run check:node-support && npm run typecheck && node --import tsx scripts/authoring-hashes.ts --check && npm test && npm run build && npm run check:private && npm run pack:check",
     "prepare": "npm run build",
     "postinstall": "node scripts/prune-wp-vips.mjs"
   },
@@ -91,7 +94,7 @@
     "@wordpress/block-library": "10.5.0",
     "@wordpress/blocks": "15.27.0",
     "ajv": "8.18.0",
-    "commander": "15.0.0",
+    "commander": "14.0.3",
     "fast-glob": "3.3.3",
     "jsdom": "29.1.1",
     "php-parser": "3.7.0",

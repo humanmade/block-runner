@@ -26,7 +26,7 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 ## Quickstart
 
 ```sh
-npm install block-runner          # requires Node 20+
+npm install block-runner          # requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0
 ```
 
 This is the basic install: deterministic `convert`, `assemble`, `validate`, `fix`, and
@@ -438,13 +438,15 @@ model-agnostic: it works on the output of any model, from any vendor.
 
 ```yaml
 - uses: actions/setup-node@v4
-  with: { node-version: 22 }
+  with: { node-version: 22.13.0 }
 - run: npx block-runner validate "content/**/*.html" --strict
 ```
 
 ## Library
 
-The library is ESM-only and requires Node.js 20 or later. CommonJS callers should use
+The library is ESM-only and requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0. This means
+Node 20.19.0+ on the 20.x line, Node 22.13.0+ on the 22.x line, or Node 24.0.0+. Node 21 and
+23 are intentionally unsupported. CommonJS callers should use
 `await import('block-runner')` rather than `require('block-runner')`.
 
 ```ts
