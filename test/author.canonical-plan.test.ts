@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { author } from '../src/author/index.js';
+import { validateCoverageFulfillment } from '../src/author/plan.js';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
 import { PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
 
@@ -134,6 +135,32 @@ describe('HTML analysis uses the confirmed compiler', () => {
     const rejectedCss = await author(markup, { ...options, plan: erasedRule });
     expect(rejectedCss.ok).toBe(false);
     expect(rejectedCss.items.map((item) => item.reason).join('\n')).toMatch(/scoped-css.*matching shared structured CSS rule/i);
+
+    const nativeCoveragePlan: any = structuredClone(independent);
+    nativeCoveragePlan.coverage.styles[0].outcome = 'native';
+    nativeCoveragePlan.styles = { strategy: 'native', outcomes: [{ property: 'color', value: 'red', outcome: 'native' }] };
+    expect(() => validateCoverageFulfillment(nativeCoveragePlan)).toThrow(/marked native.*matching native block attribute/i);
+
+    nativeCoveragePlan.structure[0]!.attributes = { metadata: { color: 'red' } };
+    expect(() => validateCoverageFulfillment(nativeCoveragePlan)).toThrow(/matching native block attribute/i);
+
+    nativeCoveragePlan.structure[0]!.attributes = { style: { color: { text: 'red' } } };
+    expect(() => validateCoverageFulfillment(nativeCoveragePlan)).not.toThrow();
+    expect(compileRegisteredBlock(nativeCoveragePlan).files.find((file) => file.path === 'edit.js')?.content.toString()).toContain('"text": "red"');
+
+    const assertNativeOutput = (property: string, value: string, attributes: object, output: string) => {
+      const candidate: any = structuredClone(nativeCoveragePlan);
+      candidate.coverage.styles = [{ ...candidate.coverage.styles[0], property, value, outcome: 'native' }];
+      candidate.styles = { strategy: 'native', outcomes: [{ property, value, outcome: 'native' }] };
+      candidate.structure[0]!.attributes = attributes;
+      expect(() => validateCoverageFulfillment(candidate)).not.toThrow();
+      expect(compileRegisteredBlock(candidate).files.find((file) => file.path === 'edit.js')?.content.toString()).toContain(output);
+    };
+    assertNativeOutput('font-size', '2rem', { style: { typography: { fontSize: '2rem' } } }, '"fontSize": "2rem"');
+    assertNativeOutput('font-family', 'Inter, sans-serif', { style: { typography: { fontFamily: 'Inter, sans-serif' } } }, '"fontFamily": "Inter, sans-serif"');
+    assertNativeOutput('margin-top', '1rem', { style: { spacing: { margin: { top: '1rem' } } } }, '"margin": {');
+    assertNativeOutput('line-height', '1.5', { style: { typography: { lineHeight: '1.5' } } }, '"lineHeight": "1.5"');
+    assertNativeOutput('border-radius', '4px', { style: { border: { radius: '4px' } } }, '"radius": "4px"');
 
     const wrongTarget = structuredClone(independent);
     wrongTarget.target.name = 'other/block';

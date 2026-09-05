@@ -12,6 +12,7 @@ import type {
   JsonValue,
 } from '../authoring/schema.js';
 import { authoringRulesFromStylesheet } from '../authoring/styles.js';
+import { BACKGROUND_COLOR_TARGET, GRADIENT_TARGET, classifyBackground, lookupDeclaration } from '../styles/declarations.js';
 import type { AssetLedgerEntry, AuthoredStyleLedgerEntry, AuthorConfig, WpBlock } from '../types.js';
 import { scanCssUrlReferences, type FontAssetWarning, type FontLicenseDecision, type PreparedCssAsset } from './assets.js';
 import { scanStylesheet, scopeStylesheet, type CssRule } from './styles.js';
@@ -291,12 +292,17 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
       }
       continue;
     }
+    const nativeAttribute = hasNativeAttribute(plan.structure, entry.property, entry.value);
+    if (entry.outcome === 'native') {
+      // A native ledger outcome records intended transport, but structure is compiler input.
+      if (!nativeAttribute) throw new Error(`${label} is marked native but has no matching native block attribute.`);
+      continue;
+    }
     const explicitDisposition = plan.styles.outcomes.some((outcome) => outcome.property === entry.property
       && outcome.value === entry.value
-      && ((entry.outcome === 'native' && outcome.outcome === 'native')
-        || (entry.outcome === 'preset' && outcome.outcome === 'token')
+      && ((entry.outcome === 'preset' && outcome.outcome === 'token')
         || (entry.outcome === 'literal' && outcome.outcome === 'scoped-css')));
-    if (!explicitDisposition && !hasNativeAttribute(plan.structure, entry.property, entry.value)) {
+    if (!explicitDisposition && !nativeAttribute) {
       throw new Error(`${label} has no explicit native or literal plan disposition.`);
     }
   }
@@ -322,15 +328,30 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
 /** Match a native declaration only where the requested property and value coexist in an emitted
  * block attribute object; a value-only search would allow unrelated text to satisfy coverage. */
 function hasNativeAttribute(nodes: readonly AuthoringStructureNode[], property: string, value: string): boolean {
-  const expected = property.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase()).toLowerCase();
-  const contains = (input: JsonValue): boolean => {
-    if (Array.isArray(input)) return input.some(contains);
-    if (!input || typeof input !== 'object') return false;
-    return Object.entries(input).some(([key, candidate]) =>
-      key.replace(/-/g, '').toLowerCase() === expected && candidate === value || contains(candidate));
+  const target = nativeStyleTarget(property, value);
+  if (!target) return false;
+  const path = ['style', ...target];
+  const matches = (attributes: JsonValue | undefined): boolean => {
+    let current: unknown = attributes;
+    for (const key of path) {
+      if (!current || typeof current !== 'object' || Array.isArray(current)) return false;
+      current = (current as Record<string, unknown>)[key];
+    }
+    return current === value;
   };
-  return nodes.some((node) => (node.attributes !== undefined && contains(node.attributes))
-    || hasNativeAttribute(node.children ?? [], property, value));
+  return nodes.some((node) => matches(node.attributes) || hasNativeAttribute(node.children ?? [], property, value));
+}
+
+/** Use the same finite declaration registry as conversion. This proves transport only through
+ * actual WordPress style-engine paths, never arbitrary matching metadata. */
+function nativeStyleTarget(property: string, value: string): readonly string[] | undefined {
+  const target = lookupDeclaration(property);
+  if (target?.kind === 'style') return target.path;
+  if (property !== 'background') return undefined;
+  const kind = classifyBackground(value);
+  if (kind === 'color') return BACKGROUND_COLOR_TARGET.path;
+  if (kind === 'gradient') return GRADIENT_TARGET.path;
+  return undefined;
 }
 
 function hasCoverageCssRule(
