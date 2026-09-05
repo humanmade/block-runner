@@ -81,7 +81,9 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   addKeyValue(lines, 'Text domain', target.textDomain ?? target.textdomain, width);
   addKeyValue(lines, 'WordPress', target.wordpress, width);
   const destination = options.destination ?? readString(target, ['directory', 'destination', 'outputDir']);
-  addKeyValue(lines, 'Destination', destination, width);
+  // The exact destination is part of the confirmation boundary, so it must remain copyable
+  // even when a narrow terminal would otherwise split it across lines.
+  addExactKeyValue(lines, 'Destination', destination);
   addKeyValue(lines, 'Destination fingerprint', options.destinationFingerprint, width);
 
   section(lines, 'Structure', width);
@@ -176,7 +178,7 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     if (options.touchedFiles.length === 0) {
       bullet(lines, 'none', width);
     } else {
-      options.touchedFiles.forEach((file) => bullet(lines, describeTouchedFile(file), width));
+      options.touchedFiles.forEach((file) => renderTouchedFile(lines, file, width));
     }
   }
 
@@ -275,7 +277,7 @@ function renderReviewSummary(
   if (destination || touchedFiles.length > 0) {
     bullet(
       lines,
-      `Destination changes: ${destination ?? 'destination not supplied'}; ${creates} create, ${replacements} replacement${replacements === 1 ? '' : 's'}${replacements ? ' requiring explicit hash-bound approval' : ''}. Exact paths follow below.`,
+      `Destination changes: ${destination ? 'selected destination' : 'destination not supplied'}; ${creates} create, ${replacements} replacement${replacements === 1 ? '' : 's'}${replacements ? ' requiring explicit hash-bound approval' : ''}. Exact paths follow below.`,
       width,
     );
   }
@@ -514,11 +516,16 @@ function describeFile(value: unknown, index: number): string {
   return `${path}${kind ? ` [${kind}]` : ''} [${replacement}]`;
 }
 
+function renderTouchedFile(lines: string[], file: AuthoringPreviewTouchedFile, width: number): void {
+  addExactKeyValue(lines, file.operation === 'replace' ? 'Replacement path' : 'Create path', file.path);
+  bullet(lines, describeTouchedFile(file), width);
+}
+
 function describeTouchedFile(file: AuthoringPreviewTouchedFile): string {
   if (file.operation === 'replace') {
-    return `${file.path} [replace; ${file.exists ? 'existing file' : 'path currently absent'}; explicit hash-bound replacement approval required]`;
+    return `[replace; ${file.exists ? 'existing file' : 'path currently absent'}; explicit hash-bound replacement approval required]`;
   }
-  return `${file.path} [create; ${file.exists ? 'conflict: existing file' : 'path currently absent'}]`;
+  return `[create; ${file.exists ? 'conflict: existing file' : 'path currently absent'}]`;
 }
 
 function describeItem(value: unknown, index: number): string {

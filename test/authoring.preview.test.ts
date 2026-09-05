@@ -87,7 +87,8 @@ describe('authoring preview', () => {
   it('wraps to the supplied terminal width', () => {
     for (const width of [44, 12]) {
       const output = renderAuthoringPreview(plan, { width });
-      expect(output.split('\n').every((line) => line.length <= width)).toBe(true);
+      const exactDestination = `Destination: ${plan.target.directory}`;
+      expect(output.split('\n').every((line) => line.length <= width || line === exactDestination)).toBe(true);
     }
   });
 
@@ -126,12 +127,33 @@ describe('authoring preview', () => {
     expect(output).toContain('Unresolved decisions and losses: 3 style or asset issues; 1 warning.');
     expect(output).toContain('Asset ownership: 1 package-owned, 0 external, 0 licensed bundled fonts.');
     expect(output).toContain('Style ownership: 1 native-owned, 1 package-owned shared, 1 editor-only.');
-    expect(output).toContain('/work/generated/feature-grid/block.json [create; path currently absent]');
-    expect(output).toContain('/work/generated/feature-grid/edit.js [replace; existing file; explicit hash-bound replacement approval required]');
+    expect(output).toContain('Destination: /work/generated/feature-grid');
+    expect(output).toContain('Create path: /work/generated/feature-grid/block.json');
+    expect(output).toContain('Replacement path: /work/generated/feature-grid/edit.js');
+    expect(output).toContain('[replace; existing file; explicit hash-bound replacement approval required]');
     expect(output).toContain(`Confirmation SHA-256: ${confirmation}`);
     expect(output.indexOf('Review summary')).toBeLessThan(output.indexOf('Structure'));
     expect(output.indexOf('Structure')).toBeLessThan(output.indexOf('Warnings'));
     expect(output.indexOf('Warnings')).toBeLessThan(output.indexOf(`Confirmation SHA-256: ${confirmation}`));
+  });
+
+  it('keeps authoritative destination and replacement paths copyable at narrow widths', () => {
+    const width = 24;
+    const destination = '/workspace/deterministic-authoring-preview/with/a-deliberately-long-destination';
+    const replacement = `${destination}/block.json`;
+    const output = renderAuthoringPreview(plan, {
+      width,
+      destination,
+      touchedFiles: [{ path: replacement, operation: 'replace', exists: true }],
+    });
+    const lines = output.split('\n');
+
+    expect(destination.length).toBeGreaterThan(width);
+    expect(replacement.length).toBeGreaterThan(width);
+    expect(lines).toContain(`Destination: ${destination}`);
+    expect(lines).toContain(`Replacement path: ${replacement}`);
+    const copyableLines = new Set([`Destination: ${destination}`, `Replacement path: ${replacement}`]);
+    expect(lines.filter((line) => !copyableLines.has(line)).every((line) => line.length <= width)).toBe(true);
   });
 
   it('shows the asset binding and license record for a confirmed font face', () => {
