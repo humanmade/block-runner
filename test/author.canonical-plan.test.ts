@@ -7,6 +7,7 @@ import { author } from '../src/author/index.js';
 import { collectSourceEvidence } from '../src/index.js';
 import { validateCoverageFulfillment } from '../src/author/plan.js';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
+import type { AuthoringPlan } from '../src/authoring/schema.js';
 import { PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
 
 describe('HTML analysis uses the confirmed compiler', () => {
@@ -116,14 +117,32 @@ describe('HTML analysis uses the confirmed compiler', () => {
     const options = { author: { name: 'example/design', styles: { mode: 'css' as const, css: '.notice { color: red; }' } } };
     const analyzed = await author(markup, options);
     expect(analyzed.ok).toBe(false);
-    const independent = {
+    const independent: AuthoringPlan = {
       version: 1 as const, generatorVersion: '0.9.0',
       target: { name: 'example/design', title: 'Design', wordpress: '7.1' },
       source: analyzed.source!, coverage: analyzed.evidence!.coverage!,
-      structure: [{ id: 'root', block: 'core/group' }], fields: [], locking: { mode: 'none' as const },
+      structure: [{ id: 'root', block: 'core/group', attributes: { className: 'notice' }, children: [
+        { id: 'copy', block: 'core/paragraph', attributes: { content: 'Hello' } },
+      ] }], fields: [], locking: { mode: 'none' as const },
       styles: { strategy: 'scoped-css' as const, outcomes: [], rules: [{ kind: 'style' as const, selector: '.notice', declarations: [{ property: 'color', value: 'red' }] }] },
       pattern: { ready: false, overrides: [] }, assets: [], files: [], warnings: [],
     };
+    const setSelector = (candidate: AuthoringPlan, selector: string) => {
+      const rule = candidate.styles.rules?.[0];
+      const coverage = candidate.coverage?.styles[0];
+      if (!rule || rule.kind !== 'style' || !coverage?.source) throw new Error('test plan is missing its style rule coverage');
+      rule.selector = selector;
+      coverage.source.selector = selector;
+    };
+
+    // A declaration alone is not delivery: without the source class in native output, this used
+    // to report a false success while emitted CSS selected nothing.
+    const missingOutputClass = structuredClone(independent);
+    missingOutputClass.structure[0]!.attributes = {};
+    expect(() => validateCoverageFulfillment(missingOutputClass)).toThrow(/selector does not match the generated native template/i);
+    const rejectedMissingOutputClass = await author(markup, { ...options, plan: missingOutputClass });
+    expect(rejectedMissingOutputClass.ok).toBe(false);
+    expect(rejectedMissingOutputClass.items.map((item) => item.reason).join('\n')).toMatch(/selector does not match the generated native template/i);
 
     // The returned inline coverage contains undefined optional location fields before JSON
     // serialization. A separately validated proposal removes them, but remains equivalent.
@@ -131,12 +150,48 @@ describe('HTML analysis uses the confirmed compiler', () => {
     expect(accepted.ok, JSON.stringify(accepted.items)).toBe(true);
     expect(accepted.package?.name).toBe('example/design');
     expect(accepted.package?.files['style.scss']).toContain('color: red');
+    expect(accepted.package?.files['edit.js']).toContain('Hello');
 
     const erasedRule = structuredClone(independent);
     erasedRule.styles.rules = [];
     const rejectedCss = await author(markup, { ...options, plan: erasedRule });
     expect(rejectedCss.ok).toBe(false);
     expect(rejectedCss.items.map((item) => item.reason).join('\n')).toMatch(/scoped-css.*matching shared structured CSS rule/i);
+
+    const selectorList = structuredClone(independent);
+    setSelector(selectorList, '.notice:hover, .missing');
+    expect(() => validateCoverageFulfillment(selectorList)).not.toThrow();
+
+    const nestedSelector = structuredClone(independent);
+    setSelector(nestedSelector, '.card > .notice:not(:hover)');
+    nestedSelector.structure = [{ id: 'card', block: 'core/group', attributes: { className: 'card' }, children: [
+      { id: 'notice', block: 'core/paragraph', attributes: { className: 'notice', content: 'Hello' } },
+    ] }];
+    expect(() => validateCoverageFulfillment(nestedSelector)).not.toThrow();
+
+    const wrongNesting = structuredClone(nestedSelector);
+    wrongNesting.structure[0]!.children = [{ id: 'wrapper', block: 'core/group', attributes: { className: 'wrapper' }, children: [
+      { id: 'notice', block: 'core/paragraph', attributes: { className: 'notice', content: 'Hello' } },
+    ] }];
+    expect(() => validateCoverageFulfillment(wrongNesting)).toThrow(/selector does not match the generated native template/i);
+
+    const nativeTagAndPseudo = structuredClone(independent);
+    setSelector(nativeTagAndPseudo, 'p.notice::before');
+    nativeTagAndPseudo.structure = [{ id: 'notice', block: 'core/paragraph', attributes: { className: 'notice', content: 'Hello' } }];
+    expect(() => validateCoverageFulfillment(nativeTagAndPseudo)).not.toThrow();
+
+    const nestedDynamicNegation = structuredClone(independent);
+    setSelector(nestedDynamicNegation, '.notice:not(:not(.missing:hover))');
+    expect(() => validateCoverageFulfillment(nestedDynamicNegation)).toThrow(/selector does not match the generated native template/i);
+
+    const escapedUtility = structuredClone(independent);
+    escapedUtility.structure[0]!.attributes = { className: 'hover:text-red' };
+    setSelector(escapedUtility, '.hover\\:text-red:hover');
+    expect(() => validateCoverageFulfillment(escapedUtility)).not.toThrow();
+
+    const quotedAttribute = structuredClone(independent);
+    setSelector(quotedAttribute, '.notice[data-state="\:hover"]');
+    expect(() => validateCoverageFulfillment(quotedAttribute)).toThrow(/selector does not match the generated native template/i);
 
     const nativeCoveragePlan: any = structuredClone(independent);
     nativeCoveragePlan.coverage.styles[0].outcome = 'native';
