@@ -29,6 +29,10 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 npm install block-runner          # requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0
 ```
 
+This is the basic install: deterministic `convert`, `assemble`, `validate`, `fix`, and
+authoring commands work without Docker, browser binaries, `wp-env`, or browser-proof
+dependencies.
+
 For the **0.9 registered-block authoring testing release**, use
 `npm install block-runner@testing`. The stable `latest` channel remains on 0.8.0.
 
@@ -296,6 +300,41 @@ runtime verification.
 
 Headless validation is a fast first rung. A generated plugin needs a separate real-WordPress proof before any claim that it activates, registers, edits, renders, or supports pattern overrides is credible. The `proof` command runs the cumulative profile you select against an installable ZIP and a checked-in JSON fixture:
 
+| Entry point | Basic install requirements | Optional proof requirements |
+| --- | --- | --- |
+| Library plus `convert`, `assemble`, `validate`, `fix`, `author`, `plugin`, `context`, and `skill` | Block Runner's production dependencies. WP-CLI remains an external requirement only when selected for context, token, or media resolution. | None. |
+| `proof --profile headless` | The same deterministic Gutenberg validator. | None; it does not start Docker. |
+| `proof --profile runtime` or `editor` | — | Exact `wp-env`, Playwright, WordPress Playwright helpers, and Axe; Docker; an explicitly installed Chromium browser. |
+| `proof --profile full` | — | The runtime/editor toolchain plus exact `pixelmatch` and `pngjs` visual-proof packages. |
+
+The 0.9.0 package inventory moves the six real-WordPress/browser packages from the
+19 direct production dependencies to six exact optional peers (retained as development
+dependencies for this repository). A basic installed dependency tree therefore has none of
+`@wordpress/env`, `@playwright/test`, `@wordpress/e2e-test-utils-playwright`, `axe-core`,
+`pixelmatch`, or `pngjs`; install them only in a project that runs real-WordPress proof.
+
+Set up the runtime/editor proof boundary before requesting `runtime` or `editor`:
+
+```sh
+npm install --save-dev --save-exact \
+  @wordpress/env@11.12.0 \
+  @playwright/test@1.61.1 \
+  @wordpress/e2e-test-utils-playwright@1.51.0 \
+  axe-core@4.11.0
+npx --no-install playwright install chromium
+```
+
+The `full` profile adds the visual-proof pair:
+
+```sh
+npm install --save-dev --save-exact pixelmatch@7.1.0 pngjs@7.0.0
+```
+
+This is deliberately explicit: the proof command never downloads tooling or a browser, and
+never makes a model call. If its optional tools are absent or on the wrong version, the receipt
+is blocked before Docker starts and prints this exact install command. A working Docker CLI and
+daemon are still required for real-WordPress profiles.
+
 ```sh
 # Fast Gutenberg markup check; no Docker is started.
 block-runner proof dist/acme-hero.zip --profile headless --markup fixtures/hero.blocks.html --input fixtures/hero.source.html --fixture fixtures/hero.proof.json
@@ -309,7 +348,7 @@ Profiles build on each other: `headless` validates Gutenberg markup; `runtime` i
 
 The fixture supplies the generated block name, a non-empty editable field inventory, a titled pattern fixture with edits to persist, frontend scope/expectations, reviewed visual golden/masks/threshold, and Axe/manual-review scopes. The browser always navigates to the post it created and published during the run, then records that ID and permalink. Golden images are read-only inputs: the runner stores expected, actual, and diff evidence but never refreshes a golden. Axe output is preserved in full; it is an automated check plus a separately recorded manual-review status, not a claim of complete WCAG conformance.
 
-Proof tooling is exact-pinned in production dependencies: `@wordpress/env`, `@wordpress/e2e-test-utils-playwright`, Playwright, Axe, pixelmatch, and pngjs. The included `proof/wp-env.json` pins WordPress core 7.1 and PHP 8.3; the receipt additionally captures running-container image IDs, database/PHP/core/theme/browser observations, observed plugin metadata, Node and WordPress-package pins, generator/input/plugin/ZIP hashes, command logs, and every evidence object. The environment gate verifies that every retained observation command exited successfully, parses each value against its requested version/hash format, and requires the lockfile plus integrity-pinned direct `@wordpress/*` packages. Missing or malformed observations block the runtime profile. Use `--no-run` only to produce an honest blocked diagnostic receipt.
+Proof tooling is exact-pinned as optional peers and retained in this repository's development dependencies. The included `proof/wp-env.json` pins WordPress core 7.1 and PHP 8.3, while the packed `proof/dependency-pins.json` preserves the direct WordPress package integrity pins that npm intentionally omits from package tarballs. The receipt additionally captures running-container image IDs, database/PHP/core/theme/browser observations, observed plugin metadata, Node and WordPress-package pins, generator/input/plugin/ZIP hashes, command logs, and every evidence object. The environment gate verifies that every retained observation command exited successfully, parses each value against its requested version/hash format, and requires the lockfile or packed pin snapshot plus integrity-pinned direct `@wordpress/*` packages. Missing or malformed observations block the runtime profile. Use `--no-run` only to produce an honest blocked diagnostic receipt after proof tooling is available.
 
 `npm run test:proof:mutations` is an opt-in Docker acceptance suite. It builds deliberately broken plugin ZIPs and proves that registration, save, stylesheet, and pattern failures reach their respective independent gates; it does not run as part of the ordinary unit suite.
 
