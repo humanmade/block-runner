@@ -35,7 +35,7 @@ describe('registered authoring candidate materialization', () => {
     const receipts = path.join(root, 'receipts');
     const manifest = materializeCandidate(fixture, root, candidate, receipts, candidatePlan);
     expect(await readFile(path.join(candidate, 'edit.js'), 'utf8')).toContain('The actual candidate');
-    expect(await readFile(path.join(candidate, 'save.js'), 'utf8')).toContain('InnerBlocks.Content');
+    expect(await readFile(path.join(candidate, 'save.js'), 'utf8')).toContain('useInnerBlocksProps.save( blockProps )');
     expect(existsSync(path.join(candidate, 'src', 'edit.tsx'))).toBe(false);
     expect(existsSync(path.join(candidate, 'style-decisions.json'))).toBe(true);
     expect(existsSync(path.join(candidate, 'style-ledger.json'))).toBe(false);

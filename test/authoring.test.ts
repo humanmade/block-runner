@@ -103,9 +103,10 @@ describe('registered block authoring compiler', () => {
     const canonical = compileRegisteredBlock(compiled.canonicalPlan!);
     for (const file of canonical.files) expect(compiled.files[file.path]).toBe(file.content);
     expect(compiled.template).toEqual(canonical.template);
-    expect(compiled.files['edit.js']).toContain('allowedBlocks={ ALLOWED_BLOCKS }');
-    expect(compiled.files['edit.js']).toContain('templateLock={ TEMPLATE_LOCK }');
-    expect(compiled.files['save.js']).toContain('<InnerBlocks.Content />');
+    expect(compiled.files['edit.js']).toContain('allowedBlocks: ALLOWED_BLOCKS');
+    expect(compiled.files['edit.js']).toContain('useInnerBlocksProps( blockProps');
+    expect(compiled.files['edit.js']).toContain('templateLock: TEMPLATE_LOCK');
+    expect(compiled.files['save.js']).toContain('useInnerBlocksProps.save( blockProps )');
     expect(JSON.parse(compiled.files['block.json']!).$schema).toBe('https://schemas.wp.org/wp/7.1/block.json');
 
     expect(compiled.editableFields).toEqual(
@@ -153,7 +154,7 @@ describe('registered block authoring compiler', () => {
       const compiled = compileAuthoringPlan(representativePlan(templateLock));
       expect(compiled.templateLock).toBe(templateLock);
       expect(compiled.files['edit.js']).toContain(`const TEMPLATE_LOCK = ${JSON.stringify(templateLock)};`);
-      expect(compiled.files['edit.js']).toContain('templateLock={ TEMPLATE_LOCK }');
+      expect(compiled.files['edit.js']).toContain('templateLock: TEMPLATE_LOCK');
     });
   }
 

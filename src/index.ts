@@ -240,6 +240,7 @@ export type {
   ProofEnvironment,
   ProofFilePin,
   ProofFixture,
+  ProofBrowserMatrix,
   ProofGateContext,
   ProofGateResult,
   ProofGateRunner,
