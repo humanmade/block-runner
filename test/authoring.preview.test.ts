@@ -77,11 +77,48 @@ describe('authoring preview', () => {
     expect(first).toContain('assets: 1 (prepared 1)');
     expect(first).toContain('Pattern readiness');
     expect(first).toContain('Planned files');
+    expect(first).toContain('block.json [create]');
+    expect(first).toContain('block.php [create]');
     expect(first).toContain('Warnings');
     expect(first).toContain('No files written.');
     expect(first).toMatch(/Plan SHA-256: [a-f0-9]{64}/);
     expect(first).not.toContain('Confirmation SHA-256:');
     expect(first).not.toMatch(/\x1b\[/);
+  });
+
+  it('derives compiler-owned files and renders hash-bound native metadata for every public caller', () => {
+    const reviewed = validateAuthoringPlan({
+      ...plan,
+      files: [],
+      target: { ...plan.target, metadata: { keywords: ['feature'], variations: [{ name: 'compact', title: 'Compact' }] } },
+    });
+    const output = renderAuthoringPreview(reviewed, { width: 160 });
+
+    expect(output).toContain('Native metadata: {"keywords":["feature"], "variations":[{"name":"compact", "title":"Compact"}]}');
+    expect(output).toContain('block.json [create]');
+    expect(output).toContain('index.js [create]');
+    expect(output).toContain('block.php [create]');
+    expect(output).not.toContain('Planned files\n-------------\n- none');
+  });
+
+  it('uses the shared output derivation to show ready asset destinations and replacement decisions', () => {
+    const reviewed = validateAuthoringPlan({
+      ...plan,
+      files: [{ path: 'assets/inter.woff2', operation: 'replace' }],
+      styles: {
+        ...plan.styles,
+        fonts: [{ assetId: 'inter', family: 'block-runner-example-feature-grid-inter' }],
+      },
+      assets: [{
+        id: 'inter', source: '/design/inter.woff2', kind: 'font', destination: 'assets/inter.woff2', status: 'ready',
+        sha256: 'd'.repeat(64), fontLicense: { ownership: 'Example', license: 'OFL-1.1' },
+      }],
+    });
+
+    const output = renderAuthoringPreview(reviewed, { width: 160 });
+
+    expect(output).toContain('assets/inter.woff2 [replace]');
+    expect(output).toContain('font-licenses.txt [create]');
   });
 
   it('wraps to the supplied terminal width', () => {

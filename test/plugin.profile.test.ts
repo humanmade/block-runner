@@ -13,7 +13,9 @@ import {
   planExistingPluginOutput,
   planStandalonePluginOutput,
   npmEnvironmentForGeneratedPlugin,
+  PublicationInterruptedError,
   removeMatchingAllowScriptsProjection,
+  retryPluginPublication,
   UnsupportedPluginLayoutError,
   writePluginOutput,
 } from '../src/plugin/profile.js';
@@ -82,6 +84,140 @@ describe('wp-scripts plugin profile', () => {
     expect(php?.content.toString()).toContain("register_block_type( $blocks_dir . '/notice' );");
     expect(packageFile?.content.toString()).toContain('--blocks-manifest');
     expect(plan.touchedFiles.every((file) => path.isAbsolute(file.path))).toBe(true);
+  });
+
+  it('retains an exact recovery inventory when failure interrupts publication between two approved replacements', async () => {
+    const root = await existingCollectionPlugin(false);
+    const plan = await planExistingPluginOutput(root, block);
+    const replacements = plan.touchedFiles.filter((file) => file.operation === 'modify');
+    expect(replacements).toHaveLength(2);
+    const original = new Map(await Promise.all(replacements.map(async (file) => [file.path, await readFile(file.path)] as const)));
+
+    let interrupted: PublicationInterruptedError | undefined;
+    try {
+      await writePluginOutput(plan, {
+        authorizedReplacements: replacements.map((file) => file.path),
+        failAfterPublishStep: 1,
+      });
+    } catch (error) {
+      expect(error).toBeInstanceOf(PublicationInterruptedError);
+      interrupted = error as PublicationInterruptedError;
+    }
+    expect(interrupted).toBeDefined();
+    const recovery = interrupted!.recovery;
+    expect(recovery.completed).toHaveLength(1);
+    expect(recovery.pending).toHaveLength(plan.touchedFiles.length - 1);
+    expect(recovery.replacements).toHaveLength(1);
+    expect(recovery.recordPath).toBeDefined();
+    expect(recovery.recordPath!.startsWith(`${root}${path.sep}`)).toBe(false);
+    const completed = recovery.completed[0]!;
+    expect(completed.beforeHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(completed.afterHash).toMatch(/^sha256:[a-f0-9]{64}$/);
+    expect(completed.beforeContent).toEqual(original.get(completed.path));
+    const pendingReplacement = recovery.pending.find((entry) => original.has(entry.path));
+    expect(pendingReplacement?.beforeContent).toEqual(original.get(pendingReplacement!.path));
+
+    await retryPluginPublication(recovery);
+    for (const file of plan.touchedFiles) {
+      expect(await readFile(file.path)).toEqual(file.content);
+    }
+    await expect(stat(recovery.recordPath!)).rejects.toThrow();
+  });
+
+  it('reports exact completed and pending paths for every recognised-plugin publication step', async () => {
+    for (let failAfterPublishStep = 1; failAfterPublishStep <= 4; failAfterPublishStep += 1) {
+      const root = await existingDirectPlugin();
+      const plan = await planExistingPluginOutput(root, block);
+      let interrupted: PublicationInterruptedError | undefined;
+      try {
+        await writePluginOutput(plan, {
+          authorizedReplacements: plan.touchedFiles.filter((file) => file.operation === 'modify').map((file) => file.path),
+          failAfterPublishStep,
+        });
+      } catch (error) {
+        interrupted = error as PublicationInterruptedError;
+      }
+      expect(interrupted).toBeInstanceOf(PublicationInterruptedError);
+      const recovery = interrupted!.recovery;
+      expect(recovery.completed.map((entry) => entry.path)).toEqual(plan.touchedFiles.slice(0, failAfterPublishStep).map((file) => file.path));
+      expect(recovery.pending.map((entry) => entry.path)).toEqual(plan.touchedFiles.slice(failAfterPublishStep).map((file) => file.path));
+      expect(recovery.replacements.map((entry) => entry.path)).toEqual(plan.touchedFiles
+        .slice(0, failAfterPublishStep).filter((file) => file.operation === 'modify').map((file) => file.path));
+      expect(recovery.completed.concat(recovery.pending).every((entry) => entry.afterHash.startsWith('sha256:'))).toBe(true);
+      await retryPluginPublication(recovery);
+    }
+  });
+
+  it('reports a conflict when a callback changes a published target before success', async () => {
+    const root = await existingDirectPlugin();
+    const plan = await planExistingPluginOutput(root, block);
+    const modified = plan.touchedFiles.filter((file) => file.operation === 'modify').map((file) => file.path);
+    const first = plan.touchedFiles[0]!;
+
+    await expect(writePluginOutput(plan, {
+      authorizedReplacements: modified,
+      onPublished: async (_entry, recovery) => {
+        if (recovery.pending.length === 0) await writeFile(first.path, 'changed after publication\n');
+      },
+    })).rejects.toThrow(/plugin publication conflict/);
+  });
+
+  it('rejects a recognised-plugin target changed while later target content is being validated', async () => {
+    const root = await existingDirectPlugin();
+    const plan = await planExistingPluginOutput(root, block);
+    const modified = plan.touchedFiles.filter((file) => file.operation === 'modify').map((file) => file.path);
+    const first = plan.touchedFiles[0]!;
+
+    await expect(writePluginOutput(plan, {
+      authorizedReplacements: modified,
+      onFinalValidationTarget: async (_entry, validated) => {
+        if (validated.length === 1) await writeFile(first.path, 'changed during final validation\n');
+      },
+    })).rejects.toThrow(/plugin publication conflict/);
+    expect(await readFile(first.path, 'utf8')).toBe('changed during final validation\n');
+  });
+
+  it('does not report a changed published target as completed after an interruption', async () => {
+    const root = await existingDirectPlugin();
+    const plan = await planExistingPluginOutput(root, block);
+    const modified = plan.touchedFiles.filter((file) => file.operation === 'modify').map((file) => file.path);
+    let interrupted: PublicationInterruptedError | undefined;
+    try {
+      await writePluginOutput(plan, {
+        authorizedReplacements: modified,
+        onPublished: async (entry) => {
+          await writeFile(entry.path, 'changed after publication\n');
+          throw new Error('interrupt after external change');
+        },
+      });
+    } catch (error) {
+      interrupted = error as PublicationInterruptedError;
+    }
+
+    expect(interrupted).toBeInstanceOf(PublicationInterruptedError);
+    expect(interrupted!.recovery.completed).toEqual([]);
+    expect(interrupted!.recovery.pending.map((entry) => entry.path)).toEqual(plan.touchedFiles.map((file) => file.path));
+  });
+
+  it('refuses to retry over a pending replacement changed by another process', async () => {
+    const root = await existingCollectionPlugin(false);
+    const plan = await planExistingPluginOutput(root, block);
+    const replacements = plan.touchedFiles.filter((file) => file.operation === 'modify');
+    let interrupted: PublicationInterruptedError | undefined;
+    try {
+      await writePluginOutput(plan, {
+        authorizedReplacements: replacements.map((file) => file.path),
+        failAfterPublishStep: 1,
+      });
+    } catch (error) {
+      interrupted = error as PublicationInterruptedError;
+    }
+    expect(interrupted).toBeInstanceOf(PublicationInterruptedError);
+    const pending = interrupted!.recovery.pending.find((entry) => replacements.some((file) => file.path === entry.path))!;
+    await writeFile(pending.path, 'changed by another process\n');
+
+    await expect(retryPluginPublication(interrupted!.recovery)).rejects.toThrow('pending replacement changed');
+    expect(await readFile(pending.path, 'utf8')).toBe('changed by another process\n');
   });
 
   it('plans font notice transport for an existing plugin without replacing its postbuild hook', async () => {

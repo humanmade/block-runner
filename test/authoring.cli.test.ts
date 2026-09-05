@@ -51,6 +51,8 @@ describe('author CLI', () => {
     const previewJson = JSON.parse(preview.stdout) as { hash: string; preview: string; noFilesWritten: boolean };
     expect(previewJson.noFilesWritten).toBe(true);
     expect(previewJson.preview).toContain('No files written.');
+    expect(previewJson.preview).toContain('block.json [create]');
+    expect(previewJson.preview).toContain('block.php [create]');
     expect(preview.stdout).not.toMatch(/\x1b\[/);
     await expect(stat(path.join(project, 'generated'))).rejects.toMatchObject({ code: 'ENOENT' });
 

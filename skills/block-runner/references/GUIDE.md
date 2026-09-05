@@ -41,7 +41,7 @@ unsure whether the styling matters, ask the user rather than silently flattening
 ## 2. Registered-block authoring — plan, preview, confirm, write, prove
 
 Use this path for one reusable `namespace/slug` block source package. The model interprets the
-design and produces the versioned declarative **`AuthoringPlan`**; the deterministic source
+design and produces the versioned declarative **`GeneratedAuthoringPlan`**; the deterministic source
 generator produces all executable source and serializes blocks. This is deliberately different
 from converting a design into page `post_content`.
 
@@ -60,12 +60,12 @@ which assets are available, and which fields a pattern may override. A missing d
 question for the user, not permission to use a temporary directory.
 
 The plan is declarative JSON only. Do **not** emit or ask the user to paste React, JSX, TSX,
-PHP, `block.json` or other block metadata, generated CSS, `registerBlockType` or
+PHP, a complete `block.json`, generated CSS, `registerBlockType` or
 `register_block_type` calls, or `<!-- wp:… -->` delimiters. Do not put executable source in a
 plan's file content. The generator owns executable source and block serialization; the model
 owns the reviewable design decisions.
 
-### `AuthoringPlan` v1 shape
+### `GeneratedAuthoringPlan` v1 shape
 
 The CLI accepts exactly this versioned JSON shape. Object keys may be in any order; arrays retain
 their order and every listed value participates in the confirmation hash. `files` names
@@ -76,7 +76,7 @@ list fields may be empty when a design genuinely has none of that item.
 |---|---|
 | `version` | The number `1`. |
 | `generatorVersion` | Non-empty generator version string. |
-| `target` | `{ "name": "namespace/slug", "title": "…" }`; optional `description`, `category`, `icon`, `textDomain`, `wordpress`, and safe relative `directory`. |
+| `target` | `{ "name": "namespace/slug", "title": "…" }`; optional `description`, `category`, `icon`, `textDomain`, `wordpress`, safe relative `directory`, and `metadata`. `metadata` is hash-bound native declarative `block.json` data; safe forward-compatible fields pass through unchanged, while executable or file-loading capabilities are rejected. |
 | `structure` | Ordered native nodes: `block`, optional stable `id`, `label`, JSON `attributes`, `lock`, and recursive `children`. Never HTML. |
 | `allowedBlocks` | Optional direct-child insertion allowlist. It must include every initial direct child; nested blocks are not added implicitly. |
 | `fields` | Ordered `{ "id", "label", "mode" }` records; `mode` is exactly `fixed`, `editable`, or `override`. Optional `node`, `attribute`, `type`, `default`, and `description` explain the editor surface. |

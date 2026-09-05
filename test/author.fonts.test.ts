@@ -249,6 +249,8 @@ describe('registered-block font transport', () => {
       style: { typography: { fontFamily: 'Arial, sans-serif' } },
     });
     expect(report.items.some((item) => item.reason.includes('font') && item.reason.includes('licensed'))).toBe(true);
+    expect(report.package?.canonicalPlan?.source).toEqual(report.source);
+    expect(report.package?.canonicalPlan?.warnings).toContainEqual(expect.stringContaining('licensed'));
     expect(report.package?.assets ?? []).toEqual([]);
   });
 

@@ -42,17 +42,18 @@ describe('confirmed editor fields in the production generator', () => {
 
   it('gives separate fields on one native node the same stable override name', () => {
     const input = plan();
-    input.structure = [{ id: 'cta', block: 'core/button', attributes: { text: 'Go', url: 'https://example.com' } }];
+    input.structure = [{ id: 'actions', block: 'core/buttons', children: [{ id: 'cta', block: 'core/button', attributes: { text: 'Go', url: 'https://example.com' } }] }];
     input.fields = ['text', 'url', 'linkTarget', 'rel'].map((attribute) => ({ id: attribute, label: attribute, mode: 'override', node: 'cta', attribute }));
     input.pattern.overrides = input.fields.map(({ id }) => ({ field: id }));
-    expect(compileRegisteredBlock(input).template[0]?.[1].metadata).toMatchObject({
+    expect(compileRegisteredBlock(input).template[0]?.[2]?.[0]?.[1].metadata).toMatchObject({
       name: expect.any(String), bindings: { __default: { source: 'core/pattern-overrides' } },
     });
   });
 
   it('rejects partial native-region overrides instead of silently enabling unconfirmed fields', () => {
     const input = plan();
-    input.structure[0]!.block = 'core/button';
+    input.structure = [{ id: 'actions', block: 'core/buttons', children: [{ id: 'cta', block: 'core/button', attributes: { text: 'Go' } }] }];
+    input.fields[0]!.node = 'cta';
     input.fields[0]!.attribute = 'text';
     expect(() => compileRegisteredBlock(input)).toThrow('partial-pattern-override');
   });
@@ -66,7 +67,8 @@ describe('confirmed editor fields in the production generator', () => {
       if (invalid === 'fixed') input.fields[0]!.mode = 'fixed';
       if (invalid === 'unconfirmed') input.pattern.ready = false;
       if (invalid === 'unsafe-default') {
-        input.structure[0]!.block = 'core/button';
+        input.structure = [{ id: 'actions', block: 'core/buttons', children: [{ id: 'cta', block: 'core/button', attributes: { url: 'https://example.com' } }] }];
+        input.fields[0]!.node = 'cta';
         input.fields[0]!.attribute = 'url';
         input.fields[0]!.default = 'javascript:alert(1)';
       }

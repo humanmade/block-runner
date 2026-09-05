@@ -23,10 +23,14 @@ const plan: AuthoringPlan = {
         alt: 'Canonical image',
       },
       {
-        path: 'hero.cta',
-        role: 'button',
-        content: 'Canonical action',
-        url: 'https://example.test/canonical',
+        path: 'hero.actions',
+        role: 'buttons',
+        children: [{
+          path: 'hero.cta',
+          role: 'button',
+          content: 'Canonical action',
+          url: 'https://example.test/canonical',
+        }],
       },
     ],
   },

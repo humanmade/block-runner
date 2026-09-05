@@ -53,12 +53,23 @@ export {
 } from './authoring/generate.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
 export { AuthoringStyleError, authoringRulesFromStylesheet, renderConfirmedStyleRules } from './authoring/styles.js';
-export { hashAuthoringConfirmation, inspectAuthoringDestination, writeAuthoringOutput, writeGeneratedRegisteredBlock } from './authoring/destination.js';
+export {
+  hashAuthoringConfirmation,
+  inspectAuthoringDestination,
+  PublicationInterruptedError,
+  recoverAuthoringPublication,
+  retryAuthoringPublication,
+  writeAuthoringOutput,
+  writeGeneratedRegisteredBlock,
+} from './authoring/destination.js';
 export {
   assertStandaloneZipEntries,
   detectWpScriptsPlugin,
   planExistingPluginOutput,
   planStandalonePluginOutput,
+  PublicationInterruptedError as PluginPublicationInterruptedError,
+  recoverPluginPublication,
+  retryPluginPublication,
   STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT,
   STANDALONE_LOCK_TEMPLATE_VERSION,
   STANDALONE_WP_SCRIPTS_VERSION,
@@ -73,6 +84,8 @@ export type {
   PluginOutputPlan,
   PluginPlanMode,
   PluginProfile,
+  PublicationRecovery as PluginPublicationRecovery,
+  PublicationRecoveryEntry as PluginPublicationRecoveryEntry,
   PluginRegistrationStrategy,
   PluginTouchedFile,
   UnsupportedPluginProfile,
@@ -174,7 +187,16 @@ export type {
   JsonValue,
 } from './authoring/schema.js';
 export type { AuthoringPreviewContext, AuthoringPreviewOptions } from './authoring/preview.js';
-export type { AuthoringDestinationApproval, AuthoringOutputFile, AuthoringOutputPlan, DestinationEntry, DestinationInspection } from './authoring/destination.js';
+export type {
+  AuthoringDestinationApproval,
+  AuthoringOutputFile,
+  AuthoringOutputPlan,
+  AuthoringPublicationOptions,
+  DestinationEntry,
+  DestinationInspection,
+  PublicationRecovery,
+  PublicationRecoveryEntry,
+} from './authoring/destination.js';
 export type {
   GeneratedRegisteredBlock,
   GeneratedSourceFile,
@@ -190,6 +212,7 @@ export type {
   AuthoringEditableField,
   AuthoringNode,
   AuthoringPlan,
+  AuthoringPlan as SemanticAuthoringPlan,
   AuthoringRole,
   AuthoringTemplate,
   AssetLedgerEntry,

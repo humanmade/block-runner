@@ -15,6 +15,8 @@ export const {
   GENERATED_REGISTERED_BLOCK_PATHS,
   ImmutableContentError,
   PATTERN_OVERRIDE_SOURCE,
+  PublicationInterruptedError,
+  PluginPublicationInterruptedError,
   PROOF_GATE_IDS,
   PROOF_GATE_STATUSES,
   PROOF_PROFILES,
@@ -85,6 +87,10 @@ export const {
   processCssAssets,
   prove,
   realize,
+  recoverAuthoringPublication,
+  retryAuthoringPublication,
+  recoverPluginPublication,
+  retryPluginPublication,
   renderAuthoringPreview,
   renderConfirmedStyleRules,
   renderResidualCss,
@@ -120,3 +126,6 @@ export type EvidenceStore = import('./index-implementation.js').EvidenceStore;
 export type ImmutableContentError = import('./index-implementation.js').ImmutableContentError;
 export type ReceiptWriter = import('./index-implementation.js').ReceiptWriter;
 export type UnsupportedPluginLayoutError = import('./index-implementation.js').UnsupportedPluginLayoutError;
+
+export type PublicationInterruptedError = import('./index-implementation.js').PublicationInterruptedError;
+export type PluginPublicationInterruptedError = import('./index-implementation.js').PluginPublicationInterruptedError;
