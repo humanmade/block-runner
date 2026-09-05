@@ -4,6 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { author } from '../src/author/index.js';
+import { collectSourceEvidence } from '../src/index.js';
 import { validateCoverageFulfillment } from '../src/author/plan.js';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
 import { PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
@@ -11,6 +12,7 @@ import { PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
 describe('HTML analysis uses the confirmed compiler', () => {
   it('keeps source evidence available when rules cannot propose a tree, then compiles a bound independent plan', async () => {
     const markup = '<custom-card data-layout="masonry"><slot>Ignored by rules</slot></custom-card>';
+    expect(collectSourceEvidence(markup).structure).toContainEqual(expect.objectContaining({ tag: 'custom-card' }));
     const initial = await author(markup, { author: { name: 'example/design' } });
 
     expect(initial.ok).toBe(false);
