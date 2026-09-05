@@ -118,31 +118,3 @@ describe('WordPress 7.1 pattern overrides', () => {
     expect(result.files).toEqual({});
   });
 });
-
-describe('pattern override values across generated defaults', () => {
-  it('keeps authored binding names and serialized per-instance override values when v2 changes only a default', () => {
-    const v1 = compileAuthoringPlan(plan);
-    const v2Plan = JSON.parse(JSON.stringify(plan)) as AuthoringPlan;
-    v2Plan.root.children![0]!.content = 'Version two default heading';
-    const v2 = compileAuthoringPlan(v2Plan);
-    const v1Contract = validatePatternOverrideContract(v1.template, v1.editableFields);
-    const v2Contract = validatePatternOverrideContract(v2.template, v2.editableFields);
-    expect(v1Contract.ok).toBe(true);
-    expect(v2Contract.ok).toBe(true);
-    expect(v2Contract.bindings.map((binding) => ({ name: binding.name, block: binding.block, attribute: binding.attribute })))
-      .toEqual(v1Contract.bindings.map((binding) => ({ name: binding.name, block: binding.block, attribute: binding.attribute })));
-
-    const byPath = new Map(v1.editableFields.map((field) => [field.path, field.overrideName]));
-    const stored = patternOverrideContent({
-      [byPath.get('hero.title')!]: { content: 'Saved title override' },
-      [byPath.get('hero.image')!]: { id: 101, url: 'https://example.test/saved.jpg', alt: 'Saved image override' },
-      [byPath.get('hero.cta')!]: { text: 'Saved action', url: 'https://example.test/saved' },
-    });
-    const serialized = JSON.stringify(stored);
-    const reopened = JSON.parse(serialized) as Record<string, Record<string, unknown>>;
-    expect(reopened).toEqual(stored);
-    expect(reopened[byPath.get('hero.title')!]).toEqual({ content: 'Saved title override' });
-    expect(reopened[byPath.get('hero.image')!]).toEqual({ id: 101, url: 'https://example.test/saved.jpg', alt: 'Saved image override' });
-    expect(reopened[byPath.get('hero.cta')!]).toEqual({ text: 'Saved action', url: 'https://example.test/saved' });
-  });
-});

@@ -70,6 +70,20 @@ describe('registered block regeneration', () => {
     expect(impact).toMatchObject({ kind: 'content-defaults', writeAllowed: true, changedFiles: ['edit.js'] });
   });
 
+  it('publishes the synchronous sealed snapshot when a caller mutates the generated object after inspection begins', async () => {
+    const output = await mkdtemp(path.join(tmpdir(), 'block-runner-regeneration-'));
+    const v1 = compiledDefault('Version one default', 'create');
+    const v2 = compiledDefault('Version two default', 'replace');
+    await writeGeneratedRegisteredBlock(output, v1);
+    const pending = writeGeneratedRegisteredBlock(output, v2);
+    queueMicrotask(() => {
+      const mutated = changed(v2, 'save.js', 'export default function save(){ return <p>mutated</p>; }\n');
+      Object.assign(v2.files.find((file) => file.path === 'save.js')!, mutated.files.find((file) => file.path === 'save.js')!);
+      Object.assign(v2.manifest.files.find((entry) => entry.path === 'save.js')!, mutated.manifest.files.find((entry) => entry.path === 'save.js')!);
+    });
+    expect((await pending).written).toContain('edit.js');
+  });
+
   it('keeps an editor-template change distinct from saved markup and refuses a save change without a migration or new identity', async () => {
     const output = await mkdtemp(path.join(tmpdir(), 'block-runner-regeneration-'));
     const first = generated();

@@ -4,7 +4,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { transform } from 'esbuild';
 import { describe, expect, it } from 'vitest';
-import { compileAuthoringPlan } from '../src/index.js';
+import { compileAuthoringPlan, patternOverrideContent, validatePatternOverrideContract } from '../src/index.js';
 import { getWp } from '../src/headless/wp.js';
 import type { AuthoringPlan, AuthoringTemplate, CompiledAuthoringBlock, InnerBlocksLock, WpBlock, WpModules } from '../src/types.js';
 
@@ -61,6 +61,17 @@ function planFor(templateLock: InnerBlocksLock): AuthoringPlan {
         { path: 'runtime.quote', role: 'quote', content: 'Original native quote' },
       ],
     },
+  };
+}
+
+function patternPlanForDefault(heading: string): AuthoringPlan {
+  return {
+    name: 'block-runner/runtime-pattern-regeneration', title: 'Runtime pattern regeneration', templateLock: 'contentOnly',
+    root: { path: 'hero', role: 'wrapper', children: [
+      { path: 'hero.title', role: 'heading', content: heading },
+      { path: 'hero.image', role: 'image', attributes: { id: 42 }, url: 'https://example.test/canonical.jpg', alt: 'Canonical image' },
+      { path: 'hero.actions', role: 'buttons', children: [{ path: 'hero.cta', role: 'button', content: 'Canonical action', url: 'https://example.test/canonical' }] },
+    ] },
   };
 }
 
@@ -360,6 +371,40 @@ describe('saved authoring content across regeneration', () => {
       expect(wp.serialize([reopenedRoot])).toContain('https://example.test/original.jpg');
       actions.updateBlockAttributes(reopenedRoot.innerBlocks[1]!.clientId, { content: 'Second user edit after v2.' });
       expect(wp.serialize([selectors.getBlock(reopenedRoot.clientId) as RuntimeBlock])).toContain('Second user edit after v2.');
+    } finally {
+      wp.unregisterBlockType(name);
+    }
+  });
+});
+
+
+describe('saved synced-pattern overrides across regeneration', () => {
+  it('parses and serializes v1 core/block override content after registering v2 defaults', async () => {
+    const wp = await getWp();
+    const v1 = compileAuthoringPlan(patternPlanForDefault('Version one heading'));
+    const v2 = compileAuthoringPlan(patternPlanForDefault('Version two heading'));
+    const before = validatePatternOverrideContract(v1.template, v1.editableFields);
+    const after = validatePatternOverrideContract(v2.template, v2.editableFields);
+    expect(before.ok).toBe(true);
+    expect(after.bindings).toEqual(before.bindings);
+    const names = new Map(v1.editableFields.map((field) => [field.path, field.overrideName]));
+    const content = patternOverrideContent({
+      [names.get('hero.title')!]: { content: 'Saved override heading' },
+      [names.get('hero.image')!]: { id: 101, url: 'https://example.test/saved.jpg', alt: 'Saved override image' },
+      [names.get('hero.cta')!]: { text: 'Saved override action', url: 'https://example.test/saved' },
+    });
+    const name = await registerCompiledBlock(wp, v1);
+    try {
+      const custom = runtimeBlock(wp.createBlock(name, {}, blocksFromTemplate(wp, v1.template)));
+      const storedV1 = wp.serialize([wp.createBlock('core/block', { ref: 101, content }), custom]);
+      wp.unregisterBlockType(name);
+      await registerCompiledBlock(wp, v2);
+      const reopened = wp.parse(storedV1).map(runtimeBlock);
+      const pattern = reopened.find((block) => block.name === 'core/block')!;
+      const customReopened = reopened.find((block) => block.name === name)!;
+      expect(pattern.attributes.content).toEqual(content);
+      expect(wp.serialize([pattern, customReopened])).toContain('Saved override heading');
+      expectValidTree(wp, customReopened);
     } finally {
       wp.unregisterBlockType(name);
     }
