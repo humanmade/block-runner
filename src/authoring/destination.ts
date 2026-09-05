@@ -360,14 +360,16 @@ export async function writeGeneratedRegisteredBlock(
     }
   }
   const inspection = await inspectAuthoringDestination(outputDirectory, { files });
-  // Ownership is decided before regeneration semantics. A user-owned create collision is never
-  // evidence of an earlier compiler package and must retain its explicit replacement error.
-  assertCollisions(inspection, files.map((file) => ({ path: file.path, replace: file.operation === 'replace' })), inspection.directory);
   const regeneration = await classifyRegisteredBlockRegeneration(inspection, generatedSnapshot);
+  // Exact compiler output is a no-op even when its original manifest carries create operations:
+  // it neither replaces nor claims an existing user file.
+  if (regeneration.kind === 'unchanged') {
+    return { directory: inspection.directory, fingerprint: inspection.fingerprint, written: [] };
+  }
+  // A changed package must establish ownership before its regeneration impact is acted on. A
+  // user-owned create collision is never evidence of an earlier compiler package.
+  assertCollisions(inspection, files.map((file) => ({ path: file.path, replace: file.operation === 'replace' })), inspection.directory);
   if (!regeneration.writeAllowed) {
-    if (regeneration.kind === 'unchanged') {
-      return { directory: inspection.directory, fingerprint: inspection.fingerprint, written: [] };
-    }
     throw new Error('saved-markup or structure changed; no files written. ' + regeneration.nextStep);
   }
   return writeAuthoringOutput(outputDirectory, { files }, approval, options);

@@ -114,6 +114,7 @@ describe('registered block regeneration', () => {
     expect(schema.writeAllowed).toBe(false);
     await expect(writeGeneratedRegisteredBlock(output, changed(replacements(first), 'save.js', 'export default function save(){ return <p>changed</p>; }\n')))
       .rejects.toThrow(/no files written/i);
+    expect((await writeGeneratedRegisteredBlock(output, first)).written).toEqual([]);
     expect((await writeGeneratedRegisteredBlock(output, replacements(first))).written).toEqual([]);
   });
 });
