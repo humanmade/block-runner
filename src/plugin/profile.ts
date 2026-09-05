@@ -1,7 +1,7 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { promisify } from 'node:util';
 
@@ -148,12 +148,65 @@ export interface WritePluginOutputOptions {
    * New files do not need this authority. Package and PHP bootstrap edits always do.
    */
   authorizedReplacements?: readonly string[];
+  /**
+   * Test-only failure injection. A value of 1 throws immediately after the first destination
+   * file is published, before the next file can be touched.
+   */
+  failAfterPublishStep?: number;
+  /**
+   * Called immediately after each individual destination file is published. Throwing from this
+   * hook simulates an interrupted multi-file publication and returns a recovery inventory.
+   */
+  onPublished?: (entry: PublicationRecoveryEntry, recovery: PublicationRecovery) => void | Promise<void>;
 }
 
 export interface WritePluginOutputResult {
   directory: string;
   written: string[];
   fingerprint: string;
+}
+
+/** A single destination file in a partial-publication inventory. */
+export interface PublicationRecoveryEntry {
+  path: string;
+  /** SHA-256 hashes are prefixed so callers never mistake them for arbitrary identifiers. */
+  beforeHash?: string;
+  afterHash: string;
+  /** The prior bytes are present only for an approved replacement, never for a new file. */
+  beforeContent?: Buffer;
+}
+
+/**
+ * A bounded report for a publication that did not complete. The private staging directory named
+ * by recordPath contains its JSON inventory and staged bytes, but no additional published
+ * destination files; it can be supplied to retryPluginPublication later.
+ */
+export interface PublicationRecovery {
+  directory: string;
+  completed: PublicationRecoveryEntry[];
+  pending: PublicationRecoveryEntry[];
+  /** The subset of completed files whose prior bytes were replaced. */
+  replacements: PublicationRecoveryEntry[];
+  recordPath?: string;
+}
+
+/** A write failed after at least one destination file may have been published. */
+export class PublicationInterruptedError extends Error {
+  readonly recovery: PublicationRecovery;
+
+  constructor(message: string, recovery: PublicationRecovery, options?: ErrorOptions) {
+    super(message, options);
+    this.name = 'PublicationInterruptedError';
+    this.recovery = recovery;
+  }
+}
+
+/** A destination previously published by this operation changed before completion. */
+class PublicationConflictError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = 'PublicationConflictError';
+  }
 }
 
 export class UnsupportedPluginLayoutError extends Error {
@@ -459,7 +512,10 @@ export async function planStandalonePluginOutput(
 
 /**
  * Materialize a previously previewed plan. Existing files are never replaced unless their exact
- * preview paths appear in authorizedReplacements. All targets are checked before the first write.
+ * preview paths appear in authorizedReplacements. The complete output is first built in a
+ * private sibling staging directory. File renames are individually atomic only when the staging
+ * and destination reside on the same filesystem; this function intentionally makes no stronger
+ * cross-file atomicity claim.
  */
 export async function writePluginOutput(
   plan: PluginOutputPlan,
@@ -471,15 +527,225 @@ export async function writePluginOutput(
     throw new Error('Plugin output plan changed after preview; create and approve a new preview before writing.');
   }
 
-  // Complete inspection happens before directory creation or file mutation.
-  for (const file of plan.touchedFiles) {
+  // This complete inspection happens before staging or destination mutation. The identical
+  // checks run again immediately before every rename because another process may race the
+  // preview or staging work.
+  const inspected = await inspectPluginPublication(root, plan.touchedFiles, approved);
+  const stageDirectory = publicationStageDirectory(root);
+  const stageRoot = path.join(stageDirectory, 'output');
+  let staged: StagedPluginPublicationFile[] = [];
+  let recordPath: string | undefined;
+  let publicationStarted = false;
+  let publicationComplete = false;
+  let publishedSteps = 0;
+  const completed = new Set<string>();
+  try {
+    await mkdir(stageRoot, { recursive: true, mode: 0o700 });
+    staged = await stagePluginPublication(root, stageRoot, inspected);
+    if (plan.mode === 'standalone') {
+      // Resolve the generated lock before publication. A resolution failure therefore leaves all
+      // destination files untouched; the final lock bytes are also included in the inventory.
+      await writeStandaloneDependencyLock(stageRoot);
+      await refreshStagedStandaloneLock(staged);
+    }
+
+    const record = storedPublicationRecord(root, plan.fingerprint, staged, completed);
+    recordPath = path.join(stageDirectory, 'recovery.json');
+    await persistPublicationRecord(recordPath, record);
+
+    for (const item of staged) {
+      await recheckPluginPublicationTarget(root, item, approved);
+      await mkdir(path.dirname(item.target), { recursive: true });
+      // mkdir can race with an attacker replacing a newly made parent. Recheck after it too.
+      await recheckPluginPublicationTarget(root, item, approved);
+      publicationStarted = true;
+      await publishStagedPluginFile(item);
+      if (item.operation === 'modify') {
+        // rename(2) preserves the temporary file's mode. Keep the previewed target mode explicit
+        // in case a platform's creation mask changed it while the temporary file was written.
+        await chmod(item.target, item.mode);
+      }
+      completed.add(item.target);
+      publishedSteps += 1;
+      record.completed = [...completed].sort();
+      await persistPublicationRecord(recordPath, record);
+      const recovery = publicationRecovery(root, staged, completed, recordPath);
+      if (options.failAfterPublishStep === publishedSteps) {
+        throw new Error(`Injected failure after plugin publication step ${publishedSteps}.`);
+      }
+      await options.onPublished?.(publicationEntry(item), recovery);
+    }
+
+    await verifyPublishedPluginTargets(staged, completed);
+    publicationComplete = true;
+    return { directory: root, written: [...completed].sort(), fingerprint: plan.fingerprint };
+  } catch (error) {
+    if (!publicationStarted) {
+      // The validation/staging phase does not publish destination files. Its private temporary
+      // directory is safe to discard and is deliberately not represented as destination output.
+      await removePublicationStage(stageDirectory);
+      throw error;
+    }
+    const recovery = publicationRecovery(root, staged, await observedCompleted(staged), recordPath);
+    if (recordPath) {
+      try {
+        await persistPublicationRecord(recordPath, storedPublicationRecord(root, plan.fingerprint, staged,
+          new Set(recovery.completed.map((entry) => entry.path))));
+      } catch {
+        // Preserve the original publication error and the in-memory recovery report even if a
+        // second storage failure prevents refreshing the on-disk journal.
+      }
+    }
+    if (error instanceof PublicationConflictError) throw error;
+    throw new PublicationInterruptedError(
+      `Plugin publication was interrupted. Recovery inventory retained${recordPath ? ` at ${recordPath}` : ''}.`,
+      recovery,
+      { cause: error },
+    );
+  } finally {
+    if (publicationComplete) {
+      // Cleanup happens only after every target has been revalidated and success is committed.
+      // A failed recursive delete must not turn a completed publication into an interruption
+      // whose recovery journal may already have been partially removed.
+      await cleanupCompletedPluginStage(stageDirectory);
+    }
+  }
+}
+
+/**
+ * Finish an interrupted publication from its retained inventory. Files already published must
+ * still have their recorded after-hash; pending files must still be absent (creates) or retain
+ * their recorded before-hash (replacements). No changed or unrelated file is overwritten.
+ */
+export async function retryPluginPublication(
+  recovery: PublicationRecovery | string,
+  options: Omit<WritePluginOutputOptions, 'authorizedReplacements'> = {},
+): Promise<WritePluginOutputResult> {
+  const recordPath = typeof recovery === 'string' ? recovery : recovery.recordPath;
+  if (!recordPath) throw new Error('A retained plugin recovery record path is required to retry publication.');
+  const record = await readStoredPublicationRecord(recordPath);
+  const root = record.directory;
+  assertPublicationRecordLocation(root, recordPath);
+  const completedAtInterruption = new Set(record.completed);
+  const retryStageDirectory = publicationStageDirectory(root);
+  let staged: StagedPluginPublicationFile[] = [];
+  let completed = new Set<string>();
+  let publicationStarted = false;
+  let publicationComplete = false;
+  let publishedSteps = 0;
+  try {
+    staged = await stageStoredPluginPublication(record, path.join(retryStageDirectory, 'output'));
+    completed = await confirmRetryPreconditions(root, staged, completedAtInterruption);
+    for (const item of staged) {
+      if (completed.has(item.target)) continue;
+      await recheckStoredPublicationTarget(root, item);
+      await mkdir(path.dirname(item.target), { recursive: true });
+      await recheckStoredPublicationTarget(root, item);
+      publicationStarted = true;
+      await publishStagedPluginFile(item);
+      if (item.operation === 'modify') await chmod(item.target, item.mode);
+      completed.add(item.target);
+      publishedSteps += 1;
+      record.completed = [...completed].sort();
+      await persistPublicationRecord(recordPath, record);
+      const currentRecovery = publicationRecovery(root, staged, completed, recordPath);
+      if (options.failAfterPublishStep === publishedSteps) {
+        throw new Error(`Injected failure after plugin publication step ${publishedSteps}.`);
+      }
+      await options.onPublished?.(publicationEntry(item), currentRecovery);
+    }
+    await verifyPublishedPluginTargets(staged, completed);
+    publicationComplete = true;
+    return { directory: root, written: [...completed].sort(), fingerprint: record.fingerprint };
+  } catch (error) {
+    if (!publicationStarted) {
+      await removePublicationStage(retryStageDirectory);
+      throw error;
+    }
+    const currentCompleted = await observedCompleted(staged);
+    try {
+      record.completed = [...currentCompleted].sort();
+      await persistPublicationRecord(recordPath, record);
+    } catch {
+      // The original recovery journal remains better than replacing the publication failure.
+    }
+    if (error instanceof PublicationConflictError) throw error;
+    throw new PublicationInterruptedError(
+      `Plugin publication retry was interrupted. Recovery inventory retained at ${recordPath}.`,
+      publicationRecovery(root, staged, currentCompleted, recordPath),
+      { cause: error },
+    );
+  } finally {
+    if (publicationComplete) {
+      // Keep the original journal until the retry staging directory is gone. Both cleanup steps
+      // are post-success housekeeping, so an I/O failure leaves a harmless recovery record
+      // instead of reporting an unrecoverable interruption.
+      await cleanupCompletedPluginRetry(retryStageDirectory, recordPath);
+    }
+  }
+}
+
+/** Alias for callers that describe completion as recovery rather than retry. */
+export const recoverPluginPublication = retryPluginPublication;
+
+interface InspectedPluginPublicationFile {
+  file: PluginTouchedFile;
+  target: string;
+  relativePath: string;
+  mode: number;
+  beforeContent?: Buffer;
+}
+
+interface StagedPluginPublicationFile {
+  target: string;
+  relativePath: string;
+  operation: PluginFileOperation;
+  requiresSeparateAuthorization: boolean;
+  mode: number;
+  beforeContent?: Buffer;
+  beforeHash?: string;
+  content: Buffer;
+  afterHash: string;
+  temporary: string;
+}
+
+interface StoredPluginPublicationFile {
+  path: string;
+  relativePath: string;
+  operation: PluginFileOperation;
+  mode: number;
+  beforeHash?: string;
+  beforeContent?: string;
+  afterHash: string;
+  afterContent: string;
+}
+
+interface StoredPluginPublicationRecord {
+  version: 1;
+  directory: string;
+  fingerprint: string;
+  files: StoredPluginPublicationFile[];
+  completed: string[];
+}
+
+/** Validate every target before any staging directory is created. */
+async function inspectPluginPublication(
+  root: string,
+  files: readonly PluginTouchedFile[],
+  approved: ReadonlySet<string>,
+): Promise<InspectedPluginPublicationFile[]> {
+  await assertPluginPublicationRoot(root);
+  const inspected: InspectedPluginPublicationFile[] = [];
+  for (const file of files) {
     assertTargetInside(root, file.path);
     await assertNoSymlinkedParents(root, file.path);
     const stats = await lstatMaybe(file.path);
+    const relativePath = relativePublicationPath(root, file.path);
     if (file.operation === 'create') {
       if (stats) {
         throw new Error(`Refusing to replace existing file without a separately authorized preview: ${file.path}`);
       }
+      inspected.push({ file, target: file.path, relativePath, mode: 0o644 });
       continue;
     }
     if (!stats?.isFile()) {
@@ -489,59 +755,370 @@ export async function writePluginOutput(
       throw new Error(`Separate explicit authorization is required to replace: ${file.path}`);
     }
     const current = await readFile(file.path);
-    if (!current.equals(file.previousContent!)) {
+    if (!file.previousContent || !current.equals(file.previousContent)) {
       throw new Error(`Previewed file changed after inspection: ${file.path}`);
     }
+    inspected.push({
+      file,
+      target: file.path,
+      relativePath,
+      mode: stats.mode & 0o777,
+      beforeContent: Buffer.from(file.previousContent),
+    });
   }
+  return inspected;
+}
 
-  const staged: Array<{ temporary: string; target: string; mode: number }> = [];
-  const written: string[] = [];
-  try {
-    for (const file of plan.touchedFiles) {
-      await mkdir(path.dirname(file.path), { recursive: true });
-      await assertNoSymlinkedParents(root, file.path);
-      if (file.operation === 'create') {
-        await writeFile(file.path, file.content, { flag: 'wx', mode: 0o644 });
-        written.push(file.path);
-      } else {
-        const targetStats = await lstatMaybe(file.path);
-        if (!targetStats?.isFile()) {
-          throw new Error(`Previewed file is no longer a regular file: ${file.path}`);
-        }
-        const temporary = path.join(path.dirname(file.path), `.${path.basename(file.path)}.block-runner-${randomUUID()}.tmp`);
-        const mode = targetStats.mode & 0o777;
-        await writeFile(temporary, file.content, { flag: 'wx', mode });
-        await chmod(temporary, mode);
-        staged.push({ temporary, target: file.path, mode });
-      }
-    }
-    for (const item of staged) {
-      const current = await readFile(item.target);
-      const preview = plan.touchedFiles.find((file) => file.path === item.target)!;
-      if (!current.equals(preview.previousContent!)) {
-        throw new Error(`Previewed file changed before replacement: ${item.target}`);
-      }
-      await rename(item.temporary, item.target);
-      // rename(2) preserves the temporary file's mode. Keep the target mode explicit in case a
-      // platform's creation mask changed it while the temporary file was written.
-      await chmod(item.target, item.mode);
-      written.push(item.target);
-    }
-    if (plan.mode === 'standalone') {
-      await writeStandaloneDependencyLock(root);
-    }
-  } finally {
-    await Promise.all(staged.map(async ({ temporary }) => {
-      try {
-        await unlink(temporary);
-      } catch (error) {
-        if ((error as NodeJS.ErrnoException).code !== 'ENOENT') {
-          throw error;
-        }
-      }
-    }));
+/** Build every output byte in the private sibling directory before publishing any destination file. */
+async function stagePluginPublication(
+  root: string,
+  stageRoot: string,
+  inspected: readonly InspectedPluginPublicationFile[],
+): Promise<StagedPluginPublicationFile[]> {
+  const staged: StagedPluginPublicationFile[] = [];
+  for (const item of inspected) {
+    const temporary = stagePath(stageRoot, item.relativePath);
+    await mkdir(path.dirname(temporary), { recursive: true, mode: 0o700 });
+    const content = Buffer.from(item.file.content);
+    await writeFile(temporary, content, { flag: 'wx', mode: item.mode });
+    if (item.file.operation === 'modify') await chmod(temporary, item.mode);
+    staged.push({
+      target: item.target,
+      relativePath: item.relativePath,
+      operation: item.file.operation,
+      requiresSeparateAuthorization: item.file.requiresSeparateAuthorization,
+      mode: item.mode,
+      beforeContent: item.beforeContent,
+      beforeHash: item.beforeContent && publicationHash(item.beforeContent),
+      content,
+      afterHash: publicationHash(content),
+      temporary,
+    });
   }
-  return { directory: root, written: written.sort(), fingerprint: plan.fingerprint };
+  return staged;
+}
+
+/** The lock resolver writes the staged lock, so the published inventory reflects its final bytes. */
+async function refreshStagedStandaloneLock(staged: StagedPluginPublicationFile[]): Promise<void> {
+  const lock = staged.find((item) => item.relativePath === 'package-lock.json');
+  if (!lock) throw new Error('Standalone plugin staging did not include package-lock.json.');
+  lock.content = await readFile(lock.temporary);
+  lock.afterHash = publicationHash(lock.content);
+}
+
+async function recheckPluginPublicationTarget(
+  root: string,
+  item: StagedPluginPublicationFile,
+  approved: ReadonlySet<string>,
+): Promise<void> {
+  await assertPluginPublicationRoot(root);
+  assertTargetInside(root, item.target);
+  await assertNoSymlinkedParents(root, item.target);
+  const stats = await lstatMaybe(item.target);
+  if (item.operation === 'create') {
+    if (stats) throw new Error(`Refusing to replace newly appeared file: ${item.target}`);
+    return;
+  }
+  if (!stats?.isFile()) throw new Error(`Previewed file is no longer a regular file: ${item.target}`);
+  if (!item.requiresSeparateAuthorization || !approved.has(item.target)) {
+    throw new Error(`Separate explicit authorization is required to replace: ${item.target}`);
+  }
+  const current = await readFile(item.target);
+  if (!item.beforeContent || !current.equals(item.beforeContent)) {
+    throw new Error(`Previewed file changed before replacement: ${item.target}`);
+  }
+}
+
+function publicationStageDirectory(root: string): string {
+  return path.join(path.dirname(root), `.${path.basename(root)}.block-runner-publication-${randomUUID()}`);
+}
+
+function relativePublicationPath(root: string, target: string): string {
+  const relative = path.relative(root, target);
+  if (!relative || relative === '.' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+    throw new Error(`Plugin target resolves outside its approved directory: ${target}`);
+  }
+  return relative;
+}
+
+function stagePath(stageRoot: string, relativePath: string): string {
+  return path.join(stageRoot, ...relativePath.split(path.sep));
+}
+
+function publicationHash(content: Buffer): string {
+  return `sha256:${createHash('sha256').update(content).digest('hex')}`;
+}
+
+function publicationEntry(item: StagedPluginPublicationFile): PublicationRecoveryEntry {
+  return {
+    path: item.target,
+    ...(item.beforeHash ? { beforeHash: item.beforeHash, beforeContent: Buffer.from(item.beforeContent!) } : {}),
+    afterHash: item.afterHash,
+  };
+}
+
+function publicationRecovery(
+  root: string,
+  staged: readonly StagedPluginPublicationFile[],
+  completed: ReadonlySet<string>,
+  recordPath?: string,
+): PublicationRecovery {
+  const complete = staged.filter((item) => completed.has(item.target)).map(publicationEntry);
+  return {
+    directory: root,
+    completed: complete,
+    pending: staged.filter((item) => !completed.has(item.target)).map(publicationEntry),
+    replacements: staged.filter((item) => item.operation === 'modify' && completed.has(item.target)).map(publicationEntry),
+    ...(recordPath ? { recordPath } : {}),
+  };
+}
+
+function storedPublicationRecord(
+  root: string,
+  fingerprint: string,
+  staged: readonly StagedPluginPublicationFile[],
+  completed: ReadonlySet<string>,
+): StoredPluginPublicationRecord {
+  return {
+    version: 1,
+    directory: root,
+    fingerprint,
+    files: staged.map((item) => ({
+      path: item.target,
+      relativePath: item.relativePath,
+      operation: item.operation,
+      mode: item.mode,
+      ...(item.beforeHash ? {
+        beforeHash: item.beforeHash,
+        beforeContent: item.beforeContent!.toString('base64'),
+      } : {}),
+      afterHash: item.afterHash,
+      afterContent: item.content.toString('base64'),
+    })),
+    completed: [...completed].sort(),
+  };
+}
+
+async function persistPublicationRecord(recordPath: string, record: StoredPluginPublicationRecord): Promise<void> {
+  const temporary = `${recordPath}.${randomUUID()}.tmp`;
+  try {
+    await writeFile(temporary, `${JSON.stringify(record)}\n`, { encoding: 'utf8', mode: 0o600, flag: 'wx' });
+    await rename(temporary, recordPath);
+  } finally {
+    try {
+      await unlink(temporary);
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+  }
+}
+
+async function observedCompleted(staged: readonly StagedPluginPublicationFile[]): Promise<Set<string>> {
+  const observed = new Set<string>();
+  for (const item of staged) {
+    try {
+      const beforeRead = await lstatMaybe(item.target);
+      if (!beforeRead?.isFile()) continue;
+      const content = await readFile(item.target);
+      const afterRead = await lstatMaybe(item.target);
+      if (afterRead?.isFile() && publicationHash(content) === item.afterHash) observed.add(item.target);
+    } catch {
+      // The saved completion state remains the best report if the filesystem cannot be read.
+    }
+  }
+  return observed;
+}
+
+async function verifyPublishedPluginTargets(
+  staged: readonly StagedPluginPublicationFile[],
+  completed: ReadonlySet<string>,
+): Promise<void> {
+  for (const item of staged) {
+    if (!completed.has(item.target)) {
+      throw new PublicationConflictError(`plugin publication conflict: target was not recorded as completed: ${item.target}`);
+    }
+    try {
+      const beforeRead = await lstatMaybe(item.target);
+      if (!beforeRead?.isFile()) {
+        throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
+      }
+      const content = await readFile(item.target);
+      const afterRead = await lstatMaybe(item.target);
+      if (!afterRead?.isFile() || publicationHash(content) !== item.afterHash) {
+        throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
+      }
+    } catch (error) {
+      if (error instanceof PublicationConflictError) throw error;
+      throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
+    }
+  }
+}
+
+async function removePublicationStage(stageDirectory: string): Promise<void> {
+  try {
+    await rm(stageDirectory, { recursive: true, force: true });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+  }
+}
+
+async function cleanupCompletedPluginStage(stageDirectory: string): Promise<void> {
+  try {
+    await removePublicationStage(stageDirectory);
+  } catch {
+    // Completion has already been established. Keeping private staging is safer than reporting
+    // a failed publication after its recovery journal may have been partly removed.
+  }
+}
+
+async function cleanupCompletedPluginRetry(retryStageDirectory: string, recordPath: string): Promise<void> {
+  try {
+    await removePublicationStage(retryStageDirectory);
+  } catch {
+    // Retain the original journal if retry-stage cleanup cannot be completed.
+    return;
+  }
+  await cleanupCompletedPluginStage(path.dirname(recordPath));
+}
+
+async function assertPluginPublicationRoot(root: string): Promise<void> {
+  const stats = await lstatMaybe(root);
+  if (!stats) return;
+  if (stats.isSymbolicLink()) throw new Error(`Plugin target root is a symbolic link: ${root}`);
+  if (!stats.isDirectory()) throw new Error(`Plugin target root is not a directory: ${root}`);
+}
+
+/** Recovery cleanup is limited to the private sibling directory we created for this publication. */
+function assertPublicationRecordLocation(root: string, recordPath: string): void {
+  const resolvedRecord = path.resolve(recordPath);
+  const directory = path.dirname(resolvedRecord);
+  const expectedParent = path.dirname(path.resolve(root));
+  const expectedPrefix = `.${path.basename(root)}.block-runner-publication-`;
+  if (path.basename(resolvedRecord) !== 'recovery.json' || path.dirname(directory) !== expectedParent
+    || !path.basename(directory).startsWith(expectedPrefix)) {
+    throw new Error(`Plugin publication recovery record is outside its private staging directory: ${recordPath}`);
+  }
+}
+
+async function readStoredPublicationRecord(recordPath: string): Promise<StoredPluginPublicationRecord> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(recordPath, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read plugin publication recovery record ${recordPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object') throw new Error(`Plugin publication recovery record is invalid: ${recordPath}`);
+  const record = parsed as Partial<StoredPluginPublicationRecord>;
+  if (record.version !== 1 || typeof record.directory !== 'string' || typeof record.fingerprint !== 'string'
+    || !Array.isArray(record.files) || !Array.isArray(record.completed)) {
+    throw new Error(`Plugin publication recovery record is invalid: ${recordPath}`);
+  }
+  for (const file of record.files) {
+    if (!file || typeof file.path !== 'string' || typeof file.relativePath !== 'string'
+      || (file.operation !== 'create' && file.operation !== 'modify') || typeof file.mode !== 'number'
+      || typeof file.afterHash !== 'string' || typeof file.afterContent !== 'string'
+      || (file.operation === 'modify' && (typeof file.beforeHash !== 'string' || typeof file.beforeContent !== 'string'))) {
+      throw new Error(`Plugin publication recovery record is invalid: ${recordPath}`);
+    }
+  }
+  return record as StoredPluginPublicationRecord;
+}
+
+async function stageStoredPluginPublication(
+  record: StoredPluginPublicationRecord,
+  stageRoot: string,
+): Promise<StagedPluginPublicationFile[]> {
+  await mkdir(stageRoot, { recursive: true, mode: 0o700 });
+  const staged: StagedPluginPublicationFile[] = [];
+  for (const file of record.files) {
+    assertTargetInside(record.directory, file.path);
+    const relativePath = relativePublicationPath(record.directory, file.path);
+    if (relativePath !== file.relativePath) throw new Error(`Plugin publication recovery record has an invalid target: ${file.path}`);
+    const content = Buffer.from(file.afterContent, 'base64');
+    if (publicationHash(content) !== file.afterHash) throw new Error(`Plugin publication recovery record has corrupt staged bytes: ${file.path}`);
+    const beforeContent = file.beforeContent === undefined ? undefined : Buffer.from(file.beforeContent, 'base64');
+    if (beforeContent && publicationHash(beforeContent) !== file.beforeHash) {
+      throw new Error(`Plugin publication recovery record has corrupt prior bytes: ${file.path}`);
+    }
+    const temporary = stagePath(stageRoot, relativePath);
+    await mkdir(path.dirname(temporary), { recursive: true, mode: 0o700 });
+    await writeFile(temporary, content, { flag: 'wx', mode: file.mode });
+    if (file.operation === 'modify') await chmod(temporary, file.mode);
+    staged.push({
+      target: file.path,
+      relativePath,
+      operation: file.operation,
+      requiresSeparateAuthorization: file.operation === 'modify',
+      mode: file.mode,
+      beforeContent,
+      beforeHash: file.beforeHash,
+      content,
+      afterHash: file.afterHash,
+      temporary,
+    });
+  }
+  return staged;
+}
+
+async function confirmRetryPreconditions(
+  root: string,
+  staged: readonly StagedPluginPublicationFile[],
+  completedAtInterruption: ReadonlySet<string>,
+): Promise<Set<string>> {
+  await assertPluginPublicationRoot(root);
+  const completed = new Set<string>();
+  for (const item of staged) {
+    assertTargetInside(root, item.target);
+    await assertNoSymlinkedParents(root, item.target);
+    const stats = await lstatMaybe(item.target);
+    const current = stats?.isFile() ? await readFile(item.target) : undefined;
+    if (current && publicationHash(current) === item.afterHash) {
+      completed.add(item.target);
+      continue;
+    }
+    if (completedAtInterruption.has(item.target)) {
+      throw new Error(`Refusing recovery because a previously published file changed: ${item.target}`);
+    }
+    if (item.operation === 'create') {
+      if (stats) throw new Error(`Refusing recovery because a pending target appeared: ${item.target}`);
+      continue;
+    }
+    if (!stats?.isFile() || !item.beforeContent || !current?.equals(item.beforeContent)) {
+      throw new Error(`Refusing recovery because a pending replacement changed: ${item.target}`);
+    }
+  }
+  return completed;
+}
+
+async function recheckStoredPublicationTarget(root: string, item: StagedPluginPublicationFile): Promise<void> {
+  await assertPluginPublicationRoot(root);
+  assertTargetInside(root, item.target);
+  await assertNoSymlinkedParents(root, item.target);
+  const stats = await lstatMaybe(item.target);
+  if (item.operation === 'create') {
+    if (stats) throw new Error(`Refusing recovery because a pending target appeared: ${item.target}`);
+    return;
+  }
+  if (!stats?.isFile() || !item.beforeContent) {
+    throw new Error(`Refusing recovery because a pending replacement changed: ${item.target}`);
+  }
+  const current = await readFile(item.target);
+  if (!current.equals(item.beforeContent)) {
+    throw new Error(`Refusing recovery because a pending replacement changed: ${item.target}`);
+  }
+}
+
+/**
+ * A hard link is an exclusive create: unlike rename it cannot silently replace a file that
+ * appears after the final recheck. Replacements retain rename's same-filesystem atomic swap.
+ */
+async function publishStagedPluginFile(item: StagedPluginPublicationFile): Promise<void> {
+  if (item.operation === 'create') {
+    await link(item.temporary, item.target);
+    await unlink(item.temporary);
+    return;
+  }
+  await rename(item.temporary, item.target);
 }
 
 /** A narrow archive policy check for the standalone release lane. */
