@@ -96,6 +96,27 @@ export interface ProofEditableField {
   value?: string;
 }
 
+/**
+ * A deliberately small, browser-observable reproduction of a generated
+ * block's root layout.  This is separate from visual regression: it records
+ * the editor-canvas DOM before and after the content cases that used to be
+ * hidden by the extra InnerBlocks wrapper.
+ */
+export interface ProofBrowserMatrix {
+  /** The computed display mode which must belong to the generated root. */
+  rootLayout: 'grid' | 'flex';
+  /** Exact native blocks emitted as children of the generated root. */
+  directNativeChildren: readonly string[];
+  /** The block-owned family declared by the shared stylesheet. */
+  fontFamily: string;
+  /** Text written to and then removed from the native heading in the iframe. */
+  longContent: string;
+  /** Deliberately non-default native Image proportions observed at narrow width. */
+  image: { width: string; height: string };
+  desktopViewport: { width: number; height: number };
+  narrowViewport: { width: number; height: number };
+}
+
 /** The exact per-instance map WordPress stores at core/block.attributes.content. */
 export type PatternOverrideContent = Record<string, Record<string, unknown>>;
 
@@ -130,6 +151,12 @@ export interface ProofFixture {
   postId?: number;
   blockTitle?: string;
   editableFields?: readonly ProofEditableField[];
+  /**
+   * Opt-in real-browser root-layout evidence. The helper refuses to record a
+   * pass unless WordPress 7.1 rendered the generated root inside editor-canvas
+   * at both declared viewport widths.
+   */
+  browserMatrix?: ProofBrowserMatrix;
   patternOverrides?: {
     /** Exact pattern title inserted through the visible inserter. */
     title: string;
