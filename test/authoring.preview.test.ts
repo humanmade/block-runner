@@ -86,6 +86,17 @@ describe('authoring preview', () => {
     expect(first).not.toMatch(/\x1b\[/);
   });
 
+  it('makes style-context limits and unresolved variables reviewable before confirmation', () => {
+    const reviewed = validateAuthoringPlan({ ...plan, coverage: { ...plan.coverage!, styleContext: {
+      unresolvedVariables: ['--external-brand'],
+      limitations: ['No target theme settings snapshot was supplied; native/theme-preset fidelity is not asserted.'],
+    } } });
+    const output = renderAuthoringPreview(reviewed, { width: 300 });
+    expect(output).toContain('Style context: theme context unavailable');
+    expect(output).toContain('--external-brand');
+    expect(output).toContain('fidelity is not asserted');
+  });
+
   it('derives compiler-owned files and renders hash-bound native metadata for every public caller', () => {
     const reviewed = validateAuthoringPlan({
       ...plan,

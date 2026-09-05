@@ -43,6 +43,15 @@ describe('registered-block stylesheet graph', () => {
     expect(scoped.ledger.every((entry) => entry.outcome === 'scoped-css')).toBe(true);
   });
 
+  it('never turns a conditional source declaration into an unconditional native style', () => {
+    const scoped = scopeStylesheet(scanStylesheet('@media (min-width: 48rem) { .hero { color: red; } }'), {
+      root: '.wp-block-acme-hero',
+      disposition: () => ({ outcome: 'native', reason: 'simulated support' }),
+    });
+    expect(scoped.css).toContain('@media (min-width: 48rem)');
+    expect(scoped.ledger).toContainEqual(expect.objectContaining({ property: 'color', outcome: 'scoped-css' }));
+  });
+
   it('blocks global foundation and escaping selectors rather than pretending that a prefix preserves them', () => {
     const scoped = scopeStylesheet(
       scanStylesheet(`html, body { margin: 0; } * { box-sizing: border-box; } :root { color: red; } .card { color: blue; }`),

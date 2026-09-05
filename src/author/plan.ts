@@ -10,6 +10,7 @@ import type {
   AuthoringCoverageStyle,
   AuthoringFontFace,
   AuthoringPlan,
+  AuthoringStyleContext,
   AuthoringStructureNode,
   JsonValue,
 } from '../authoring/schema.js';
@@ -264,6 +265,7 @@ export function createAnalyzedDesignCoverage(input: {
     ...(input.editorStylesheet === undefined ? {} : {
       editorStylesheet: { entry: '<author.styles.editorCss>', sha256: sha256(input.editorStylesheet) },
     }),
+    styleContext: coverageStyleContext(input.definition, `${input.stylesheet ?? ''}\n${input.editorStylesheet ?? ''}`),
     styles: [
       ...input.styleLedger.map((entry) => toCoverageStyle(entry, 'shared')),
       ...input.editorStyleLedger.map((entry) => toCoverageStyle(entry, 'editor')),
@@ -271,6 +273,40 @@ export function createAnalyzedDesignCoverage(input: {
     ],
     assets: input.assets.map((entry) => toCoverageAsset(entry, input.preparedAssets)),
   };
+}
+
+/** Keep target inputs reviewable without importing or mutating global theme.json. */
+function coverageStyleContext(definition: AuthorConfig, css: string): AuthoringStyleContext {
+  const supplied = definition.styles?.context;
+  const theme = supplied?.theme;
+  const unresolvedVariables = unresolvedCssVariables(css);
+  const limitations: string[] = [];
+  if (!theme?.settings) limitations.push('No target theme settings snapshot was supplied; native/theme-preset fidelity is not asserted.');
+  if (!supplied?.viewports) limitations.push('No configured WordPress viewport ranges were supplied; responsive source conditions remain exact scoped CSS.');
+  if (unresolvedVariables.length) limitations.push('Custom CSS variables are unresolved outside this block stylesheet; their provider and cascade remain a destination assumption.');
+  limitations.push('Global foundation/reset CSS is not injected; source rules requiring it are blocked instead of being approximated.');
+  return {
+    ...(theme ? { theme: {
+      ...(theme.slug ? { slug: theme.slug } : {}),
+      ...(theme.version ? { version: theme.version } : {}),
+      ...(theme.settings ? { settingsSha256: sha256(stableJson(theme.settings)) } : {}),
+    } } : {}),
+    ...(supplied?.viewports ? { viewports: supplied.viewports } : {}),
+    ...(unresolvedVariables.length ? { unresolvedVariables } : {}),
+    limitations,
+  };
+}
+
+function unresolvedCssVariables(css: string): string[] {
+  const defined = new Set([...css.matchAll(/(--[A-Za-z_][A-Za-z0-9_-]*)\s*:/g)].map((match) => match[1]));
+  return [...new Set([...css.matchAll(/var\(\s*(--[A-Za-z_][A-Za-z0-9_-]*)/g)]
+    .map((match) => match[1]).filter((name) => !defined.has(name) && !name.startsWith('--wp--')))].sort();
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
+  return JSON.stringify(value);
 }
 
 /**

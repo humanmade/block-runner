@@ -180,6 +180,8 @@ export interface AuthorStyleConfig {
   fontLicenses?: readonly FontLicenseDecision[];
   /** Optional destination-approved fallback stack for fonts which cannot be redistributed. */
   fallbackStack?: string;
+  /** Target facts used for ownership decisions; copied into the hash-bound plan coverage. */
+  context?: { theme?: { slug?: string; version?: string; settings?: Record<string, unknown> }; viewports?: Partial<Record<'mobile' | 'tablet', { min?: string; max?: string }>> };
 }
 
 export interface AuthorConfig {

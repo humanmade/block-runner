@@ -73,6 +73,22 @@ describe('AuthoringPlan schema', () => {
     expect(() => validateAuthoringPlan(plan({ source: { entry: 'design.html', sha256: 'not-a-hash', format: 'html' } }))).toThrow(/SHA-256/);
   });
 
+  it('hash-binds the target style context without treating it as writable theme configuration', () => {
+    const sourced = validateAuthoringPlan(plan({
+      source: { entry: 'design.html', sha256: 'a'.repeat(64), format: 'html' },
+      coverage: { styles: [], assets: [], styleContext: {
+        theme: { slug: 'example', version: '1.0', settingsSha256: 'b'.repeat(64) },
+        viewports: { mobile: { max: '599px' }, tablet: { min: '600px', max: '1023px' } },
+        unresolvedVariables: ['--brand-accent'],
+        limitations: ['No global reset was imported.'],
+      } },
+    }));
+    expect(sourced.coverage?.styleContext?.viewports?.tablet?.max).toBe('1023px');
+    const changed = structuredClone(sourced);
+    changed.coverage!.styleContext!.theme!.settingsSha256 = 'c'.repeat(64);
+    expect(hashAuthoringPlan(changed)).not.toBe(hashAuthoringPlan(sourced));
+  });
+
   it('pins registered-block plans to WordPress 7.1 and defaults omitted targets to that pin', () => {
     expect(validateAuthoringPlan(plan()).target.wordpress).toBe('7.1');
     expect(validateAuthoringPlan(plan({ target: { name: 'example/notice', title: 'Notice', wordpress: '7.1.1' } })).target.wordpress)
