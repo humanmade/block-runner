@@ -291,10 +291,29 @@ test:zip` verifies its release contents. Those are build checks, not WordPress r
 ### Proof is part of completion
 
 Headless validation, source generation, or a successful build is not a full success claim. Build
-the final plugin ZIP and run a full proof against the exact reviewed input and generated package:
+the final plugin ZIP and run a full proof against the exact reviewed input and generated package.
+Real-WordPress proof is an explicit optional setup: install the exact proof tooling alongside the
+same locally installed Block Runner version, then install Chromium yourself. This never triggers
+a browser download or model call from the proof command:
 
 ```bash
-npx -y block-runner@testing proof dist/acme-feature-grid.zip \
+npm install --save-dev --save-exact \
+  block-runner@testing \
+  @wordpress/env@11.12.0 \
+  @playwright/test@1.61.1 \
+  @wordpress/e2e-test-utils-playwright@1.51.0 \
+  axe-core@4.11.0 \
+  pixelmatch@7.1.0 \
+  pngjs@7.0.0
+npx --no-install playwright install chromium
+```
+
+A working Docker CLI and daemon are also required. If any proof package is absent or does not
+match its pin, the proof receipt is blocked before Docker starts and gives the exact setup
+command. After setup, run the locally installed CLI:
+
+```bash
+npx --no-install block-runner proof dist/acme-feature-grid.zip \
   --profile full \
   --input designs/feature-grid.html \
   --markup fixtures/feature-grid.blocks.html \

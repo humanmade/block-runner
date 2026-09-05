@@ -10,6 +10,7 @@ import {
   AuthorConfig,
   AuthorOptions,
   BlockRunnerReport,
+  ConvertOptions,
   GeneratedBlockPackage,
   ReportItem,
 } from '../types.js';
@@ -297,7 +298,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   // `<style>` node for its class rules, and Tailwind source would be incorrectly treated as an
   // empty stylesheet.
   const sourceStyledInput = withAuthorStyles(input, styleInput);
-  const nativeSource = await collectNativeSourceDeclarations(sourceStyledInput, options, config);
+  const nativeSource = await collectNativeSourceDeclarations(sourceStyledInput, authorAnalysisOptions(options), config);
   const preflightStyleLedger = [...safetyLedger, ...nativeSource.inlineLedger];
   const preflightInlineFailure = nativeSource.inlineLedger.some(
     (entry) => entry.outcome === 'blocked' || entry.outcome === 'warned',
@@ -345,7 +346,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
 
   const inlineStyleLedger: AuthoredStyleLedgerEntry[] = [];
   const conversion = await convert(withAuthorStyles(rewrittenMarkup.input, styleInput), {
-    ...options,
+    ...authorAnalysisOptions(options),
     // The author package carries residual authored selectors/properties in style.scss; the
     // legacy open sidecar would duplicate it as a global post stylesheet.
     styling: 'relaxed',
@@ -433,6 +434,16 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     styleLedger: compiled ? [...styleLedger, ...compiled.editorStyleLedger] : styleLedger,
     package: packageSource,
   };
+}
+
+/**
+ * The two conversion passes in HTML authoring are capability probes, not a delivery step.  They
+ * must retain the source URL and report unresolved media, but may never search, sideload, or
+ * import it through the destination configured by a caller.  `resolver` has precedence over the
+ * merged config, so this also protects callers that supplied the resolver as an option.
+ */
+function authorAnalysisOptions(options: AuthorOptions): ConvertOptions {
+  return { ...options, resolver: 'noop' };
 }
 
 function mergeAuthorConfig(configured: AuthorConfig | undefined, explicit: AuthorConfig | undefined): AuthorConfig {

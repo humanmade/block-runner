@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   AuthoringGenerationError,
   compileRegisteredBlock,
+  planRegisteredBlockOutput,
   REGISTERED_BLOCK_STYLE_EMITTER_VERSION,
   REGISTERED_BLOCK_TEMPLATE_VERSION,
   type GeneratedSourceFile,
   validateBlockMetadata,
 } from '../src/authoring/generate.js';
-import { hashAuthoringPlan, type AuthoringPlan } from '../src/authoring/schema.js';
+import { hashAuthoringPlan, type AuthoringPlan, type JsonValue } from '../src/authoring/schema.js';
 
 const plan = (): AuthoringPlan =>
   ({
@@ -115,7 +116,14 @@ describe('registered-block source compiler', () => {
     expect(edit).toContain('Plan once, ship safely');
     expect(edit).toContain('core/paragraph');
     expect(edit).toContain('This is native inner block content.');
-    expect(sourceFile(first.files, 'save.js').content).toContain('InnerBlocks.Content');
+    expect(edit).toContain('useInnerBlocksProps( blockProps');
+    expect(edit).toContain('<div { ...innerBlocksProps } />');
+    expect(edit).not.toContain('<InnerBlocks');
+
+    const save = sourceFile(first.files, 'save.js').content;
+    expect(save).toContain('useInnerBlocksProps.save( blockProps )');
+    expect(save).toContain('<div { ...innerBlocksProps } />');
+    expect(save).not.toContain('InnerBlocks.Content');
 
     const php = sourceFile(first.files, 'block.php').content;
     expect(php).toContain('register_block_type');
@@ -139,6 +147,18 @@ describe('registered-block source compiler', () => {
       title: 'Invalid support',
       supports: { align: ['narrow'] },
     })).toThrow(/metadata-schema-invalid/);
+  });
+
+  it.each<Record<string, JsonValue>>([
+    { content: '<img src=x onerror=alert(1)>' },
+    { url: 'javascript:alert(1)' },
+    { nested: { content: '<script>alert(1)</script>' } },
+  ])('rejects unsafe variation content at preview and generation: %j', (attributes) => {
+    const input = plan();
+    input.target.metadata = { variations: [{ name: 'unsafe', innerBlocks: [['core/paragraph', attributes]] }] };
+    for (const compile of [planRegisteredBlockOutput, compileRegisteredBlock]) {
+      expect(() => compile(input)).toThrow(/unsafe-inner-content.*target\.metadata\.variations\[0\]/);
+    }
   });
 
   it('passes safe native metadata through while refusing PHP variations-file capabilities', () => {

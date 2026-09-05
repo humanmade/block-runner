@@ -20,12 +20,12 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: 22
+          node-version: 22.13.0
           registry-url: https://registry.npmjs.org
       # Trusted publishing needs npm >= 11.5.1; pin 11.x (npm 12 needs Node ≥22.22
       # and changes pack --json shape — we support both, but stay on the proven line).
       - run: npm install -g npm@11
-      - run: npm ci
+      - run: npm ci --engine-strict
       - run: npx --no-install playwright install --with-deps chromium
       - name: Collect native WordPress Heading control
         env:
