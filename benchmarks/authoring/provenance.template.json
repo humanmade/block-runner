@@ -1,0 +1,39 @@
+{
+  "version": "1",
+  "timingMethod": {
+    "id": "monotonic-wall-clock-source-materialization-through-evidence-finalization",
+    "start": "immediately before reading and compiling the saved candidate plan",
+    "end": "after worker execution and evidence retention, immediately before receipt serialization",
+    "unit": "milliseconds",
+    "excludes": ["queue time", "human review time", "receipt serialization and file write", "model interpretation before the saved plan"]
+  },
+  "requiredRunFields": [
+    "suiteHash",
+    "scorerHash",
+    "promptGuideHash",
+    "templateHash",
+    "dependencyHash",
+    "wordpressHash",
+    "themeHash",
+    "browserHash",
+    "model",
+    "effort",
+    "workload",
+    "invalidCounts",
+    "timingMethod"
+  ],
+  "hashInputs": {
+    "suiteHash": ["suite.json", "fixtures.json", "fixtures/**/*.json", "sources/**/*", "assets/**/*"],
+    "scorerHash": ["<runner-revision>", "<scorer-source-tree>"],
+    "promptGuideHash": ["fixtures/**/prompt.md", "contract.md", "README.md"],
+    "templateHash": ["<candidate-template-revision>"],
+    "dependencyHash": ["package-lock.json", "<candidate-lockfile>"],
+    "wordpressHash": ["wordpress=7.1", "wp-content/plugins/*@installed-version"],
+    "themeHash": ["<theme-slug>@<version>", "theme.json"],
+    "browserHash": ["<browser-name>", "<browser-version>", "viewport=1440x1024", "deviceScaleFactor=1"]
+  },
+  "publicationLabel": {
+    "required": ["workload", "suiteSize", "model", "effort", "invalidCount", "timingMethod"],
+    "forbidden": ["unlabeled aggregate", "unrun browser pass", "cross-suite aggregate"]
+  }
+}

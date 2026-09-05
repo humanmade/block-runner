@@ -1,0 +1,32 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "Codex, agent-assisted screenshot and diff review",
+  "reviewedAt": "2026-09-04",
+  "inputSha256": "3321e9846b4c042ff9c4c23bed09a2c3e2aa552ce702624fc9b9100b4297eaaa",
+  "pluginZipSha256": "8d525c79df7792259b61790a113959fbbff20aa34ff0c1f1bd5fb92542272e9d",
+  "browser": "Chromium 149.0.7827.55",
+  "viewport": { "width": 1280, "height": 900, "deviceScaleFactor": 1 },
+  "capture": { "selector": ".wp-block-post-content", "width": 1280, "height": 1546 },
+  "threshold": 0,
+  "masks": [],
+  "baselines": [
+    {
+      "platform": "darwin",
+      "path": "proof/wordpress-7.1-pattern-overrides.expected.png",
+      "sha256": "bf61f3e4de7ff02181c4dc67e37beed8611cc308c8a0c20f3d166c3b975f2878",
+      "review": "Existing reviewed macOS fixture; retained without modification."
+    },
+    {
+      "platform": "linux",
+      "path": "proof/wordpress-7.1-pattern-overrides.linux.expected.png",
+      "sha256": "8f0334c5abd82815f5188e77d7ee1ef227833745cabd8b5c4d2e72a5bf09ff12",
+      "source": "https://github.com/humanmade/block-runner/actions/runs/33878475108",
+      "review": "Reviewed actual, expected and diff images. Four regions, canonical and overridden text, reset fallback, images, SVGs, colors, borders and spacing match. Cross-platform differences are confined to text rasterization and the resulting text-sized button edge. No content is missing or clipped."
+    }
+  ],
+  "limitations": [
+    "Platform-specific visual references, not a relaxed pixel threshold.",
+    "Agent-assisted visual review is not human accessibility certification or screen-reader testing.",
+    "Unreviewed platforms have no fallback golden and remain blocked."
+  ]
+}

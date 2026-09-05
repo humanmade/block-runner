@@ -27,13 +27,16 @@ import {
   scoreReport,
   composeInput,
   suiteHash,
+  scorerHash,
+  gutenbergVersion,
+  WORDPRESS_TARGET,
   type Spec,
   type Result,
 } from './tuner/score.js';
-import { readCache, writeCache, type CacheKeyParts } from './tuner/cache.js';
+import { readCache, writeCache, type CacheKeyParts, type InstructionProvenance } from './tuner/cache.js';
 import { selectSmoke, printSmokeReasons } from './tuner/smoke.js';
 import { attribute, printAttribution } from './tuner/attribute.js';
-import { readBaseline, detectRegressions, updateBaseline, captureRegressions, printRatchet } from './tuner/ratchet.js';
+import { readBaseline, baselineStatus, detectRegressions, updateBaseline, captureRegressions, printRatchet } from './tuner/ratchet.js';
 
 type Tier = 't0' | 't1' | 't2';
 
@@ -43,8 +46,9 @@ interface LoadedEngine {
   label: string;
   split: boolean;
   promptHash: string;
+  instructionProvenance?: InstructionProvenance;
   convert?: (html: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
-  propose?: (html: string, options?: ConvertOptions) => Promise<{ raw: string }>;
+  propose?: (html: string, options?: ConvertOptions) => Promise<{ raw: string; error?: string }>;
   realize?: (raw: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
 }
 
@@ -80,6 +84,30 @@ function effortLabel(): string {
   return arg('--effort') ?? process.env.BLOCK_RUNNER_EFFORT ?? 'none';
 }
 
+// Bare aliases are useful for exploration but make durable benchmark history ambiguous as new models ship.
+const BARE_ALIASES = /^(opus|sonnet|haiku|fable)$/i;
+function guardModelAlias(): void {
+  const model = modelLabel();
+  if (!BARE_ALIASES.test(model)) return;
+  if (has('--baseline-update')) {
+    console.error(
+      `model alias "${model}" is ambiguous: its meaning changes as new models ship; pass a full id such as claude-opus-5 instead.`,
+    );
+    process.exit(1);
+  }
+  console.error(`warning: model alias "${model}" is ambiguous; its meaning changes as new models ship. Pass a full id such as claude-opus-5.`);
+}
+
+function readInstructionProvenance(value: unknown): InstructionProvenance | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const provenance: InstructionProvenance = {};
+  for (const key of ['guideHash', 'authoringCommandHash', 'authoringSchemaHash'] as const) {
+    if (typeof candidate[key] === 'string') provenance[key] = candidate[key];
+  }
+  return Object.keys(provenance).length > 0 ? provenance : undefined;
+}
+
 async function loadEngine(): Promise<LoadedEngine> {
   const p = enginePath();
   const label = engineLabel();
@@ -100,6 +128,7 @@ async function loadEngine(): Promise<LoadedEngine> {
     label,
     split: true,
     promptHash: typeof mod.promptHash === 'string' ? mod.promptHash : '',
+    instructionProvenance: readInstructionProvenance(mod.agentSkillProvenance),
     propose: mod.propose,
     realize: mod.realize,
   };
@@ -141,7 +170,8 @@ const CONVERT_OPTS: ConvertOptions = { config: { media: { resolver: 'noop' } } }
 
 interface FixtureRun {
   result?: Result;
-  state: 'scored' | 'stale' | 'uncached';
+  state: 'scored' | 'stale' | 'uncached' | 'failed';
+  error?: string;
   // propose = the model call (≈ all the wall-clock); realize = assemble + gate (ms).
   timing?: { proposeMs: number; realizeMs: number };
 }
@@ -171,6 +201,7 @@ async function runFixture(
     effort: effortLabel(),
     inputHtml,
     promptHash: engine.promptHash,
+    instructionProvenance: engine.instructionProvenance,
   };
 
   // T0 replays the cache, never calling the engine. Missing/stale cache is reported loudly,
@@ -188,6 +219,9 @@ async function runFixture(
   const t0 = Date.now();
   const proposed = await engine.propose!(inputHtml, opts);
   const proposeMs = Date.now() - t0;
+  if (proposed.error !== undefined) {
+    return { state: 'failed', error: proposed.error, timing: { proposeMs, realizeMs: 0 } };
+  }
   const raw = proposed.raw;
   const t1 = Date.now();
   const report = await engine.realize!(raw, opts);
@@ -268,7 +302,16 @@ function printTiming(timings: FixtureTiming[]): void {
 
 // Append a timing record on full (T2) runs so speed trends over time, the way results.jsonl
 // trends scores. Committed history — the baseline a speed goal measures against.
-function recordTimings(engineLabel: string, model: string, effort: string, hash: string, timings: FixtureTiming[]): void {
+function recordTimings(
+  engineLabel: string,
+  promptHash: string,
+  instructionProvenance: InstructionProvenance | undefined,
+  model: string,
+  effort: string,
+  hash: string,
+  currentScorerHash: string,
+  timings: FixtureTiming[],
+): void {
   const live = timings.filter((t) => t.proposeMs > 0);
   if (live.length === 0) return; // a replayed T2 has no model timing worth trending
   const propose = live.map((t) => t.proposeMs).sort((a, b) => a - b);
@@ -278,6 +321,11 @@ function recordTimings(engineLabel: string, model: string, effort: string, hash:
     model,
     effort,
     suiteHash: hash,
+    scorerHash: currentScorerHash,
+    promptHash,
+    ...(instructionProvenance ?? {}),
+    wordpressVersion: WORDPRESS_TARGET,
+    blockLibraryVersion: gutenbergVersion(),
     fixtures: live.length,
     proposeMsTotal: propose.reduce((sum, ms) => sum + ms, 0),
     proposeMsMedian: propose[Math.floor(propose.length / 2)],
@@ -290,6 +338,7 @@ function recordTimings(engineLabel: string, model: string, effort: string, hash:
 }
 
 async function main(): Promise<void> {
+  guardModelAlias();
   const tierName = tier();
   const refresh = has('--refresh');
   const engine = await loadEngine();
@@ -299,13 +348,17 @@ async function main(): Promise<void> {
     return;
   }
   const hash = suiteHash(specs);
+  const currentScorerHash = scorerHash();
   const all = allFixtures(specs);
   if (all.length === 0) {
     console.log('No producer inputs found under benchmarks/producers/.');
     return;
   }
 
-  console.log(`tuner — tier ${tierName} · engine ${engine.label}${engine.split ? ' (split)' : ''} · model ${modelLabel()}/${effortLabel()} · suite ${hash}`);
+  console.log(
+    `tuner — tier ${tierName} · engine ${engine.label}${engine.split ? ' (split)' : ''} · ` +
+      `model ${modelLabel()}/${effortLabel()} · suite ${hash} · scorer ${currentScorerHash}`,
+  );
 
   const { fixtures, smokeReasons } = scopeFixtures(tierName, engine, all);
   if (smokeReasons.length > 0) printSmokeReasons(smokeReasons);
@@ -313,6 +366,7 @@ async function main(): Promise<void> {
   const results: Result[] = [];
   const stale: string[] = [];
   const uncached: string[] = [];
+  const failed: { label: string; error: string }[] = [];
   const timings: FixtureTiming[] = [];
   for (const f of fixtures) {
     const run = await runFixture(engine, f, tierName, refresh);
@@ -320,35 +374,63 @@ async function main(): Promise<void> {
       results.push(run.result);
       if (run.timing) timings.push({ label: `${f.producer}/${f.layout}`, ...run.timing });
     } else if (run.state === 'stale') stale.push(`${f.producer}/${f.layout}`);
-    else uncached.push(`${f.producer}/${f.layout}`);
+    else if (run.state === 'uncached') uncached.push(`${f.producer}/${f.layout}`);
+    else failed.push({ label: `${f.producer}/${f.layout}`, error: run.error ?? 'unknown model-call failure' });
   }
 
   printScorecard(results, stale, uncached);
   printTiming(timings);
-  if (tierName === 't2') recordTimings(engine.label, modelLabel(), effortLabel(), hash, timings);
+  if (failed.length > 0) {
+    console.error('\n!!! TUNER RUN INCOMPLETE: MODEL CALL FAILURE(S) — NO SCORE OR BASELINE WAS RECORDED !!!');
+    for (const failure of failed) console.error(`  ${failure.label}: ${failure.error}`);
+    process.exitCode = 1;
+    return;
+  }
+  if (tierName === 't2') {
+    recordTimings(
+      engine.label,
+      engine.promptHash,
+      engine.instructionProvenance,
+      modelLabel(),
+      effortLabel(),
+      hash,
+      currentScorerHash,
+      timings,
+    );
+  }
 
   // Honest attribution — per-class deltas, overfit detection, miss aggregation.
-  const attr = attribute(results, hash, engine.label, modelLabel());
+  const attr = attribute(results, hash, currentScorerHash, engine.label, modelLabel(), effortLabel());
   printAttribution(attr);
 
   // Regression ratchet — nothing degrades in silence.
-  const baseline = readBaseline(engine.label, modelLabel());
-  const regressions = detectRegressions(results, baseline);
-  printRatchet(regressions, baseline);
+  const baseline = readBaseline(engine.label, modelLabel(), effortLabel());
+  const currentGutenbergVersion = gutenbergVersion();
+  const status = baselineStatus(baseline, hash, currentScorerHash, currentGutenbergVersion);
+  const regressions = detectRegressions(results, baseline, status);
+  printRatchet(regressions, baseline, status);
 
   if (has('--capture') && regressions.length > 0) {
-    const written = captureRegressions(regressions, results, engine.label, modelLabel());
+    const written = captureRegressions(regressions, results, engine.label, modelLabel(), effortLabel());
     console.log(`\ncaptured ${written.length} regression${written.length === 1 ? '' : 's'} → benchmarks/regressions/`);
   }
 
   if (has('--baseline-update')) {
-    const updated = updateBaseline(results, engine.label, modelLabel(), hash);
+    const updated = updateBaseline(
+      results,
+      engine.label,
+      modelLabel(),
+      effortLabel(),
+      hash,
+      currentScorerHash,
+      currentGutenbergVersion,
+    );
     console.log(`\nbaseline updated → benchmarks/baselines/ (${Object.keys(updated.fixtures).length} fixtures, best-ever)`);
   }
 
   // The ratchet gate: a run that regressed a fixture below baseline exits non-zero, unless
   // this run is the deliberate baseline-update that accepts the new numbers.
-  if (regressions.length > 0 && !has('--baseline-update')) {
+  if (status.kind === 'comparable' && regressions.length > 0 && !has('--baseline-update')) {
     console.log(`\n✗ ${regressions.length} fixture(s) below baseline — failing (use --baseline-update to accept, --capture to inspect).`);
     process.exit(1);
   }

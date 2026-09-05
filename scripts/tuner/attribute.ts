@@ -1,7 +1,7 @@
 /**
  * Honest attribution — the mechanic that kills single-cell overfits.
  *
- * Every run diffs against the previous *comparable* run (same suiteHash + engine + model)
+ * Every run diffs against the previous *comparable* run (same suite/scorer + engine/model/effort)
  * and reports per-fixture deltas grouped by class — producer and layout — not just a corpus
  * number (md/13). It then classifies the change:
  *
@@ -26,7 +26,9 @@ const THRESHOLD = 1; // ignore ±0 jitter
 interface RunRecord {
   engine: string;
   model: string;
+  effort?: string;
   suiteHash: string;
+  scorerHash?: string;
   fixtures: Record<string, number>;
 }
 
@@ -67,9 +69,20 @@ function loadHistory(): RunRecord[] {
 // The previous comparable run: same suiteHash + engine + model. Holding the suite + axis
 // constant is what makes a score delta attributable to the converter (the suiteHash
 // discipline from bench.ts, applied to attribution).
-function previousComparable(suiteHash: string, engine: string, model: string): RunRecord | undefined {
+function previousComparable(
+  suiteHash: string,
+  scorerHash: string,
+  engine: string,
+  model: string,
+  effort: string,
+): RunRecord | undefined {
   const matches = loadHistory().filter(
-    (r) => r.suiteHash === suiteHash && r.engine === engine && r.model === model,
+    (r) =>
+      r.suiteHash === suiteHash &&
+      r.scorerHash === scorerHash &&
+      r.engine === engine &&
+      r.model === model &&
+      r.effort === effort,
   );
   return matches[matches.length - 1];
 }
@@ -96,11 +109,13 @@ function aggregateMisses(results: Result[]): { block: string; count: number; pro
 export function attribute(
   results: Result[],
   suiteHash: string,
+  scorerHash: string,
   engine: string,
   model: string,
+  effort: string,
 ): Attribution {
   const missesByBlock = aggregateMisses(results);
-  const prev = previousComparable(suiteHash, engine, model);
+  const prev = previousComparable(suiteHash, scorerHash, engine, model, effort);
 
   if (!prev) {
     return {
@@ -172,7 +187,7 @@ function fmtDelta(d: number): string {
 export function printAttribution(attr: Attribution): void {
   console.log('\nattribution (vs previous comparable run):');
   if (!attr.comparable) {
-    console.log('  no comparable prior run (same suiteHash + engine + model) — nothing to diff against yet.');
+    console.log('  no comparable prior run (same suite/scorer + engine/model/effort) — nothing to diff against yet.');
   } else if (attr.deltas.length === 0) {
     console.log('  flat — no fixture moved beyond jitter.');
   } else {

@@ -19,6 +19,7 @@
 import { execFileSync } from 'node:child_process';
 import type { ConvertOptions, BlockRunnerReport } from '../../src/types.js';
 import { INTENT_PROMPT, PROMPT_HASH, realize } from './intent.js';
+import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from './harness.js';
 
 function flag(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -41,11 +42,12 @@ function callModel(input: string): string {
   if (cli() === 'codex') {
     return execFileSync(
       'codex',
-      ['exec', '-m', modelName(), '-c', `model_reasoning_effort=${reasoningEffort()}`, '--dangerously-bypass-approvals-and-sandbox', '-'],
-      { input, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'], timeout: 240000, killSignal: 'SIGKILL' },
+      codexExecArgs(modelName(), reasoningEffort()),
+      { cwd: MODEL_WORKDIR, input, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'], timeout: 240000, killSignal: 'SIGKILL' },
     );
   }
-  return execFileSync('claude', ['-p', '--model', modelName(), '--permission-mode', 'bypassPermissions'], {
+  return execFileSync('claude', claudePrintArgs(modelName(), reasoningEffort()), {
+    cwd: MODEL_WORKDIR,
     input,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -57,11 +59,11 @@ function callModel(input: string): string {
 
 // The costly, non-deterministic half: ask the model for an intent tree. Its raw response is
 // what the tuner caches; realize() (deterministic) is replayed over it.
-export async function propose(html: string, _opts?: ConvertOptions): Promise<{ raw: string }> {
+export async function propose(html: string, _opts?: ConvertOptions): Promise<{ raw: string; error?: string }> {
   try {
     return { raw: callModel(INTENT_PROMPT + html) };
-  } catch {
-    return { raw: '' };
+  } catch (error) {
+    return { raw: '', error: error instanceof Error ? error.message : String(error) };
   }
 }
 
@@ -70,6 +72,11 @@ export const promptHash = PROMPT_HASH;
 
 // convert = propose + realize, for non-tuner callers (e.g. plain `npm run bench`).
 export async function convert(html: string, opts?: ConvertOptions): Promise<BlockRunnerReport> {
-  const { raw } = await propose(html, opts);
-  return realize(raw, opts);
+  const { raw, error } = await propose(html, opts);
+  const report = await realize(raw, opts);
+  if (error !== undefined) {
+    // BlockRunnerReport is shipped without benchmark failure metadata; this harness-only field keeps a failed call distinct from a real zero.
+    return { ...report, engineError: error } as BlockRunnerReport & { engineError: string };
+  }
+  return report;
 }

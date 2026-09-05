@@ -1,0 +1,15 @@
+{
+  "version": 1,
+  "expectedStatus": "unsupported",
+  "requestedCapabilities": [
+    "pointer-drag-reorder",
+    "per-user-persisted-order",
+    "live-region-sort-announcement"
+  ],
+  "warning": {
+    "code": "BR_UNSUPPORTED_INTERACTION",
+    "message": "Drag-and-drop persistence is not supported by the 0.9 testing release."
+  },
+  "noGeneratedSource": true,
+  "noInteractiveRuntime": true
+}

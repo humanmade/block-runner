@@ -1,0 +1,78 @@
+{
+  "intent": "A downloadable-resource section: an H2, a paragraph, then core/file carrying the file URL, link text, and a non-empty visible download-button label. A visibly bordered or filled source card may remain as a nested core/group; when that card visibly separates copy and download action horizontally, core/columns is also valid. An unstyled wrapper should not survive.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Get the spec sheet" },
+      { "block": "core/paragraph", "contains": "Every supported block" },
+      {
+        "block": "core/file",
+        "attrs": {
+          "href": "block-reference.pdf",
+          "fileName": "Block reference (PDF)",
+          "showDownloadButton": true,
+          "downloadButtonText": { "$oneOf": ["Download", "Block reference (PDF)"] }
+        }
+      }
+    ]
+  },
+  "acceptedTrees": [
+    {
+      "block": "core/group",
+      "children": [
+        {
+          "block": "core/group",
+          "children": [
+            { "block": "core/heading", "contains": "Get the spec sheet" },
+            { "block": "core/paragraph", "contains": "Every supported block" },
+            {
+              "block": "core/file",
+              "attrs": {
+                "href": "block-reference.pdf",
+                "fileName": "Block reference (PDF)",
+                "showDownloadButton": true,
+                "downloadButtonText": { "$oneOf": ["Download", "Block reference (PDF)"] }
+              }
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "block": "core/group",
+      "children": [
+        {
+          "block": "core/group",
+          "children": [
+            {
+              "block": "core/columns",
+              "children": [
+                {
+                  "block": "core/column",
+                  "children": [
+                    { "block": "core/heading", "contains": "Get the spec sheet" },
+                    { "block": "core/paragraph", "contains": "Every supported block" }
+                  ]
+                },
+                {
+                  "block": "core/column",
+                  "children": [
+                    {
+                      "block": "core/file",
+                      "attrs": {
+                        "href": "block-reference.pdf",
+                        "fileName": "Block reference (PDF)",
+                        "showDownloadButton": true,
+                        "downloadButtonText": { "$oneOf": ["Download", "Block reference (PDF)"] }
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

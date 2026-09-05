@@ -1,19 +1,35 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
 import { existsSync } from 'node:fs';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
-import { Command, CommanderError } from 'commander';
+import { Command, CommanderError, Option } from 'commander';
 import fg from 'fast-glob';
 import { canonicalize } from './gate/canonicalize.js';
 import { validate } from './gate/validate.js';
 import { convert } from './convert/assemble.js';
+import { author as generateRegisteredBlock } from './author/index.js';
 import { realize } from './intent/index.js';
 import { loadConfig } from './config/load.js';
 import { collectSiteContext } from './context/run.js';
+import { installCanonicalSkill, readCanonicalSkillGuide, SkillScope, SkillTarget } from './skill.js';
+import {
+  detectWpScriptsPlugin,
+  planExistingPluginOutput,
+  planStandalonePluginOutput,
+  UnsupportedPluginLayoutError,
+  writePluginOutput,
+  type GeneratedBlockPackage,
+} from './plugin/profile.js';
+import { runProof, type ProofFixture } from './proof/runner.js';
+import { isProofProfileName } from './proof/profiles.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
-
+import { hashAuthoringConfirmation, inspectAuthoringDestination, writeGeneratedRegisteredBlock } from './authoring/destination.js';
+import { materializeAuthoringPlan, planRegisteredBlockOutput } from './authoring/generate.js';
+import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
+import { renderAuthoringPreview } from './authoring/preview.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -24,6 +40,10 @@ interface CliOptions extends CommonOptions {
   out?: string;
   cssOut?: string;
   wpAppPasswordEnv?: string;
+  name?: string;
+  title?: string;
+  category?: string;
+  outDir?: string;
 }
 
 interface ContextCliOptions {
@@ -38,6 +58,48 @@ interface ContextCliOptions {
 interface SkillCliOptions {
   install?: boolean;
   dir?: string;
+  scope?: SkillScope;
+  target?: SkillTarget;
+  dryRun?: boolean;
+  force?: boolean;
+}
+
+interface AuthorPreviewCliOptions {
+  json?: boolean;
+  outputDir?: string;
+  width?: string;
+}
+
+interface AuthorWriteCliOptions {
+  confirm?: string;
+  outputDir?: string;
+  json?: boolean;
+}
+
+interface PluginInspectCliOptions {
+  json?: boolean;
+}
+
+interface PluginPreviewCliOptions {
+  host?: string;
+  standalone?: string;
+  json?: boolean;
+}
+
+interface PluginWriteCliOptions extends PluginPreviewCliOptions {
+  confirm?: string;
+  approveReplace?: string[];
+}
+interface ProofCliOptions {
+  profile?: string;
+  fixture?: string;
+  markup?: string;
+  input?: string;
+  receiptDir?: string;
+  wpEnvConfig?: string;
+  run?: boolean;
+  keepEnvironment?: boolean;
+  json?: boolean;
 }
 
 const program = new Command();
@@ -68,6 +130,55 @@ addTokenOptions(
     );
     const report = aggregateReports('validate', reports);
     await emit(report, options);
+    process.exitCode = report.ok ? 0 : 1;
+  });
+
+const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
+
+addTokenOptions(
+  addWpCredentialOptions(
+    addSharedOptions(program.command('generate-author <htmlOrStdin>', { hidden: true }), {
+      output: false,
+    }),
+  ),
+  { styling: false },
+)
+  .option('--name <namespace/slug>', 'registered block name, for example acme/hero')
+  .option('--title <title>', 'block title (defaults from the slug)')
+  .option('--category <category>', 'block category (default: widgets)')
+  .option('--out-dir <path>', 'unsupported: use author preview/write to confirm source publication')
+  .action(async (htmlOrStdin: string, options: CliOptions) => {
+    if (options.outDir) {
+      program.error('error: HTML authoring is analysis-only; use --json, review package.canonicalPlan with author preview, then author write --confirm');
+    }
+    if (!htmlOrStdin) {
+      program.error('error: author needs exactly one design input');
+    }
+    if (!options.name) {
+      program.error("error: required option '--name <namespace/slug>' not specified");
+    }
+    const apiOptions = normalizeOptions(options);
+    const inputs = await readInputs(htmlOrStdin, { allowInline: true });
+    if (inputs.length !== 1) {
+      program.error('error: author accepts exactly one design input because it generates exactly one registered block');
+    }
+    if (!options.json) {
+      program.error('error: HTML authoring needs --json to return its analysis and canonical plan; source publication uses author preview/write');
+    }
+    const input = inputs[0];
+    if (!input) {
+      return;
+    }
+    const report = await generateRegisteredBlock(input.content, {
+      ...apiOptions,
+      sourcePath: input.path,
+      author: {
+        name: options.name,
+        title: options.title,
+        category: options.category,
+      },
+    });
+    await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
 
@@ -201,35 +312,269 @@ program
     }
   });
 
+const plugin = program
+  .command('plugin')
+  .description('Inspect or package a generated registered block for a supported wp-scripts plugin.');
+
+plugin
+  .command('inspect <hostDirectory>')
+  .description('Report a read-only @wordpress/scripts host profile and its registration strategy.')
+  .option('--json', 'emit a machine-readable profile')
+  .action(async (hostDirectory: string, options: PluginInspectCliOptions) => {
+    const profile = await detectWpScriptsPlugin(hostDirectory);
+    if (options.json) {
+      console.log(JSON.stringify(profile, null, 2));
+      process.exitCode = profile.kind === 'recognized' ? 0 : 1;
+      return;
+    }
+    if (profile.kind !== 'recognized') {
+      console.error(`plugin inspect: ${profile.reason}`);
+      console.error('No files written. Use plugin preview <block-dir> --standalone <output-dir> to create a standalone plugin.');
+      process.exitCode = 1;
+      return;
+    }
+    console.log([
+      'plugin inspect: recognised',
+      `@wordpress/scripts=${profile.wpScriptsVersion}`,
+      `source root=${profile.sourceRoot}`,
+      `build root=${profile.buildRoot}`,
+      `entry discovery=${profile.entryDiscovery}`,
+      `registration=${profile.registration} (${profile.registrationFile})`,
+    ].join('\n'));
+  });
+
+plugin
+  .command('preview <blockDirectory>')
+  .description('List every generated and bootstrap file that would be touched; writes nothing.')
+  .option('--host <directory>', 'recognised existing wp-scripts plugin root')
+  .option('--standalone <directory>', 'plan a complete standalone plugin wrapper instead')
+  .option('--json', 'emit the machine-readable plan')
+  .action(async (blockDirectory: string, options: PluginPreviewCliOptions) => {
+    const plan = await pluginPlanForCli(blockDirectory, options);
+    emitPluginPlan(plan, options.json ?? false);
+  });
+
+plugin
+  .command('write <blockDirectory>')
+  .description('Write exactly a previewed plugin source plan; build and runtime proof remain separate.')
+  .requiredOption('--confirm <fingerprint>', 'exact fingerprint printed by plugin preview')
+  .option('--host <directory>', 'recognised existing wp-scripts plugin root')
+  .option('--standalone <directory>', 'write a complete standalone plugin wrapper instead')
+  .option('--approve-replace <path...>', 'absolute preview paths explicitly approved for replacement')
+  .option('--json', 'emit a machine-readable write result')
+  .action(async (blockDirectory: string, options: PluginWriteCliOptions) => {
+    const plan = await pluginPlanForCli(blockDirectory, options);
+    if (options.confirm !== plan.fingerprint) {
+      throw new Error('plugin confirmation does not match the reviewed preview; no files written');
+    }
+    const result = await writePluginOutput(plan, { authorizedReplacements: options.approveReplace });
+    const delivery = pluginDelivery(plan.mode, result.directory);
+    if (options.json) {
+      console.log(JSON.stringify({ ok: true, ...result, delivery }, null, 2));
+      return;
+    }
+    console.log(`plugin write: ${result.written.length} file${result.written.length === 1 ? '' : 's'} written to ${result.directory}`);
+    for (const file of result.written) console.log(`- ${file}`);
+    console.log('Source delivery: complete. Build and WordPress runtime proof have not run.');
+    console.log(`Next: ${delivery.nextCommand}`);
+  });
+
+program
+  .command('proof <pluginZip>')
+  .description('Run a WordPress proof profile and write a content-addressed receipt.')
+  .addOption(new Option('--profile <profile>', 'headless, runtime, editor, or full').choices(['headless', 'runtime', 'editor', 'full']).default('full'))
+  .option('--fixture <path>', 'JSON fixture with block name, editable fields, and proof assertions')
+  .option('--markup <path>', 'generated block markup for the headless validation gate')
+  .option('--input <path>', 'reviewed generator input to pin as evidence (required for a passing proof)')
+  .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
+  .option('--wp-env-config <path>', 'wp-env configuration (default: proof/wp-env.json)')
+  .option('--no-run', 'only produce a blocked receipt; do not start Docker or Playwright')
+  .option('--keep-environment', 'leave wp-env running after the proof')
+  .option('--json', 'emit the complete receipt result as JSON')
+  .action(async (pluginZip: string, options: ProofCliOptions) => {
+    const profile = options.profile ?? 'full';
+    if (!isProofProfileName(profile)) {
+      program.error(`error: unsupported proof profile ${JSON.stringify(profile)}`);
+      return;
+    }
+    const [fixture, markup, input] = await Promise.all([
+      options.fixture ? readJsonFixture(options.fixture) : undefined,
+      options.markup ? readFile(options.markup, 'utf8') : undefined,
+      options.input ? readFile(options.input) : undefined,
+    ]);
+    const result = await runProof({
+      profile,
+      pluginZip,
+      fixture,
+      markup,
+      input,
+      inputPath: options.input,
+      outputDir: options.receiptDir,
+      wpEnvConfig: options.wpEnvConfig,
+      execute: options.run,
+      keepEnvironment: options.keepEnvironment,
+    });
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+    } else {
+      console.log(`proof ${result.profile.profile}: ${result.ok ? 'pass' : 'fail'}`);
+      console.log(`receipt: ${result.receiptReference.path} (${result.receiptReference.sha256})`);
+      for (const failed of result.profile.failedGates) {
+        console.log(`- ${failed.gate}: ${failed.status}${failed.record?.reason ? ` — ${failed.record.reason}` : ''}`);
+      }
+    }
+    process.exitCode = result.ok ? 0 : 1;
+  });
+
+
 program
   .command('skill')
   .description('Print or install the agent guide.')
   .option('--install', 'install the agent skill files')
-  .option('--dir <path>', 'install root (default: .claude/skills)')
+  .addOption(new Option('--scope <scope>', 'installation scope (default: project)').choices(['project', 'user']))
+  .addOption(new Option('--target <target>', 'skill discovery target (default: all)').choices(['all', 'agents', 'claude']))
+  .option('--dir <path>', 'install under an explicit skills directory')
+  .option('--dry-run', 'show destinations without writing files')
+  .option('--force', 'replace locally changed or unmanaged skill files')
   .action(async (options: SkillCliOptions) => {
     if (!options.install) {
-      process.stdout.write(await readSkillSource('GUIDE.md'));
+      if (options.dir || options.scope || options.target || options.dryRun || options.force) {
+        program.error('error: --dir, --scope, --target, --dry-run, and --force require --install');
+      }
+      process.stdout.write(await readCanonicalSkillGuide());
       return;
     }
 
-    const skill = await readSkillSource('SKILL.md');
-    const guide = await readSkillSource('GUIDE.md');
-    const destination = path.resolve(options.dir ?? '.claude/skills', 'block-runner');
-    await mkdir(destination, { recursive: true });
-
-    for (const [filename, content] of [
-      ['SKILL.md', skill],
-      ['GUIDE.md', guide],
-    ] as const) {
-      const target = path.join(destination, filename);
-      const status = existsSync(target) ? 'updated' : 'installed';
-      await writeFile(target, content, 'utf8');
-      console.log(`${status} ${target}`);
+    const results = await installCanonicalSkill({
+      cwd: process.cwd(),
+      home: process.env.HOME || homedir(),
+      packageVersion,
+      directory: options.dir,
+      scope: options.scope,
+      target: options.target,
+      dryRun: options.dryRun,
+      force: options.force,
+    });
+    for (const result of results) {
+      const status = result.dryRun && result.status !== 'unchanged'
+        ? `would ${result.status === 'installed' ? 'install' : 'update'}`
+        : result.status;
+      console.log(`${status} ${result.destination}`);
+      for (const warning of result.warnings) {
+        console.error(`warning: ${warning}`);
+      }
     }
+  });
+
+author
+  .command('preview <planOrStdin>')
+  .description('Validate and review a declarative authoring plan without writing files.')
+  .option('--output-dir <dir>', 'exact destination directory to fingerprint (default: plan directory or current directory)')
+  .option('--width <columns>', 'preview width in terminal columns')
+  .option('--json', 'emit a machine-readable preview')
+  .action(async (planOrStdin: string, options: AuthorPreviewCliOptions) => {
+    const plan = validateAuthoringPlan(await readAuthoringPlan(planOrStdin));
+    const hash = hashAuthoringPlan(plan);
+    const outputPlan = planRegisteredBlockOutput(plan);
+    const destination = authoringDestination(options.outputDir, plan.target.directory);
+    const inspection = await inspectAuthoringDestination(destination, outputPlan);
+    const confirmation = hashAuthoringConfirmation(plan, inspection);
+    const touchedFiles = previewTouchedFiles(inspection, outputPlan.files);
+    const width = parsePreviewWidth(options.width);
+    const preview = renderAuthoringPreview(plan, {
+      hash,
+      confirmationHash: confirmation,
+      width,
+      // Rendering itself contains no ANSI. Explicitly force the plain policy when NO_COLOR is
+      // set so a caller cannot accidentally enable colour through a shared option object later.
+      color: !process.env.NO_COLOR,
+      destination: inspection.directory,
+      destinationFingerprint: inspection.fingerprint,
+      touchedFiles,
+    });
+    const result = {
+      ok: true,
+      command: 'author preview',
+      // `hash` remains the copy-and-paste confirmation value for backwards-compatible CLI use.
+      // `planHash` is included separately for consumers that only need plan identity.
+      hash: confirmation,
+      planHash: hash,
+      confirmation,
+      canonicalJson: serializeAuthoringPlan(plan),
+      plan,
+      destination: { directory: inspection.directory, fingerprint: inspection.fingerprint },
+      touchedFiles,
+      replacementApprovals: touchedFiles.filter((file) => file.operation === 'replace').map((file) => file.path),
+      preview,
+      noFilesWritten: true,
+    };
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    process.stdout.write(preview);
+  });
+
+author
+  .command('write <planOrStdin>')
+  .description('Generate and write a sealed registered-block source package; build and runtime proof remain separate.')
+  .requiredOption('--confirm <hash>', 'exact destination-bound SHA-256 from author preview')
+  .requiredOption('--output-dir <dir>', 'exact destination directory')
+  .option('--json', 'emit a machine-readable write result')
+  .action(async (planOrStdin: string, options: AuthorWriteCliOptions) => {
+    const plan = validateAuthoringPlan(await readAuthoringPlan(planOrStdin));
+    const planHash = hashAuthoringPlan(plan);
+    if (!options.outputDir) {
+      throw new Error('--output-dir is required');
+    }
+    const outputPlan = planRegisteredBlockOutput(plan);
+    const destination = authoringDestination(options.outputDir, plan.target.directory);
+    const inspection = await inspectAuthoringDestination(destination, outputPlan);
+    const confirmation = hashAuthoringConfirmation(plan, inspection);
+    // Inspection is read-only. The write boundary receives the same snapshot and checks it again
+    // before creating a directory or establishing any new filesystem baseline.
+    if (options.confirm !== confirmation) {
+      throw new Error('authoring confirmation does not match the reviewed plan and destination; no files written');
+    }
+    const generated = materializeAuthoringPlan(plan);
+    if (generated.sourcePlanHash !== planHash) {
+      throw new Error('generated registered-block package does not match the confirmed plan; no files written');
+    }
+    const result = await writeGeneratedRegisteredBlock(destination, generated, inspection);
+    const delivery = authoringDelivery(result.directory);
+    const output = {
+      ok: true,
+      command: 'author write',
+      hash: confirmation,
+      planHash,
+      destination: { directory: result.directory, fingerprint: result.fingerprint },
+      written: result.written,
+      noFilesWritten: result.written.length === 0,
+      delivery,
+    };
+    if (options.json) {
+      console.log(JSON.stringify(output, null, 2));
+      return;
+    }
+    console.log(`Plan SHA-256: ${planHash}`);
+    console.log(`Confirmation SHA-256: ${confirmation}`);
+    console.log(`Destination: ${result.directory}`);
+    console.log(`Destination fingerprint: ${result.fingerprint}`);
+    if (result.written.length === 0) {
+      console.log('No files written.');
+      return;
+    }
+    for (const file of result.written) {
+      console.log(`Wrote: ${file}`);
+    }
+    console.log('Source delivery: complete. Build and WordPress runtime proof have not run.');
+    console.log(`Next (existing plugin): ${delivery.next.existingPlugin}`);
+    console.log(`Next (standalone plugin): ${delivery.next.standalonePlugin}`);
   });
 
 async function main(): Promise<void> {
   try {
+    routeDirectAuthorInvocation(process.argv);
     rejectAssembleStylingOptions(process.argv);
     await program.parseAsync(process.argv);
   } catch (error) {
@@ -246,6 +591,12 @@ async function main(): Promise<void> {
 
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
+  }
+}
+
+function routeDirectAuthorInvocation(argv: string[]): void {
+  if (argv[2] === 'author' && argv[3] && !['preview', 'write'].includes(argv[3])) {
+    argv[2] = 'generate-author';
   }
 }
 
@@ -283,7 +634,7 @@ function addTokenOptions(command: Command, options: { styling?: boolean } = {}):
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {
-  const { config, json, out, wpAppPasswordEnv, ...rest } = options;
+  const { config, json, out, wpAppPasswordEnv, name, title, category, outDir, ...rest } = options;
   const wpAppPassword = wpAppPasswordEnv ? process.env[wpAppPasswordEnv] : rest.wpAppPassword;
   return {
     ...rest,
@@ -322,6 +673,123 @@ async function readInputs(
   return Promise.all(files.map(async (file) => ({ path: file, content: await readFile(file, 'utf8') })));
 }
 
+/** Read an authoring plan from exactly one safe relative regular file or stdin. */
+async function readAuthoringPlan(target: string): Promise<string> {
+  if (target === '-') {
+    return readStdin();
+  }
+  if (!isSafePlanPath(target)) {
+    throw new Error(`authoring plan path must be a safe relative path: ${JSON.stringify(target)}`);
+  }
+  let current = path.resolve(process.cwd());
+  const segments = target.split('/');
+  for (const [index, segment] of segments.entries()) {
+    current = path.join(current, segment);
+    const stats = await lstat(current);
+    if (stats.isSymbolicLink()) {
+      throw new Error(`authoring plan path must not contain a symbolic link: ${target}`);
+    }
+    if (index < segments.length - 1 && !stats.isDirectory()) {
+      throw new Error(`authoring plan path has a non-directory parent: ${target}`);
+    }
+    if (index === segments.length - 1 && !stats.isFile()) {
+      throw new Error(`authoring plan path is not a regular file: ${target}`);
+    }
+  }
+  return readFile(current, 'utf8');
+}
+
+function isSafePlanPath(value: string): boolean {
+  if (
+    !value ||
+    value.includes('\0') ||
+    value.includes('\\') ||
+    path.posix.isAbsolute(value) ||
+    path.win32.isAbsolute(value) ||
+    /^[A-Za-z]:/.test(value)
+  ) {
+    return false;
+  }
+  return value.split('/').every((segment) => segment.length > 0 && segment !== '.' && segment !== '..');
+}
+
+function authoringDestination(outputDirectory: string | undefined, packageDirectory: string | undefined): string {
+  // `--output-dir` names the exact package destination, so the directory printed by preview can
+  // be passed unchanged to write. A plan directory is only the preview default when no explicit
+  // destination was selected.
+  if (outputDirectory !== undefined) {
+    return path.resolve(outputDirectory);
+  }
+  return packageDirectory && packageDirectory !== '.'
+    ? path.resolve(process.cwd(), ...packageDirectory.split('/'))
+    : path.resolve(process.cwd());
+}
+
+function previewTouchedFiles(
+  inspection: Awaited<ReturnType<typeof inspectAuthoringDestination>>,
+  files: ReadonlyArray<{ path: string; operation: 'create' | 'replace' }>,
+): Array<{ path: string; operation: 'create' | 'replace'; exists: boolean }> {
+  return files.map((file) => {
+    const target = path.resolve(inspection.directory, ...file.path.split('/'));
+    return {
+      path: target,
+      operation: file.operation,
+      exists: inspection.entries.some((entry) => entry.path === target && entry.kind === 'file'),
+    };
+  });
+}
+
+function authoringDelivery(directory: string): {
+  status: 'source-delivered';
+  buildRuntimeProof: 'not-run';
+  next: { existingPlugin: string; standalonePlugin: string };
+} {
+  const runtime = pinnedBlockRunnerRuntime();
+  return {
+    status: 'source-delivered',
+    buildRuntimeProof: 'not-run',
+    next: {
+      existingPlugin: `${runtime} plugin preview ${shellDisplay(directory)} --host <existing-plugin-root>`,
+      standalonePlugin: `${runtime} plugin preview ${shellDisplay(directory)} --standalone <retained-plugin-directory>`,
+    },
+  };
+}
+
+function pluginDelivery(mode: 'existing' | 'standalone', directory: string): {
+  status: 'source-delivered';
+  buildRuntimeProof: 'not-run';
+  nextCommand: string;
+} {
+  return {
+    status: 'source-delivered',
+    buildRuntimeProof: 'not-run',
+    nextCommand: mode === 'standalone'
+      ? `cd ${shellDisplay(directory)} && npm ci && npm run zip && npm run test:zip`
+      : `cd ${shellDisplay(directory)} && npm run build`,
+  };
+}
+
+function shellDisplay(value: string): string {
+  // These strings are explicitly offered as the next command to run. JSON quoting is not shell
+  // quoting: a double-quoted `$()` or backtick still executes. Single-quote every argument and
+  // reopen around literal single quotes, which is safe in POSIX-compatible shells.
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function pinnedBlockRunnerRuntime(): string {
+  return `npx -y block-runner@${packageVersion}`;
+}
+
+function parsePreviewWidth(value: string | undefined): number | undefined {
+  if (value === undefined) {
+    return undefined;
+  }
+  if (!/^[0-9]+$/.test(value) || Number(value) < 1) {
+    throw new Error('--width must be a positive integer');
+  }
+  return Number(value);
+}
+
 function rejectAssembleStylingOptions(argv: string[]): void {
   const commandIndex = argv.indexOf('assemble');
   if (commandIndex === -1) {
@@ -350,6 +818,19 @@ function readStdin(): Promise<string> {
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
+}
+
+async function readJsonFixture(file: string): Promise<ProofFixture> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read proof fixture ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed) || typeof (parsed as { blockName?: unknown }).blockName !== 'string') {
+    throw new Error(`Proof fixture ${file} must be an object with a string blockName`);
+  }
+  return parsed as ProofFixture;
 }
 
 function aggregateReports(command: BlockRunnerReport['command'], reports: BlockRunnerReport[]): BlockRunnerReport {
@@ -400,17 +881,6 @@ function emitHint(report: BlockRunnerReport): void {
   }
 }
 
-async function readSkillSource(filename: 'SKILL.md' | 'GUIDE.md'): Promise<string> {
-  const source = filename === 'GUIDE.md'
-    ? new URL('../skill/GUIDE.md', import.meta.url)
-    : new URL('../skill/SKILL.md', import.meta.url);
-  try {
-    return await readFile(source, 'utf8');
-  } catch {
-    throw new Error(`skill source file is missing: ${source.pathname}`);
-  }
-}
-
 function formatTextReport(report: BlockRunnerReport): string {
   const status = report.ok ? 'ok' : 'problems found';
   const lines = [
@@ -455,6 +925,79 @@ function ensureSafeOutputTarget(
 
 function looksLikeInlineHtml(value: string): boolean {
   return /<([a-z][\w:-]*)(\s|>|\/>)/i.test(value) || /<!--\s+wp:/.test(value);
+}
+
+async function pluginPlanForCli(
+  blockDirectory: string,
+  options: Pick<PluginPreviewCliOptions, 'host' | 'standalone'>,
+) {
+  if (Boolean(options.host) === Boolean(options.standalone)) {
+    throw new Error('Pass exactly one of --host <plugin-root> or --standalone <output-dir>.');
+  }
+  const generated = await readGeneratedBlockPackage(blockDirectory);
+  if (options.standalone) {
+    return planStandalonePluginOutput(options.standalone, generated);
+  }
+  try {
+    return await planExistingPluginOutput(options.host!, generated);
+  } catch (error) {
+    if (error instanceof UnsupportedPluginLayoutError) {
+      throw new Error(`${error.message} Offer: ${pinnedBlockRunnerRuntime()} plugin preview ${shellDisplay(blockDirectory)} --standalone <output-dir>.`);
+    }
+    throw error;
+  }
+}
+
+function emitPluginPlan(
+  plan: Awaited<ReturnType<typeof pluginPlanForCli>>,
+  json = false,
+): void {
+  if (json) {
+    console.log(JSON.stringify({ ok: true, ...plan, noFilesWritten: true }, null, 2));
+    return;
+  }
+  console.log(`plugin preview: ${plan.mode}`);
+  console.log(`target directory: ${plan.targetDirectory}`);
+  console.log(`confirmation: ${plan.fingerprint}`);
+  for (const note of plan.notes) console.log(`- ${note}`);
+  console.log('touched files:');
+  for (const file of plan.touchedFiles) {
+    console.log(`- ${file.operation}${file.requiresSeparateAuthorization ? ' (separate authorization required)' : ''}: ${file.path}`);
+  }
+  console.log('No files written.');
+}
+
+async function readGeneratedBlockPackage(directory: string): Promise<GeneratedBlockPackage> {
+  const root = path.resolve(directory);
+  const metadataFile = path.join(root, 'block.json');
+  if (!existsSync(metadataFile)) {
+    throw new Error(`Generated block directory must contain block.json: ${root}`);
+  }
+  const files: Record<string, Buffer> = {};
+  async function walk(current: string, prefix = ''): Promise<void> {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isSymbolicLink()) {
+        throw new Error(`Generated block directory must not contain symbolic links: ${path.join(current, entry.name)}`);
+      }
+      if (entry.name === 'node_modules' || entry.name === '.git') continue;
+      const relative = prefix ? `${prefix}/${entry.name}` : entry.name;
+      const absolute = path.join(current, entry.name);
+      if (entry.isDirectory()) await walk(absolute, relative);
+      else if (entry.isFile()) files[relative] = await readFile(absolute);
+    }
+  }
+  await walk(root);
+  let metadata: { name?: unknown };
+  try {
+    metadata = JSON.parse(files['block.json']!.toString('utf8')) as { name?: unknown };
+  } catch {
+    throw new Error(`Generated block metadata is not valid JSON: ${metadataFile}`);
+  }
+  if (typeof metadata.name !== 'string') {
+    throw new Error(`Generated block metadata has no name: ${metadataFile}`);
+  }
+  return { name: metadata.name, files };
 }
 
 await main();

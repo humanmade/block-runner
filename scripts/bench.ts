@@ -37,6 +37,9 @@ import {
   producerMeta,
   scoreFixture,
   suiteHash,
+  scorerHash,
+  gutenbergVersion,
+  WORDPRESS_TARGET,
   type Spec,
   type DisplayNode,
   type Result,
@@ -48,7 +51,15 @@ import {
 // (e.g. an old commit's dist/index.js in a git worktree). Default = this repo's source.
 // The scoring core (scripts/tuner/score.ts) stays current — it's a stable scoring
 // utility, not the thing under test. The suite is the constant; the engine is the variable.
-let convert: (input: string, options?: ConvertOptions) => Promise<BlockRunnerReport>;
+type BenchReport = BlockRunnerReport & { engineError?: string };
+interface InstructionProvenance {
+  guideHash?: string;
+  authoringCommandHash?: string;
+  authoringSchemaHash?: string;
+}
+let convert: (input: string, options?: ConvertOptions) => Promise<BenchReport>;
+let loadedPromptHash = 'rules';
+let loadedInstructionProvenance: InstructionProvenance | undefined;
 
 function engineArg(flag: string): string | undefined {
   const i = process.argv.indexOf(flag);
@@ -66,6 +77,18 @@ async function loadEngine(): Promise<void> {
   const p = enginePath();
   const mod = p ? await import(pathToFileURL(path.resolve(p)).href) : await import('../src/index.js');
   convert = mod.convert;
+  loadedPromptHash = typeof mod.promptHash === 'string' ? mod.promptHash : p ? 'unreported' : 'rules';
+  loadedInstructionProvenance = readInstructionProvenance(mod.agentSkillProvenance);
+}
+
+function readInstructionProvenance(value: unknown): InstructionProvenance | undefined {
+  if (!value || typeof value !== 'object' || Array.isArray(value)) return undefined;
+  const candidate = value as Record<string, unknown>;
+  const provenance: InstructionProvenance = {};
+  for (const key of ['guideHash', 'authoringCommandHash', 'authoringSchemaHash'] as const) {
+    if (typeof candidate[key] === 'string') provenance[key] = candidate[key];
+  }
+  return Object.keys(provenance).length > 0 ? provenance : undefined;
 }
 
 // Model + reasoning effort behind the conversion. The current engine is
@@ -79,8 +102,29 @@ function effortLabel(): string {
   return engineArg('--effort') ?? process.env.BLOCK_RUNNER_EFFORT ?? 'none';
 }
 
+// Bare aliases are useful for exploration but make durable benchmark history ambiguous as new models ship.
+const BARE_ALIASES = /^(opus|sonnet|haiku|fable)$/i;
+function guardModelAlias(): void {
+  const model = modelLabel();
+  if (!BARE_ALIASES.test(model)) return;
+  if (process.argv.includes('--record')) {
+    console.error(
+      `model alias "${model}" is ambiguous: its meaning changes as new models ship; pass a full id such as claude-opus-5 instead.`,
+    );
+    process.exit(1);
+  }
+  console.error(`warning: model alias "${model}" is ambiguous; its meaning changes as new models ship. Pass a full id such as claude-opus-5.`);
+}
+
 interface RunRecord {
   runAt: string;
+  /**
+   * Wall-clock of the whole run. Kept because time is a real axis of this comparison,
+   * not an operational footnote: a model writing full markup takes roughly twice as long
+   * as one emitting a compact intent tree, and "faster AND valid" is a stronger claim
+   * than "valid" — but only if we can evidence it from our own records.
+   */
+  durationMs: number;
   commit: string;
   branch: string;
   author: string;
@@ -89,6 +133,15 @@ interface RunRecord {
   model: string;
   effort: string;
   suiteHash: string;
+  scorerHash?: string;
+  promptHash?: string;
+  guideHash?: string;
+  authoringCommandHash?: string;
+  authoringSchemaHash?: string;
+  wordpressVersion?: string;
+  blockLibraryVersion?: string;
+  gutenbergVersion: string;
+  dirty?: boolean;
   corpusAvg: number;
   coverage: number;
   confidence: number | null;
@@ -101,6 +154,8 @@ const REPORT_PATH = path.join(ROOT, 'benchmarks', 'presentation', 'review.html')
 const SCOREBOARD_PATH = path.join(ROOT, 'benchmarks', 'presentation', 'scoreboard.html');
 
 async function main(): Promise<void> {
+  const startedAt = Date.now();
+  guardModelAlias();
   await loadEngine();
   if (engineLabel() !== 'local') console.log(`engine under test: ${engineLabel()} (${enginePath()})`);
   const specs = loadSpecs();
@@ -114,13 +169,32 @@ async function main(): Promise<void> {
 
   const onlyProducer = engineArg('--producer');
   const onlyLayouts = engineArg('--layouts')?.split(',').map((s) => s.trim());
-  const results: Result[] = [];
+  const results: (Result & { engineError?: string })[] = [];
+  // Per-fixture wall clock. The tuner splits this into propose (model) + realize
+  // (deterministic), because it owns a split engine. bench drives whole engines — including
+  // raw-LLM ones with no such split — so the only measure that means the same thing for every
+  // engine is the whole conversion. Recorded in the same file and the same shape as the
+  // tuner's, so a run from either tool is comparable.
+  const convertMs = new Map<string, number>();
   for (const producer of producers) {
     if (onlyProducer && producer !== onlyProducer) continue;
     for (const [layout, spec] of specs) {
       if (onlyLayouts && !onlyLayouts.includes(layout)) continue;
       if (existsSync(producerFile(producer, layout))) {
-        results.push(await scoreFixture(convert, producer, layout, spec));
+        let engineError: string | undefined;
+        const startedFixture = Date.now();
+        const result = await scoreFixture(
+          async (input, options) => {
+            const report = await convert(input, options);
+            if (report.engineError !== undefined) engineError = report.engineError;
+            return report;
+          },
+          producer,
+          layout,
+          spec,
+        );
+        convertMs.set(result.label, Date.now() - startedFixture);
+        results.push(engineError === undefined ? result : { ...result, engineError });
       }
     }
   }
@@ -132,11 +206,20 @@ async function main(): Promise<void> {
   }
 
   printConsole(results);
+  const errored = results.filter((r): r is Result & { engineError: string } => r.engineError !== undefined);
+  if (errored.length > 0) printEngineErrors(errored);
 
-  const record = buildRecord(results, specs);
+  writeTimings(results, specs, convertMs);
+
+  const record = buildRecord(results, specs, Date.now() - startedAt);
   if (process.argv.includes('--record')) {
-    appendFileSync(RESULTS_PATH, `${JSON.stringify(record)}\n`, 'utf8');
-    console.log(`recorded run → ${RESULTS_PATH}`);
+    if (errored.length > 0) {
+      console.error('run was not recorded because one or more model calls failed; the average is not a valid measurement.');
+      process.exitCode = 1;
+    } else {
+      appendFileSync(RESULTS_PATH, `${JSON.stringify(record)}\n`, 'utf8');
+      console.log(`recorded run → ${RESULTS_PATH}`);
+    }
   }
 
   const history = readHistory();
@@ -145,6 +228,16 @@ async function main(): Promise<void> {
   writeFileSync(SCOREBOARD_PATH, renderScoreboard(history, record), 'utf8');
   console.log(`\nreview page:  file://${REPORT_PATH}`);
   console.log(`scoreboard:   file://${SCOREBOARD_PATH}\n`);
+}
+
+function printEngineErrors(results: (Result & { engineError: string })[]): void {
+  console.error('\n' + '═'.repeat(86));
+  console.error('!!! BENCHMARK INVALID: MODEL CALL FAILURE(S) !!!');
+  console.error('These tests were scored 0 because the model call failed, NOT because the conversion was wrong.');
+  console.error("The run's average is not a valid measurement.");
+  console.error('');
+  for (const r of results) console.error(`  ${r.label}: ${r.engineError}`);
+  console.error('═'.repeat(86));
 }
 
 function fmtPct(value: number): string {
@@ -192,15 +285,51 @@ function bySource(results: Result[]): [string, number, number][] {
 
 // ── Provenance / history ─────────────────────────────────────────────────────
 
-function buildRecord(results: Result[], specs: Map<string, Spec>): RunRecord {
+// Append one timing record per run, mirroring the tuner's benchmarks/timings.jsonl so both
+// tools' numbers can be read together. Time is a real axis of this comparison — a model
+// writing full markup takes roughly twice as long as one emitting a compact intent tree.
+function writeTimings(results: Result[], specs: Map<string, Spec>, convertMs: Map<string, number>): void {
+  const values = [...convertMs.values()].sort((a, b) => a - b);
+  if (values.length === 0) return;
+  const record = {
+    runAt: new Date().toISOString(),
+    tool: 'bench',
+    engine: engineLabel(),
+    model: modelLabel(),
+    effort: effortLabel(),
+    suiteHash: suiteHash(specs),
+    scorerHash: scorerHash(),
+    promptHash: loadedPromptHash,
+    ...(loadedInstructionProvenance ?? {}),
+    wordpressVersion: WORDPRESS_TARGET,
+    blockLibraryVersion: gutenbergVersion(),
+    gutenbergVersion: gutenbergVersion(),
+    fixtures: results.length,
+    convertMsTotal: values.reduce((a, b) => a + b, 0),
+    convertMsMedian: values[Math.floor(values.length / 2)],
+    convertMsSlowest: values[values.length - 1],
+    perFixture: Object.fromEntries([...convertMs.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, { convertMs: v }])),
+  };
+  appendFileSync(path.join(ROOT, 'benchmarks', 'timings.jsonl'), `${JSON.stringify(record)}\n`, 'utf8');
+  console.log(`timing: ${(record.convertMsTotal / 1000).toFixed(1)}s total · median ${(record.convertMsMedian / 1000).toFixed(1)}s · slowest ${(record.convertMsSlowest / 1000).toFixed(1)}s`);
+}
+
+function buildRecord(results: Result[], specs: Map<string, Spec>, durationMs: number): RunRecord {
   return {
     runAt: new Date().toISOString(),
+    durationMs,
     ...gitInfo(),
     version: readPackageVersion(),
     engine: engineLabel(),
     model: modelLabel(),
     effort: effortLabel(),
     suiteHash: suiteHash(specs),
+    scorerHash: scorerHash(),
+    promptHash: loadedPromptHash,
+    ...(loadedInstructionProvenance ?? {}),
+    wordpressVersion: WORDPRESS_TARGET,
+    blockLibraryVersion: gutenbergVersion(),
+    gutenbergVersion: gutenbergVersion(),
     corpusAvg: Math.round(results.reduce((sum, r) => sum + r.score, 0) / results.length),
     coverage: Math.round((results.reduce((sum, r) => sum + r.coverage, 0) / results.length) * 100),
     // Per-conversion confidence is engine-emitted (calibrated: HIGH only when no judgment
@@ -225,7 +354,7 @@ function readHistory(): RunRecord[] {
     .map((line) => JSON.parse(line) as RunRecord);
 }
 
-function gitInfo(): { commit: string; branch: string; author: string } {
+function gitInfo(): { commit: string; branch: string; author: string; dirty: boolean } {
   const run = (cmd: string): string => {
     try {
       return execSync(cmd, { cwd: ROOT, stdio: ['ignore', 'pipe', 'ignore'] }).toString().trim();
@@ -237,6 +366,7 @@ function gitInfo(): { commit: string; branch: string; author: string } {
     commit: process.env.GITHUB_SHA?.slice(0, 7) || run('git rev-parse --short HEAD') || 'unknown',
     branch: process.env.GITHUB_REF_NAME || run('git rev-parse --abbrev-ref HEAD') || 'unknown',
     author: process.env.GITHUB_ACTOR || run('git log -1 --format=%an') || 'unknown',
+    dirty: run('git status --porcelain').length > 0,
   };
 }
 
@@ -293,20 +423,26 @@ function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
             .map(
               (r) => `<figure class="prod">
                 <figcaption>${esc(r.producer)}</figcaption>
-                <div class="frame"><iframe sandbox loading="lazy" srcdoc="${escAttr(preparePreview(r.inputHtml))}"></iframe></div>
+                <div class="frame"><iframe sandbox loading="eager" srcdoc="${escAttr(preparePreview(r.inputHtml))}"></iframe></div>
               </figure>`,
             )
             .join('\n')
         : `<p class="missing">No producer inputs for this layout yet.</p>`;
-      return `<section class="layout">
+      return `<section class="layout" id="${esc(spec.layout)}">
         <header class="layout__head">
           <h2>${esc(humanize(spec.layout))}</h2>
           ${spec.intent ? `<p class="intent">${esc(spec.intent)}</p>` : ''}
         </header>
         <div class="split">
           <div class="ideal">
-            <p class="panel-label">Ideal end state</p>
+            <p class="panel-label">Canonical end state</p>
             <div class="tree"><ul>${renderTree(spec.display)}</ul></div>
+            ${spec.acceptedDisplays
+              .map(
+                (tree, index) =>
+                  `<div class="alternative"><p class="panel-label">Accepted equivalent ${index + 1}</p><div class="tree"><ul>${renderTree(tree)}</ul></div></div>`,
+              )
+              .join('')}
           </div>
           <div class="renders">
             <p class="panel-label">Producer renders</p>
@@ -381,6 +517,7 @@ function renderHtml(specs: Map<string, Spec>, results: Result[]): string {
   .tree { font-family: var(--font-mono); font-size: 12.5px; line-height: 1.85; position: sticky; top: 24px; }
   .tree ul { list-style: none; margin: 0; padding: 0; }
   .tree ul ul { margin-left: 6px; padding-left: 14px; border-left: 1px solid var(--line); }
+  .alternative { margin-top: 28px; padding-top: 20px; border-top: 1px dashed var(--line-strong); }
   .ns { color: var(--faint); }
   .blk { color: var(--ink); font-weight: 600; }
   .blk--3p { color: var(--muted); }
@@ -473,7 +610,8 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
     .join('\n');
 
   const lastIsCurrent = history.length > 0 && history[history.length - 1].runAt === current.runAt;
-  const prev = lastIsCurrent ? history[history.length - 2] : history[history.length - 1];
+  const priorHistory = lastIsCurrent ? history.slice(0, -1) : history;
+  const prev = [...priorHistory].reverse().find((candidate) => comparableRun(candidate, current));
   const fixtureRows = Object.entries(current.fixtures)
     .sort()
     .map(([label, score]) => {
@@ -582,6 +720,18 @@ function renderScoreboard(history: RunRecord[], current: RunRecord): string {
 </body>
 </html>
 `;
+}
+
+function comparableRun(a: RunRecord, b: RunRecord): boolean {
+  return (
+    a.suiteHash === b.suiteHash &&
+    a.scorerHash !== undefined &&
+    a.scorerHash === b.scorerHash &&
+    a.engine === b.engine &&
+    a.model === b.model &&
+    a.effort === b.effort &&
+    (a.blockLibraryVersion ?? a.gutenbergVersion) === (b.blockLibraryVersion ?? b.gutenbergVersion)
+  );
 }
 
 function trendChart(history: RunRecord[], producers: string[]): string {

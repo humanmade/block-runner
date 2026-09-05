@@ -1,0 +1,17 @@
+{
+  "intent": "An audio section: an H2, a paragraph, then a self-hosted audio player. The idiomatic core is core/audio (NOT core/embed and NOT core/html). The caption is the audio block's own caption attribute.",
+  "tree": {
+    "block": "core/group",
+    "children": [
+      { "block": "core/heading", "contains": "Listen to the episode" },
+      { "block": "core/paragraph", "contains": "Episode 12" },
+      {
+        "block": "core/audio",
+        "attrs": {
+          "src": "episode-12.mp3",
+          "caption": "Recorded March 2026. 34 minutes."
+        }
+      }
+    ]
+  }
+}

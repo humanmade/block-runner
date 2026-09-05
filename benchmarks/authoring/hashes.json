@@ -1,0 +1,38 @@
+{
+  "algorithm": "sha256",
+  "generatedFrom": "repository content; regenerate before a release record if any listed input changes",
+  "values": {
+    "suiteHash": {
+      "value": "39fba6758e1a932eb36e6d50a239fb8ef2efd73433de80da87b2d365a988bb05",
+      "inputs": "all corpus files except hashes.json and runs/, ordered by path; canonical JSON path/raw-byte-SHA-256 pairs"
+    },
+    "fixtureDefinitionHash": {
+      "value": "32653d4026f867c074afa8972ae14abfd5243921030ad544cdbd299e8e8864d2",
+      "inputs": "fixtures/** as canonical path/raw-byte-SHA-256 pairs"
+    },
+    "sourceSetHash": {
+      "value": "edf36ad64ceacfe70c35cf46fa0736909966e2b0a9b137b8c3955492238a8bf0",
+      "inputs": "sources/** as canonical path/raw-byte-SHA-256 pairs"
+    },
+    "fixtureIndexHash": "c560c31530b96f05ba42f5a29344e38cc0dd656b17c8db0b7219776431f4b671",
+    "fixtureSchemaHash": "d5508b413d5b01421557b7cedb7bd19ce4e0c29566f0809df02e9fd410127a77",
+    "contractHash": "c0e163ec94dc0b151a3623560531fa44fd9336c01137b9bc8ba33131088bcc0c",
+    "candidateContractHash": "78da7e741e3290582c0828a6b1e06a3ee61190e79d5e9455841d310c18fdccc0",
+    "provenanceGuideHash": "e207e0500de3a005b5df113baff578e26801c2aa5547f2cb8d914ea58e190bfa",
+    "releaseMatrixHash": "29d0e8c0965de9ee106423744820f3e8980533696992b05d14141437c405abb6",
+    "suiteManifestHash": "abe91aa331fd5b90db4df08fbc0b51ea83cfa1a4b3fff356a584bb6550989732",
+    "fixtureManifestHash": "2d3dac0f9f114c2901d6b5660a9d8115142f1f55d305eeea631b466ba6eb9dca",
+    "sourceDependencyHash": "d8e39545a4fc92817f916afbff48ad726c5d046d31ba4d794aa5bef01d15ad9e",
+    "expectedPlanHash": "08b80782525056282b6c2dac70ae0350894fff4ed6058237e5e0e4d9a2cf0865",
+    "receiptSchemaHash": "90b4cc60efabc87f3c60f7c28fae21e95ad35c030aa454c97c9e2b0941d373f5"
+  },
+  "perRunOnly": {
+    "scorerHash": "Hash the exact scorer/runner revision, not this corpus.",
+    "templateHash": "Hash the production compiler and plugin profile used for the candidate.",
+    "dependencyHash": "Hash the exact candidate lockfile and installed dependency inventory.",
+    "wordpressHash": "Hash the observed WordPress install and installed plugin inventory.",
+    "themeHash": "Hash the observed theme slug/version and active theme.json.",
+    "browserHash": "Hash observed browser name/version plus viewport and deviceScaleFactor."
+  },
+  "command": "node --import tsx scripts/authoring-hashes.ts"
+}

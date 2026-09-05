@@ -1,7 +1,7 @@
 /**
  * Engine Skill — measures the SHIPPED guide, not the tuned prompt.
  *
- * Engine C sends the tuner-owned `INTENT_PROMPT`. This engine sends `skill/GUIDE.md` — the
+ * Engine C sends the tuner-owned `INTENT_PROMPT`. This engine sends the canonical skill guide — the
  * text we actually publish — plus the minimal task framing a real agent would supply. Same
  * `realize()` on the other side, so the only variable is the instructions.
  *
@@ -13,14 +13,51 @@
  *     --producer claude-impeccable --layouts hero-cover,pricing-table
  */
 import { execFileSync } from 'node:child_process';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ConvertOptions, BlockRunnerReport } from '../../src/types.js';
 import { realize } from './intent.js';
+import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from './harness.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const GUIDE = readFileSync(path.join(ROOT, 'skill', 'GUIDE.md'), 'utf8');
+const GUIDE = readFileSync(path.join(ROOT, 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
+
+export interface AgentSkillProvenance {
+  guideHash: string;
+  authoringCommandHash: string;
+  authoringSchemaHash: string;
+}
+
+function hash(value: string): string {
+  return `sha256:${createHash('sha256').update(value).digest('hex')}`;
+}
+
+/** Hash the implemented command and plan contract which the guide directs models to use. */
+function hashSourceSet(paths: string[]): string {
+  return hash(paths.map((relativePath) => {
+    const sourcePath = path.join(ROOT, relativePath);
+    if (!existsSync(sourcePath)) {
+      throw new Error(`authoring provenance source is missing: ${relativePath}`);
+    }
+    const content = readFileSync(sourcePath, 'utf8');
+    return `${relativePath}\0${content}`;
+  }).join('\0'));
+}
+
+// The guide tells the model which authoring command and schema it must use. Record all three
+// components individually as well as in promptHash: the aggregate invalidates the tuner cache;
+// named values make a historical benchmark run independently auditable.
+export const agentSkillProvenance: AgentSkillProvenance = Object.freeze({
+  guideHash: hash(GUIDE),
+  authoringCommandHash: hashSourceSet(['src/cli.ts']),
+  authoringSchemaHash: hashSourceSet([
+    'src/authoring/schema.ts',
+    'src/authoring/preview.ts',
+    'src/authoring/destination.ts',
+  ]),
+});
 
 // The framing an agent supplies around the guide when it has been handed a design to convert.
 // Deliberately thin: any lifting here is lifting the guide is not doing.
@@ -34,6 +71,16 @@ Do not run any commands, write any files, or output block markup.
 
 HTML:
 `;
+
+// The shipped guide is itself an engine prompt. Include the authoring command/schema revisions:
+// a guide sentence that names an old plan shape or write workflow is not reproducible against a
+// newer deterministic implementation. Tuner cache keys and benchmark records use this value.
+export const promptHash = `skill-${createHash('sha256')
+  .update(GUIDE)
+  .update(TASK)
+  .update(JSON.stringify(agentSkillProvenance))
+  .digest('hex')
+  .slice(0, 10)}`;
 
 function flag(name: string, fallback?: string): string | undefined {
   const i = process.argv.indexOf(name);
@@ -56,11 +103,12 @@ function callModel(input: string): string {
   if (cli() === 'codex') {
     return execFileSync(
       'codex',
-      ['exec', '-m', modelName(), '-c', `model_reasoning_effort=${reasoningEffort()}`, '--dangerously-bypass-approvals-and-sandbox', '-'],
-      { input, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'], timeout: 240000, killSignal: 'SIGKILL' },
+      codexExecArgs(modelName(), reasoningEffort()),
+      { cwd: MODEL_WORKDIR, input, encoding: 'utf8', maxBuffer: 16 * 1024 * 1024, stdio: ['pipe', 'pipe', 'ignore'], timeout: 240000, killSignal: 'SIGKILL' },
     );
   }
-  return execFileSync('claude', ['-p', '--model', modelName(), '--permission-mode', 'bypassPermissions'], {
+  return execFileSync('claude', claudePrintArgs(modelName(), reasoningEffort()), {
+    cwd: MODEL_WORKDIR,
     input,
     encoding: 'utf8',
     maxBuffer: 16 * 1024 * 1024,
@@ -70,17 +118,22 @@ function callModel(input: string): string {
   });
 }
 
-export async function propose(html: string, _opts?: ConvertOptions): Promise<{ raw: string }> {
+export async function propose(html: string, _opts?: ConvertOptions): Promise<{ raw: string; error?: string }> {
   try {
     return { raw: callModel(GUIDE + TASK + html) };
-  } catch {
-    return { raw: '' };
+  } catch (error) {
+    return { raw: '', error: error instanceof Error ? error.message : String(error) };
   }
 }
 
 export { realize };
 
 export async function convert(html: string, opts?: ConvertOptions): Promise<BlockRunnerReport> {
-  const { raw } = await propose(html, opts);
-  return realize(raw, opts);
+  const { raw, error } = await propose(html, opts);
+  const report = await realize(raw, opts);
+  if (error !== undefined) {
+    // BlockRunnerReport is shipped without benchmark failure metadata; this harness-only field keeps a failed call distinct from a real zero.
+    return { ...report, engineError: error } as BlockRunnerReport & { engineError: string };
+  }
+  return report;
 }

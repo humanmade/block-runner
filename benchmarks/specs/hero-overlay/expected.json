@@ -37,5 +37,55 @@
         ]
       }
     ]
-  }
+  },
+  "acceptedTrees": [
+    {
+      "block": "core/cover",
+      "children": [
+        {
+          "block": "core/group",
+          "children": [
+            { "block": "core/heading", "contains": "Ship native blocks" },
+            { "block": "core/paragraph", "contains": "design handoff" },
+            {
+              "block": "core/columns",
+              "children": [
+                {
+                  "block": "core/column",
+                  "children": [
+                    {
+                      "block": "core/group",
+                      "children": [
+                        { "block": "core/paragraph", "contains": "10k+" },
+                        { "block": "core/paragraph", "contains": "blocks converted" }
+                      ]
+                    }
+                  ]
+                },
+                {
+                  "block": "core/column",
+                  "children": [
+                    {
+                      "block": "core/group",
+                      "children": [
+                        { "block": "core/paragraph", "contains": "0" },
+                        { "block": "core/paragraph", "contains": "API keys" }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            {
+              "block": "core/buttons",
+              "children": [
+                { "block": "core/button", "contains": "Get started" },
+                { "block": "core/button", "contains": "Read the docs" }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
 }

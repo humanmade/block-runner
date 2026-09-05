@@ -1,0 +1,54 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://humanmade.com/block-runner/benchmarks/authoring/fixture.schema.json",
+  "title": "Registered-block authoring fixture",
+  "type": "object",
+  "required": [
+    "id", "family", "producer", "sourceStyle", "source", "prompt", "plan",
+    "requiredDimensions", "assertions", "expectedStatus", "candidate"
+  ],
+  "properties": {
+    "id": { "type": "string", "pattern": "^[a-z0-9-]+$" },
+    "family": { "type": "string" },
+    "producer": { "type": "string", "enum": ["semantic-studio", "utility-generator", "interaction-probe"] },
+    "sourceStyle": { "type": "string", "enum": ["semantic", "utility-tailwind", "interaction-spec"] },
+    "source": {
+      "type": "object",
+      "required": ["path", "sha256"],
+      "properties": {
+        "path": { "type": "string", "pattern": "^sources/" },
+        "sha256": { "type": "string", "pattern": "^[a-f0-9]{64}$" }
+      },
+      "additionalProperties": false
+    },
+    "prompt": { "type": "string", "pattern": "^fixtures/[a-z0-9-]+/prompt\\.md$" },
+    "plan": { "type": "string", "pattern": "^fixtures/[a-z0-9-]+/expected-plan\\.json$" },
+    "requiredDimensions": {
+      "type": "array",
+      "minItems": 11,
+      "uniqueItems": true,
+      "items": { "enum": ["plan", "source", "native", "style", "warnings", "build", "editor", "frontend", "pattern", "fidelity", "accessibility"] }
+    },
+    "assertions": {
+      "type": "object",
+      "required": ["plan", "source", "native", "style", "warnings", "build", "editor", "frontend", "pattern", "fidelity", "accessibility"],
+      "additionalProperties": { "oneOf": [{ "type": "boolean" }, { "type": "number" }, { "type": "object" }] }
+    },
+    "expectedStatus": { "enum": ["scored", "unsupported", "blocked"] },
+    "candidate": {
+      "type": "object",
+      "required": ["artifactRoot", "requiredFiles", "receipt"],
+      "properties": {
+        "artifactRoot": { "type": "string" },
+        "requiredFiles": { "type": "array", "uniqueItems": true, "items": { "type": "string" } },
+        "receipt": { "type": "string" }
+      }
+    }
+  },
+  "allOf": [{
+    "if": { "properties": { "expectedStatus": { "const": "unsupported" } } },
+    "then": { "properties": { "candidate": { "properties": { "requiredFiles": { "maxItems": 0 } } } } },
+    "else": { "properties": { "candidate": { "properties": { "requiredFiles": { "minItems": 1 } } } } }
+  }],
+  "additionalProperties": true
+}

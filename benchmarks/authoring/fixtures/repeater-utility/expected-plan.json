@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "root": "stories",
+  "blocks": [
+    {
+      "key": "stories",
+      "blockName": "block-runner/customer-stories",
+      "role": "section",
+      "attributes": {
+        "minimumItems": 3,
+        "layout": "grid-3"
+      },
+      "allowedControls": [
+        "heading",
+        "items",
+        "spacing",
+        "background"
+      ],
+      "children": [
+        {
+          "key": "eyebrow",
+          "blockName": "core/paragraph",
+          "role": "eyebrow",
+          "attributes": {
+            "content": "From the field"
+          },
+          "allowedControls": [
+            "content",
+            "typography"
+          ]
+        },
+        {
+          "key": "heading",
+          "blockName": "core/heading",
+          "role": "heading",
+          "attributes": {
+            "level": 2,
+            "content": "A repeatable story should remain a repeatable block."
+          },
+          "allowedControls": [
+            "content",
+            "level"
+          ]
+        },
+        {
+          "key": "story-template",
+          "blockName": "block-runner/customer-story",
+          "role": "repeater-template",
+          "attributes": {
+            "repeat": true
+          },
+          "allowedControls": [
+            "reorder",
+            "duplicate",
+            "remove"
+          ],
+          "children": [
+            {
+              "key": "metric",
+              "blockName": "core/paragraph",
+              "role": "metric",
+              "attributes": {},
+              "allowedControls": [
+                "content",
+                "typography"
+              ]
+            },
+            {
+              "key": "quote",
+              "blockName": "core/quote",
+              "role": "testimonial",
+              "attributes": {},
+              "allowedControls": [
+                "content",
+                "citation"
+              ]
+            },
+            {
+              "key": "avatar",
+              "blockName": "core/image",
+              "role": "avatar",
+              "attributes": {
+                "decorative": true
+              },
+              "allowedControls": [
+                "media",
+                "alt",
+                "crop"
+              ]
+            },
+            {
+              "key": "citation",
+              "blockName": "core/paragraph",
+              "role": "citation",
+              "attributes": {},
+              "allowedControls": [
+                "content",
+                "typography"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

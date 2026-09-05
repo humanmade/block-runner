@@ -1,12 +1,35 @@
 {
-  "intent": "An FAQ section: an H2, then one collapsible per question. Idiomatically each Q/A is a core/details block (summary = question, body = answer paragraph). CAPABILITY GAP: <details> has no converter rule and falls to Custom HTML; only the section/heading scaffold is recovered. coblocks/accordion is the styled third-party alternative.",
+  "intent": "An FAQ section: an H2, then one native accordion containing three items. WordPress 7.1 provides core/accordion for a set of disclosures; core/details remains the idiom for one standalone disclosure.",
   "tree": {
     "block": "core/group",
     "children": [
       { "block": "core/heading", "contains": "Frequently asked questions" },
-      { "block": "core/details", "contains": "live WordPress", "children": [ { "block": "core/paragraph", "contains": "headless Gutenberg" } ] },
-      { "block": "core/details", "contains": "run it in CI", "children": [ { "block": "core/paragraph", "contains": "deterministic CLI" } ] },
-      { "block": "core/details", "contains": "third-party blocks", "children": [ { "block": "core/paragraph", "contains": "tiered validation" } ] }
+      {
+        "block": "core/accordion",
+        "children": [
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "Does it work without a live WordPress site?" } },
+              { "block": "core/accordion-panel", "children": [ { "block": "core/paragraph", "contains": "headless Gutenberg" } ] }
+            ]
+          },
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "Can I run it in CI?" } },
+              { "block": "core/accordion-panel", "children": [ { "block": "core/paragraph", "contains": "deterministic CLI" } ] }
+            ]
+          },
+          {
+            "block": "core/accordion-item",
+            "children": [
+              { "block": "core/accordion-heading", "attrs": { "title": "What about third-party blocks?" } },
+              { "block": "core/accordion-panel", "children": [ { "block": "core/paragraph", "contains": "tiered validation" } ] }
+            ]
+          }
+        ]
+      }
     ]
   }
 }

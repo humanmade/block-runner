@@ -29,6 +29,11 @@ export function createRestResolver(config: BlockRunnerConfig): MediaResolver {
         const bytes = isRemoteUrl(input.urlOrPath)
           ? Buffer.from(await (await fetch(input.urlOrPath)).arrayBuffer())
           : await readFile(input.urlOrPath);
+        // `Buffer` is an ArrayBufferView at runtime, but the DOM fetch overload
+        // used by TypeScript does not consistently model Node's Buffer subtype.
+        // Copy it into a portable Uint8Array so the same bytes reach the REST API
+        // under both the Node and DOM declaration sets.
+        const body = new Uint8Array(bytes);
         const response = await fetch(`${wpUrl.replace(/\/$/, '')}/wp-json/wp/v2/media`, {
           method: 'POST',
           headers: {
@@ -36,7 +41,7 @@ export function createRestResolver(config: BlockRunnerConfig): MediaResolver {
             'Content-Disposition': `attachment; filename="${filename}"`,
             'Content-Type': contentType(filename),
           },
-          body: bytes,
+          body,
         });
 
         if (!response.ok) {

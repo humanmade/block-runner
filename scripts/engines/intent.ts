@@ -45,7 +45,8 @@ Top level: { "blocks": [ ...nodes ] }.
 Available blocks: core/cover, core/columns, core/column, core/media-text, core/group,
 core/heading, core/paragraph, core/list, core/list-item, core/buttons, core/button,
 core/image, core/quote, core/pullquote, core/details, core/gallery, core/table, core/code,
-core/separator, core/social-links, core/social-link.
+core/separator, core/social-links, core/social-link, core/video, core/audio, core/embed,
+core/file, core/accordion, core/accordion-item, core/accordion-heading, core/accordion-panel.
 
 Reproduce the design's visual structure with the most idiomatic native blocks. Preserve
 layout — do NOT flatten it away. If content sits in columns, keep core/columns > core/column.
@@ -73,16 +74,20 @@ Within a section, use the idiomatic mapping:
 - Image beside text as a plain feature row (no background) → a core/group containing ONE
   core/media-text (image = media side; heading/paragraph/list/buttons = text side); never
   core/columns for this.
-- FAQ / accordion → a core/group of a heading then one core/details per question (text = the
-  question; a core/paragraph child = the answer).
+- FAQ / accordion (a SET of disclosures) → a core/group of a heading then ONE core/accordion.
+  It holds one core/accordion-item per question; each item has a core/accordion-heading with
+  attrs {"title":"the question"}, then a core/accordion-panel containing the answer blocks.
+  Use core/details only for one standalone disclosure, not an FAQ set.
 - Logo / brand strip → a core/group holding an eyebrow core/paragraph then the logo core/image
   elements DIRECTLY (not core/columns — a flat row of logos is images in a group).
 - CTA band → a core/group of the heading/paragraph and a core/buttons > core/button.
-- Feature or pricing cards (equal columns) → a core/group of core/columns > core/column; each
-  column holds its heading, paragraph(s), an optional core/list, and core/buttons.
+- Feature or pricing cards (equal columns) → a core/group of core/columns > core/column >
+  core/group; the inner group holds the card heading, paragraph(s), optional core/list, and
+  core/buttons. The visible card boundary is a real container.
 - Stats / figures row → a core/group of core/columns > core/column; each column is TWO
   core/paragraph — the big number as a PARAGRAPH (not a heading; a stat figure has no
-  document-outline role), then its label.
+  document-outline role), then its label. If each stat has its own visible border, shadow,
+  or fill, preserve that individual card as core/column > core/group > the two paragraphs.
 - Testimonials grid → a core/group of core/columns > core/column; each column is a core/quote
   (the testimonial text), a core/image (the avatar), and a core/paragraph (name / role).
 - Image gallery / photo grid → a core/group of a heading then a core/gallery holding the
@@ -94,6 +99,11 @@ Within a section, use the idiomatic mapping:
   a core/code; a thematic divider between parts is a core/separator.
 - A social bar / footer icon row → a core/group of a core/social-links holding one
   core/social-link per network, each with attrs {"service":"<name>","url":"<href>"}.
+- Self-hosted video/audio → core/video or core/audio with src and caption in attrs; video also
+  preserves poster and controls. Third-party media → core/embed with URL, caption, and
+  allowResponsive. A downloadable file → core/file with attrs {"href":"...","fileName":"...",
+  "showDownloadButton":true,"downloadButtonText":"<the visible source label>"}; use
+  "Download" when that is the source label, and never leave the button label empty.
 
 Output the JSON between a line ===INTENT_START=== and a line ===INTENT_END===. Do not run any
 commands or write any files.

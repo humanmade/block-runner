@@ -1,0 +1,51 @@
+{
+  "id": "registered-block-authoring-0.9",
+  "version": "0.9.0-testing",
+  "kind": "registered-block-authoring",
+  "description": "Independent authoring corpus; never combine with HTML-to-page-block conversion scores.",
+  "fixtureCount": 13,
+  "sourceVariantCount": 13,
+  "families": [
+    "hero",
+    "split-feature",
+    "cards",
+    "repeater",
+    "tailwind-responsive-css",
+    "pseudo-states",
+    "local-assets",
+    "pattern-overrides",
+    "unsupported-interaction"
+  ],
+  "requiredDimensions": [
+    "plan", "source", "native", "style", "warnings", "build", "editor",
+    "frontend", "pattern", "fidelity", "accessibility"
+  ],
+  "terminalStatuses": ["scored", "unsupported", "blocked", "engine_error"],
+  "environment": {
+    "wordpress": "7.1",
+    "theme": {
+      "slug": "twentytwentyfive",
+      "configuration": "fixtures/theme.json",
+      "hashRequired": true
+    },
+    "browser": {
+      "name": "chromium",
+      "viewport": { "width": 1440, "height": 1024 },
+      "deviceScaleFactor": 1,
+      "versionHashRequired": true
+    }
+  },
+  "integrity": {
+    "prohibitCombinedScoreWith": ["../specs", "../results.jsonl"],
+    "invalidMeasurementStatuses": ["unsupported", "blocked", "engine_error"],
+    "requiredProvenance": "provenance.template.json",
+    "hashAlgorithm": "sha256",
+    "hashInputs": "provenance.template.json#/hashInputs"
+  },
+  "resultPolicy": {
+    "unrunExecutableGate": "blocked",
+    "missingReceipt": "blocked",
+    "toolOrModelFailure": "engine_error",
+    "expectedNegative": "must-fail-closed-as-unsupported"
+  }
+}

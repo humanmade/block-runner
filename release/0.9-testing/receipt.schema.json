@@ -1,0 +1,260 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://block-runner.dev/release/0.9-testing/receipt.schema.json",
+  "title": "Block Runner 0.9 testing-release receipt",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "receiptId",
+    "matrixRowId",
+    "status",
+    "measurementState",
+    "startedAt",
+    "finishedAt",
+    "command",
+    "candidate",
+    "provenance",
+    "environment",
+    "timing",
+    "artifacts",
+    "gates"
+  ],
+  "properties": {
+    "schemaVersion": { "const": 1 },
+    "receiptId": { "type": "string", "minLength": 1 },
+    "supersedes": { "type": "string", "minLength": 1 },
+    "matrixRowId": { "type": "string", "minLength": 1 },
+    "status": {
+      "enum": ["passed", "failed", "unsupported", "blocked", "engine_error"]
+    },
+    "measurementState": {
+      "enum": ["scored", "unsupported", "blocked", "engine_error", "not_applicable"]
+    },
+    "startedAt": { "type": "string", "format": "date-time" },
+    "finishedAt": { "type": "string", "format": "date-time" },
+    "command": { "type": "string", "minLength": 1 },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["commit", "packageVersion", "worktreeClean"],
+      "properties": {
+        "commit": { "type": "string", "pattern": "^[0-9a-f]{7,64}$" },
+        "packageVersion": { "type": "string", "pattern": "^0\\.9\\.0(?:[-+][0-9A-Za-z.-]+)?$" },
+        "worktreeClean": { "type": "boolean" }
+      }
+    },
+    "provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "suiteHash",
+        "corpusHash",
+        "scorerHash",
+        "fixtureManifestHash",
+        "sourceSetHash",
+        "sourceDependencyHash",
+        "expectedPlanHash",
+        "promptGuideHash",
+        "templateHash",
+        "dependencyHash",
+        "wordpressHash",
+        "themeHash",
+        "browserHash",
+        "generatedSourceHash"
+      ],
+      "properties": {
+        "suiteHash": { "$ref": "#/$defs/hash" },
+        "corpusHash": { "$ref": "#/$defs/hash" },
+        "scorerHash": { "$ref": "#/$defs/hash" },
+        "fixtureManifestHash": { "$ref": "#/$defs/hash" },
+        "sourceSetHash": { "$ref": "#/$defs/hash" },
+        "sourceDependencyHash": { "$ref": "#/$defs/hash" },
+        "expectedPlanHash": { "$ref": "#/$defs/hash" },
+        "promptGuideHash": { "$ref": "#/$defs/hash" },
+        "templateHash": { "$ref": "#/$defs/hash" },
+        "dependencyHash": { "$ref": "#/$defs/hash" },
+        "wordpressHash": { "$ref": "#/$defs/observedHash" },
+        "themeHash": { "$ref": "#/$defs/observedHash" },
+        "browserHash": { "$ref": "#/$defs/observedHash" },
+        "generatedSourceHash": { "$ref": "#/$defs/observedHash" },
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string", "minLength": 1 }
+      }
+    },
+    "environment": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["os", "node", "npm", "wordpress", "theme", "browser", "driver"],
+      "properties": {
+        "os": { "type": "string", "minLength": 1 },
+        "node": { "type": "string", "minLength": 1 },
+        "npm": { "type": "string", "minLength": 1 },
+        "wordpress": { "const": "7.1" },
+        "theme": { "type": "string", "minLength": 1 },
+        "browser": { "type": "string", "minLength": 1 },
+        "driver": { "type": "string", "minLength": 1 }
+      }
+    },
+    "timing": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["elapsedMs", "method", "timeoutMs"],
+      "properties": {
+        "elapsedMs": { "type": "integer", "minimum": 0 },
+        "method": { "type": "string", "minLength": 1 },
+        "timeoutMs": { "type": "integer", "minimum": 1 }
+      }
+    },
+    "artifacts": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["stdoutHash", "stderrHash", "retained"],
+      "properties": {
+        "npmTarballHash": { "$ref": "#/$defs/hash" },
+        "pluginZipHash": { "$ref": "#/$defs/hash" },
+        "stdoutHash": { "$ref": "#/$defs/hash" },
+        "stderrHash": { "$ref": "#/$defs/hash" },
+        "retained": {
+          "type": "array",
+          "minItems": 1,
+          "items": { "type": "string", "minLength": 1 }
+        }
+      }
+    },
+    "acceptance": { "$ref": "#/$defs/acceptance" },
+    "benchmarkReadiness": { "$ref": "#/$defs/benchmarkReadiness" },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["build", "editor", "frontend", "pattern", "fidelity", "accessibility"],
+      "properties": {
+        "build": { "$ref": "#/$defs/gate" },
+        "editor": { "$ref": "#/$defs/gate" },
+        "frontend": { "$ref": "#/$defs/gate" },
+        "pattern": { "$ref": "#/$defs/gate" },
+        "fidelity": { "$ref": "#/$defs/gate" },
+        "accessibility": { "$ref": "#/$defs/gate" }
+      }
+    },
+    "measurement": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "suiteSize": { "type": "integer", "minimum": 0 },
+        "workload": { "type": "string", "minLength": 1 },
+        "invalidCount": { "type": "integer", "minimum": 0 },
+        "engineError": { "type": "string", "minLength": 1 },
+        "warnings": { "type": "array", "items": { "type": "string" } }
+      }
+    }
+  },
+  "allOf": [{
+    "if": { "properties": { "status": { "const": "passed" }, "matrixRowId": { "enum": ["full-release-matrix", "zip-activation"] } } },
+    "then": { "properties": { "provenance": { "properties": {
+      "wordpressHash": { "$ref": "#/$defs/hash" }, "themeHash": { "$ref": "#/$defs/hash" },
+      "browserHash": { "$ref": "#/$defs/hash" }, "generatedSourceHash": { "$ref": "#/$defs/hash" }
+    } } } }
+  }],
+  "$defs": {
+    "observedHash": { "anyOf": [{ "$ref": "#/$defs/hash" }, { "type": "null" }] },
+    "hash": {
+      "type": "string",
+      "pattern": "^sha256:[0-9a-f]{64}$"
+    },
+    "gate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["state", "evidence"],
+      "properties": {
+        "state": { "enum": ["passed", "failed", "unsupported", "blocked", "engine_error"] },
+        "evidence": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string" }
+      }
+    },
+    "acceptanceBlocker": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["gate", "status", "reason"],
+      "properties": {
+        "gate": { "type": "string", "minLength": 1 },
+        "status": { "type": "string", "minLength": 1 },
+        "reason": { "type": "string", "minLength": 1 }
+      }
+    },
+    "acceptedUpstreamFinding": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["exceptionId", "gate", "violationId", "target", "basis"],
+      "properties": {
+        "exceptionId": {
+          "enum": [
+            "wordpress-7.1-native-heading-editor-a11y",
+            "wordpress-7.1-native-paragraph-editor-a11y"
+          ]
+        },
+        "gate": { "const": "accessibility_editor" },
+        "violationId": { "type": "string", "minLength": 1 },
+        "target": { "type": "string", "minLength": 1 },
+        "basis": { "type": "string", "minLength": 1 }
+      }
+    },
+    "acceptance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "rawProfileOk",
+        "automatedOk",
+        "releaseOk",
+        "releaseStatus",
+        "rawFailures",
+        "automatedBlockers",
+        "releaseBlockers",
+        "acceptedUpstreamFindings"
+      ],
+      "properties": {
+        "rawProfileOk": { "type": "boolean" },
+        "automatedOk": { "type": "boolean" },
+        "releaseOk": { "type": "boolean" },
+        "releaseStatus": { "enum": ["passed", "failed", "blocked", "engine_error"] },
+        "rawFailures": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+        "automatedBlockers": { "type": "array", "items": { "$ref": "#/$defs/acceptanceBlocker" } },
+        "releaseBlockers": { "type": "array", "items": { "$ref": "#/$defs/acceptanceBlocker" } },
+        "acceptedUpstreamFindings": { "type": "array", "items": { "$ref": "#/$defs/acceptedUpstreamFinding" } },
+        "nativeHeadingControlEvidence": { "$ref": "#/$defs/nativeControlEvidence" },
+        "nativeParagraphControlEvidence": { "$ref": "#/$defs/nativeControlEvidence" }
+      }
+    },
+    "nativeControlEvidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["wordpressVersion", "evidence"],
+      "properties": {
+        "wordpressVersion": { "type": "string", "pattern": "^7\\.1(?:\\.\\d+)?$" },
+        "evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["path", "sha256"],
+          "properties": {
+            "path": { "type": "string", "minLength": 1 },
+            "sha256": { "$ref": "#/$defs/hash" }
+          }
+        }
+      }
+    },
+    "benchmarkReadiness": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["status", "scored", "requiredForRelease", "proofStatus", "command", "detail", "evidence"],
+      "properties": {
+        "status": { "enum": ["pending", "failed", "blocked", "engine_error"] },
+        "scored": { "const": false },
+        "requiredForRelease": { "const": false },
+        "proofStatus": { "enum": ["pending", "passed", "failed", "blocked", "engine_error"] },
+        "command": { "type": "string", "minLength": 1 },
+        "detail": { "type": "string", "minLength": 1 },
+        "evidence": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}

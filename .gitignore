@@ -1,14 +1,3 @@
-# Design docs: the numbered series (00, 04–11) + references/ ARE committed (public design record).
-# These remain local — they reference internal projects, or are planning/input notes:
-md/README.md
-md/01-research-brief.md
-md/02-architecture.md
-md/03-open-questions.md
-md/PRD.md
-md/dogfood-notes.md
-md/12-market-landscape.md
-md/handover.md
-
 # Internal agent context — private (may reference internal/dogfood projects).
 # Never committed; the public repo must read clean.
 AGENTS.md
@@ -35,9 +24,17 @@ benchmarks/presentation/review.html
 benchmarks/presentation/scoreboard.html
 .playwright-mcp/
 
+# Immutable proof-run evidence is an output artifact, not a source fixture.
+proof-receipts/
+.block-runner-proof-stage/
+.block-runner-trash/
+
 # tuner: cached propose artifacts + captured regressions (smoke.seed.json + baselines/ stay committed)
 benchmarks/.cache/
 benchmarks/regressions/
+
+# Immutable release evidence is retained by CI/release artifacts, not overwritten in-tree.
+release/0.9-testing/receipts/
 
 # Raw research reference (local)
 WORDPRESS_BLOCK_PATTERNS_REFERENCE.md

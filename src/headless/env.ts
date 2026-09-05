@@ -3,16 +3,16 @@ import { JSDOM, VirtualConsole } from 'jsdom';
 import { HeadlessBootError, WpModules } from '../types.js';
 
 let bootPromise: Promise<WpModules> | undefined;
+let booted: WpModules | undefined;
 
 export async function bootHeadlessWordPress(): Promise<WpModules> {
-  if (!bootPromise) {
-    bootPromise = boot();
-  }
-
+  bootPromise ??= Promise.resolve().then(bootHeadlessWordPressSync);
   return bootPromise;
 }
 
-async function boot(): Promise<WpModules> {
+/** The pinned registry is local and bootstraps synchronously for compiler capability checks. */
+export function bootHeadlessWordPressSync(): WpModules {
+  if (booted) return booted;
   try {
     installDomGlobals();
 
@@ -28,13 +28,16 @@ async function boot(): Promise<WpModules> {
       blockLibrary.registerCoreBlocks();
     });
 
-    return {
+    booted = {
       createBlock: blocks.createBlock,
       parse: blocks.parse,
       serialize: blocks.serialize,
       validateBlock: blocks.validateBlock,
       getBlockType: blocks.getBlockType,
+      registerBlockType: blocks.registerBlockType,
+      unregisterBlockType: blocks.unregisterBlockType,
     };
+    return booted;
   } catch (error) {
     bootPromise = undefined;
     throw new HeadlessBootError('Failed to boot headless Gutenberg.', { cause: error });

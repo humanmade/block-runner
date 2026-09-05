@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "root": "feature",
+  "blocks": [
+    {
+      "key": "feature",
+      "blockName": "block-runner/split-feature",
+      "role": "section",
+      "attributes": {
+        "layout": "media-start",
+        "mobileOrder": [
+          "media",
+          "content"
+        ]
+      },
+      "allowedControls": [
+        "spacing",
+        "layout"
+      ],
+      "children": [
+        {
+          "key": "media",
+          "blockName": "core/image",
+          "role": "feature-image",
+          "attributes": {
+            "alt": "Editor controls panel"
+          },
+          "allowedControls": [
+            "media",
+            "alt",
+            "crop"
+          ]
+        },
+        {
+          "key": "content",
+          "blockName": "core/group",
+          "role": "content",
+          "attributes": {},
+          "allowedControls": [
+            "width"
+          ],
+          "children": [
+            {
+              "key": "title",
+              "blockName": "core/heading",
+              "role": "heading",
+              "attributes": {
+                "level": 2,
+                "content": "Keep the useful details editable"
+              },
+              "allowedControls": [
+                "content",
+                "level",
+                "typography"
+              ]
+            },
+            {
+              "key": "description",
+              "blockName": "core/paragraph",
+              "role": "description",
+              "attributes": {},
+              "allowedControls": [
+                "content",
+                "typography"
+              ]
+            },
+            {
+              "key": "points",
+              "blockName": "core/list",
+              "role": "feature-list",
+              "attributes": {
+                "ordered": false,
+                "minimumItems": 3
+              },
+              "allowedControls": [
+                "items",
+                "style"
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

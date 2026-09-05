@@ -1,5 +1,108 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Node.js compatibility decision.** Block Runner now explicitly supports Node.js
+  `^20.19.0 || ^22.13.0 || >=24.0.0`, rather than broadly advertising `>=20`.
+  This retains the Node 20 release line by pinning Commander to 14.0.3, but raises
+  its minimum patch release to 20.19.0 because the resolved jsdom and WordPress
+  production dependencies require it. Node 21 and 23 are not supported by that
+  graph. CI installs the lockfile and packed tarball with engine-strict at each
+  exact floor.
+
+## 0.9.0 — 2026-09-04 — testing release
+
+This is the 0.9 testing release line, distributed through the `testing` npm tag. The stable
+`latest` channel remains on 0.8.0. The release workflow requires the receipt-backed matrix to
+pass before publication; 1.0 remains contingent on real-project feedback and resolved
+release-relevant failures.
+
+### Added
+
+- **Registered-block authoring.** A versioned `AuthoringPlan` can be reviewed in a deterministic
+  terminal preview and compiled into one static registered block whose content remains native
+  WordPress `InnerBlocks`. The preview is read-only; `author write --confirm` binds the canonical
+  plan, compiler contract, and destination fingerprint before publishing source.
+- **Authored HTML analysis.** `author <html> --name <namespace/slug> --json` analyses one authored
+  design and returns a canonical plan plus style and asset ledgers. It does not write source or
+  turn an unresolved `core/html` region into a registered-block substitute.
+- **Plugin output workflow.** `plugin inspect`, `plugin preview`, and `plugin write` inspect a
+  recognised `@wordpress/scripts` host or plan/write a standalone plugin wrapper. Existing files
+  require explicit replacement approval.
+- **Target metadata.** Standalone generated plugins declare the observed compatibility floor:
+  WordPress 7.1 and PHP 7.4.
+- **Destination-aware source transport.** The compiler carries confirmed native styles, scoped
+  declarative CSS, and hash-verified local PNG/JPEG/GIF/WebP/static-SVG assets. Native SVGs use an
+  owned URL helper so the built asset remains a real file rather than a data URL stripped on a
+  WordPress save.
+- **Bound source identity and editing policy.** Authored source hashes and style/asset coverage
+  flow into the canonical plan, generated files, and manifest. Fixed fields use Gutenberg's
+  native block-level `lock.edit: true`; mixed fixed/editable fields on one native node are
+  refused. This is an editor policy, not an immutable-content or security guarantee.
+- **Licensed local font transport.** Only local WOFF/WOFF2 files with an explicit source,
+  SHA-256, ownership/license decision, and optional redistribution notice are bundled. Faces are
+  namespaced in shared editor/frontend CSS; unlicensed or unsupported faces fall back safely with
+  a source-located warning. Full font notices are retained as a separate text file in production
+  archives, including when adding the block to a supported existing plugin.
+- **Pattern-override path.** Native Heading/Paragraph/List Item/Image/Button fields can be marked
+  for the WordPress 7.1 pattern-override flow through the generated plan. Generic Block Bindings,
+  dynamic PHP, and frontend interaction code remain outside this release's contract.
+- **Release proof and benchmark contracts.** Separate receipts cover package, skill, generated
+  plugin activation, WordPress editor/frontend lifecycle, pattern behavior, visual evidence, and
+  accessibility. The registered-block authoring suite is independent of the historical
+  HTML-to-page-block benchmark; model/tool failures are invalid measurements, never zero scores.
+- **Recoverable build cleanup.** `npm run build` moves this checkout's existing `dist/` to
+  macOS Trash (or `~/.Trash` when the `trash` CLI is unavailable) before running `tsup` with
+  cleanup disabled. The guard refuses target arguments and cannot silently delete another path.
+
+### Release status
+
+Node 20, 22 and 24 verification and the WordPress 7.1 automated proof passed in
+[CI](https://github.com/humanmade/block-runner/actions/runs/33879578421). Local production font
+ZIP, existing-plugin second-block, and all four deliberate-mutation checks also passed.
+Those historical major-line jobs used ordinary installs and do not establish the exact
+engine-strict floors documented in the Unreleased compatibility decision above.
+A keyboard and screenshot review is saved
+against the reproducible fixture's exact input and ZIP hashes. The narrow 0.9 testing exception
+covers separately reproduced native Heading and Paragraph accessibility findings; raw failures
+remain in the receipts, and the agent-assisted review is not human accessibility certification.
+
+The publishing workflow runs the complete release matrix before uploading the package. Passing
+unit tests or historical page-content benchmark scores does not establish that release acceptance.
+The separate registered-block benchmark remains pending and unscored; no new model benchmark
+results are claimed for this candidate.
+
+## 0.8.0 — 2026-09-02
+
+### Changed
+
+- Updated the bundled Gutenberg runtime to the WordPress 7.1 package releases.
+- **The bundled agent skill is now canonical and cross-harness.** Its source lives at
+  `skills/block-runner/`, where the directory matches the frontmatter name, with the detailed
+  guide under `references/`. `skill --install` copies the complete bundle to both
+  `.agents/skills/block-runner/` and `.claude/skills/block-runner/` by default; `--scope`,
+  `--target`, and `--dir` cover user-wide, single-harness, and arbitrary roots.
+- **Skill installation is inspectable and guarded.** `--dry-run` resolves destinations without
+  writes, repeat installs are idempotent, managed files carry hashes, local changes are refused
+  unless `--force` is explicit, and installed runtime commands are pinned to the installing
+  package version while the explicit update command stays on `@latest`.
+
+### Fixed
+
+- Custom HTML fallbacks retain their source markup after the WordPress 7.1 `core/html`
+  serialization change; unsupported input no longer collapses to an empty block.
+- Validation no longer rejects a working Custom HTML fallback because `core/html` has no
+  canonical saved output. The fallback warning and count remain unchanged.
+- The skill metadata now states its Node/shell/registry requirements, and the guide no longer
+  describes an uncached `npx` run as fully offline or treats frontend-scraped HTML as supported
+  authored input.
+- Pre-manifest 0.7.x installations now fail closed on their first upgrade. After review, rerun
+  with `--force`; the obsolete root-level `GUIDE.md` is preserved rather than deleted.
+- Skill installs reject symlinked discovery roots, and default dual-target installs preflight
+  ordinary write permissions across both destinations before changing either one.
+
 ## 0.7.1
 
 ### Fixed

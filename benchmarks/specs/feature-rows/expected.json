@@ -6,6 +6,7 @@
       { "block": "core/heading", "contains": "Built for the handoff" },
       {
         "block": "core/media-text",
+        "attrs": { "mediaPosition": "left" },
         "contains": "capture.png",
         "children": [
           { "block": "core/heading", "contains": "Paste anything" },
@@ -15,6 +16,7 @@
       },
       {
         "block": "core/media-text",
+        "attrs": { "mediaPosition": "right" },
         "contains": "tree.png",
         "children": [
           { "block": "core/heading", "contains": "Real nesting" },
@@ -24,6 +26,7 @@
       },
       {
         "block": "core/media-text",
+        "attrs": { "mediaPosition": "left" },
         "contains": "gate.png",
         "children": [
           { "block": "core/heading", "contains": "Always valid" },

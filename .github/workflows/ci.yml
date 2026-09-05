@@ -11,8 +11,10 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # Node 18 is EOL; keep in step with engines (>=20).
-        node: [20, 22, 24]
+        # engines.node: ^20.19.0 || ^22.13.0 || >=24.0.0. These are its exact
+        # lowest releases; the 21.x and 23.x lines are intentionally unsupported
+        # by the resolved jsdom graph.
+        node: [20.19.0, 22.13.0, 24.0.0]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -23,5 +25,69 @@ jobs:
       # and changed `npm pack --json` shape (handled in check-private-refs, but
       # avoid `npm@latest` floating across majors on the matrix).
       - run: npm install -g npm@11
+      - run: npm ci --engine-strict
+      - name: Verify
+        run: npm run verify
+      - name: Smoke the packed CLI in a clean engine-strict consumer
+        run: npm run smoke:package
+      - name: Reject unsupported Node before packed CLI dependencies load
+        if: matrix.node == '20.19.0'
+        run: npm run smoke:package:unsupported-node
+
+  package-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
       - run: npm ci
-      - run: npm run verify
+      - run: npm run build
+      - name: Verify basic and proof-enabled packed consumers
+        run: npm run test:package
+
+  wordpress-proof:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci --engine-strict
+      - run: npx --no-install playwright install --with-deps chromium
+      - name: Collect native WordPress Heading and Paragraph controls
+        env:
+          BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-heading-control
+          BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-paragraph-control
+          BLOCK_RUNNER_NATIVE_HEADING_CONTROL_KEEP: '1'
+          BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_KEEP: '1'
+        run: |
+          npm run proof:control -- --block heading --output-dir "$BLOCK_RUNNER_NATIVE_HEADING_CONTROL_OUTPUT_DIR"
+          npm run proof:control -- --block paragraph --output-dir "$BLOCK_RUNNER_NATIVE_PARAGRAPH_CONTROL_OUTPUT_DIR"
+      - name: Bind native control evidence to the acceptance test
+        run: |
+          cat "${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-heading-control/github-env.txt" >> "$GITHUB_ENV"
+          cat "${{ runner.temp }}/block-runner-wordpress-7.1-receipt/native-paragraph-control/github-env.txt" >> "$GITHUB_ENV"
+      - name: Verify generated-plugin automated acceptance in WordPress 7.1
+        env:
+          BLOCK_RUNNER_PROOF_OUTPUT_DIR: ${{ runner.temp }}/block-runner-wordpress-7.1-receipt
+          BLOCK_RUNNER_PROOF_ACCEPTANCE: required
+        run: npm run test:proof:wordpress
+      - name: Stop WordPress proof environment
+        if: always()
+        run: npx --no-install wp-env --config=proof/wp-env.json stop
+      - name: Upload WordPress 7.1 pattern-overrides receipt
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: wordpress-7.1-pattern-overrides-receipt
+          path: |
+            ${{ runner.temp }}/block-runner-wordpress-7.1-receipt
+            !${{ runner.temp }}/block-runner-wordpress-7.1-receipt/**/node_modules/**
+          if-no-files-found: warn
+          retention-days: 14

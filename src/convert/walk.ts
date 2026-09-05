@@ -1,5 +1,6 @@
 import { RuleContext, WpBlock } from '../types.js';
 import { contextText, isCommentNode, isElementNode, isForeignElement, isWhitespaceText } from './dom.js';
+import { createHtmlFallback } from './fallback.js';
 
 export async function walkChildren(parent: Node, context: RuleContext, skip = new Set<Node>()): Promise<WpBlock[]> {
   const blocks: WpBlock[] = [];
@@ -33,6 +34,13 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
   // string `className`. Route them straight to Custom HTML so nothing degrades in silence.
   if (isForeignElement(node)) {
     return [emitCustomHtml(node, context, 'foreign element emitted as Custom HTML fallback')];
+  }
+
+  // `srcset` and inline `image-set()` values describe multiple concrete assets. Core's simple
+  // media blocks only retain one URL, so authoring preserves the original markup rather than
+  // emitting a successful-looking block that silently drops candidates.
+  if (context.preserveAssetForms && hasNonNativeAssetForm(node)) {
+    return [emitCustomHtml(node, context, 'asset-bearing source form emitted as Custom HTML fallback')];
   }
 
   for (const rule of context.rules) {
@@ -80,9 +88,13 @@ export async function walkNode(node: Node, context: RuleContext): Promise<WpBloc
   return [];
 }
 
+function hasNonNativeAssetForm(node: Element): boolean {
+  return node.hasAttribute('srcset') || /(?:-webkit-)?image-set\s*\(/i.test(node.getAttribute('style') ?? '');
+}
+
 function emitCustomHtml(node: Element, context: RuleContext, reason: string): WpBlock {
   context.warn(reason, node, 'core/html', 'html');
-  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  const block = createHtmlFallback(context.wp, node.outerHTML);
   block.__blockRunnerSource = context.sourceFor(node);
   return block;
 }
@@ -90,7 +102,7 @@ function emitCustomHtml(node: Element, context: RuleContext, reason: string): Wp
 function emitConversionError(node: Element, context: RuleContext, ruleId: string, error: unknown): WpBlock {
   const message = error instanceof Error ? error.message : String(error);
   context.warn('conversion error emitted as Custom HTML fallback', node, 'core/html', ruleId, { error: message });
-  const block = context.wp.createBlock('core/html', { content: node.outerHTML }, []);
+  const block = createHtmlFallback(context.wp, node.outerHTML);
   block.__blockRunnerSource = context.sourceFor(node);
   return block;
 }

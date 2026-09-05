@@ -1,0 +1,68 @@
+{
+  "kind": "artifact-contract",
+  "title": "Registered-block authoring source candidate and runtime evidence",
+  "version": "0.9.0-testing",
+  "artifactRoot": "<run-root>/candidates/<fixture-id>/",
+  "requiredFiles": [
+    "block.json",
+    "index.js",
+    "edit.js",
+    "save.js",
+    "style.scss",
+    "editor.scss",
+    "block.php",
+    "style-decisions.json",
+    "compiler-manifest.json",
+    "authoring-plan.json",
+    "generated-source-manifest.json"
+  ],
+  "workerRequiredFiles": ["style-ledger.json"],
+  "receiptPath": "<run-root>/receipts/<fixture-id>.json",
+  "sourceInputs": {
+    "root": "source/",
+    "contents": "The fixture source and every declared sourceDependencies file, preserved at suite-relative paths and passed to the worker from this snapshot."
+  },
+  "packaging": "The candidate is source, not an installable plugin. The worker must package these exact files with the production plugin profile, then retain the built ZIP and dependency lock.",
+  "blockJson": {
+    "required": ["apiVersion", "name", "title", "editorScript", "style", "editorStyle", "allowedBlocks", "supports"],
+    "forbiddenFallbacks": ["core/html", "dangerouslySetInnerHTML"]
+  },
+  "plan": {
+    "validator": "src/authoring/schema.ts validateAuthoringPlan",
+    "required": ["version", "generatorVersion", "target", "structure", "fields", "locking", "styles", "pattern", "assets", "files", "warnings"],
+    "targetNamesRegisteredWrapper": true,
+    "everyEditableFieldHas": ["id", "label", "mode", "node", "attribute"],
+    "expectedPlanIsCandidate": false
+  },
+  "styleLedger": {
+    "producer": "runtime worker, checked against the source declarations",
+    "notEquivalentTo": "style-decisions.json: confirmed plan choices alone do not prove declaration coverage",
+    "required": ["version", "entries"],
+    "entryRequired": ["selector", "property", "value", "owner", "editorControl", "source"],
+    "owners": ["block", "theme", "pattern", "asset", "unsupported"]
+  },
+  "receipt": {
+    "schema": "receipt.schema.json",
+    "required": [
+      "fixtureId",
+      "status",
+      "startedAt",
+      "finishedAt",
+      "durationMs",
+      "timingMethod",
+      "provenance",
+      "checks",
+      "artifacts"
+    ],
+    "statuses": ["scored", "unsupported", "blocked", "engine_error"],
+    "checkKeys": [
+      "plan", "source", "native", "style", "warnings", "build",
+      "editor", "frontend", "pattern", "fidelity", "accessibility"
+    ],
+    "timing": {
+      "method": "monotonic-wall-clock-source-materialization-through-evidence-finalization",
+      "unit": "milliseconds"
+    },
+    "artifactKeys": ["buildLog", "editorTrace", "frontendTrace", "patternTrace", "fidelityReport", "accessibilityReport"]
+  }
+}

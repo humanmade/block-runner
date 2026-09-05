@@ -27,6 +27,14 @@ tagged with commit / branch / author / version and a `suiteHash` (so a score cha
 attributable to the converter only when the suite is unchanged). Plain `npm run bench` does
 not append; only `--record` does (CI records on merge — see `md/08-benchmark-system.md`).
 
+The suite targets **WordPress 7.1** and runs its gate against the pinned
+`@wordpress/block-library` **10.5.0** runtime. It covers the common marketing/content-section
+archetypes Block Runner converts; it is deliberately not an inventory test for every Core
+block WordPress ships. Every record also stores the scorer hash, engine prompt hash, target
+WordPress version, block-library version, and dirty-worktree state. Historical scores are
+comparable only when the suite, scorer, engine/model/effort, and block runtime agree; changing
+the engine prompt is an intentional converter change and remains measurable.
+
 ## Structure: shared specs, many producers
 
 The ideal end state is defined **once per layout** (a spec); each producer supplies its own
@@ -36,7 +44,7 @@ HTML answer to the same brief, and all are scored against the shared spec:
 benchmarks/
   specs/<layout>/
     prompt.md          # the brief given to EVERY producer (the shared question)
-    expected.json      # { intent, tree } — the ideal native block tree (the shared answer)
+    expected.json      # { intent, tree, acceptedTrees? } — shared native-block contract
   producers/<producer>/<layout>.html   # one producer's HTML answer to that layout's prompt
   base/<producer>.css                  # optional; inlined into that producer's layouts at run time
   results.jsonl        # committed run history
@@ -88,6 +96,13 @@ convertibility — that spread is the point.)
 - `children` — nested blocks, **in the order you expect them**.
 - `contains` *(optional)* — a substring that must appear in that block's content/attrs
   (text, url, alt, href). Use it to assert the right content landed in the right block.
+- `attrs` *(optional)* — exact top-level Gutenberg attributes required by the brief, such as
+  `{"ordered": true}`, a media caption/poster, an accordion heading's `title`, or a file's
+  non-empty `downloadButtonText`. A narrowly specified `{"$oneOf": [...]}` accepts an explicit
+  set of prompt-permitted values. Each key is one content assertion.
+- `acceptedTrees` *(optional)* — a short list of explicitly reviewed **whole-tree** equivalents.
+  The scorer chooses the best complete match. Alternatives apply to every producer and engine;
+  never use them to special-case one source or to forgive a required card/container globally.
 
 ## How scoring works
 
@@ -96,7 +111,7 @@ Per fixture, four axes:
 | Axis | Meaning |
 |---|---|
 | **STRUCT** | Right blocks, right nesting, right order (ordered tree alignment vs `tree`). |
-| **CONTENT** | Of asserted `contains`, how many landed in the matched block. |
+| **CONTENT** | Of asserted `contains` checks and exact `attrs` keys, how many landed in the matched block. |
 | **VALID** | The produced markup passes the gate. Invalid output halves the score — correctness presupposes validity. |
 | **FALLBKS** | Count of `core/html` blocks. Every fallback is a conversion miss; surfaced loudly, never hidden. |
 
@@ -126,6 +141,11 @@ The other real engine is **Engine C** — a *split* engine in `scripts/engines/e
 Engine C exports the tuner's split contract — `propose` / `realize` / `promptHash` — so the
 tuner caches the model's intent tree once and replays `realize()` for free (T0) while you
 iterate on the assembler, calling the model again only when the prompt or schema changes.
+
+All CLI-backed benchmark engines receive their complete task through stdin and launch outside
+the repository. Codex runs with a read-only sandbox, ignored user configuration, and ephemeral
+sessions; Claude runs in safe, restricted, non-persistent mode. A prompt asking the model not
+to write files is not a security boundary, so bypass-permission modes are prohibited here.
 
 Run Engine C:
 
@@ -216,8 +236,8 @@ The tuner prints *why* each fixture was selected — selection is explainable, n
 
 ### Honest attribution (kills single-cell overfits)
 
-Every run diffs against the previous **comparable** run (same `suiteHash` + `engine` +
-`model`) and reports per-fixture deltas grouped by class — producer and layout — then
+Every run diffs against the previous **comparable** run (same suite/scorer +
+engine/model/effort) and reports per-fixture deltas grouped by class — producer and layout — then
 classifies the change:
 
 - **class-move** (the win we want): moved ≥2 fixtures across ≥2 producers, same direction.
@@ -229,10 +249,13 @@ fixtures across M producers) so the next fix is chosen by which *class* it unloc
 
 ### Regression ratchet (nothing degrades in silence)
 
-Per engine/model, the tuner keeps a best-ever score per fixture
-(`baselines/<engine>__<model>.json`, committed). Any run where a fixture drops below its
+Per engine/model/effort, the tuner keeps a best-ever score per fixture
+(`baselines/<engine>__<model>__<effort>.json`, committed). Any run where a fixture drops below its
 baseline by more than a small threshold **exits non-zero** — the loop cannot silently
 regress, and coverage only ratchets up.
+
+A changed suite, scorer, or Gutenberg block-library version makes the old baseline
+non-comparable and skips the ratchet loudly; accepting a new baseline is always explicit.
 
 - `--baseline-update` accepts the current run as the new baseline (a deliberate act; it only
   ever raises the recorded ceiling).

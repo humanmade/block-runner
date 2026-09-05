@@ -7,6 +7,7 @@ import {
   applyElementStyles,
   isCarryable,
   richTextDescendantStyles,
+  sourceDeclarationKey,
   unattributableStyles,
 } from '../styles/apply.js';
 import { SidecarCollector, addClassName } from '../styles/sidecar.js';
@@ -21,7 +22,16 @@ import {
   StylingRung,
   WpBlock,
 } from '../types.js';
-import { contextHtml, contextText, isElementNode, makeContextWarning, prepareDom, sourceForNode } from './dom.js';
+import {
+  contextHtml,
+  contextText,
+  cssBackgroundsFromRules,
+  isElementNode,
+  makeContextWarning,
+  prepareDom,
+  retainSelectorDependencies,
+  sourceForNode,
+} from './dom.js';
 import { defaultRules } from './defaults.js';
 import { finalizeBlocks } from './finalize.js';
 import { walkChildren } from './walk.js';
@@ -66,6 +76,25 @@ async function runConvert(
   wp: Awaited<ReturnType<typeof getWp>>,
 ): Promise<BlockRunnerReport> {
   const prepared = prepareDom(input, options.sourcePath);
+  retainSelectorDependencies(
+    prepared.dom.window.document,
+    options.preserveSourceSelectorDependencies ?? [],
+  );
+  // A registered-block stylesheet owns declarations that could not be mapped natively for every
+  // matching element. Remove exactly those source declarations before structural/style mapping so
+  // a mixed result cannot emit both a native value and the residual rule.
+  const suppressed = new Set(options.suppressSourceDeclarations ?? []);
+  const cssClassRules = suppressed.size === 0
+    ? prepared.cssClassRules
+    : prepared.cssClassRules.map((rule) => ({
+        ...rule,
+        declarations: rule.declarations.filter(
+          (declaration) => !declaration.origin || !suppressed.has(
+            sourceDeclarationKey(declaration.origin, declaration.property, declaration.value, declaration.originId),
+          ),
+        ),
+      }));
+  const cssBackgrounds = cssBackgroundsFromRules(cssClassRules);
   const warnings: ReportItem[] = [...prepared.warnings];
   const explainItems: ReportItem[] = [];
   const rules = buildRules(config);
@@ -88,8 +117,9 @@ async function runConvert(
     rules,
     sourcePath: options.sourcePath,
     explain: options.explain === true,
-    cssBackgrounds: prepared.cssBackgrounds,
-    cssClassRules: prepared.cssClassRules,
+    cssBackgrounds,
+    cssClassRules,
+    preserveAssetForms: options.preserveAssetForms === true,
     warn(reason, node, block, rule, details) {
       warnings.push(makeContextWarning(context, reason, node, block, rule, details));
     },
@@ -113,9 +143,22 @@ async function runConvert(
             styling,
             capabilities,
             tokens: tokenInvMap,
-            classRules: prepared.cssClassRules,
+            classRules: cssClassRules,
           })
-        : unattributableStyles(element, blocks.length, prepared.cssClassRules);
+        : unattributableStyles(element, blocks.length, cssClassRules);
+
+      // Registered-block authoring owns a stylesheet rooted at its generated wrapper. Retain only
+      // the source classes that stylesheet actually references, and only on the one native block
+      // that claimed this source element. The ordinary convert path deliberately keeps its prior
+      // no-source-class output, so a transport class can never leak accidentally into post content.
+      if (block && options.preserveSourceClasses) {
+        const retained = new Set(options.preserveSourceClasses);
+        for (const className of element.classList) {
+          if (retained.has(className)) {
+            addClassName(block, className);
+          }
+        }
+      }
 
       reportLedger(carryToSidecar(ledger, block), element, block?.name, 'styles');
     },
@@ -125,7 +168,7 @@ async function runConvert(
       }
       // Rich-text descendants have no block of their own, so only author-selector rules can be
       // rescued — passing the enclosing block would put the class in the wrong place.
-      const ledger = richTextDescendantStyles(node as Element, styling, prepared.cssClassRules);
+      const ledger = richTextDescendantStyles(node as Element, styling, cssClassRules);
       reportLedger(carryToSidecar(ledger, undefined), node as Element, block, rule ?? 'styles');
     },
     explainRule(node, rule, reason, details) {
@@ -224,6 +267,7 @@ async function runConvert(
   // `overridden` and clean `mapped` outcomes are accounted for under --explain, because warning on
   // them would bury the entries that need action.
   function reportLedger(ledger: StyleLedgerEntry[], element: Element, block: string | undefined, rule: string): void {
+    options.styleLedgerObserver?.(ledger, context.sourceFor(element), block);
     for (const entry of ledger) {
       const authored = entry.shorthand ? `${entry.shorthand} (${entry.property})` : entry.property;
       // An unparseable chunk has no value to quote — it *is* the quoted text. Name the rule a
