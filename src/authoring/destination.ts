@@ -70,6 +70,11 @@ export interface AuthoringPublicationOptions {
   failAfterPublishStep?: number;
   /** Invoked after each target has been published and durably recorded as completed. */
   onPublished?: (entry: PublicationRecoveryEntry, recovery: PublicationRecovery) => void | Promise<void>;
+  /**
+   * Test-only hook after a target has been stably observed by final validation. Validation
+   * observes every target once, then observes the whole set again before returning success.
+   */
+  onFinalValidationTarget?: (entry: PublicationRecoveryEntry, validated: ReadonlyArray<PublicationRecoveryEntry>) => void | Promise<void>;
 }
 
 /** A write error with the exact recovery inventory. It is never a successful write receipt. */
@@ -291,7 +296,7 @@ export async function writeAuthoringOutput(
     }
 
     const after = await inspectAuthoringDestination(preflight.directory, output);
-    await verifyPublishedTargets(runtime);
+    await verifyPublishedTargets(runtime, options);
     publicationComplete = true;
     return { directory: after.directory, fingerprint: after.fingerprint, written: files.map((file) => file.path) };
   } catch (error) {
@@ -548,7 +553,7 @@ async function resumeAuthoringPublication(
       await afterPublicationStep(runtime, entry, options);
     }
     const after = await inspectAuthoringDestination(runtime.directory, { files: runtime.entries.map(({ file }) => file) });
-    await verifyPublishedTargets(runtime);
+    await verifyPublishedTargets(runtime, options);
     publicationComplete = true;
     return { directory: after.directory, fingerprint: after.fingerprint, written: runtime.entries.map(({ file }) => file.path) };
   } catch (error) {
@@ -621,17 +626,34 @@ function assertStagingPath(entry: Pick<PublicationRuntimeEntry, 'file' | 'target
   }
 }
 
-async function verifyPublishedTargets(runtime: PublicationRuntime): Promise<void> {
+async function verifyPublishedTargets(runtime: PublicationRuntime, options: AuthoringPublicationOptions): Promise<void> {
+  const validated: PublicationRecoveryEntry[] = [];
+  const observed = new Map<string, FileIdentity>();
   for (const entry of runtime.entries) {
-    let current: Buffer | undefined;
-    try {
-      current = await readRegularFile(entry.target, entry.file.path);
-    } catch {
+    observed.set(entry.target, await assertPublishedTarget(entry));
+    validated.push(publicationEntry(entry));
+    await options.onFinalValidationTarget?.(publicationEntry(entry), validated);
+  }
+  // Recheck exact identities after every target's content has been read. This catches an
+  // earlier target replaced while a later target was being validated. The guarantee ends at
+  // this final observation and makes no perpetual or cross-filesystem atomicity claim.
+  for (const entry of runtime.entries) {
+    if (!sameIdentity(observed.get(entry.target)!, await lstatRegular(entry.target, entry.file.path, false))) {
       throw new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`);
     }
-    if (sha256(current) !== entry.afterHash) {
+  }
+}
+
+async function assertPublishedTarget(entry: PublicationRuntimeEntry): Promise<FileIdentity> {
+  try {
+    const { content, identity } = await readRegularFileWithIdentity(entry.target, entry.file.path);
+    if (sha256(content) !== entry.afterHash) {
       throw new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`);
     }
+    return identity;
+  } catch (error) {
+    if (error instanceof PublicationConflictError) throw error;
+    throw new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`);
   }
 }
 
@@ -921,21 +943,29 @@ async function identityFor(file: string, stats: Awaited<ReturnType<typeof lstat>
   };
 }
 
-async function lstatRegular(file: string, plannedPath: string): Promise<FileIdentity> {
+async function lstatRegular(file: string, plannedPath: string, includeContent = true): Promise<FileIdentity> {
   const stats = await lstat(file);
   if (stats.isSymbolicLink() || !stats.isFile()) {
     throw new Error(`planned destination is no longer a regular file: ${plannedPath}`);
   }
-  return identityFor(file, stats, true);
+  return identityFor(file, stats, includeContent);
 }
 
 async function readRegularFile(file: string, plannedPath: string): Promise<Buffer> {
-  await lstatRegular(file, plannedPath);
+  return (await readRegularFileWithIdentity(file, plannedPath)).content;
+}
+
+async function readRegularFileWithIdentity(file: string, plannedPath: string): Promise<{ content: Buffer; identity: FileIdentity }> {
+  const beforeRead = await lstatRegular(file, plannedPath, false);
   const content = await readFile(file);
   // Check again after the read so a link substituted during it is not silently accepted as a
-  // recovery or replacement source.
-  await lstatRegular(file, plannedPath);
-  return content;
+  // recovery or replacement source. Comparing the stable identity also rejects a replacement
+  // that happened while the bytes were being read.
+  const afterRead = await lstatRegular(file, plannedPath, false);
+  if (!sameIdentity(beforeRead, afterRead)) {
+    throw new Error(`planned destination changed while reading: ${plannedPath}`);
+  }
+  return { content, identity: afterRead };
 }
 
 async function readRegularFileMaybe(file: string, plannedPath: string): Promise<Buffer | undefined> {

@@ -139,6 +139,21 @@ describe('authoring destination', () => {
     })).rejects.toThrow(/authoring publication conflict/);
   });
 
+  it('rejects a prior target changed while later target content is being validated', async () => {
+    const destination = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    const first = path.join(destination, 'block.json');
+
+    await expect(writeAuthoringOutput(destination, plan([
+      { path: 'block.json', content: 'first\n' },
+      { path: 'index.js', content: 'second\n' },
+    ]), undefined, {
+      onFinalValidationTarget: async (_entry, validated) => {
+        if (validated.length === 1) await writeFile(first, 'changed during final validation\n');
+      },
+    })).rejects.toThrow(/authoring publication conflict/);
+    expect(await readFile(first, 'utf8')).toBe('changed during final validation\n');
+  });
+
   it('does not report a changed published target as completed after an interruption', async () => {
     const destination = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
     let interrupted: PublicationInterruptedError | undefined;

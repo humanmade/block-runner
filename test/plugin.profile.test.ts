@@ -162,6 +162,21 @@ describe('wp-scripts plugin profile', () => {
     })).rejects.toThrow(/plugin publication conflict/);
   });
 
+  it('rejects a recognised-plugin target changed while later target content is being validated', async () => {
+    const root = await existingDirectPlugin();
+    const plan = await planExistingPluginOutput(root, block);
+    const modified = plan.touchedFiles.filter((file) => file.operation === 'modify').map((file) => file.path);
+    const first = plan.touchedFiles[0]!;
+
+    await expect(writePluginOutput(plan, {
+      authorizedReplacements: modified,
+      onFinalValidationTarget: async (_entry, validated) => {
+        if (validated.length === 1) await writeFile(first.path, 'changed during final validation\n');
+      },
+    })).rejects.toThrow(/plugin publication conflict/);
+    expect(await readFile(first.path, 'utf8')).toBe('changed during final validation\n');
+  });
+
   it('does not report a changed published target as completed after an interruption', async () => {
     const root = await existingDirectPlugin();
     const plan = await planExistingPluginOutput(root, block);

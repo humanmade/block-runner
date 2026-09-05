@@ -158,6 +158,11 @@ export interface WritePluginOutputOptions {
    * hook simulates an interrupted multi-file publication and returns a recovery inventory.
    */
   onPublished?: (entry: PublicationRecoveryEntry, recovery: PublicationRecovery) => void | Promise<void>;
+  /**
+   * Test-only hook after a target has been stably observed by final validation. The complete set
+   * is observed again before success so a later read cannot hide a changed earlier target.
+   */
+  onFinalValidationTarget?: (entry: PublicationRecoveryEntry, validated: ReadonlyArray<PublicationRecoveryEntry>) => void | Promise<void>;
 }
 
 export interface WritePluginOutputResult {
@@ -576,7 +581,7 @@ export async function writePluginOutput(
       await options.onPublished?.(publicationEntry(item), recovery);
     }
 
-    await verifyPublishedPluginTargets(staged, completed);
+    await verifyPublishedPluginTargets(staged, completed, options);
     publicationComplete = true;
     return { directory: root, written: [...completed].sort(), fingerprint: plan.fingerprint };
   } catch (error) {
@@ -654,7 +659,7 @@ export async function retryPluginPublication(
       }
       await options.onPublished?.(publicationEntry(item), currentRecovery);
     }
-    await verifyPublishedPluginTargets(staged, completed);
+    await verifyPublishedPluginTargets(staged, completed, options);
     publicationComplete = true;
     return { directory: root, written: [...completed].sort(), fingerprint: record.fingerprint };
   } catch (error) {
@@ -932,26 +937,79 @@ async function observedCompleted(staged: readonly StagedPluginPublicationFile[])
 async function verifyPublishedPluginTargets(
   staged: readonly StagedPluginPublicationFile[],
   completed: ReadonlySet<string>,
+  options: Pick<WritePluginOutputOptions, 'onFinalValidationTarget'>,
 ): Promise<void> {
+  const validated: PublicationRecoveryEntry[] = [];
+  const observed = new Map<string, PluginFileIdentity>();
   for (const item of staged) {
     if (!completed.has(item.target)) {
       throw new PublicationConflictError(`plugin publication conflict: target was not recorded as completed: ${item.target}`);
     }
-    try {
-      const beforeRead = await lstatMaybe(item.target);
-      if (!beforeRead?.isFile()) {
-        throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
-      }
-      const content = await readFile(item.target);
-      const afterRead = await lstatMaybe(item.target);
-      if (!afterRead?.isFile() || publicationHash(content) !== item.afterHash) {
-        throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
-      }
-    } catch (error) {
-      if (error instanceof PublicationConflictError) throw error;
+    observed.set(item.target, await assertPublishedPluginTarget(item));
+    validated.push(publicationEntry(item));
+    await options.onFinalValidationTarget?.(publicationEntry(item), validated);
+  }
+  // Recheck exact identities after every target's content has been read. This catches an
+  // earlier target replaced while a later target was being validated. The guarantee ends at
+  // this final observation and makes no perpetual or cross-filesystem atomicity claim.
+  for (const item of staged) {
+    if (!samePluginFileIdentity(observed.get(item.target)!, await pluginRegularFileIdentity(item.target))) {
       throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
     }
   }
+}
+
+interface PluginFileIdentity {
+  dev: string;
+  ino: string;
+  mode: number;
+  size: string;
+  mtimeNs: string;
+  ctimeNs: string;
+}
+
+async function assertPublishedPluginTarget(item: StagedPluginPublicationFile): Promise<PluginFileIdentity> {
+  try {
+    const { content, identity } = await readStablePluginFile(item.target);
+    if (publicationHash(content) !== item.afterHash) {
+      throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
+    }
+    return identity;
+  } catch (error) {
+    if (error instanceof PublicationConflictError) throw error;
+    throw new PublicationConflictError(`plugin publication conflict: completed target changed: ${item.target}`);
+  }
+}
+
+async function readStablePluginFile(target: string): Promise<{ content: Buffer; identity: PluginFileIdentity }> {
+  const beforeRead = await pluginRegularFileIdentity(target);
+  const content = await readFile(target);
+  const afterRead = await pluginRegularFileIdentity(target);
+  if (!samePluginFileIdentity(beforeRead, afterRead)) {
+    throw new Error(`plugin target changed while reading: ${target}`);
+  }
+  return { content, identity: afterRead };
+}
+
+async function pluginRegularFileIdentity(target: string): Promise<PluginFileIdentity> {
+  const stats = await lstat(target);
+  if (stats.isSymbolicLink() || !stats.isFile()) {
+    throw new Error(`plugin target is no longer a regular file: ${target}`);
+  }
+  const withNs = stats as typeof stats & { mtimeNs?: bigint; ctimeNs?: bigint };
+  return {
+    dev: String(stats.dev),
+    ino: String(stats.ino),
+    mode: Number(stats.mode),
+    size: String(stats.size),
+    mtimeNs: String(withNs.mtimeNs ?? BigInt(Math.round(Number(stats.mtimeMs) * 1_000_000))),
+    ctimeNs: String(withNs.ctimeNs ?? BigInt(Math.round(Number(stats.ctimeMs) * 1_000_000))),
+  };
+}
+
+function samePluginFileIdentity(left: PluginFileIdentity, right: PluginFileIdentity): boolean {
+  return left.dev === right.dev && left.ino === right.ino && left.mode === right.mode
+    && left.size === right.size && left.mtimeNs === right.mtimeNs && left.ctimeNs === right.ctimeNs;
 }
 
 async function removePublicationStage(stageDirectory: string): Promise<void> {
