@@ -8,7 +8,7 @@ description: >-
   markup, or before writing blocks to WordPress. Do not use for general WordPress administration,
   unrelated plugin or theme code, frontend-scraped HTML, or non-WordPress HTML.
 license: GPL-2.0-or-later
-compatibility: Requires Node.js 20+ and shell access. An uncached npx run requires npm registry access.
+compatibility: Requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0 and shell access. An uncached npx run requires npm registry access.
 ---
 
 # Block Runner

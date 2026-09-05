@@ -1,5 +1,17 @@
 # Changelog
 
+## Unreleased
+
+### Changed
+
+- **Node.js compatibility decision.** Block Runner now explicitly supports Node.js
+  `^20.19.0 || ^22.13.0 || >=24.0.0`, rather than broadly advertising `>=20`.
+  This retains the Node 20 release line by pinning Commander to 14.0.3, but raises
+  its minimum patch release to 20.19.0 because the resolved jsdom and WordPress
+  production dependencies require it. Node 21 and 23 are not supported by that
+  graph. CI installs the lockfile and packed tarball with engine-strict at each
+  exact floor.
+
 ## 0.9.0 — 2026-09-04 — testing release
 
 This is the 0.9 testing release line, distributed through the `testing` npm tag. The stable
@@ -50,6 +62,8 @@ release-relevant failures.
 Node 20, 22 and 24 verification and the WordPress 7.1 automated proof passed in
 [CI](https://github.com/humanmade/block-runner/actions/runs/33879578421). Local production font
 ZIP, existing-plugin second-block, and all four deliberate-mutation checks also passed.
+Those historical major-line jobs used ordinary installs and do not establish the exact
+engine-strict floors documented in the Unreleased compatibility decision above.
 A keyboard and screenshot review is saved
 against the reproducible fixture's exact input and ZIP hashes. The narrow 0.9 testing exception
 covers separately reproduced native Heading and Paragraph accessibility findings; raw failures
