@@ -169,7 +169,22 @@ export interface RegisteredBlockOutputPlan {
  */
 export function planRegisteredBlockOutput(input: AuthoringPlan): RegisteredBlockOutputPlan {
   const plan = prepareStaticPlan(input);
-  return { files: [...outputFiles(plan), ...collectConfirmedAssets(plan).map(({ path, operation }) => ({ path, operation }))] };
+  return { files: deriveRegisteredBlockOutputFiles(plan) };
+}
+
+/**
+ * List every compiler-owned destination selected by a plan without reading its source assets.
+ * The preview renderer uses this same derivation so it never omits a ready asset or diverges
+ * from the destination plan that the verified planner returns.
+ */
+export function deriveRegisteredBlockOutputFiles(plan: AuthoringPlan): Array<{ path: string; operation: AuthoringFileOperation }> {
+  const operations = new Map(plan.files.map((file) => [file.path, file.operation ?? 'create'] as const));
+  return [
+    ...outputFiles(plan),
+    ...plan.assets.flatMap((asset) => asset.status === 'ready' && asset.destination
+      ? [{ path: asset.destination, operation: operations.get(asset.destination) ?? 'create' }]
+      : []),
+  ];
 }
 
 /**
@@ -227,10 +242,10 @@ export function compileRegisteredBlock(input: AuthoringPlan): GeneratedRegistere
   return { template, templateVersion: REGISTERED_BLOCK_TEMPLATE_VERSION, sourcePlanHash, files, assets, manifest };
 }
 
-/** Readable alias for callers that call the compiler a generator. */
+/** @deprecated Use compileRegisteredBlock, the public confirmation-bound compiler name. */
 export const generateRegisteredBlock = compileRegisteredBlock;
 
-/** The confirmation boundary materializes an immutable, hash-bound source package. */
+/** @deprecated Use compileRegisteredBlock, the public confirmation-bound compiler name. */
 export const materializeAuthoringPlan = compileRegisteredBlock;
 
 /**
@@ -349,6 +364,7 @@ function renderFontStyles(plan: AuthoringPlan, assets: readonly GeneratedAssetFi
 /** Typed JSON emitter for the API-v3 metadata document. */
 export function emitBlockJson(plan: Pick<AuthoringPlan, 'target'>, allowedBlocks: string[] = []): string {
   const metadata: Record<string, JsonValue> = {
+    ...(plan.target.metadata ?? {}),
     $schema: WORDPRESS_BLOCK_SCHEMA_URL,
     apiVersion: 3,
     name: plan.target.name,
@@ -367,7 +383,6 @@ export function emitBlockJson(plan: Pick<AuthoringPlan, 'target'>, allowedBlocks
   if (plan.target.description) metadata.description = plan.target.description;
   if (plan.target.icon) metadata.icon = plan.target.icon;
   const serialized = `${JSON.stringify(sortJson(metadata), null, 2)}\n`;
-  validateBlockMetadata(JSON.parse(serialized));
   return serialized;
 }
 
@@ -476,7 +491,7 @@ export function validateGeneratedSources(files: readonly GeneratedSourceFile[]):
     try {
       switch (file.kind) {
         case 'json':
-          validateBlockMetadata(JSON.parse(file.content));
+          validateGeneratedBlockMetadata(JSON.parse(file.content));
           break;
         case 'javascript':
           parseJavaScript(file.content, { sourceType: 'module', plugins: ['jsx'] });
@@ -497,6 +512,21 @@ export function validateGeneratedSources(files: readonly GeneratedSourceFile[]):
       const message = error instanceof Error ? error.message : String(error);
       throw new AuthoringGenerationError(`generated-source-invalid: ${file.path}: ${message}`, `files.${file.path}`);
     }
+  }
+}
+
+/**
+ * Generated JSON is parsed here, while plan metadata is validated at the capability boundary in
+ * prepareStaticPlan. Do not apply the pinned vendor schema: native metadata intentionally
+ * permits forward-compatible declarative keys which that snapshot does not yet know.
+ */
+function validateGeneratedBlockMetadata(metadata: unknown): void {
+  if (!metadata || typeof metadata !== 'object' || Array.isArray(metadata)) {
+    throw new Error('block metadata must be a JSON object');
+  }
+  const record = metadata as Record<string, unknown>;
+  if (record.apiVersion !== 3 || typeof record.name !== 'string' || !record.name) {
+    throw new Error('generated block metadata is missing its API-v3 identity');
   }
 }
 
@@ -543,6 +573,7 @@ function emitAssetUrls(template: TemplateNode[], assets: readonly GeneratedAsset
 function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   const plan = canonicalizeAuthoringPlan(input);
   assertNoExecutableBehaviour(plan);
+  assertStaticMetadataCapabilities(plan.target.metadata);
   assertSafePlanData(plan);
   validateLockingOperations(plan.locking);
   // Preview must refuse unsupported styles too, rather than promising an unwritable package.
@@ -571,6 +602,21 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   // survive the confirmation hash and fail only when source files are materialized.
   renderFontStyles(plan, assets);
   return plan;
+}
+
+/**
+ * Metadata remains a permissive JSON transport, but no metadata value may turn a confirmed
+ * static package into code loading. WordPress interprets string `variations` as a PHP file path,
+ * so only inline declarative variation records are safe at this boundary.
+ */
+function assertStaticMetadataCapabilities(metadata: AuthoringPlan['target']['metadata']): void {
+  if (!metadata) return;
+  if (metadata.variations !== undefined && !Array.isArray(metadata.variations)) {
+    throw new AuthoringGenerationError(
+      'unsupported-metadata-capability: variations must be inline declarative records; PHP file references are not allowed in static authoring',
+      'target.metadata.variations',
+    );
+  }
 }
 
 function outputFiles(plan: AuthoringPlan): Array<Pick<GeneratedSourceFile, 'path' | 'operation'>> {
@@ -634,6 +680,9 @@ function assertSafePlanData(plan: AuthoringPlan): void {
   visit(plan.fields as unknown as JsonValue, 'fields');
   visit(plan.pattern as unknown as JsonValue, 'pattern');
   visit(plan.assets as unknown as JsonValue, 'assets');
+  // Native metadata can contain variation InnerBlocks and attribute values, not just labels.
+  // Apply the same recursive content/URL policy before either preview or source generation.
+  visit(plan.target.metadata, 'target.metadata');
 }
 
 function assertSafeUrl(value: string, path: string): void {

@@ -481,7 +481,7 @@ author
     const confirmation = hashAuthoringConfirmation(plan, inspection);
     const touchedFiles = previewTouchedFiles(inspection, outputPlan.files);
     const width = parsePreviewWidth(options.width);
-    const preview = renderAuthoringPreview({ ...plan, files: outputPlan.files.map((file) => ({ ...file })) }, {
+    const preview = renderAuthoringPreview(plan, {
       hash,
       confirmationHash: confirmation,
       width,

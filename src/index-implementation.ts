@@ -212,6 +212,7 @@ export type {
   AuthoringEditableField,
   AuthoringNode,
   AuthoringPlan,
+  AuthoringPlan as SemanticAuthoringPlan,
   AuthoringRole,
   AuthoringTemplate,
   AssetLedgerEntry,

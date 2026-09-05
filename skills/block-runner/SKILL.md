@@ -20,7 +20,7 @@ package.
 
 Four paths. Pick by the requested artifact:
 
-- **You need a reusable, named registered block in code** → create an `AuthoringPlan`, not
+- **You need a reusable, named registered block in code** → create a `GeneratedAuthoringPlan`, not
   source code. It records the block identity, design structure, editability and locking, style
   and asset outcomes, pattern overrides, final destination, and proof inputs. Run `author
   preview`, show the literal tree and every warning, ask for a clear confirmation, then run
@@ -39,10 +39,11 @@ Four paths. Pick by the requested artifact:
 
 ## Rules that are easy to get wrong
 
-- **A registered-block plan is declarative only.** Never emit React/JSX, PHP, `block.json` or
-  other block metadata, generated CSS, or `<!-- wp:… -->` delimiters in the plan or chat as a
+- **A registered-block plan is declarative only.** Never emit React/JSX, PHP, a complete `block.json`,
+  generated CSS, or `<!-- wp:… -->` delimiters in the plan or chat as a
   substitute for the generator. The model interprets the design and makes reviewable choices;
-  deterministic code produces executable files.
+  deterministic code produces executable files. Safe native `block.json` fields belong in
+  `target.metadata`; do not use that field for executable or file-loading capabilities.
 - **Registered-block authoring is preview first.** `author preview` writes no files. Before
   asking, show the preview's terminal tree, destination, planned files, and warnings verbatim;
   then obtain a specific yes for its full confirmation hash. A changed design, plan, or

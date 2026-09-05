@@ -81,6 +81,18 @@ describe('AuthoringPlan schema', () => {
       .toThrow(/must target WordPress 7\.1/);
   });
 
+  it('keeps native metadata permissive, canonical, and hash-bound before static capability validation', () => {
+    const input = plan({ target: {
+      name: 'example/notice', title: 'Notice', metadata: { keywords: ['notice'], experimentalFlag: { enabled: true } },
+    } });
+    const normalized = validateAuthoringPlan(input);
+    expect(normalized.target.metadata).toEqual({ keywords: ['notice'], experimentalFlag: { enabled: true } });
+    expect(hashAuthoringPlan(input)).not.toBe(hashAuthoringPlan(plan()));
+    expect(() => compileRegisteredBlock({ ...normalized, fields: [], pattern: { ready: false, overrides: [] } })).not.toThrow();
+    expect(validateAuthoringPlan({ ...input, target: { ...input.target as object, metadata: { variations: 'file:./variations.php' } } }).target.metadata?.variations)
+      .toBe('file:./variations.php');
+  });
+
   it('keeps font faces bound to a licensed plan asset rather than a duplicated source path', () => {
     const input = plan({
       styles: {

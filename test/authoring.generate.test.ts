@@ -2,12 +2,13 @@ import { describe, expect, it } from 'vitest';
 import {
   AuthoringGenerationError,
   compileRegisteredBlock,
+  planRegisteredBlockOutput,
   REGISTERED_BLOCK_STYLE_EMITTER_VERSION,
   REGISTERED_BLOCK_TEMPLATE_VERSION,
   type GeneratedSourceFile,
   validateBlockMetadata,
 } from '../src/authoring/generate.js';
-import { hashAuthoringPlan, type AuthoringPlan } from '../src/authoring/schema.js';
+import { hashAuthoringPlan, type AuthoringPlan, type JsonValue } from '../src/authoring/schema.js';
 
 const plan = (): AuthoringPlan =>
   ({
@@ -146,6 +147,35 @@ describe('registered-block source compiler', () => {
       title: 'Invalid support',
       supports: { align: ['narrow'] },
     })).toThrow(/metadata-schema-invalid/);
+  });
+
+  it.each<Record<string, JsonValue>>([
+    { content: '<img src=x onerror=alert(1)>' },
+    { url: 'javascript:alert(1)' },
+    { nested: { content: '<script>alert(1)</script>' } },
+  ])('rejects unsafe variation content at preview and generation: %j', (attributes) => {
+    const input = plan();
+    input.target.metadata = { variations: [{ name: 'unsafe', innerBlocks: [['core/paragraph', attributes]] }] };
+    for (const compile of [planRegisteredBlockOutput, compileRegisteredBlock]) {
+      expect(() => compile(input)).toThrow(/unsafe-inner-content.*target\.metadata\.variations\[0\]/);
+    }
+  });
+
+  it('passes safe native metadata through while refusing PHP variations-file capabilities', () => {
+    const safe = plan();
+    safe.target.metadata = {
+      keywords: ['callout'],
+      variations: [{ name: 'compact', title: 'Compact', attributes: { className: 'is-compact' } }],
+    };
+    const metadata = JSON.parse(sourceFile(compileRegisteredBlock(safe).files, 'block.json').content) as Record<string, unknown>;
+    expect(metadata).toMatchObject({ keywords: ['callout'], variations: [{ name: 'compact', title: 'Compact' }] });
+    expect(hashAuthoringPlan(safe)).not.toBe(hashAuthoringPlan(plan()));
+
+    for (const variationFile of ['file:./variations.php', 'file:../../outside.php']) {
+      const unsafe = plan();
+      unsafe.target.metadata = { variations: variationFile };
+      expect(() => compileRegisteredBlock(unsafe)).toThrow(/unsupported-metadata-capability.*target\.metadata\.variations/);
+    }
   });
 
   it('rejects event-bearing rich text deeply nested in a table-cell attribute with a source path', async () => {

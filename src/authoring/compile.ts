@@ -30,6 +30,9 @@ const ROLE_BLOCKS: Record<Exclude<AuthoringRole, 'wrapper' | 'custom'>, string> 
 const VALID_LOCKS = new Set<InnerBlocksLock>([false, 'insert', 'all', 'contentOnly']);
 
 /**
+ * @deprecated This accepts the pre-confirmation semantic adapter. Adapted output is exposed as
+ * `canonicalPlan`; preview and write that `AuthoringPlan` with `compileRegisteredBlock`.
+ *
  * Compile a reviewed authoring plan into a deliberately small registered-block source package.
  *
  * The generated wrapper has no content attributes. Its complete editable state is the native
@@ -91,7 +94,7 @@ export function compileAuthoringPlan(plan: AuthoringPlan): CompiledAuthoringBloc
   return { files, template: generated.template, allowedBlocks, templateLock, editableFields, diagnostics, canonicalPlan };
 }
 
-/** Alias kept readable for consumers that call the authoring API a compiler rather than a generator. */
+/** @deprecated Use compileAuthoringPlan only as a semantic-input adapter. */
 export const compileAuthoringBlock = compileAuthoringPlan;
 
 function compileNode(
