@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Install the built tarball as a clean engine-strict consumer, then smoke its CLI. */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -11,7 +11,7 @@ const consumer = mkdtempSync(path.join(tmpdir(), 'block-runner-consumer-'));
 
 try {
   const packed = run('npm', ['pack', '--json', '--ignore-scripts', '--pack-destination', packDirectory], root);
-  const details = JSON.parse(packed.stdout);
+  const details = parsePackJson(packed.stdout);
   if (!Array.isArray(details) || details.length !== 1 || typeof details[0]?.filename !== 'string') {
     throw new Error('npm pack did not return exactly one tarball.');
   }
@@ -28,8 +28,19 @@ try {
   if (!conversion.ok) throw new Error('Packed CLI conversion smoke did not succeed.');
   console.log(`Packed engine-strict install and CLI smoke passed on Node ${process.versions.node}.`);
 } finally {
-  rmSync(packDirectory, { recursive: true, force: true });
-  rmSync(consumer, { recursive: true, force: true });
+  trash(packDirectory);
+  trash(consumer);
+}
+
+function parsePackJson(stdout) {
+  const start = stdout.indexOf('[\n');
+  if (start < 0) throw new Error(`npm pack did not return JSON output:\n${stdout}`);
+  return JSON.parse(stdout.slice(start));
+}
+
+function trash(target) {
+  // The smoke directories are unique temporary paths, but retain them if this host lacks trash.
+  spawnSync('trash', [target], { encoding: 'utf8' });
 }
 
 function run(command, args, cwd) {
