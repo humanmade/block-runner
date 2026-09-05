@@ -45,6 +45,7 @@ export const {
   classifyCssUrlReference,
   classifyRegisteredBlockRegeneration,
   collectSiteContext,
+  collectSourceEvidence,
   compileAuthoringBlock,
   compileAuthoringPlan,
   compileRegisteredBlock,
