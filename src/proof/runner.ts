@@ -9,14 +9,19 @@ import { createRequire } from 'node:module';
 import { validate } from '../gate/validate.js';
 import { PROOF_IMAGE_BASE64 } from './fixture-image.js';
 import {
+  PROOF_CLAIM_NAMES,
   PROOF_GATE_IDS,
   PROOF_PROFILES,
   evaluateProofProfile,
+  proofClaimGates,
   type ProofGateId,
   type ProofGateRecord,
+  type ProofClaimName,
   type ProofGateStatus,
   type ProofProfileName,
   type ProofProfileReport,
+  type ProofRequirementClaim,
+  type ProofRequirementReport,
 } from './profiles.js';
 import {
   EvidenceStore,
@@ -220,6 +225,12 @@ export interface ProofFixture {
   };
 }
 
+/** Immutable capability contract emitted for the exact archive under proof. */
+export interface ProofArtifactContract {
+  sha256: Sha256;
+  capabilities: { patternOverrides: boolean };
+}
+
 export interface ProofCommandResult {
   command: string;
   args: string[];
@@ -255,6 +266,7 @@ export interface ProofGateContext {
   profile: ProofProfileName;
   gate: ProofGateId;
   fixture?: ProofFixture;
+  artifact?: ProofArtifactContract;
   pluginZip?: string;
   wpEnvConfig: string;
   environment: ProofEnvironment;
@@ -273,6 +285,8 @@ export interface ProofRunOptions {
   profile?: ProofProfileName;
   /** Built, installable static-plugin archive. Runtime profiles require it. */
   pluginZip?: string;
+  /** Confirmed artifact capability contract. Capability-scoped claims bind it to pluginZip. */
+  artifact?: ProofArtifactContract;
   /** Generator input bytes or a path to its reviewed input. */
   input?: string | Uint8Array;
   inputPath?: string;
@@ -342,6 +356,8 @@ export interface ProofReceiptDocument {
   selectedProfile: ProofProfileName;
   ok: boolean;
   environment: ProofEnvironment;
+  /** Pre-run capability contract and missing-input diagnosis retained with the raw gates. */
+  requirements?: ProofRequirementReport;
   gates: ProofGateRecord[];
   profile: ProofProfileReport;
 }
@@ -390,7 +406,10 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   const evidence = receiptWriter.evidence;
   const wpEnvConfig = path.resolve(options.wpEnvConfig ?? defaultWpEnvConfig);
   const environment = await collectEnvironmentPins(options, evidence, wpEnvConfig);
-  const runtime = createRuntime(options, environment, wpEnvConfig, evidence);
+  // Resolve the declared claim before any adapter or Docker work begins. This is
+  // retained even for blocked runs so a missing fixture cannot masquerade as N/A.
+  const requirements = reportProofRequirements(profile, options.artifact, environment.plugin.zip?.sha256, options.fixture);
+  const runtime = createRuntime(options, environment, wpEnvConfig, evidence, requirements.requiredGates);
   // A supplied gate adapter owns its own proof environment. Otherwise report
   // an unavailable package before any profile's runtime gate can reach Docker.
   const unavailable = options.gateRunner ? [] : unavailableProofTooling(profile);
@@ -398,12 +417,13 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   const records: ProofGateRecord[] = [];
 
   try {
-    for (const gate of PROOF_PROFILES[profile].requiredGates) {
+    for (const gate of requirements.requiredGates) {
       const startedAt = new Date().toISOString();
       const context: ProofGateContext = {
         profile,
         gate,
         fixture: options.fixture,
+        artifact: options.artifact,
         pluginZip: options.pluginZip,
         wpEnvConfig,
         environment,
@@ -414,7 +434,9 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
           return evidence.putJson(value);
         },
       };
-      const configurationError = missingProofConfiguration(context);
+      const artifactError = requirements.missingInputs.find((reason) => reason.startsWith('Capability-scoped proof')
+        || reason.startsWith('Confirmed artifact') || reason.startsWith('Pattern-verified proof'));
+      const configurationError = artifactError ?? missingProofConfiguration(context);
       const unverifiedResult = gate !== 'headless_validation' && toolingError
         ? { status: 'blocked' as const, reason: toolingError }
         : configurationError
@@ -433,7 +455,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
     await runtime.stop();
   }
 
-  const profileReport = evaluateProofProfile(profile, records);
+  const profileReport = evaluateProofProfile({ name: profile, requiredGates: requirements.requiredGates, optionalGates: [] }, records);
   const receipt: ProofReceiptDocument = {
     schemaVersion: 1,
     kind: 'block-runner.wordpress-proof',
@@ -441,6 +463,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
     selectedProfile: profile,
     ok: profileReport.ok,
     environment,
+    requirements,
     gates: records,
     profile: profileReport,
   };
@@ -448,6 +471,94 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   return { ok: profileReport.ok, profile: profileReport, receipt, receiptReference };
 }
 
+/**
+ * Build the requirement report before a runner invokes Docker, Playwright, or
+ * a caller adapter. The original named profiles remain byte-for-byte in scope;
+ * only capability-scoped profiles need an immutable artifact contract.
+ */
+export function reportProofRequirements(
+  profile: ProofProfileName,
+  artifact: ProofArtifactContract | undefined,
+  observedPluginZip: Sha256 | undefined,
+  fixture?: ProofFixture,
+): ProofRequirementReport {
+  const capabilityScoped = (PROOF_CLAIM_NAMES as readonly string[]).includes(profile);
+  const validArtifact = artifact != null
+    && typeof artifact.sha256 === 'string'
+    && /^sha256:[a-f0-9]{64}$/.test(artifact.sha256)
+    && typeof artifact.capabilities?.patternOverrides === 'boolean';
+  const artifactMatches = validArtifact && observedPluginZip !== undefined && artifact.sha256 === observedPluginZip;
+  const patternOverrides = validArtifact && artifactMatches && artifact.capabilities.patternOverrides;
+  const missingInputs: string[] = [];
+  if (capabilityScoped && !validArtifact) {
+    missingInputs.push('Capability-scoped proof requires a well-formed confirmed artifact contract with SHA-256 and capabilities.');
+  } else if (capabilityScoped && !observedPluginZip) {
+    missingInputs.push('Capability-scoped proof requires a readable plugin ZIP so its artifact SHA-256 can be confirmed.');
+  } else if (capabilityScoped && !artifactMatches) {
+    missingInputs.push('Confirmed artifact SHA-256 does not match the supplied plugin ZIP.');
+  }
+  if (profile === 'pattern-verified' && !patternOverrides) {
+    missingInputs.push('Pattern-verified proof requires a hash-matched artifact contract that declares patternOverrides.');
+  }
+  const requiredGates = [...PROOF_PROFILES[profile].requiredGates];
+  // An artifact that declares overrides must complete the actual lifecycle
+  // before its scoped editor/fidelity result can make that claim.
+  if (patternOverrides && (profile === 'editor-verified' || profile === 'fidelity-checked')
+    && !requiredGates.includes('pattern_overrides')) requiredGates.push('pattern_overrides');
+  if (requiredGates.some((gate) => ['plugin_activation', 'php_registry', 'rest_block_type', 'client_registry', 'editor_inserter', 'editor_field_editing', 'editor_save', 'editor_reopen'].includes(gate)) && !fixture?.blockName) {
+    missingInputs.push('Required runtime/editor gates need fixture.blockName.');
+  }
+  if (requiredGates.includes('editor_field_editing') && (!fixture?.editableFields || fixture.editableFields.length === 0)) {
+    missingInputs.push('Editor verification requires fixture.editableFields.');
+  }
+  if (requiredGates.some((gate) => ['frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_media', 'frontend_assets', 'frontend_runtime_errors'].includes(gate)) && !fixture?.frontend?.url) {
+    missingInputs.push('Frontend and fidelity verification require fixture.frontend.url.');
+  }
+  if (requiredGates.includes('pattern_overrides')) {
+    const pattern = fixture?.patternOverrides;
+    if (!fixture?.blockName || !pattern?.title || !pattern.canonicalContent || pattern.instances?.length !== 2
+      || !pattern.canonicalUpdate?.content || !pattern.reset || !Array.isArray(pattern.requiredBindings) || pattern.requiredBindings.length === 0
+      || !pattern.negative?.value || !pattern.negative.fallback || !pattern.structuralPolicy || !Array.isArray(pattern.requiredBindings)) {
+      missingInputs.push('Pattern verification requires the complete two-instance lifecycle fixture.');
+    } else {
+      const canonical = generatedBlockPatternCoverage(pattern.canonicalContent, fixture.blockName, pattern.requiredBindings);
+      const update = generatedBlockPatternCoverage(pattern.canonicalUpdate.content, fixture.blockName, pattern.requiredBindings);
+      if (!canonical.ok || !update.ok) missingInputs.push('Pattern verification requires every required binding inside generated block markup in both canonical versions.');
+    }
+  }
+  if (requiredGates.includes('visual_regression') && (!fixture?.visual?.expectedPath || typeof fixture.visual.threshold !== 'number')) {
+    missingInputs.push('Visual fidelity verification requires fixture.visual.expectedPath and threshold.');
+  }
+  if (requiredGates.some((gate) => ['accessibility_editor', 'accessibility_frontend', 'accessibility_manual_review'].includes(gate)) && !fixture?.accessibility) {
+    missingInputs.push('Accessibility gates require a separately declared fixture.accessibility scope.');
+  }
+  const claims: ProofRequirementClaim[] = capabilityScoped
+    ? [{ claim: profile as ProofClaimName, status: missingInputs.length === 0 ? 'required' : 'blocked', requiredGates: [...requiredGates] }]
+    : [];
+  if (patternOverrides && (profile === 'editor-verified' || profile === 'fidelity-checked')) {
+    claims.push({ claim: 'pattern-verified', status: missingInputs.length === 0 ? 'required' : 'blocked', requiredGates: proofClaimGates('pattern-verified') });
+  }
+  const artifactStatus = !capabilityScoped ? 'not_requested'
+    : !artifact ? 'missing'
+    : !validArtifact ? 'invalid'
+    : !observedPluginZip ? 'missing'
+    : artifactMatches ? 'confirmed' : 'stale';
+  return {
+    profile,
+    artifact: {
+      status: artifactStatus,
+      ...(artifact ? { declaredSha256: artifact.sha256 } : {}),
+      ...(observedPluginZip ? { observedPluginZipSha256: observedPluginZip } : {}),
+      ...(validArtifact ? { capabilities: { patternOverrides: artifact.capabilities.patternOverrides } } : {}),
+    },
+    requiredGates,
+    claims,
+    expectedEnvironment: requiredGates.length === 1
+      ? ['pinned generator input']
+      : ['pinned generator input', 'plugin ZIP', 'WordPress 7.1, PHP 8.3, MySQL, and Chromium observations'],
+    missingInputs,
+  };
+}
 /** Alias kept concise for callers that use the proof layer as a verifier. */
 export const prove = runProof;
 
@@ -521,9 +632,14 @@ function missingProofConfiguration(context: ProofGateContext): string | undefine
   }
   if (gate === 'pattern_overrides') {
     const pattern = fixture?.patternOverrides;
+    if (context.profile === 'pattern-verified') {
+      if (!context.artifact?.capabilities?.patternOverrides || context.artifact.sha256 !== environment.plugin.zip?.sha256) {
+        return 'Pattern-verified proof requires a confirmed artifact contract whose SHA-256 matches the supplied plugin ZIP.';
+      }
+    }
     if (!fixture?.blockName || !pattern?.title || !pattern.canonicalContent || pattern.instances?.length !== 2
-      || !pattern.canonicalUpdate?.content || !pattern.reset || pattern.requiredBindings.length === 0
-      || !pattern.negative?.value || !pattern.negative.fallback || !pattern.structuralPolicy) {
+      || !pattern.canonicalUpdate?.content || !pattern.reset || !Array.isArray(pattern.requiredBindings) || pattern.requiredBindings.length === 0
+      || !pattern.negative?.value || !pattern.negative.fallback || !pattern.structuralPolicy || !Array.isArray(pattern.requiredBindings)) {
       return 'Pattern proof requires canonical wp_block content, exactly two instances, reset/canonical-update assertions, required bindings, a structural policy, and a saved negative binding exercise.';
     }
     const canonicalCoverage = generatedBlockPatternCoverage(pattern.canonicalContent, fixture.blockName, pattern.requiredBindings);
@@ -677,6 +793,7 @@ function createRuntime(
   environment: ProofEnvironment,
   wpEnvConfig: string,
   evidence: EvidenceStore,
+  requiredGates: readonly ProofGateId[],
 ): { run: (context: ProofGateContext) => Promise<ProofGateResult>; stop: () => Promise<void> } {
   let environmentStarted = false;
   let staticPluginDeactivated = false;
@@ -785,7 +902,7 @@ function createRuntime(
     const config = path.join(work, 'proof.json');
     const report = path.join(work, 'result.json');
     try {
-      if (mode === 'active' && options.profile === 'full' && options.fixture.patternOverrides) {
+      if (mode === 'active' && requiredGates.includes('pattern_overrides') && options.fixture.patternOverrides) {
         const prepared = await prepareSyncedPattern();
         if (!prepared) {
           browserResults = Object.fromEntries(browserGateIds.map((gate) => [gate, {
@@ -816,7 +933,7 @@ function createRuntime(
               : undefined,
           }
         : options.fixture;
-      await writeFile(config, JSON.stringify({ fixture, profile: options.profile, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
+      await writeFile(config, JSON.stringify({ fixture, profile: options.profile, requiredGates, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
       const result = await command(process.execPath, [playwrightHelper, '--config', config, '--out', report], {
         cwd: projectRoot,
         timeoutMs: PROOF_COMMAND_TIMEOUTS.browser,
@@ -1689,8 +1806,7 @@ function proofToolingVersion(name: (typeof PROOF_TOOLING)[number]): string {
 }
 
 function unavailableProofTooling(profile: ProofProfileName): string[] {
-  if (profile === 'headless') return [];
-  const required = profile === 'full' ? PROOF_TOOLING : BROWSER_PROOF_TOOLING;
+  const required = proofToolingForProfile(profile);
   const require = createRequire(import.meta.url);
   const unavailable: string[] = [];
   for (const name of required) {
@@ -1740,8 +1856,16 @@ function unavailableChromiumBrowserMessage(): string {
 }
 
 function proofToolingInstallCommand(profile: ProofProfileName): string {
-  const required = profile === 'full' ? PROOF_TOOLING : BROWSER_PROOF_TOOLING;
-  return `npm install --save-dev --save-exact ${required.map((name) => `${name}@${proofToolingVersion(name)}`).join(' ')}`;
+  const required = proofToolingForProfile(profile);
+  return required.length === 0 ? 'no optional proof tooling is required for this headless claim' : `npm install --save-dev --save-exact ${required.map((name) => `${name}@${proofToolingVersion(name)}`).join(' ')}`;
+}
+
+function proofToolingForProfile(profile: ProofProfileName): readonly (typeof PROOF_TOOLING)[number][] {
+  // `runtime` has historically required the browser proof toolchain for its
+  // registry observations. Keep that contract for its capability alias `built`.
+  if (profile === 'headless' || profile === 'generated') return [];
+  if (profile === 'full' || profile === 'fidelity-checked') return PROOF_TOOLING;
+  return BROWSER_PROOF_TOOLING;
 }
 
 function resolveProjectRoot(modulePath: string): string {

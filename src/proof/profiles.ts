@@ -56,10 +56,45 @@ export const PROOF_GATE_IDS = [
 export type ProofGateId = (typeof PROOF_GATE_IDS)[number];
 export type GateId = ProofGateId;
 
-export const PROOF_PROFILE_NAMES = ['headless', 'runtime', 'editor', 'full'] as const;
+export const PROOF_PROFILE_NAMES = ['headless', 'runtime', 'editor', 'full', 'generated', 'built', 'editor-verified', 'fidelity-checked', 'pattern-verified'] as const;
 
 export type ProofProfileName = (typeof PROOF_PROFILE_NAMES)[number];
 export type ProfileName = ProofProfileName;
+
+/** Capability claims are narrower than the historical cumulative profiles. */
+export const PROOF_CLAIM_NAMES = [
+  'generated',
+  'built',
+  'editor-verified',
+  'fidelity-checked',
+  'pattern-verified',
+] as const;
+
+export type ProofClaimName = (typeof PROOF_CLAIM_NAMES)[number];
+
+export interface ProofRequirementClaim {
+  claim: ProofClaimName;
+  status: 'required' | 'not_applicable' | 'blocked';
+  requiredGates: readonly ProofGateId[];
+  reason?: string;
+}
+
+/** The runner writes this before executing any proof adapter. */
+export interface ProofArtifactRequirement {
+  status: 'not_requested' | 'missing' | 'invalid' | 'stale' | 'confirmed';
+  declaredSha256?: string;
+  observedPluginZipSha256?: string;
+  capabilities?: { patternOverrides: boolean };
+}
+
+export interface ProofRequirementReport {
+  profile: ProofProfileName;
+  artifact: ProofArtifactRequirement;
+  requiredGates: readonly ProofGateId[];
+  claims: readonly ProofRequirementClaim[];
+  expectedEnvironment: readonly string[];
+  missingInputs: readonly string[];
+}
 
 /**
  * A single receipt assertion. Evidence is deliberately opaque here so the
@@ -168,6 +203,14 @@ const editorGates = [
   'editor_reopen',
 ] as const satisfies readonly ProofGateId[];
 
+const fidelityGates = [
+  ...editorGates,
+  'frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_media', 'frontend_assets',
+  'frontend_runtime_errors', 'php_logs', 'visual_regression', 'accessibility_editor', 'accessibility_frontend',
+] as const satisfies readonly ProofGateId[];
+
+const patternGates = [...editorGates, 'pattern_overrides'] as const satisfies readonly ProofGateId[];
+
 const fullGates = [
   ...editorGates,
   'frontend_status',
@@ -208,6 +251,11 @@ export const PROOF_PROFILES: Readonly<Record<ProofProfileName, ProofProfile>> = 
     requiredGates: editorGates,
     optionalGates: [],
   }),
+  generated: Object.freeze({ name: 'generated', requiredGates: headlessGates, optionalGates: [] }),
+  built: Object.freeze({ name: 'built', requiredGates: runtimeGates, optionalGates: [] }),
+  'editor-verified': Object.freeze({ name: 'editor-verified', requiredGates: editorGates, optionalGates: [] }),
+  'fidelity-checked': Object.freeze({ name: 'fidelity-checked', requiredGates: fidelityGates, optionalGates: [] }),
+  'pattern-verified': Object.freeze({ name: 'pattern-verified', requiredGates: patternGates, optionalGates: [] }),
   full: Object.freeze({
     name: 'full',
     requiredGates: fullGates,
@@ -219,6 +267,11 @@ export const PROOF_PROFILES: Readonly<Record<ProofProfileName, ProofProfile>> = 
 export const proofProfiles = PROOF_PROFILES;
 export const proofGateIds = PROOF_GATE_IDS;
 export const proofGateStatuses = PROOF_GATE_STATUSES;
+
+/** Map a requested capability label to the cumulative gates that substantiate it. */
+export function proofClaimGates(claim: ProofClaimName): readonly ProofGateId[] {
+  return PROOF_PROFILES[claim].requiredGates;
+}
 
 /** Return a profile after validating an untrusted profile name. */
 export function getProofProfile(profile: ProofProfileName): ProofProfile {
