@@ -2,6 +2,7 @@ import { readFile } from 'node:fs/promises';
 import { createRequire } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { transform } from 'esbuild';
 import { describe, expect, it } from 'vitest';
 import { compileAuthoringPlan } from '../src/index.js';
 import { getWp } from '../src/headless/wp.js';
@@ -15,6 +16,8 @@ type RuntimeBlock = WpBlock & { clientId: string; innerBlocks: RuntimeBlock[] };
 type BlockEditorRuntime = {
   store: unknown;
   BlockInspector: unknown;
+  BlockEditorProvider: unknown;
+  BlockList: unknown;
   useBlockProps: (() => Record<string, unknown>) & { save: () => Record<string, unknown> };
   useInnerBlocksProps: {
     (props: Record<string, unknown>, options: Record<string, unknown>): Record<string, unknown>;
@@ -28,7 +31,7 @@ type DataRuntime = {
 };
 
 type ElementRuntime = {
-  createElement: (type: unknown, props?: Record<string, unknown>) => unknown;
+  createElement: (type: unknown, props?: Record<string, unknown>, ...children: unknown[]) => unknown;
   createRoot: (container: Element) => { render: (element: unknown) => void; unmount: () => void };
   flushSync: (callback: () => void) => void;
 };
@@ -71,29 +74,49 @@ function blocksFromTemplate(wp: WpModules, template: AuthoringTemplate): Runtime
   );
 }
 
-function registerCompiledBlock(
+type GeneratedComponent = () => unknown;
+
+/**
+ * Execute the exact JSX module emitted by the generator. The only transform is
+ * the same JSX-to-JavaScript compilation a block build performs; no edit/save
+ * implementation is re-created in this test.
+ */
+async function loadGeneratedComponent(
+  compiled: CompiledAuthoringBlock,
+  sourcePath: 'edit.js' | 'save.js',
+  moduleOverrides: Record<string, unknown> = {},
+): Promise<GeneratedComponent> {
+  const source = compiled.files[sourcePath];
+  expect(source, `expected generated source file ${sourcePath}`).toBeDefined();
+  const { code } = await transform(source!, {
+    loader: 'jsx',
+    format: 'cjs',
+    jsx: 'automatic',
+    target: 'es2020',
+    sourcefile: sourcePath,
+  });
+  const generatedModule: { exports: Record<string, unknown> } = { exports: {} };
+  const generatedRequire = (specifier: string): unknown => moduleOverrides[specifier] ?? require(specifier);
+  const execute = new Function('require', 'module', 'exports', `${code}\n//# sourceURL=generated-${sourcePath}`) as (
+    moduleRequire: (specifier: string) => unknown,
+    module: { exports: Record<string, unknown> },
+    exports: Record<string, unknown>,
+  ) => void;
+  execute(generatedRequire, generatedModule, generatedModule.exports);
+  expect(generatedModule.exports.default, `expected generated ${sourcePath} default export`).toBeTypeOf('function');
+  return generatedModule.exports.default as GeneratedComponent;
+}
+
+async function registerCompiledBlock(
   wp: WpModules,
   compiled: CompiledAuthoringBlock,
-  editor: BlockEditorRuntime,
-  element: ElementRuntime,
-): string {
+): Promise<string> {
   const metadata = JSON.parse(compiled.files['block.json']!) as Record<string, unknown>;
   const name = metadata.name as string;
-
-  const edit = () => {
-    const blockProps = editor.useBlockProps();
-    const innerBlocksProps = editor.useInnerBlocksProps(blockProps, {
-      allowedBlocks: compiled.allowedBlocks,
-      template: compiled.template,
-      templateLock: compiled.templateLock,
-    });
-    return element.createElement('div', innerBlocksProps);
-  };
-  const save = () => {
-    const blockProps = editor.useBlockProps.save();
-    const innerBlocksProps = editor.useInnerBlocksProps.save(blockProps);
-    return element.createElement('div', innerBlocksProps);
-  };
+  const [edit, save] = await Promise.all([
+    loadGeneratedComponent(compiled, 'edit.js'),
+    loadGeneratedComponent(compiled, 'save.js'),
+  ]);
 
   expect(wp.registerBlockType(metadata, { edit, save })).toBeTruthy();
   return name;
@@ -126,17 +149,65 @@ function expectValidTree(wp: WpModules, block: RuntimeBlock): void {
 }
 
 describe('generated registered blocks in WordPress 7.1', () => {
+  it('loads the emitted components and puts the InnerBlocks layout on their shared root', async () => {
+    const compiled = compileAuthoringPlan(planFor('all'));
+    const calls: Array<{ hook: string; props?: Record<string, unknown>; options?: Record<string, unknown> }> = [];
+    const editBlockProps = { className: 'wp-block-block-runner-runtime-all', 'data-layout-owner': 'edit-root' };
+    const saveBlockProps = { className: 'wp-block-block-runner-runtime-all', 'data-layout-owner': 'save-root' };
+    const editChildren = { kind: 'editor-block-list' };
+    const saveChildren = { kind: 'saved-native-children' };
+    const blockEditor = {
+      useBlockProps: Object.assign(() => {
+        calls.push({ hook: 'useBlockProps' });
+        return editBlockProps;
+      }, {
+        save: () => {
+          calls.push({ hook: 'useBlockProps.save' });
+          return saveBlockProps;
+        },
+      }),
+      useInnerBlocksProps: Object.assign((props: Record<string, unknown>, options: Record<string, unknown>) => {
+        calls.push({ hook: 'useInnerBlocksProps', props, options });
+        return { ...props, className: `${props.className} block-editor-block-list__layout`, children: editChildren };
+      }, {
+        save: (props: Record<string, unknown>) => {
+          calls.push({ hook: 'useInnerBlocksProps.save', props });
+          return { ...props, className: `${props.className} saved-inner-blocks`, children: saveChildren };
+        },
+      }),
+    };
+    const [Edit, save] = await Promise.all([
+      loadGeneratedComponent(compiled, 'edit.js', { '@wordpress/block-editor': blockEditor }),
+      loadGeneratedComponent(compiled, 'save.js', { '@wordpress/block-editor': blockEditor }),
+    ]);
+
+    const edit = Edit() as { type: unknown; props: Record<string, unknown> };
+    const saved = save() as { type: unknown; props: Record<string, unknown> };
+
+    expect(edit).toMatchObject({ type: 'div', props: { className: expect.stringContaining('block-editor-block-list__layout'), children: editChildren } });
+    expect(saved).toMatchObject({ type: 'div', props: { className: expect.stringContaining('saved-inner-blocks'), children: saveChildren } });
+    expect(calls).toEqual([
+      { hook: 'useBlockProps' },
+      {
+        hook: 'useInnerBlocksProps',
+        props: editBlockProps,
+        options: { allowedBlocks: compiled.allowedBlocks, template: compiled.template, templateLock: compiled.templateLock },
+      },
+      { hook: 'useBlockProps.save' },
+      { hook: 'useInnerBlocksProps.save', props: saveBlockProps },
+    ]);
+  });
+
   it.each([false, 'insert', 'all', 'contentOnly'] as const satisfies readonly InnerBlocksLock[])(
     'registers, persists native edits, and enforces %s structural operations',
     async (templateLock) => {
       const wp = await getWp();
       const editor = require('@wordpress/block-editor') as BlockEditorRuntime;
       const data = require('@wordpress/data') as DataRuntime;
-      const element = require('@wordpress/element') as ElementRuntime;
       const actions = data.dispatch(editor.store);
       const selectors = data.select(editor.store);
       const compiled = compileAuthoringPlan(planFor(templateLock));
-      const name = registerCompiledBlock(wp, compiled, editor, element);
+      const name = await registerCompiledBlock(wp, compiled);
       const expected = expectedStructuralOperations(templateLock);
 
       try {
@@ -169,6 +240,65 @@ describe('generated registered blocks in WordPress 7.1', () => {
     },
   );
 
+  it('renders the generated editor root as the direct InnerBlocks layout owner', async () => {
+    const wp = await getWp();
+    const editor = require('@wordpress/block-editor') as BlockEditorRuntime;
+    const data = require('@wordpress/data') as DataRuntime;
+    const element = require('@wordpress/element') as ElementRuntime;
+    const actions = data.dispatch(editor.store);
+    const selectors = data.select(editor.store);
+    const plan = planFor(false);
+    plan.root.children = plan.root.children?.slice(0, 3);
+    const compiled = compileAuthoringPlan(plan);
+    const name = await registerCompiledBlock(wp, compiled);
+    const target = document.createElement('div');
+    const editorRoot = element.createRoot(target);
+
+    try {
+      const mounted = mountCompiledBlock(wp, compiled, actions, selectors);
+      const block = selectors.getBlock(mounted.rootId) as RuntimeBlock;
+      document.body.append(target);
+      element.flushSync(() => editorRoot.render(element.createElement(
+        editor.BlockEditorProvider,
+        { value: [block], settings: {}, onInput: () => {}, onChange: () => {} },
+        element.createElement(editor.BlockList),
+      )));
+      await new Promise<void>((resolve) => setTimeout(resolve, 0));
+
+      const outer = target.querySelector(`[data-block="${mounted.rootId}"]`);
+      expect(outer).not.toBeNull();
+      expect(outer?.classList.contains('block-editor-block-list__layout')).toBe(true);
+      expect(outer?.querySelector(':scope > .block-editor-inner-blocks')).toBeNull();
+      expect([...outer!.querySelectorAll(':scope > [data-block]')].map((child) => child.getAttribute('data-type')))
+        .toEqual(['core/heading', 'core/paragraph', 'core/image']);
+    } finally {
+      editorRoot.unmount();
+      target.remove();
+      wp.unregisterBlockType(name);
+    }
+  });
+
+  it('accepts pre-v9 saved markup with native children directly below the outer wrapper', async () => {
+    const wp = await getWp();
+    const compiled = compileAuthoringPlan(planFor(false));
+    const name = await registerCompiledBlock(wp, compiled);
+    const nativeChildren = wp.serialize(blocksFromTemplate(wp, compiled.template));
+    // This is the canonical output from the previous `InnerBlocks.Content`
+    // save contract: direct native child comments immediately inside the
+    // generated wrapper, with no editor-only layout wrapper persisted.
+    const legacyMarkup = `<!-- wp:${name} -->\n<div class="wp-block-${name.replace('/', '-')}">${nativeChildren}</div>\n<!-- /wp:${name} -->`;
+
+    try {
+      const reopened = wp.parse(legacyMarkup).map(runtimeBlock);
+
+      expect(reopened).toHaveLength(1);
+      expectValidTree(wp, reopened[0]!);
+      expect(wp.serialize(reopened)).toBe(legacyMarkup);
+    } finally {
+      wp.unregisterBlockType(name);
+    }
+  });
+
   it('observes the WordPress 7.1 Edit pattern Inspector control in the contentOnly fixture', async () => {
     const wp = await getWp();
     const editor = require('@wordpress/block-editor') as BlockEditorRuntime;
@@ -178,7 +308,7 @@ describe('generated registered blocks in WordPress 7.1', () => {
     const selectors = data.select(editor.store);
     const fixture = JSON.parse(await readFile(path.join(FIXTURES, 'content-only.plan.json'), 'utf8')) as AuthoringPlan;
     const compiled = compileAuthoringPlan(fixture);
-    const name = registerCompiledBlock(wp, compiled, editor, element);
+    const name = await registerCompiledBlock(wp, compiled);
     const target = document.createElement('div');
     const inspector = element.createRoot(target);
 

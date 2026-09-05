@@ -115,7 +115,14 @@ describe('registered-block source compiler', () => {
     expect(edit).toContain('Plan once, ship safely');
     expect(edit).toContain('core/paragraph');
     expect(edit).toContain('This is native inner block content.');
-    expect(sourceFile(first.files, 'save.js').content).toContain('InnerBlocks.Content');
+    expect(edit).toContain('useInnerBlocksProps( blockProps');
+    expect(edit).toContain('<div { ...innerBlocksProps } />');
+    expect(edit).not.toContain('<InnerBlocks');
+
+    const save = sourceFile(first.files, 'save.js').content;
+    expect(save).toContain('useInnerBlocksProps.save( blockProps )');
+    expect(save).toContain('<div { ...innerBlocksProps } />');
+    expect(save).not.toContain('InnerBlocks.Content');
 
     const php = sourceFile(first.files, 'block.php').content;
     expect(php).toContain('register_block_type');

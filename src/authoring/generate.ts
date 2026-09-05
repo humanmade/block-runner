@@ -29,7 +29,7 @@ import {
  * The owned source-template contract. Changing it changes every generated package and must be an
  * intentional, reviewed release decision.
  */
-export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v8' as const;
+export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v9' as const;
 /**
  * The declarative-style renderer is part of the owned template contract.  It never accepts a
  * stylesheet fragment from the plan: its inputs are validated outcomes and structured rules.
@@ -401,7 +401,7 @@ export function emitEditJs(template: TemplateNode[], allowedBlocks: string[], lo
     });
     return `[${JSON.stringify(name)}, {${entries.join(', ')} }${children ? `, ${renderTemplate(children)}` : ''}]`;
   }).join(',\n')}]`;
-  return `import { InnerBlocks, useBlockProps } from '@wordpress/block-editor';
+  return `import { useBlockProps, useInnerBlocksProps } from '@wordpress/block-editor';
 ${imports}
 
 const TEMPLATE = ${assets.length ? renderTemplate(template) : JSON.stringify(template, null, 2)};
@@ -409,14 +409,15 @@ const ALLOWED_BLOCKS = ${JSON.stringify(allowedBlocks, null, 2)};
 const TEMPLATE_LOCK = ${JSON.stringify(templateLock)};
 
 export default function Edit() {
+  const blockProps = useBlockProps();
+  const innerBlocksProps = useInnerBlocksProps( blockProps, {
+    allowedBlocks: ALLOWED_BLOCKS,
+    template: TEMPLATE,
+    templateLock: TEMPLATE_LOCK,
+  } );
+
   return (
-    <div { ...useBlockProps() }>
-      <InnerBlocks
-        allowedBlocks={ ALLOWED_BLOCKS }
-        template={ TEMPLATE }
-        templateLock={ TEMPLATE_LOCK }
-      />
-    </div>
+    <div { ...innerBlocksProps } />
   );
 }
 `;
@@ -424,13 +425,14 @@ export default function Edit() {
 
 /** Typed JSX emitter for static saved markup: native inner blocks own all planned content. */
 export function emitSaveJs(): string {
-  return `import { InnerBlocks, useBlockProps } from '@wordpress/block-editor';
+  return `import { useBlockProps, useInnerBlocksProps } from '@wordpress/block-editor';
 
 export default function save() {
+  const blockProps = useBlockProps.save();
+  const innerBlocksProps = useInnerBlocksProps.save( blockProps );
+
   return (
-    <div { ...useBlockProps.save() }>
-      <InnerBlocks.Content />
-    </div>
+    <div { ...innerBlocksProps } />
   );
 }
 `;

@@ -163,16 +163,31 @@ try {
     reopenPersistence,
   });
 
+  // This is intentionally an iframe-only assertion. The direct root is the
+  // regression surface: a page-level mock can prove hook calls but cannot
+  // prove WordPress attached its grid/flex layout and native children to the
+  // same editor-canvas element at both responsive widths.
+  if (fixture.browserMatrix) {
+    const matrix = await phase('editor-root-layout-matrix', () => proveEditorRootLayoutMatrix(page, fixture, artifactDir));
+    const prior = gates.editor_reopen;
+    const passed = prior?.status === 'pass' && matrix.ok;
+    set('editor_reopen', passed ? 'pass' : 'fail', passed ? undefined
+      : matrix.reason ?? prior?.reason ?? 'The generated root layout matrix did not complete.', {
+      ...(prior?.details ?? {}),
+      browserMatrix: matrix.details,
+    }, [...(prior?.artifacts ?? []), ...matrix.artifacts]);
+  }
+
   if (!input.profile || input.profile === 'full') {
   patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
   const published = await phase('publish', () => publishPost(page, editor));
   const publishedState = await editorState(page);
   publication = published ? await readPublication(page, publishedState.content) : undefined;
-  await phase('accessibility-editor', () => proveAxeEditor(page, fixture));
-  await phase('frontend', () => proveFrontend(page, fixture, baseUrl, publication));
+  await phase('accessibility-editor', () => proveAxeEditor(page, fixture, artifactDir));
+  await phase('frontend', () => proveFrontend(page, fixture, baseUrl, publication, artifactDir));
   await phase('pattern-frontend', () => completePatternOverride(page, fixture, publication, patternLifecycle));
   await phase('visual-regression', () => proveVisual(page, fixture, artifactDir));
-  await phase('accessibility-frontend', () => proveAxeFrontend(page, fixture));
+  await phase('accessibility-frontend', () => proveAxeFrontend(page, fixture, artifactDir));
     blocked('accessibility_manual_review', 'Manual review is verified separately against a saved input/ZIP-bound review record, not inferred from browser automation.');
   }
   }
@@ -440,6 +455,256 @@ async function editorState(page) {
     visit(blocks);
     return { treeHash: await digest(canonical), contentHash: await digest(content), tree: blocks, content, invalidBlocks };
   });
+}
+
+/**
+ * Retain a minimal grid/flex reproduction in the actual WordPress 7.1
+ * editor iframe. The snapshots deliberately keep raw outerHTML as well as
+ * concise observations: a reviewer can inspect both the DOM nesting and the
+ * computed layout rather than having to infer them from a screenshot.
+ */
+async function proveEditorRootLayoutMatrix(page, fixture, artifactDir) {
+  const matrix = fixture.browserMatrix;
+  const artifacts = [];
+  const details = {
+    iframe: { requiredName: 'editor-canvas', observed: false },
+    rootLayout: matrix.rootLayout,
+    fontFamily: matrix.fontFamily,
+    viewports: { desktop: matrix.desktopViewport, narrow: matrix.narrowViewport },
+  };
+  let handles;
+  try {
+    const frame = page.frames().find((candidate) => candidate.name() === 'editor-canvas');
+    if (!frame) throw new Error('WordPress 7.1 editor-canvas iframe was not present; direct-page rendering is not accepted as layout evidence.');
+    details.iframe.observed = true;
+    await page.setViewportSize(matrix.desktopViewport);
+    handles = await generatedRootHandles(page, fixture.blockName);
+    if (handles.roots.length !== 1 || !handles.heading || !handles.image) {
+      throw new Error(`Expected one generated root with a native heading and image before the matrix, found ${handles.roots.length}.`);
+    }
+
+    const keyboard = await exerciseEditorKeyboard(editorCanvas, handles.heading.clientId);
+    const keyboardPath = path.join(artifactDir, `editor-root-${matrix.rootLayout}-keyboard.png`);
+    const keyboardReportPath = path.join(artifactDir, `editor-root-${matrix.rootLayout}-keyboard.json`);
+    await editorCanvas.locator(`[data-block=${JSON.stringify(handles.root.clientId)}]`).screenshot({ path: keyboardPath, animations: 'disabled' });
+    await writeFile(keyboardReportPath, JSON.stringify(keyboard, null, 2), 'utf8');
+    artifacts.push(
+      { path: `artifacts/${path.basename(keyboardPath)}`, mediaType: 'image/png' },
+      { path: `artifacts/${path.basename(keyboardReportPath)}`, mediaType: 'application/json' },
+    );
+
+    const before = await editorRootSnapshot(page, fixture, handles.root.clientId, matrix);
+    const beforeImage = path.join(artifactDir, `editor-root-${matrix.rootLayout}-before-desktop.png`);
+    await editorCanvas.locator(`[data-block=${JSON.stringify(handles.root.clientId)}]`).screenshot({ path: beforeImage, animations: 'disabled' });
+    artifacts.push({ path: `artifacts/${path.basename(beforeImage)}`, mediaType: 'image/png' });
+
+    await updateNativeBlockAttributes(page, handles.heading.clientId, { content: matrix.longContent });
+    await waitForNativeAttribute(page, handles.heading.clientId, 'content', matrix.longContent);
+    const long = await editorRootSnapshot(page, fixture, handles.root.clientId, matrix);
+    const longImage = path.join(artifactDir, `editor-root-${matrix.rootLayout}-after-long-desktop.png`);
+    await editorCanvas.locator(`[data-block=${JSON.stringify(handles.root.clientId)}]`).screenshot({ path: longImage, animations: 'disabled' });
+    artifacts.push({ path: `artifacts/${path.basename(longImage)}`, mediaType: 'image/png' });
+
+    await page.setViewportSize(matrix.narrowViewport);
+    await updateNativeBlockAttributes(page, handles.heading.clientId, { content: '' });
+    await updateNativeBlockAttributes(page, handles.image.clientId, matrix.image);
+    await waitForNativeAttribute(page, handles.heading.clientId, 'content', '');
+    await waitForNativeAttributes(page, handles.image.clientId, matrix.image);
+    const empty = await editorRootSnapshot(page, fixture, handles.root.clientId, matrix);
+    const emptyImage = path.join(artifactDir, `editor-root-${matrix.rootLayout}-after-empty-narrow.png`);
+    await editorCanvas.locator(`[data-block=${JSON.stringify(handles.root.clientId)}]`).screenshot({ path: emptyImage, animations: 'disabled' });
+    artifacts.push({ path: `artifacts/${path.basename(emptyImage)}`, mediaType: 'image/png' });
+
+    // Insert the second generated root through the visible inserter. Its
+    // local native heading is then changed via the same store used by the
+    // editor, while both iframe roots remain visible for the isolation DOM
+    // capture. This avoids treating two selector matches as one instance.
+    await insertThroughVisibleInserter(page, fixture);
+    const pair = await generatedRootHandles(page, fixture.blockName);
+    if (pair.roots.length !== 2 || !pair.roots[0]?.heading || !pair.roots[1]?.heading) {
+      throw new Error(`Expected two visible generated roots for the isolation reproduction, found ${pair.roots.length}.`);
+    }
+    const first = pair.roots.find((root) => root.clientId === handles.root.clientId) ?? pair.roots[0];
+    const second = pair.roots.find((root) => root.clientId !== first.clientId);
+    if (!first?.heading || !second?.heading) throw new Error('Could not identify each generated root\'s native heading.');
+    const isolatedContent = 'First generated root only';
+    await updateNativeBlockAttributes(page, first.heading.clientId, { content: isolatedContent });
+    await waitForNativeAttribute(page, first.heading.clientId, 'content', isolatedContent);
+    const isolation = await editorInstanceIsolationSnapshot(page, fixture, [first.clientId, second.clientId], matrix);
+    const isolationImage = path.join(artifactDir, `editor-root-${matrix.rootLayout}-two-instances-narrow.png`);
+    await editorCanvas.locator(`[data-block=${JSON.stringify(first.clientId)}]`).screenshot({ path: isolationImage, animations: 'disabled' });
+    artifacts.push({ path: `artifacts/${path.basename(isolationImage)}`, mediaType: 'image/png' });
+
+    const matrixEvidence = { before, long, empty, isolation, keyboard };
+    const matrixPath = path.join(artifactDir, `editor-root-${matrix.rootLayout}-matrix.json`);
+    await writeFile(matrixPath, JSON.stringify(matrixEvidence, null, 2), 'utf8');
+    artifacts.push({ path: `artifacts/${path.basename(matrixPath)}`, mediaType: 'application/json' });
+
+    const beforeAfterRoots = [before, long, empty].every((snapshot) => snapshot.ok);
+    const imageChanged = empty.image?.declaredWidth === matrix.image.width && empty.image?.declaredHeight === matrix.image.height;
+    const isolated = isolation.ok && isolation.instances[0]?.text.includes(isolatedContent)
+      && !isolation.instances[1]?.text.includes(isolatedContent);
+    const ok = beforeAfterRoots && long.text.includes(matrix.longContent) && empty.headingContent === ''
+      && imageChanged && isolated && keyboard.ok;
+    details.beforeAfter = {
+      ok: beforeAfterRoots,
+      beforeDomHash: sha256(before.outerHTML),
+      longDomHash: sha256(long.outerHTML),
+      emptyDomHash: sha256(empty.outerHTML),
+      longContentObserved: long.text.includes(matrix.longContent),
+      emptyContentObserved: empty.headingContent === '',
+      alteredImageObserved: imageChanged,
+      directNativeChildren: before.directNativeChildren,
+    };
+    details.isolation = { ok: isolated, rootCount: isolation.instances.length, domHash: sha256(JSON.stringify(isolation)) };
+    details.keyboard = keyboard.summary;
+    return { ok, reason: ok ? undefined : 'Iframe root layout, content variants, image proportions, instance isolation, or keyboard evidence did not match the fixture.', details, artifacts };
+  } catch (error) {
+    details.error = error instanceof Error ? error.message : String(error);
+    return { ok: false, reason: details.error, details, artifacts };
+  } finally {
+    // Restore the exact root used by the normal edit/save/reopen proof and
+    // remove the temporary second instance. The matrix is evidence, not a
+    // hidden change to the post later used for pattern/frontend assertions.
+    if (handles?.heading && handles?.image) {
+      await updateNativeBlockAttributes(page, handles.heading.clientId, handles.heading.attributes).catch(() => undefined);
+      await updateNativeBlockAttributes(page, handles.image.clientId, handles.image.attributes).catch(() => undefined);
+      const roots = await generatedRootHandles(page, fixture.blockName).catch(() => undefined);
+      const temporary = roots?.roots.find((root) => root.clientId !== handles.root.clientId);
+      if (temporary) await removeNativeBlock(page, temporary.clientId).catch(() => undefined);
+    }
+    await page.setViewportSize(matrix.desktopViewport).catch(() => undefined);
+  }
+}
+
+async function generatedRootHandles(page, blockName) {
+  return page.evaluate((name) => {
+    const select = globalThis.wp?.data?.select('core/block-editor');
+    const blocks = select?.getBlocks?.() ?? [];
+    const visit = (block) => [block, ...(block.innerBlocks ?? []).flatMap(visit)];
+    const roots = blocks.filter((block) => block.name === name).map((root) => {
+      const descendants = visit(root);
+      const heading = descendants.find((block) => block.name === 'core/heading');
+      const image = descendants.find((block) => block.name === 'core/image');
+      return {
+        clientId: root.clientId,
+        heading: heading ? { clientId: heading.clientId, attributes: JSON.parse(JSON.stringify(heading.attributes ?? {})) } : undefined,
+        image: image ? { clientId: image.clientId, attributes: JSON.parse(JSON.stringify(image.attributes ?? {})) } : undefined,
+      };
+    });
+    const root = roots[0];
+    return { roots, root, heading: root?.heading, image: root?.image };
+  }, blockName);
+}
+
+async function updateNativeBlockAttributes(page, clientId, attributes) {
+  await page.evaluate(({ id, next }) => {
+    const dispatch = globalThis.wp?.data?.dispatch('core/block-editor');
+    if (!dispatch?.updateBlockAttributes) throw new Error('WordPress block-editor dispatch was unavailable.');
+    dispatch.updateBlockAttributes(id, next);
+  }, { id: clientId, next: attributes });
+}
+
+async function removeNativeBlock(page, clientId) {
+  await page.evaluate((id) => {
+    const dispatch = globalThis.wp?.data?.dispatch('core/block-editor');
+    if (!dispatch?.removeBlock) throw new Error('WordPress block-editor removeBlock was unavailable.');
+    dispatch.removeBlock(id, false);
+  }, clientId);
+}
+
+async function waitForNativeAttribute(page, clientId, attribute, expected) {
+  await page.waitForFunction(({ id, key, value }) => {
+    const actual = globalThis.wp?.data?.select('core/block-editor')?.getBlock?.(id)?.attributes?.[key];
+    return actual === value;
+  }, { id: clientId, key: attribute, value: expected });
+}
+
+async function waitForNativeAttributes(page, clientId, expected) {
+  await page.waitForFunction(({ id, values }) => {
+    const actual = globalThis.wp?.data?.select('core/block-editor')?.getBlock?.(id)?.attributes ?? {};
+    return Object.entries(values).every(([key, value]) => actual[key] === value);
+  }, { id: clientId, values: expected });
+}
+
+async function exerciseEditorKeyboard(canvas, headingId) {
+  const heading = canvas.locator(`[data-block=${JSON.stringify(headingId)}] [contenteditable="true"]`).first();
+  await heading.waitFor({ state: 'visible' });
+  const original = (await heading.textContent()) ?? '';
+  await heading.click();
+  await heading.press('End');
+  await heading.pressSequentially(' keyboard matrix');
+  await heading.press(process.platform === 'darwin' ? 'Meta+z' : 'Control+z');
+  await heading.waitFor({ state: 'visible' });
+  const restored = (await heading.textContent()) ?? '';
+  return {
+    ok: restored === original,
+    summary: { original, restored, undoRestored: restored === original, scope: 'editor-canvas' },
+  };
+}
+
+async function editorRootSnapshot(page, fixture, clientId, matrix) {
+  const root = editorCanvas.locator(`[data-block=${JSON.stringify(clientId)}]`);
+  await root.waitFor({ state: 'visible' });
+  const rootClass = `wp-block-${fixture.blockName.replace('/', '-')}`;
+  return root.evaluate(async (element, { expectedLayout, fontFamily, pluginSlug, rootClass: expectedClass }) => {
+    await document.fonts?.ready;
+    await document.fonts?.load(`16px "${fontFamily}"`);
+    const stylesheets = [...document.styleSheets].map((sheet) => {
+      let hasRootRule = false;
+      try { hasRootRule = [...sheet.cssRules].some((rule) => rule.cssText.includes(expectedClass)); } catch { /* opaque styles are recorded by href below */ }
+      return { href: sheet.href || null, hasRootRule };
+    });
+    const style = getComputedStyle(element);
+    const image = element.querySelector('img');
+    const heading = [...element.querySelectorAll('[data-type="core/heading"]')][0];
+    const direct = [...element.children].map((child) => ({
+      tag: child.tagName.toLowerCase(),
+      block: child.getAttribute('data-type'),
+      clientId: child.getAttribute('data-block'),
+      className: child.className,
+    }));
+    const sharedStyles = stylesheets.some((sheet) => sheet.hasRootRule
+      || Boolean(sheet.href && sheet.href.includes(`/wp-content/plugins/${pluginSlug}/`)));
+    const declaredWidth = image?.style.width || image?.getAttribute('width') || '';
+    const declaredHeight = image?.style.height || image?.getAttribute('height') || '';
+    const snapshot = {
+      scope: window.frameElement?.getAttribute('name') ?? null,
+      outerHTML: element.outerHTML,
+      text: element.textContent ?? '',
+      headingContent: globalThis.wp?.data?.select('core/block-editor')?.getBlock?.(heading?.getAttribute('data-block'))?.attributes?.content ?? null,
+      display: style.display,
+      gridTemplateColumns: style.gridTemplateColumns,
+      flexDirection: style.flexDirection,
+      directNativeChildren: direct.filter((child) => Boolean(child.clientId)).map((child) => child.block),
+      hasInnerBlocksWrapper: Boolean(element.querySelector(':scope > .block-editor-inner-blocks')),
+      sharedStyles,
+      stylesheets,
+      fontLoaded: document.fonts?.check(`16px "${fontFamily}"`) ?? false,
+      image: image ? {
+        declaredWidth,
+        declaredHeight,
+        renderedWidth: Math.round(image.getBoundingClientRect().width),
+        renderedHeight: Math.round(image.getBoundingClientRect().height),
+      } : undefined,
+    };
+    snapshot.ok = snapshot.scope === 'editor-canvas'
+      && snapshot.display === expectedLayout
+      && snapshot.directNativeChildren.length > 0
+      && !snapshot.hasInnerBlocksWrapper
+      && snapshot.sharedStyles
+      && snapshot.fontLoaded;
+    return snapshot;
+  }, { expectedLayout: matrix.rootLayout, fontFamily: matrix.fontFamily, pluginSlug: fixture.pluginSlug ?? fixture.blockName.split('/').slice(1).join('-'), rootClass });
+}
+
+async function editorInstanceIsolationSnapshot(page, fixture, clientIds, matrix) {
+  const snapshots = [];
+  for (const clientId of clientIds) snapshots.push(await editorRootSnapshot(page, fixture, clientId, matrix));
+  return {
+    ok: snapshots.every((snapshot) => snapshot.ok),
+    instances: snapshots.map(({ outerHTML, ...snapshot }) => ({ ...snapshot, outerHTML })),
+  };
 }
 
 async function readPublication(page, savedContent) {
@@ -1377,7 +1642,7 @@ async function proveDeactivation(page, fixture, baseUrl, activePublication) {
     removed ? undefined : 'Plugin-owned editor registration or visible inserter control remained after deactivation.', { block: fixture.blockName, stillRegistered, stillVisible });
 }
 
-async function proveFrontend(page, fixture, baseUrl, activePublication) {
+async function proveFrontend(page, fixture, baseUrl, activePublication, artifactDir) {
   if (!fixture.frontend?.url) {
     for (const gate of ['frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_media', 'frontend_assets', 'frontend_runtime_errors']) {
       blocked(gate, 'Frontend proof needs fixture.frontend.url as an explicit proof scope.');
@@ -1427,12 +1692,64 @@ async function proveFrontend(page, fixture, baseUrl, activePublication) {
   const ownedAssets = pluginOwnedAssets(assets, fixture);
   const ownedStyles = ownedAssets.filter((asset) => asset.resourceType === 'stylesheet');
   const healthyAssets = ownedAssets.every((asset) => asset.delivery === 'inline' || (asset.status >= 200 && asset.status < 400));
-  const assetsPass = ownedStyles.length > 0 && healthyAssets;
-  set('frontend_assets', assetsPass ? 'pass' : 'fail', assetsPass ? undefined : 'No successful plugin-owned stylesheet was observed on the published post, or a plugin asset failed.', { postId: activePublication.id, permalink: activePublication.permalink, assets, ownedAssets, ownedStyles });
+  const sharedMatrix = fixture.browserMatrix ? await frontendSharedStyleSnapshot(page, fixture, artifactDir) : undefined;
+  const assetsPass = ownedStyles.length > 0 && healthyAssets && (sharedMatrix?.ok ?? true);
+  set('frontend_assets', assetsPass ? 'pass' : 'fail', assetsPass ? undefined
+    : sharedMatrix && !sharedMatrix.ok
+      ? 'The generated shared stylesheet/font did not load on the published frontend root.'
+      : 'No successful plugin-owned stylesheet was observed on the published post, or a plugin asset failed.', {
+    postId: activePublication.id,
+    permalink: activePublication.permalink,
+    assets,
+    ownedAssets,
+    ownedStyles,
+    ...(sharedMatrix ? { browserMatrix: sharedMatrix.details } : {}),
+  }, sharedMatrix?.artifacts);
   activePublication.frontendAssets = ownedAssets;
   const scopedErrors = { consoleErrors: consoleErrors.slice(consoleStart), pageErrors: pageErrors.slice(pageErrorStart) };
   const runtimePass = scopedErrors.consoleErrors.length === 0 && scopedErrors.pageErrors.length === 0;
   set('frontend_runtime_errors', runtimePass ? 'pass' : 'fail', runtimePass ? undefined : 'Frontend console or page errors were observed.', { postId: activePublication.id, permalink: activePublication.permalink, ...scopedErrors });
+}
+
+async function frontendSharedStyleSnapshot(page, fixture, artifactDir) {
+  const matrix = fixture.browserMatrix;
+  const rootClass = `wp-block-${fixture.blockName.replace('/', '-')}`;
+  const root = page.locator(`.${rootClass}`).first();
+  const artifacts = [];
+  try {
+    await root.waitFor({ state: 'visible' });
+    const details = await root.evaluate(async (element, { expectedLayout, fontFamily, pluginSlug, expectedClass }) => {
+      await document.fonts?.ready;
+      await document.fonts?.load(`16px "${fontFamily}"`);
+      const style = getComputedStyle(element);
+      const stylesheets = [...document.styleSheets].map((sheet) => {
+        let hasRootRule = false;
+        try { hasRootRule = [...sheet.cssRules].some((rule) => rule.cssText.includes(expectedClass)); } catch { /* href below remains evidence */ }
+        return { href: sheet.href || null, hasRootRule };
+      });
+      const sharedStyles = stylesheets.some((sheet) => sheet.hasRootRule
+        || Boolean(sheet.href && sheet.href.includes(`/wp-content/plugins/${pluginSlug}/`)));
+      return {
+        outerHTML: element.outerHTML,
+        display: style.display,
+        fontLoaded: document.fonts?.check(`16px "${fontFamily}"`) ?? false,
+        sharedStyles,
+        stylesheets,
+      };
+    }, { expectedLayout: matrix.rootLayout, fontFamily: matrix.fontFamily, pluginSlug: fixture.pluginSlug ?? fixture.blockName.split('/').slice(1).join('-'), expectedClass: rootClass });
+    const imagePath = path.join(artifactDir, `frontend-root-${matrix.rootLayout}-shared-style.png`);
+    const jsonPath = path.join(artifactDir, `frontend-root-${matrix.rootLayout}-shared-style.json`);
+    await root.screenshot({ path: imagePath, animations: 'disabled' });
+    await writeFile(jsonPath, JSON.stringify(details, null, 2), 'utf8');
+    artifacts.push(
+      { path: `artifacts/${path.basename(imagePath)}`, mediaType: 'image/png' },
+      { path: `artifacts/${path.basename(jsonPath)}`, mediaType: 'application/json' },
+    );
+    const ok = details.display === matrix.rootLayout && details.fontLoaded && details.sharedStyles;
+    return { ok, details: { ...details, outerHTMLHash: sha256(details.outerHTML) }, artifacts };
+  } catch (error) {
+    return { ok: false, details: { error: error instanceof Error ? error.message : String(error) }, artifacts };
+  }
 }
 
 async function proveVisual(page, fixture, artifactDir) {
@@ -1477,7 +1794,7 @@ async function proveVisual(page, fixture, artifactDir) {
   }
 }
 
-async function proveAxeEditor(page, fixture) {
+async function proveAxeEditor(page, fixture, artifactDir) {
   if (!fixture.accessibility) {
     blocked('accessibility_editor', 'Fixture has no accessibility scope.');
     return;
@@ -1485,10 +1802,16 @@ async function proveAxeEditor(page, fixture) {
   const frame = page.frames().find((candidate) => candidate.name() === 'editor-canvas') ?? page.mainFrame();
   await frame.addScriptTag({ content: axe.source });
   const editor = await frame.evaluate(async (selector) => globalThis.axe.run(selector), fixture.accessibility.editorSelector ?? '.editor-styles-wrapper');
-  set('accessibility_editor', editor.violations.length === 0 ? 'pass' : 'fail', editor.violations.length === 0 ? undefined : 'Axe found editor subtree violations.', { axe: editor, selector: fixture.accessibility.editorSelector ?? '#editor' });
+  const artifact = path.join(artifactDir, 'axe-editor.json');
+  await writeFile(artifact, JSON.stringify(editor, null, 2), 'utf8');
+  set('accessibility_editor', editor.violations.length === 0 ? 'pass' : 'fail', editor.violations.length === 0 ? undefined : 'Axe found editor subtree violations.', {
+    axe: editor,
+    selector: fixture.accessibility.editorSelector ?? '#editor',
+    scope: frame.name() || 'main-frame',
+  }, [{ path: 'artifacts/axe-editor.json', mediaType: 'application/json' }]);
 }
 
-async function proveAxeFrontend(page, fixture) {
+async function proveAxeFrontend(page, fixture, artifactDir) {
   if (!fixture.accessibility) {
     blocked('accessibility_frontend', 'Fixture has no accessibility scope.');
     return;
@@ -1499,7 +1822,9 @@ async function proveAxeFrontend(page, fixture) {
   }
   await page.addScriptTag({ content: axe.source });
   const frontend = await page.evaluate(async (selector) => globalThis.axe.run(selector), fixture.accessibility.frontendSelector ?? fixture.frontend.subtreeSelector ?? 'main');
+  const artifact = path.join(artifactDir, 'axe-frontend.json');
+  await writeFile(artifact, JSON.stringify(frontend, null, 2), 'utf8');
   set('accessibility_frontend', frontend.violations.length === 0 ? 'pass' : 'fail', frontend.violations.length === 0 ? undefined : 'Axe found frontend subtree violations.', {
     axe: frontend, selector: fixture.accessibility.frontendSelector ?? fixture.frontend.subtreeSelector ?? 'main',
-  });
+  }, [{ path: 'artifacts/axe-frontend.json', mediaType: 'application/json' }]);
 }
