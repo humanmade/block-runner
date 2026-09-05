@@ -175,7 +175,7 @@ describe('registered block authoring compiler', () => {
     plan.root.children!.push({
       path: 'hero.carousel',
       role: 'custom',
-      block: 'acme/carousel-slide',
+      block: 'core/group',
       requiresOwnInnerBlocks: true,
     });
 

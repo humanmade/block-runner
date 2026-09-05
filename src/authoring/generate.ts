@@ -15,6 +15,7 @@ import {
 } from './schema.js';
 import WORDPRESS_BLOCK_SCHEMA_7_1 from './vendor/wordpress-block.schema.7.1.json';
 import { patternOverrideName, supportedPatternOverrideAttributes } from './overrides.js';
+import { authoringRegistryIdentity, validateEditableField, validateNativeComposition, type AuthoringRegistryIdentity } from './capabilities.js';
 import { collectConfirmedAssets, fontOwnershipDecision, type GeneratedAssetFile } from './assets.js';
 import {
   renderConfirmedStyleRules,
@@ -74,6 +75,8 @@ export interface GeneratedSourceManifestEntry {
 export interface GeneratedSourceManifest {
   templateVersion: typeof REGISTERED_BLOCK_TEMPLATE_VERSION;
   sourcePlanHash: string;
+  /** Pin used for this headless capability check; it is not evidence for every WordPress site. */
+  registry: AuthoringRegistryIdentity;
   files: GeneratedSourceManifestEntry[];
 }
 
@@ -215,6 +218,7 @@ export function compileRegisteredBlock(input: AuthoringPlan): GeneratedRegistere
   const manifest: GeneratedSourceManifest = {
     templateVersion: REGISTERED_BLOCK_TEMPLATE_VERSION,
     sourcePlanHash,
+    registry: authoringRegistryIdentity(),
     files: [...files, ...assets].map((file) => ({
       path: file.path,
       kind: file.kind,
@@ -543,6 +547,12 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   assertNoExecutableBehaviour(plan);
   assertSafePlanData(plan);
   validateLockingOperations(plan.locking);
+  // This common boundary is reached by preview and source generation, including direct plans.
+  try {
+    validateNativeComposition(plan.structure);
+  } catch (error) {
+    rethrowCapabilityError(error, 'structure');
+  }
   // Preview must refuse unsupported styles too, rather than promising an unwritable package.
   emitScss(plan.styles.outcomes, blockRootClass(plan.target.name));
   // Preview and writing reject the same unresolved editor decisions.
@@ -820,6 +830,11 @@ function compileConfirmedTemplate(plan: AuthoringPlan): TemplateNode[] {
     if (!node || !field.attribute) {
       throw new AuthoringGenerationError('unresolved-editor-field: node and native attribute are required', at);
     }
+    try {
+      validateEditableField(field, index, node);
+    } catch (error) {
+      rethrowCapabilityError(error, `${at}.attribute`);
+    }
     const key = `${field.node}:${field.attribute}`;
     if (seen.has(key)) throw new AuthoringGenerationError('duplicate-editor-field', at);
     seen.add(key);
@@ -920,6 +935,14 @@ function compileConfirmedTemplate(plan: AuthoringPlan): TemplateNode[] {
   }
   assertSafePlanData({ ...plan, structure: nodes });
   return nodes.map((node, index) => toTemplateNode(node, `structure[${index}]`));
+}
+
+function rethrowCapabilityError(error: unknown, fallbackPath: string): never {
+  if (error instanceof Error && error.name === 'AuthoringGenerationError') {
+    const capability = error as Error & { reason?: string; source?: { path?: string } };
+    throw new AuthoringGenerationError(capability.reason ?? error.message, capability.source?.path ?? fallbackPath);
+  }
+  throw error;
 }
 
 /** Gutenberg's lock attribute is an object with boolean operation switches. */
