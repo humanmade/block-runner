@@ -360,6 +360,9 @@ export async function writeGeneratedRegisteredBlock(
     }
   }
   const inspection = await inspectAuthoringDestination(outputDirectory, { files });
+  // Ownership is decided before regeneration semantics. A user-owned create collision is never
+  // evidence of an earlier compiler package and must retain its explicit replacement error.
+  assertCollisions(inspection, files.map((file) => ({ path: file.path, replace: file.operation === 'replace' })), inspection.directory);
   const regeneration = await classifyRegisteredBlockRegeneration(inspection, generatedSnapshot);
   if (!regeneration.writeAllowed) {
     if (regeneration.kind === 'unchanged') {

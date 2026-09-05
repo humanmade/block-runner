@@ -33,6 +33,14 @@ function compiledDefault(heading: string, operation: 'create' | 'replace'): Gene
   }));
 }
 
+function replacements(source: GeneratedRegisteredBlock): GeneratedRegisteredBlock {
+  return {
+    ...source,
+    files: source.files.map((file) => ({ ...file, operation: 'replace' as const })),
+    manifest: { ...source.manifest, files: source.manifest.files.map((entry) => ({ ...entry, operation: 'replace' as const })) },
+  };
+}
+
 function changed(source: GeneratedRegisteredBlock, file: string, content: string): GeneratedRegisteredBlock {
   const hash = createHash('sha256').update(content).digest('hex');
   return {
@@ -94,18 +102,18 @@ describe('registered block regeneration', () => {
     expect(defaults.kind).toBe('content-defaults');
     expect(defaults.existingInstanceEffect).toMatch(/New insertions/i);
 
-    const saved = await classifyRegisteredBlockRegeneration(inspection, changed(first, 'save.js', 'export default function save(){ return <p>changed</p>; }\n'));
+    const saved = await classifyRegisteredBlockRegeneration(inspection, changed(replacements(first), 'save.js', 'export default function save(){ return <p>changed</p>; }\n'));
     expect(saved.kind).toBe('saved-markup-or-structure');
     expect(saved.writeAllowed).toBe(false);
     expect(saved.nextStep).toMatch(/new block identity|deprecation\/migration/i);
 
     const metadata = JSON.parse(first.files.find((file) => file.path === 'block.json')!.content);
     metadata.attributes = { retainedField: { type: 'string', source: 'html', selector: 'p' } };
-    const schema = await classifyRegisteredBlockRegeneration(inspection, changed(first, 'block.json', JSON.stringify(metadata, null, 2) + '\n'));
+    const schema = await classifyRegisteredBlockRegeneration(inspection, changed(replacements(first), 'block.json', JSON.stringify(metadata, null, 2) + '\n'));
     expect(schema.kind).toBe('saved-markup-or-structure');
     expect(schema.writeAllowed).toBe(false);
-    await expect(writeGeneratedRegisteredBlock(output, changed(first, 'save.js', 'export default function save(){ return <p>changed</p>; }\n')))
+    await expect(writeGeneratedRegisteredBlock(output, changed(replacements(first), 'save.js', 'export default function save(){ return <p>changed</p>; }\n')))
       .rejects.toThrow(/no files written/i);
-    expect((await writeGeneratedRegisteredBlock(output, first)).written).toEqual([]);
+    expect((await writeGeneratedRegisteredBlock(output, replacements(first))).written).toEqual([]);
   });
 });
