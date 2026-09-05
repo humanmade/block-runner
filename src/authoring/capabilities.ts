@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { bootHeadlessWordPressSync, withMutedWordPressConsole } from '../headless/env.js';
 import type { AuthoringField, AuthoringStructureNode } from './schema.js';
+import type { WpBlock } from '../types.js';
 
 /** Pinned local registry and the deliberately narrow static-authoring policy. */
 export const AUTHORING_NATIVE_POLICY_VERSION = '1' as const;
@@ -59,15 +60,25 @@ export function validateNativeComposition(nodes: readonly AuthoringStructureNode
       }
       const children = visit(node.children ?? [], blockType, [...ancestors, node.block], `${nodePath}.children`);
       const block = wp.createBlock(node.block, node.attributes as Record<string, unknown> | undefined, children);
-      const parsed = withMutedWordPressConsole(() => wp.parse(wp.serialize(block))[0]);
+      const roundTrip = withMutedWordPressConsole(() => wp.parse(wp.serialize(block)));
+      const parsed = roundTrip[0];
       if (!parsed || !withMutedWordPressConsole(() => wp.validateBlock(parsed)[0])) {
         fail('invalid-native-serialization: pinned WordPress cannot validate this native block data', nodePath);
+      }
+      // A leaf save function may silently ignore supplied InnerBlocks and still produce valid
+      // markup. Prove that the requested native tree survived, not only that what remains is valid.
+      if (roundTrip.length !== 1 || treeShape(block) !== treeShape(parsed)) {
+        fail('lossy-native-serialization: pinned WordPress did not preserve the requested native child tree', `${nodePath}.children`);
       }
       blocks.push(block);
     }
     return blocks;
   };
   visit(nodes, undefined, [], 'structure');
+}
+
+function treeShape(block: WpBlock): string {
+  return JSON.stringify([block.name, block.innerBlocks.map(treeShape)]);
 }
 
 export function validateEditableField(field: AuthoringField, index: number, node: AuthoringStructureNode | undefined): void {

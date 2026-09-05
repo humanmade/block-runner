@@ -25,6 +25,22 @@ function expectRejectedByPreviewAndGeneration(input: AuthoringPlan, reason: stri
 }
 
 describe('static native composition capabilities', () => {
+  it.each(['core/paragraph', 'core/heading', 'core/image'])('rejects child content discarded by %s saving', (block) => {
+    const input = plan();
+    input.fields = [];
+    input.structure = [{ block, attributes: { content: 'Outer', url: 'https://example.test/image.png' },
+      children: [{ block: 'core/paragraph', attributes: { content: 'Must survive saving' } }] }];
+    expectRejectedByPreviewAndGeneration(input, 'lossy-native-serialization', 'structure[0].children');
+  });
+
+  it('locates dropped descendants inside an otherwise valid container', () => {
+    const input = plan();
+    input.fields = [];
+    input.structure = [{ block: 'core/group', children: [{ block: 'core/paragraph', attributes: { content: 'Outer' },
+      children: [{ block: 'core/paragraph', attributes: { content: 'Must survive saving' } }] }] }];
+    expectRejectedByPreviewAndGeneration(input, 'lossy-native-serialization', 'structure[0].children[0].children');
+  });
+
   it('rejects unknown blocks at the shared preview/write boundary', () => {
     const input = plan();
     input.structure[0]!.block = 'core/not-real';
