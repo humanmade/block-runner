@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from '../src/authoring/schema.js';
+import { compileRegisteredBlock } from '../src/authoring/generate.js';
 
 function plan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -46,6 +47,14 @@ describe('AuthoringPlan schema', () => {
       expect(() => validateAuthoringPlan(plan({ files: [{ path: file }] }))).toThrow(/safe relative path/);
     }
     expect(() => validateAuthoringPlan(plan({ files: [{ path: 'src' }, { path: 'src/edit.ts' }] }))).toThrow(/descendant/);
+  });
+
+  it('keeps executable source out of declarative file declarations', () => {
+    const input = validateAuthoringPlan(plan({
+      structure: [], fields: [], locking: { mode: 'none' }, styles: { strategy: 'native', outcomes: [] },
+      pattern: { ready: false, overrides: [] }, files: [{ path: 'block.json', content: '{}' }],
+    }));
+    expect(() => compileRegisteredBlock(input)).toThrow(/plan file content is not accepted/);
   });
 
   it('validates and hash-binds source identity and the complete analysis ledger', () => {
