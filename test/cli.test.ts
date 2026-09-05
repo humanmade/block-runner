@@ -41,7 +41,7 @@ describe('CLI', () => {
       expect(sourceGuide).not.toMatch(/block-runner@latest (?:author|plugin|proof)/);
       expect(guide).toContain(`block-runner@${packageVersion} author preview`);
       expect(guide).toContain(`block-runner@${packageVersion} plugin preview`);
-      expect(guide).toContain(`block-runner@${packageVersion} proof`);
+      expect(guide).toContain('npx --no-install block-runner proof');
       expect(guide).toContain('block-runner@testing skill --install');
       expect(guide).not.toMatch(/block-runner@(?:latest|testing) (?:assemble|convert|validate|fix|author|plugin|proof)/);
       expect(JSON.parse(await readFile(path.join(destination, '.block-runner-install.json'), 'utf8'))).toMatchObject({
@@ -327,8 +327,10 @@ describe('CLI', () => {
 
     // relaxed (the default) keeps the off-system value; strict drops it. If the flag were not
     // forwarded, both runs would produce identical output.
-    const relaxed = await runCli(['convert', '-', '--config', configPath, '--json'], html);
-    const strict = await runCli(['convert', '-', '--config', configPath, '--styling', 'strict', '--json'], html);
+    const [relaxed, strict] = await Promise.all([
+      runCli(['convert', '-', '--config', configPath, '--json'], html),
+      runCli(['convert', '-', '--config', configPath, '--styling', 'strict', '--json'], html),
+    ]);
 
     const relaxedReport = JSON.parse(relaxed.stdout) as { output: string };
     const strictReport = JSON.parse(strict.stdout) as { output: string };
