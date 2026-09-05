@@ -41,7 +41,7 @@ describe('CLI', () => {
       expect(sourceGuide).not.toMatch(/block-runner@latest (?:author|plugin|proof)/);
       expect(guide).toContain(`block-runner@${packageVersion} author preview`);
       expect(guide).toContain(`block-runner@${packageVersion} plugin preview`);
-      expect(guide).toContain(`block-runner@${packageVersion} proof`);
+      expect(guide).toContain('npx --no-install block-runner proof');
       expect(guide).toContain('block-runner@testing skill --install');
       expect(guide).not.toMatch(/block-runner@(?:latest|testing) (?:assemble|convert|validate|fix|author|plugin|proof)/);
       expect(JSON.parse(await readFile(path.join(destination, '.block-runner-install.json'), 'utf8'))).toMatchObject({
