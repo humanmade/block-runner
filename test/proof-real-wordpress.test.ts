@@ -46,6 +46,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       inputPath: built.inputPath,
       markup: built.nativeContainerMarkup,
       fixture: built.fixture,
+      artifact: built.artifact,
       outputDir,
     });
 
@@ -166,6 +167,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       inputPath: built.inputPath,
       markup: built.nativeContainerMarkup,
       fixture: built.fixture,
+      artifact: built.artifact,
       outputDir,
     });
     const matrix = (result.receipt.gates.find((gate) => gate.gate === 'editor_reopen')?.details as {

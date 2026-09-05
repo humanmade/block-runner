@@ -23,8 +23,8 @@ import {
   writePluginOutput,
   type GeneratedBlockPackage,
 } from './plugin/profile.js';
-import { runProof, type ProofFixture } from './proof/runner.js';
-import { isProofProfileName } from './proof/profiles.js';
+import { runProof, type ProofArtifactContract, type ProofFixture } from './proof/runner.js';
+import { isProofProfileName, PROOF_PROFILE_NAMES } from './proof/profiles.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 import { hashAuthoringConfirmation, inspectAuthoringDestination, writeGeneratedRegisteredBlock } from './authoring/destination.js';
 import { materializeAuthoringPlan, planRegisteredBlockOutput } from './authoring/generate.js';
@@ -93,6 +93,7 @@ interface PluginWriteCliOptions extends PluginPreviewCliOptions {
 interface ProofCliOptions {
   profile?: string;
   fixture?: string;
+  artifact?: string;
   markup?: string;
   input?: string;
   receiptDir?: string;
@@ -382,8 +383,9 @@ plugin
 program
   .command('proof <pluginZip>')
   .description('Run a WordPress proof profile and write a content-addressed receipt.')
-  .addOption(new Option('--profile <profile>', 'headless, runtime, editor, or full').choices(['headless', 'runtime', 'editor', 'full']).default('full'))
+  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES as unknown as string[]).default('full'))
   .option('--fixture <path>', 'JSON fixture with block name, editable fields, and proof assertions')
+  .option('--artifact <path>', 'confirmed JSON artifact contract (SHA-256 and capabilities) for capability-scoped claims')
   .option('--markup <path>', 'generated block markup for the headless validation gate')
   .option('--input <path>', 'reviewed generator input to pin as evidence (required for a passing proof)')
   .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
@@ -397,8 +399,9 @@ program
       program.error(`error: unsupported proof profile ${JSON.stringify(profile)}`);
       return;
     }
-    const [fixture, markup, input] = await Promise.all([
+    const [fixture, artifact, markup, input] = await Promise.all([
       options.fixture ? readJsonFixture(options.fixture) : undefined,
+      options.artifact ? readProofArtifact(options.artifact) : undefined,
       options.markup ? readFile(options.markup, 'utf8') : undefined,
       options.input ? readFile(options.input) : undefined,
     ]);
@@ -406,6 +409,7 @@ program
       profile,
       pluginZip,
       fixture,
+      artifact,
       markup,
       input,
       inputPath: options.input,
@@ -818,6 +822,21 @@ function readStdin(): Promise<string> {
     process.stdin.on('end', () => resolve(data));
     process.stdin.on('error', reject);
   });
+}
+
+async function readProofArtifact(file: string): Promise<ProofArtifactContract> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readFile(file, 'utf8'));
+  } catch (error) {
+    throw new Error(`Could not read proof artifact contract ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  const candidate = parsed as { sha256?: unknown; capabilities?: { patternOverrides?: unknown } } | undefined;
+  if (!candidate || typeof candidate.sha256 !== 'string' || !/^sha256:[a-f0-9]{64}$/.test(candidate.sha256)
+    || typeof candidate.capabilities?.patternOverrides !== 'boolean') {
+    throw new Error(`Proof artifact contract ${file} requires sha256 and capabilities.patternOverrides.`);
+  }
+  return candidate as ProofArtifactContract;
 }
 
 async function readJsonFixture(file: string): Promise<ProofFixture> {
