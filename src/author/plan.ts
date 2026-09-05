@@ -178,6 +178,7 @@ export function compileAnalyzedDesign(input: {
   }
   const editorCss = input.editorStylesheet ?? definition.styles?.editorCss;
   const editor = scopeStylesheet(scanStylesheet(editorCss ?? ''), { root: `.wp-block-${name.replace('/', '-')}` });
+  const editorSelectors = cssRuleSelectors(editor.localRules);
   if (editor.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned') || editor.ruleRecords.some((rule) => rule.outcome === 'blocked')) {
     throw new Error('Editor-only CSS must use supported component-local rules; global or unsupported rules cannot be emitted.');
   }
@@ -190,28 +191,24 @@ export function compileAnalyzedDesign(input: {
     atRules: entry.atRules,
     source: {
       path: input.sourcePath,
+      selector: editorSelectors.get(entry.ruleId),
       offset: entry.source.start.offset,
       htmlLine: entry.source.start.line,
       htmlColumn: entry.source.start.column,
     },
   }));
-  const coverage: AuthoringCoverage = {
-    ...(input.stylesheet === undefined ? {} : {
-      stylesheet: {
-        entry: definition.styles?.css !== undefined ? '<author.styles.css>' : sourceEntry,
-        sha256: sha256(input.stylesheet),
-      },
-    }),
-    ...(editorCss === undefined ? {} : {
-      editorStylesheet: { entry: '<author.styles.editorCss>', sha256: sha256(editorCss) },
-    }),
-    styles: [
-      ...input.styleLedger.map((entry) => toCoverageStyle(entry, 'shared')),
-      ...editorStyleLedger.map((entry) => toCoverageStyle(entry, 'editor')),
-      ...(input.fontWarnings ?? []).map(({ warning, scope }) => toCoverageFontWarning(warning, scope)),
-    ],
-    assets: input.assets.map((entry) => toCoverageAsset(entry, input.preparedAssets)),
-  };
+  const coverage = createAnalyzedDesignCoverage({
+    definition,
+    source: input.source,
+    sourcePath: input.sourcePath,
+    styleLedger: input.styleLedger,
+    assets: input.assets,
+    preparedAssets: input.preparedAssets,
+    stylesheet: input.stylesheet,
+    editorStylesheet: editorCss,
+    editorStyleLedger,
+    fontWarnings: input.fontWarnings,
+  });
   const plan: AuthoringPlan = {
     version: 1, generatorVersion: '0.9.0', target: { name,
       title: definition.title ?? name.split('/')[1]!.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
@@ -230,6 +227,130 @@ export function compileAnalyzedDesign(input: {
     warnings: (input.fontWarnings ?? []).map(({ warning }) => warning.reason),
   };
   return { plan, generated: compileRegisteredBlock(plan), editorStyleLedger };
+}
+
+function cssRuleSelectors(rules: readonly CssRule[], output = new Map<string, string>()): Map<string, string> {
+  for (const rule of rules) {
+    if (rule.kind === 'conditional') cssRuleSelectors(rule.rules, output);
+    else if (rule.kind === 'style') output.set(rule.id, rule.selector);
+  }
+  return output;
+}
+
+/** Build the source-bound coverage shared by rules-derived and caller-supplied proposals. */
+export function createAnalyzedDesignCoverage(input: {
+  definition: AuthorConfig;
+  source: string;
+  sourcePath?: string;
+  styleLedger: readonly AuthoredStyleLedgerEntry[];
+  assets: readonly AssetLedgerEntry[];
+  preparedAssets: readonly PreparedCssAsset[];
+  stylesheet?: string;
+  editorStylesheet?: string;
+  editorStyleLedger: readonly AuthoredStyleLedgerEntry[];
+  fontWarnings?: ReadonlyArray<{ warning: FontAssetWarning; scope: 'shared' | 'editor' }>;
+}): AuthoringCoverage {
+  const sourceEntry = input.sourcePath ?? '<inline>';
+  return {
+    ...(input.stylesheet === undefined ? {} : {
+      stylesheet: {
+        entry: input.definition.styles?.css !== undefined ? '<author.styles.css>' : sourceEntry,
+        sha256: sha256(input.stylesheet),
+      },
+    }),
+    ...(input.editorStylesheet === undefined ? {} : {
+      editorStylesheet: { entry: '<author.styles.editorCss>', sha256: sha256(input.editorStylesheet) },
+    }),
+    styles: [
+      ...input.styleLedger.map((entry) => toCoverageStyle(entry, 'shared')),
+      ...input.editorStyleLedger.map((entry) => toCoverageStyle(entry, 'editor')),
+      ...(input.fontWarnings ?? []).map(({ warning, scope }) => toCoverageFontWarning(warning, scope)),
+    ],
+    assets: input.assets.map((entry) => toCoverageAsset(entry, input.preparedAssets)),
+  };
+}
+
+/**
+ * Prove that a source-bound proposal carries each successful source disposition into the
+ * declarative package it asks the compiler to emit.  Ledger equality alone is provenance, not
+ * delivery: CSS and prepared assets must also have a concrete plan transport.
+ */
+export function validateCoverageFulfillment(plan: AuthoringPlan): void {
+  const coverage = plan.coverage;
+  if (!coverage) throw new Error('Supplied authoring plan is missing its source coverage.');
+
+  for (const [index, entry] of coverage.styles.entries()) {
+    const label = `coverage.styles[${index}] ${entry.property}: ${entry.value}`;
+    if (entry.outcome === 'blocked' || entry.outcome === 'warned') {
+      throw new Error(`${label} has unresolved source evidence and cannot be claimed as fulfilled.`);
+    }
+    if (entry.outcome === 'scoped-css') {
+      const rules = entry.scope === 'editor' ? plan.styles.editorRules ?? [] : plan.styles.rules ?? [];
+      if (!hasCoverageCssRule(rules, entry.property, entry.value, entry.atRules, entry.source?.selector)) {
+        throw new Error(`${label} is marked scoped-css but has no matching ${entry.scope} structured CSS rule.`);
+      }
+      continue;
+    }
+    const explicitDisposition = plan.styles.outcomes.some((outcome) => outcome.property === entry.property
+      && outcome.value === entry.value
+      && ((entry.outcome === 'native' && outcome.outcome === 'native')
+        || (entry.outcome === 'preset' && outcome.outcome === 'token')
+        || (entry.outcome === 'literal' && outcome.outcome === 'scoped-css')));
+    if (!explicitDisposition && !hasNativeAttribute(plan.structure, entry.property, entry.value)) {
+      throw new Error(`${label} has no explicit native or literal plan disposition.`);
+    }
+  }
+
+  for (const [index, entry] of coverage.assets.entries()) {
+    const label = `coverage.assets[${index}] ${entry.reference}`;
+    if (entry.outcome === 'unresolved' || entry.outcome === 'blocked' || entry.outcome === 'external') {
+      throw new Error(`${label} is unresolved source evidence and cannot be claimed as transported.`);
+    }
+    const asset = plan.assets.find((candidate) => (candidate.source === entry.reference || path.basename(candidate.source) === entry.reference)
+      && candidate.destination === entry.destination && candidate.sha256 === entry.sha256);
+    if (!asset) throw new Error(`${label} has no matching confirmed plan asset record.`);
+    if (entry.kind === 'font') {
+      if (!plan.styles.fonts?.some((face) => face.assetId === asset.id)) {
+        throw new Error(`${label} has no generated font-face transport.`);
+      }
+    } else if (!asset.uses?.length) {
+      throw new Error(`${label} has no native output use.`);
+    }
+  }
+}
+
+/** Match a native declaration only where the requested property and value coexist in an emitted
+ * block attribute object; a value-only search would allow unrelated text to satisfy coverage. */
+function hasNativeAttribute(nodes: readonly AuthoringStructureNode[], property: string, value: string): boolean {
+  const expected = property.replace(/-([a-z])/g, (_, letter: string) => letter.toUpperCase()).toLowerCase();
+  const contains = (input: JsonValue): boolean => {
+    if (Array.isArray(input)) return input.some(contains);
+    if (!input || typeof input !== 'object') return false;
+    return Object.entries(input).some(([key, candidate]) =>
+      key.replace(/-/g, '').toLowerCase() === expected && candidate === value || contains(candidate));
+  };
+  return nodes.some((node) => (node.attributes !== undefined && contains(node.attributes))
+    || hasNativeAttribute(node.children ?? [], property, value));
+}
+
+function hasCoverageCssRule(
+  rules: readonly import('../authoring/schema.js').AuthoringCssRule[],
+  property: string,
+  value: string,
+  atRules: readonly string[],
+  selector: string | undefined,
+  conditions: string[] = [],
+): boolean {
+  for (const rule of rules) {
+    if (rule.kind === 'conditional') {
+      if (hasCoverageCssRule(rule.rules, property, value, atRules, selector, [...conditions, `@${rule.name} ${rule.prelude}`])) return true;
+      continue;
+    }
+    if (conditions.length === atRules.length && conditions.every((condition, index) => condition === atRules[index])
+      && (selector === undefined || rule.selector === selector)
+      && rule.declarations.some((declaration) => declaration.property === property && declaration.value === value)) return true;
+  }
+  return false;
 }
 
 function collectFontFaceRules(

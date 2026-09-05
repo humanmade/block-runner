@@ -160,11 +160,21 @@ An empty `files` list lets the compiler enumerate its complete
 source set in the preview; it does not mean no output. A native SVG adds an owned
 `asset-urls.mjs` source file, which is included in confirmation and the manifest.
 
-For existing HTML/CSS input, `author <html> --name <namespace/slug> --json` can analyze the
-source and return `package.canonicalPlan` with checked source and style/asset ledgers.
-It does not write source. Review that plan's structure and editing policy through the
-normal preview/write flow. An unresolved Custom HTML region is a failure to resolve,
-not permission to ship it inside a registered wrapper.
+For existing HTML/CSS input, `author <html> --name <namespace/slug> --json` returns deterministic
+source evidence before any rules proposal: authored elements and locations, stylesheet/build
+dependencies, source hashes, and complete style/asset ledgers (including unresolved entries).
+Rules conversion is an advisory proposal source, not a prerequisite for inspecting messy or
+unknown-safe markup. It does not write source. A caller may supply an independently designed
+native plan through the API, but it must carry the exact source hash and complete evidence
+coverage; changing the proposed tree cannot erase an unresolved declaration or asset obligation.
+The same registered-block compiler, preview, confirmation, and write gate apply to either plan.
+
+Tailwind detection is advisory. Supplied compiled CSS can be handled as ordinary CSS; Tailwind
+source/runtime output needs an explicit, pinned build graph (including custom variants, plugins,
+variables, reset/Preflight effects, and dependencies) before fidelity is claimed. Block Runner
+does not infer utility semantics or execute package/config files. Missing build inputs are reported
+as a specific dependency diagnostic. Scripts, event handlers, unsafe CSS URLs, and executable
+browser behaviour remain blocked by the output policy.
 
 Licensed local WOFF/WOFF2 fonts use an asset with `kind: "font"`, an absolute source,
 confirmed byte hash/destination, and `fontLicense: { ownership, license, notice? }`.

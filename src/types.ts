@@ -48,6 +48,11 @@ export interface BlockRunnerReport {
   items: ReportItem[];
   /** Exact source identity for the registered-block HTML authoring pass, when available. */
   source?: import('./authoring/schema.js').AuthoringSource;
+  /**
+   * Deterministic observations made at the input edge. This is deliberately available even when
+   * the optional HTML-to-block rules proposal cannot represent the source.
+   */
+  evidence?: AuthorSourceEvidence;
   /** Advisory guidance only; never affects `ok` or summary counts. */
   hint?: string;
   output?: string;
@@ -67,6 +72,27 @@ export interface BlockRunnerReport {
   styleLedger?: AuthoredStyleLedgerEntry[];
   /** Files that make up an authored registered block, keyed by their package-relative path. */
   package?: GeneratedBlockPackage;
+}
+
+/** A source element observed without assigning it a Gutenberg meaning. */
+export interface AuthorSourceElement {
+  tag: string;
+  attributes: Record<string, string>;
+  source?: SourceLocation;
+}
+
+/**
+ * Evidence separated from a proposed native tree. Consumers may use it to construct a plan, but
+ * must carry its source and coverage records into that plan before compiling it.
+ */
+export interface AuthorSourceEvidence {
+  source: import('./authoring/schema.js').AuthoringSource;
+  structure: AuthorSourceElement[];
+  dependencies: Array<{ kind: 'stylesheet' | 'tailwind-build'; reference: string; source?: SourceLocation }>;
+  /** Input-edge diagnostics. They never instruct a caller to rewrite otherwise safe markup. */
+  diagnostics: ReportItem[];
+  /** Present once CSS/assets have been scanned, including unresolved dispositions. */
+  coverage?: import('./authoring/schema.js').AuthoringCoverage;
 }
 
 export type AuthoredStyleOutcome = 'native' | 'preset' | 'literal' | 'scoped-css' | 'warned' | 'blocked';
@@ -311,6 +337,11 @@ export interface AuthorOptions extends ConvertOptions {
   outDir?: string;
   /** Per-run author settings, which override `config.author`. */
   author?: AuthorConfig;
+  /**
+   * A caller-authored native proposal. It is validated by the same registered-block compiler as a
+   * rules proposal and must retain the exact source/coverage evidence observed in this run.
+   */
+  plan?: import('./authoring/schema.js').AuthoringPlan;
 }
 
 export interface AssembleOptions extends CommonOptions {

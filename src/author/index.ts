@@ -8,6 +8,7 @@ import {
   AssetLedgerEntry,
   AuthoredStyleLedgerEntry,
   AuthorConfig,
+  AuthorSourceEvidence,
   AuthorOptions,
   BlockRunnerReport,
   ConvertOptions,
@@ -25,7 +26,9 @@ import {
   type PreparedCssAsset,
 } from './assets.js';
 import { writeGeneratedRegisteredBlock } from '../authoring/destination.js';
-import { compileAnalyzedDesign, namespaceAuthoringFontReferences, prepareAuthoringFonts } from './plan.js';
+import { compileAnalyzedDesign, createAnalyzedDesignCoverage, namespaceAuthoringFontReferences, prepareAuthoringFonts, validateCoverageFulfillment } from './plan.js';
+import { compileRegisteredBlock } from '../authoring/generate.js';
+import { validateAuthoringPlan } from '../authoring/schema.js';
 import {
   compileTailwindBuildGraph,
   createSelectorDependencyTransport,
@@ -49,18 +52,19 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const config = await loadConfig(options);
   const definition = mergeAuthorConfig(config.author, options.author);
   const source = { entry: options.sourcePath ?? '<inline>', sha256: createHash('sha256').update(input, 'utf8').digest('hex'), format: 'html' as const };
+  const evidence = collectSourceEvidence(input, source, options.sourcePath);
   const name = definition.name;
   if (!name || !isBlockName(name)) {
-    return authorFailure('author.name must be a registered block name such as "acme/hero"', source);
+    return authorFailure('author.name must be a registered block name such as "acme/hero"', source, evidence);
   }
   const behaviour = unsupportedBehaviour(input);
   if (behaviour) {
-    return authorFailure(behaviour, source);
+    return authorFailure(behaviour, source, evidence);
   }
   if (!definition.styles?.css && linkedStylesheets(input).length > 0) {
     return authorFailure(
-      'external stylesheet input requires compiled CSS in author.styles.css; remote stylesheet fetching and implicit import graphs are disabled',
-      source,
+      'external stylesheet input is evidence only until its compiled CSS is supplied in author.styles.css; remote fetching and implicit import graphs are disabled',
+      source, evidence,
     );
   }
 
@@ -70,18 +74,19 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   if (styleInput.trim() && styleMode !== 'css' && styleMode !== 'tailwind') {
     return authorFailure(
       'author.styles.mode must explicitly be "css" or "tailwind" whenever stylesheet input is supplied',
-      source,
+      source, evidence,
     );
   }
   if (styleMode !== undefined && styleMode !== 'css' && styleMode !== 'tailwind') {
-    return authorFailure('author.styles.mode must be "css" or "tailwind"', source);
+    return authorFailure('author.styles.mode must be "css" or "tailwind"', source, evidence);
   }
   if (styleMode === 'css' && definition.styles?.tailwind) {
-    return authorFailure('author.styles.tailwind requires author.styles.mode to be "tailwind"', source);
+    return authorFailure('author.styles.tailwind requires author.styles.mode to be "tailwind"', source, evidence);
   }
-  if (styleMode === 'css' && (hasTailwindSignal(styleInput) || hasTailwindRuntimeSignal(styleInput))) {
-    return authorFailure('Tailwind source or runtime CSS requires author.styles.mode to be "tailwind"', source);
-  }
+  // Vendor signals are advisory. A caller may intentionally provide already-compiled CSS from a
+  // Tailwind project; without a request to validate its build graph we retain it as CSS instead
+  // of guessing utility semantics or running project configuration.
+  const tailwindSignal = hasTailwindSignal(styleInput) || hasTailwindRuntimeSignal(styleInput);
   let buildGraph = validateCssBuildGraph(definition.styles?.tailwind, {
     css: styleInput,
     tailwindDetected: styleMode === 'tailwind',
@@ -214,7 +219,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     disposition: (declaration) => unsafeResidualDeclaration(declaration.property, declaration.value),
     selectorTransform: selectorTransport.rewrite,
   });
-  const safetyLedger = safetyScopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath));
+  const safetyLedger = safetyScopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(safetyScopedStyles.localRules)));
   const hardSafetyStyleFailure = safetyScopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || safetyScopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
   const fontItems: ReportItem[] = fontWarnings.map(({ warning, scope }) => ({
@@ -237,6 +242,12 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     },
   }));
   const graphItems: ReportItem[] = [
+    ...(styleMode === 'css' && tailwindSignal ? [{
+      block: name,
+      status: 'warning' as const,
+      reason: 'Tailwind-like CSS was treated as supplied compiled CSS; no utility semantics or build configuration were inferred',
+      details: { outcome: 'advisory', field: 'vendor-detection' },
+    }] : []),
     ...(buildGraph.tailwindDetected ? buildGraph.issues : []).map((issue) => ({
       block: name,
       status: 'warning' as const,
@@ -267,6 +278,17 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       })),
   ];
 
+  // Markup assets are source evidence, not a by-product of a successful CSS graph or rules
+  // proposal. Gather them before either optional analysis can stop package generation.
+  const rewrittenMarkup = await rewriteMarkupAssets(input, {
+    sourcePath: options.sourcePath,
+    destinationAssetDir,
+    prepareAsset,
+    fontLicenses,
+    stylesheetAssetsAlreadyAccounted: definition.styles?.css === undefined,
+  });
+  assets = [...assets, ...rewrittenMarkup.assets];
+
   // A missing build input is not a recoverable fidelity loss.  Stop before generating a package
   // that looks successful but contains an incomplete Tailwind transport layer.
   if (buildGraph.blocked) {
@@ -277,6 +299,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length + fontItems.length },
       items: [...fontItems, ...graphItems],
       styleLedger: safetyLedger,
+      assets: assets.length > 0 ? assets : undefined,
+      evidence: { ...evidence, dependencies: [...evidence.dependencies, { kind: 'tailwind-build', reference: 'pinned compiler/build graph' }], coverage: sourceCoverage(safetyLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
     };
   }
   // Scoping deliberately removes selectors/declarations that cannot retain their source meaning.
@@ -290,6 +314,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length + fontItems.length },
       items: [...fontItems, ...graphItems],
       styleLedger: safetyLedger,
+      assets: assets.length > 0 ? assets : undefined,
+      evidence: { ...evidence, coverage: sourceCoverage(safetyLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
     };
   }
   const stylesheet = scanStylesheet(styleInput);
@@ -303,7 +329,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const preflightInlineFailure = nativeSource.inlineLedger.some(
     (entry) => entry.outcome === 'blocked' || entry.outcome === 'warned',
   );
-  if (!nativeSource.conversion.ok || preflightInlineFailure) {
+  if ((!nativeSource.conversion.ok && !options.plan) || preflightInlineFailure) {
     return {
       ...nativeSource.conversion,
       ok: false,
@@ -315,6 +341,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       },
       items: [...nativeSource.conversion.items, ...fontItems, ...graphItems],
       styleLedger: preflightStyleLedger,
+      assets: assets.length > 0 ? assets : undefined,
+      evidence: { ...evidence, coverage: sourceCoverage(preflightStyleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
     };
   }
   const scopedStyles = scopeStylesheet(stylesheet, {
@@ -329,20 +357,9 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
           }
         : undefined),
   });
-  const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath));
+  const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(scopedStyles.localRules)));
   const hardStyleFailure = scopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || scopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
-
-  // Rewrite every concrete source asset before conversion. That makes assets inside Custom HTML
-  // fallbacks just as accountable as assets that happen to map to a native media block.
-  const rewrittenMarkup = await rewriteMarkupAssets(input, {
-    sourcePath: options.sourcePath,
-    destinationAssetDir,
-    prepareAsset,
-    fontLicenses,
-    stylesheetAssetsAlreadyAccounted: definition.styles?.css === undefined,
-  });
-  assets = [...assets, ...rewrittenMarkup.assets];
 
   const inlineStyleLedger: AuthoredStyleLedgerEntry[] = [];
   const conversion = await convert(withAuthorStyles(rewrittenMarkup.input, styleInput), {
@@ -381,7 +398,33 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const hardAssetFailure = assets.some((asset) => asset.outcome === 'unresolved' || asset.outcome === 'blocked');
   let compiled: ReturnType<typeof compileAnalyzedDesign> | undefined;
   const generationItems: ReportItem[] = [];
-  if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && conversion.ok) {
+  if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && options.plan) {
+    try {
+      const supplied = validateAuthoringPlan(options.plan);
+      // Both sides must take the schema's optional-field normalization path. In particular,
+      // source locations legitimately omit path/line data for inline input.
+      const expectedCoverage = validateAuthoringPlan({ ...supplied, coverage: sourceCoverage(
+        styleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings,
+      ) }).coverage!;
+      if (supplied.source?.entry !== source.entry || supplied.source.sha256 !== source.sha256 || supplied.source.format !== 'html') {
+        throw new Error('Supplied authoring plan is not bound to this exact HTML source hash.');
+      }
+      if (supplied.target.name !== name) {
+        throw new Error(`Supplied authoring plan target ${supplied.target.name} does not match requested block ${name}.`);
+      }
+      if (!supplied.coverage || stableJson(supplied.coverage) !== stableJson(expectedCoverage)) {
+        throw new Error('Supplied authoring plan does not retain the complete source declaration and asset coverage.');
+      }
+      validateCoverageFulfillment(supplied);
+      compiled = {
+        plan: supplied,
+        generated: compileRegisteredBlock(supplied),
+        editorStyleLedger: [],
+      } as ReturnType<typeof compileAnalyzedDesign>;
+    } catch (error) {
+      generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+    }
+  } else if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && conversion.ok) {
     try {
       compiled = compileAnalyzedDesign({
         definition,
@@ -433,6 +476,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     assets: assets.length > 0 ? assets : undefined,
     styleLedger: compiled ? [...styleLedger, ...compiled.editorStyleLedger] : styleLedger,
     package: packageSource,
+    evidence: { ...evidence, coverage: sourceCoverage(styleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
   };
 }
 
@@ -506,14 +550,103 @@ async function collectNativeSourceDeclarations(
   };
 }
 
-function authorFailure(reason: string, source?: BlockRunnerReport['source']): BlockRunnerReport {
+function authorFailure(
+  reason: string,
+  source?: BlockRunnerReport['source'],
+  evidence?: AuthorSourceEvidence,
+): BlockRunnerReport {
   return {
     ok: false,
     command: 'author',
     ...(source ? { source } : {}),
+    ...(evidence ? { evidence } : {}),
     summary: { blocks: 0, valid: 0, invalid: 0, warnings: 1 },
     items: [{ block: 'input', status: 'warning', reason }],
   };
+}
+
+/**
+ * Read source facts without applying the rules engine. Locations refer to the original HTML and
+ * unknown elements are intentionally recorded rather than classified as invalid markup.
+ */
+export function collectSourceEvidence(
+  input: string,
+  source: NonNullable<BlockRunnerReport['source']> = {
+    entry: '<inline>', sha256: createHash('sha256').update(input, 'utf8').digest('hex'), format: 'html',
+  },
+  sourcePath?: string,
+): AuthorSourceEvidence {
+  const dom = new JSDOM(input, { contentType: 'text/html', includeNodeLocations: true });
+  const structure = [...dom.window.document.querySelectorAll('*')].map((element) => {
+    const location = dom.nodeLocation(element);
+    return {
+      tag: element.tagName.toLowerCase(),
+      attributes: Object.fromEntries([...element.attributes].map((attribute) => [attribute.name, attribute.value])),
+      source: {
+        path: sourcePath,
+        htmlLine: location?.startLine,
+        htmlColumn: location?.startCol,
+        offset: location?.startOffset,
+      },
+    };
+  });
+  const dependencies = [...dom.window.document.querySelectorAll('link[rel~="stylesheet"]')].map((element) => ({
+    kind: 'stylesheet' as const,
+    reference: element.getAttribute('href') ?? '<missing href>',
+    source: sourceLocation(dom, element, sourcePath),
+  }));
+  const diagnostics: ReportItem[] = [];
+  for (const element of [...dom.window.document.querySelectorAll('script')]) {
+    diagnostics.push({ block: 'input', status: 'warning', reason: 'script behaviour is not authorized in a generated static block', source: sourceLocation(dom, element, sourcePath) });
+  }
+  for (const element of [...dom.window.document.querySelectorAll('*')]) {
+    for (const attribute of [...element.attributes]) {
+      if (/^on[a-z][\w-]*$/i.test(attribute.name)) {
+        diagnostics.push({ block: 'input', status: 'warning', reason: 'event-handler behaviour is not authorized in a generated static block', source: sourceLocation(dom, element, sourcePath) });
+      }
+    }
+  }
+  return { source, structure, dependencies, diagnostics };
+}
+
+function sourceLocation(dom: JSDOM, node: Node, sourcePath?: string) {
+  const location = dom.nodeLocation(node);
+  return { path: sourcePath, htmlLine: location?.startLine, htmlColumn: location?.startCol, offset: location?.startOffset };
+}
+
+function sourceCoverage(
+  styleLedger: readonly AuthoredStyleLedgerEntry[],
+  assets: readonly AssetLedgerEntry[],
+  preparedAssets: readonly PreparedCssAsset[],
+  stylesheet: string | undefined,
+  editorStylesheet: string | undefined,
+  definition: AuthorConfig,
+  options: AuthorOptions,
+  fontWarnings: ReadonlyArray<{ warning: FontAssetWarning; scope: 'shared' | 'editor' }>,
+) {
+  const editor = scopeStylesheet(scanStylesheet(editorStylesheet ?? ''), { root: `.wp-block-${definition.name?.replace('/', '-') ?? 'unknown'}` });
+  const editorStyleLedger = editor.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(editor.localRules)));
+  return createAnalyzedDesignCoverage({
+    definition,
+    source: '',
+    sourcePath: options.sourcePath,
+    styleLedger,
+    assets,
+    preparedAssets,
+    stylesheet,
+    editorStylesheet,
+    editorStyleLedger,
+    fontWarnings,
+  });
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') {
+    return `{${Object.entries(value as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right))
+      .map(([key, entry]) => `${JSON.stringify(key)}:${stableJson(entry)}`).join(',')}}`;
+  }
+  return JSON.stringify(value);
 }
 
 function isBlockName(value: string): boolean {
@@ -1022,7 +1155,9 @@ function toAssetLedgerEntry(asset: {
 
 function toAuthoredStyleLedgerEntry(
   sourcePath: string | undefined,
+  selectors: ReadonlyMap<string, string> = new Map(),
 ): (entry: {
+  ruleId: string;
   property: string;
   value: string;
   outcome: string;
@@ -1038,11 +1173,20 @@ function toAuthoredStyleLedgerEntry(
     atRules: entry.atRules,
     source: {
       path: sourcePath,
+      selector: selectors.get(entry.ruleId),
       offset: entry.source.start.offset,
       htmlLine: entry.source.start.line,
       htmlColumn: entry.source.start.column,
     },
   });
+}
+
+function selectorsByRule(rules: readonly import('./styles.js').CssRule[], output = new Map<string, string>()): Map<string, string> {
+  for (const rule of rules) {
+    if (rule.kind === 'conditional') selectorsByRule(rule.rules, output);
+    else if (rule.kind === 'style') output.set(rule.id, rule.selector);
+  }
+  return output;
 }
 
 function normalizeStyleOutcome(value: string): AuthoredStyleLedgerEntry['outcome'] {

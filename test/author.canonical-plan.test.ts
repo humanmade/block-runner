@@ -8,6 +8,39 @@ import { compileRegisteredBlock } from '../src/authoring/generate.js';
 import { PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
 
 describe('HTML analysis uses the confirmed compiler', () => {
+  it('keeps source evidence available when rules cannot propose a tree, then compiles a bound independent plan', async () => {
+    const markup = '<custom-card data-layout="masonry"><slot>Ignored by rules</slot></custom-card>';
+    const initial = await author(markup, { author: { name: 'example/design' } });
+
+    expect(initial.ok).toBe(false);
+    expect(initial.evidence?.structure).toEqual(expect.arrayContaining([
+      expect.objectContaining({ tag: 'custom-card', attributes: { 'data-layout': 'masonry' }, source: expect.objectContaining({ offset: 0 }) }),
+    ]));
+    expect(initial.evidence?.coverage).toBeDefined();
+
+    const result = await author(markup, {
+      author: { name: 'example/design' },
+      plan: {
+        version: 1, generatorVersion: '0.9.0',
+        target: { name: 'example/design', title: 'Design', wordpress: '7.1' },
+        source: initial.source!, coverage: initial.evidence!.coverage!,
+        structure: [{ id: 'root', block: 'core/group', children: [{ id: 'copy', block: 'core/paragraph', attributes: { content: 'Ignored by rules' } }] }],
+        fields: [], locking: { mode: 'none' }, styles: { strategy: 'native', outcomes: [] },
+        pattern: { ready: false, overrides: [] }, assets: [], files: [], warnings: [],
+      },
+    });
+
+    expect(result.ok, JSON.stringify(result.items)).toBe(true);
+    expect(result.package?.canonicalPlan?.structure[0]?.block).toBe('core/group');
+
+    const erased = await author(markup, {
+      author: { name: 'example/design' },
+      plan: { ...result.package!.canonicalPlan!, coverage: { styles: [], assets: [] } },
+    });
+    expect(erased.ok).toBe(false);
+    expect(erased.items.map((item) => item.reason).join('\n')).toMatch(/complete source declaration and asset coverage/i);
+  });
+
   it('returns exact canonical source with responsive CSS, editor CSS, native fields, and SVG transport', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-html-plan-'));
     await writeFile(path.join(root, 'logo.svg'), PROOF_SVG_SOURCE);
@@ -42,6 +75,26 @@ describe('HTML analysis uses the confirmed compiler', () => {
     expect(result.package!.files['asset-urls.mjs']).toContain('new URL(');
     expect(generated.assets[0]!.content.toString()).toBe(PROOF_SVG_SOURCE);
     expect(await readdir(root)).toEqual(before);
+
+    const supplied = await author('<div class="card"><h2>Heading</h2><img src="logo.svg" alt="A check mark"></div>', {
+      sourcePath: path.join(root, 'design.html'),
+      author: { name: 'example/design', locking: { mode: 'contentOnly' },
+        styles: { mode: 'css', css: '@media (min-width: 48rem) { .card:hover { transform: translateY(-2px); } }',
+          editorCss: '.card:focus-within { outline: 2px solid blue; }' } },
+      plan,
+    });
+    expect(supplied.ok, JSON.stringify(supplied.items)).toBe(true);
+    const missingAsset = structuredClone(plan);
+    missingAsset.assets = [];
+    const rejectedAsset = await author('<div class="card"><h2>Heading</h2><img src="logo.svg" alt="A check mark"></div>', {
+      sourcePath: path.join(root, 'design.html'),
+      author: { name: 'example/design', locking: { mode: 'contentOnly' },
+        styles: { mode: 'css', css: '@media (min-width: 48rem) { .card:hover { transform: translateY(-2px); } }',
+          editorCss: '.card:focus-within { outline: 2px solid blue; }' } },
+      plan: missingAsset,
+    });
+    expect(rejectedAsset.ok).toBe(false);
+    expect(rejectedAsset.items.map((item) => item.reason).join('\n')).toMatch(/matching confirmed plan asset record/i);
   });
 
   it('refuses editor CSS that escapes the component before writing any source', async () => {
@@ -53,5 +106,39 @@ describe('HTML analysis uses the confirmed compiler', () => {
     expect(result.package).toBeUndefined();
     expect(result.items.some((item) => item.reason.includes('Editor-only CSS'))).toBe(true);
     await expect(readFile(path.join(outDir, 'block.json'))).rejects.toMatchObject({ code: 'ENOENT' });
+  });
+
+  it('binds supplied coverage to the requested target and its actual CSS output', async () => {
+    const markup = '<custom-card class="notice">Hello</custom-card>';
+    const options = { author: { name: 'example/design', styles: { mode: 'css' as const, css: '.notice { color: red; }' } } };
+    const analyzed = await author(markup, options);
+    expect(analyzed.ok).toBe(false);
+    const independent = {
+      version: 1 as const, generatorVersion: '0.9.0',
+      target: { name: 'example/design', title: 'Design', wordpress: '7.1' },
+      source: analyzed.source!, coverage: analyzed.evidence!.coverage!,
+      structure: [{ id: 'root', block: 'core/group' }], fields: [], locking: { mode: 'none' as const },
+      styles: { strategy: 'scoped-css' as const, outcomes: [], rules: [{ kind: 'style' as const, selector: '.notice', declarations: [{ property: 'color', value: 'red' }] }] },
+      pattern: { ready: false, overrides: [] }, assets: [], files: [], warnings: [],
+    };
+
+    // The returned inline coverage contains undefined optional location fields before JSON
+    // serialization. A separately validated proposal removes them, but remains equivalent.
+    const accepted = await author(markup, { ...options, plan: independent });
+    expect(accepted.ok, JSON.stringify(accepted.items)).toBe(true);
+    expect(accepted.package?.name).toBe('example/design');
+    expect(accepted.package?.files['style.scss']).toContain('color: red');
+
+    const erasedRule = structuredClone(independent);
+    erasedRule.styles.rules = [];
+    const rejectedCss = await author(markup, { ...options, plan: erasedRule });
+    expect(rejectedCss.ok).toBe(false);
+    expect(rejectedCss.items.map((item) => item.reason).join('\n')).toMatch(/scoped-css.*matching shared structured CSS rule/i);
+
+    const wrongTarget = structuredClone(independent);
+    wrongTarget.target.name = 'other/block';
+    const rejectedTarget = await author(markup, { ...options, plan: wrongTarget });
+    expect(rejectedTarget.ok).toBe(false);
+    expect(rejectedTarget.items.map((item) => item.reason).join('\n')).toMatch(/does not match requested block/i);
   });
 });

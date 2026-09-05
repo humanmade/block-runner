@@ -1,7 +1,7 @@
 export { canonicalize } from './gate/canonicalize.js';
 export { validate } from './gate/validate.js';
 export { convert } from './convert/assemble.js';
-export { author } from './author/index.js';
+export { author, collectSourceEvidence } from './author/index.js';
 export {
   compileTailwindBuildGraph,
   hasTailwindSignal,
@@ -197,6 +197,8 @@ export type {
   AuthoredStyleLedgerEntry,
   AuthoredStyleOutcome,
   AuthorConfig,
+  AuthorSourceElement,
+  AuthorSourceEvidence,
   AuthorOptions,
   AuthorStyleConfig,
   BlockRunnerConfig,
