@@ -1,4 +1,6 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -16,10 +18,12 @@ import {
 const scratch: string[] = [];
 
 afterEach(async () => {
+  // Preserve generated scratch files recoverably; never recursively delete a directory.
   const directories = scratch.splice(0);
-  // These paths are created by mkdtemp for this test process only. Remove them so repeated
-  // runs do not fill the shared temporary volume or depend on a platform Trash implementation.
-  await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })));
+  // CI containers dispose of their temporary filesystem outside the test process.
+  if (process.platform === 'darwin') {
+    await Promise.all(directories.map((directory) => promisify(execFile)('trash', [directory])));
+  }
 });
 
 describe('registered-block stylesheet graph', () => {

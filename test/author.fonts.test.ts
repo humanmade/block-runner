@@ -1,5 +1,7 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { promisify } from 'node:util';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, describe, expect, it } from 'vitest';
@@ -25,7 +27,9 @@ const scratch: string[] = [];
 
 afterEach(async () => {
   const directories = scratch.splice(0);
-  await Promise.all(directories.map((directory) => rm(directory, { recursive: true, force: true })));
+  if (process.platform === 'darwin') {
+    await Promise.all(directories.map((directory) => promisify(execFile)('trash', [directory])));
+  }
 });
 
 async function fixture(extension = '.woff2', bytes = Buffer.from(`${extension === '.woff2' ? 'wOF2' : 'wOFF'}font-fixture`)) {
