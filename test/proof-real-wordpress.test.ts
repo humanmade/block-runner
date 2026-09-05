@@ -136,7 +136,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
         longContentObserved: true,
         emptyContentObserved: true,
         alteredImageObserved: true,
-        directNativeChildren: expect.arrayContaining(['core/heading', 'core/image']),
+        directNativeChildren: built.fixture.browserMatrix?.directNativeChildren,
       },
       isolation: { ok: true, rootCount: 2 },
       keyboard: { undoRestored: true, scope: 'editor-canvas' },
@@ -181,10 +181,31 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     expect(matrix).toMatchObject({
       iframe: { observed: true },
       rootLayout: 'flex',
-      beforeAfter: { ok: true, directNativeChildren: expect.arrayContaining(['core/heading', 'core/image']) },
+      beforeAfter: { ok: true, directNativeChildren: built.fixture.browserMatrix?.directNativeChildren },
       isolation: { ok: true, rootCount: 2 },
     });
   }, 480_000);
+
+  it('proves root-owned grid and flex native sibling layouts in the WordPress iframe', async () => {
+    for (const rootLayout of ['grid', 'flex'] as const) {
+      const outputDir = await proofOutputDirectory('root-owned-' + rootLayout);
+      const built = await buildPatternOverridesFixture(outputDir, { rootLayout, rootOwned: true });
+      const result = await runProof({
+        profile: 'editor', pluginZip: built.pluginZip, inputPath: built.inputPath,
+        markup: built.nativeContainerMarkup, fixture: built.fixture, outputDir,
+      });
+      const matrix = (result.receipt.gates.find((gate) => gate.gate === 'editor_reopen')?.details as {
+        browserMatrix?: { iframe?: { observed?: boolean }; rootLayout?: string; beforeAfter?: { ok?: boolean; directNativeChildren?: string[] } };
+      } | undefined)?.browserMatrix;
+      expect(result.profile.ok).toBe(true);
+      expect(built.fixture.browserMatrix?.directNativeChildren).toEqual(expect.arrayContaining(['core/heading', 'core/image']));
+      expect(matrix).toMatchObject({
+        iframe: { observed: true },
+        rootLayout,
+        beforeAfter: { ok: true, directNativeChildren: built.fixture.browserMatrix?.directNativeChildren },
+      });
+    }
+  }, 960_000);
 });
 
 function controlEvidenceFromEnvironment(): ReleaseAcceptanceOptions {

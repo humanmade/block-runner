@@ -93,6 +93,8 @@ export interface ProofEditableField {
 export interface ProofBrowserMatrix {
   /** The computed display mode which must belong to the generated root. */
   rootLayout: 'grid' | 'flex';
+  /** Exact native blocks emitted as children of the generated root. */
+  directNativeChildren: readonly string[];
   /** The block-owned family declared by the shared stylesheet. */
   fontFamily: string;
   /** Text written to and then removed from the native heading in the iframe. */

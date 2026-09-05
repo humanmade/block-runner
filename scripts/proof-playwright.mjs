@@ -689,7 +689,7 @@ async function editorRootSnapshot(page, fixture, clientId, matrix) {
   const root = editorCanvas.locator(`[data-block=${JSON.stringify(clientId)}]`);
   await root.waitFor({ state: 'visible' });
   const rootClass = `wp-block-${fixture.blockName.replace('/', '-')}`;
-  return root.evaluate(async (element, { expectedLayout, fontFamily, pluginSlug, rootClass: expectedClass }) => {
+  return root.evaluate(async (element, { expectedLayout, expectedDirectNativeChildren, fontFamily, pluginSlug, rootClass: expectedClass }) => {
     await document.fonts?.ready;
     await document.fonts?.load(`16px "${fontFamily}"`);
     const stylesheets = [...document.styleSheets].map((sheet) => {
@@ -714,7 +714,7 @@ async function editorRootSnapshot(page, fixture, clientId, matrix) {
       scope: window.frameElement?.getAttribute('name') ?? null,
       outerHTML: element.outerHTML,
       text: element.textContent ?? '',
-      headingContent: globalThis.wp?.data?.select('core/block-editor')?.getBlock?.(heading?.getAttribute('data-block'))?.attributes?.content ?? null,
+      headingContent: heading?.textContent?.replace(/\uFEFF/g, '') ?? null,
       display: style.display,
       gridTemplateColumns: style.gridTemplateColumns,
       flexDirection: style.flexDirection,
@@ -732,12 +732,12 @@ async function editorRootSnapshot(page, fixture, clientId, matrix) {
     };
     snapshot.ok = snapshot.scope === 'editor-canvas'
       && snapshot.display === expectedLayout
-      && snapshot.directNativeChildren.length > 0
+      && JSON.stringify(snapshot.directNativeChildren) === JSON.stringify(expectedDirectNativeChildren)
       && !snapshot.hasInnerBlocksWrapper
       && snapshot.sharedStyles
       && snapshot.fontLoaded;
     return snapshot;
-  }, { expectedLayout: matrix.rootLayout, fontFamily: matrix.fontFamily, pluginSlug: fixture.pluginSlug ?? fixture.blockName.split('/').slice(1).join('-'), rootClass });
+  }, { expectedLayout: matrix.rootLayout, expectedDirectNativeChildren: matrix.directNativeChildren, fontFamily: matrix.fontFamily, pluginSlug: fixture.pluginSlug ?? fixture.blockName.split('/').slice(1).join('-'), rootClass });
 }
 
 async function editorInstanceIsolationSnapshot(page, fixture, clientIds, matrix) {

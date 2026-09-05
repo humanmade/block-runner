@@ -51,11 +51,12 @@ export type RootLayoutReproduction = 'grid' | 'flex';
 
 export interface PatternOverridesFixtureOptions {
   /**
-   * Both values compile to the generated wrapper's root, not to a nested Core
-   * group. They are intentionally minimal so before/after layout evidence is
-   * attributable to the useInnerBlocksProps root change.
+   * Both values set the layout on the generated wrapper root. With rootOwned, the
+   * fixture also flattens its semantic group so native siblings exercise that layout.
    */
   rootLayout?: RootLayoutReproduction;
+  /** Flatten the fixture into direct native root children for the layout regression matrix. */
+  rootOwned?: boolean;
 }
 
 /**
@@ -94,10 +95,12 @@ export async function buildPatternOverridesFixture(
 ): Promise<BuiltPatternOverridesFixture> {
   const root = path.resolve(outputDir);
   const rootLayout = options.rootLayout ?? 'grid';
+  const rootOwned = options.rootOwned ?? false;
   const inputPath = path.join(root, 'pattern-overrides.plan.json');
   const pluginDirectory = path.join(root, pluginSlug);
   const pluginZip = path.join(pluginDirectory, `${pluginSlug}.zip`);
   const plan = JSON.parse(await readFile(planPath, 'utf8')) as AuthoringPlan;
+  const layoutPlan = rootOwned ? rootOwnedLayoutPlan(plan) : plan;
   const sourceImage = path.join(root, 'source', 'canonical.png');
   const imageBytes = Buffer.from(PROOF_IMAGE_BASE64, 'base64');
   await mkdir(path.dirname(sourceImage), { recursive: true });
@@ -121,12 +124,12 @@ export async function buildPatternOverridesFixture(
     } }];
   // The retained plan stays portable; the compiler receives resolved files for its asset reads.
   const portablePlan = portableFixturePlan({
-    ...plan,
+    ...layoutPlan,
     assets: assetPlan,
     styles: {
-      ...plan.styles,
+      ...layoutPlan.styles,
       outcomes: [
-        ...plan.styles.outcomes,
+        ...layoutPlan.styles.outcomes,
         { property: 'display', outcome: 'scoped-css', value: rootLayout },
         ...(rootLayout === 'grid'
           ? [{ property: 'grid-template-columns', outcome: 'scoped-css' as const, value: 'minmax(0, 1fr)' }]
@@ -140,6 +143,7 @@ export async function buildPatternOverridesFixture(
     assets: portablePlan.assets.map((asset) => ({ ...asset, source: path.resolve(root, asset.source) })),
   };
   const compiled = compileRegisteredBlock(compilerPlan);
+  const directNativeChildren = compiled.template.map(([name]) => name);
   const contract = validatePatternOverrideContract(compiled.template, []);
   const errors = contract.errors;
   if (errors.length > 0) throw new Error(`The generated pattern fixture plan is invalid: ${errors.join('; ')}`);
@@ -187,10 +191,10 @@ export async function buildPatternOverridesFixture(
     ...(children ? [runtimeTemplate(children)] : []),
   ] as AuthoringTemplate[number]);
   const nativeContainerMarkup = await serializeNativeTemplate(runtimeTemplate(compiled.template));
-  assertBackgroundClass(nativeContainerMarkup, 'initial');
+  if (!rootOwned) assertBackgroundClass(nativeContainerMarkup, 'initial');
   const generatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, nativeContainerMarkup);
   const updatedNativeMarkup = await serializeNativeTemplate(runtimeTemplate(updated.template));
-  assertBackgroundClass(updatedNativeMarkup, 'updated');
+  if (!rootOwned) assertBackgroundClass(updatedNativeMarkup, 'updated');
   const updatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, updatedNativeMarkup);
 
   const fixture = proofFixture({
@@ -200,6 +204,7 @@ export async function buildPatternOverridesFixture(
     requiredBindings: contract.bindings.map(({ name, attribute }) => ({ name, attribute })),
     visualGoldenPath,
     rootLayout,
+    directNativeChildren,
     fontFamily,
   });
   await Promise.all([
@@ -294,6 +299,7 @@ function proofFixture({
   requiredBindings,
   visualGoldenPath,
   rootLayout,
+  directNativeChildren,
   fontFamily,
 }: {
   plan: AuthoringPlan;
@@ -302,6 +308,7 @@ function proofFixture({
   requiredBindings: ProofPatternRequiredBinding[];
   visualGoldenPath: string;
   rootLayout: RootLayoutReproduction;
+  directNativeChildren: readonly string[];
   fontFamily: string;
 }): ProofFixture {
   const nameFor = (pathName: string, attribute: string): string => {
@@ -324,6 +331,7 @@ function proofFixture({
     editableFields: [{ path: 'hero.title', metadataName: title, surface: 'richText', value: 'Proof editor field' }],
     browserMatrix: {
       rootLayout,
+      directNativeChildren,
       fontFamily,
       longContent: 'A deliberately long native heading proves that the generated root remains the layout owner while the editor canvas wraps at narrow widths without creating an InnerBlocks intermediary.',
       image: { width: '240px', height: '60px' },
@@ -389,13 +397,19 @@ function proofFixture({
   };
 }
 
+function rootOwnedLayoutPlan(plan: AuthoringPlan): AuthoringPlan {
+  const layout = plan.structure.find((node) => node.id === 'hero.layout');
+  if (!layout?.children?.length) throw new Error('The root-owned fixture requires the checked-in layout container children.');
+  return { ...plan, structure: structuredClone(layout.children) };
+}
+
 function canonicalUpdatePlan(plan: AuthoringPlan): AuthoringPlan {
   const updated = JSON.parse(JSON.stringify(plan)) as AuthoringPlan;
-  const layout = updated.structure[0];
-  if (!layout) throw new Error('The generated fixture has no native layout container.');
-  layout.attributes = { ...layout.attributes, className: 'block-runner-pattern-layout block-runner-layout-v2' };
-  const title = layout.children?.find((child) => child.id === 'hero.title');
-  const note = layout.children?.find((child) => child.id === 'hero.layout-note');
+  const layout = updated.structure.find((node) => node.id === 'hero.layout');
+  if (layout) layout.attributes = { ...layout.attributes, className: 'block-runner-pattern-layout block-runner-layout-v2' };
+  const children = layout?.children ?? updated.structure;
+  const title = children.find((child) => child.id === 'hero.title');
+  const note = children.find((child) => child.id === 'hero.layout-note');
   if (!title || !note) throw new Error('The generated fixture is missing its title or layout marker.');
   title.attributes = { ...title.attributes, content: 'Canonical fallback after reset' };
   note.attributes = { ...note.attributes, content: 'Canonical layout version two.' };
