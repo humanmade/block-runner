@@ -44,6 +44,7 @@ export const {
   canonicalizeAuthoringPlan,
   classifyCssUrlReference,
   collectSiteContext,
+  collectSourceEvidence,
   compileAuthoringBlock,
   compileAuthoringPlan,
   compileRegisteredBlock,
