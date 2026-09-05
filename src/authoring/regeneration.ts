@@ -30,11 +30,16 @@ export async function classifyRegisteredBlockRegeneration(
   const outputs = [...generated.files, ...generated.assets];
   const target = (file: { path: string }) => path.resolve(inspection.directory, ...file.path.split('/'));
   const knownExisting = outputs.some((file) => existing.has(target(file)));
-  if (!knownExisting) return impact('new-package', [], 'No existing compiler-owned package was observed.', 'Review the create operations before writing.', true);
-
   const changedFiles = outputs.filter((file) => existing.get(target(file)) !== file.hash).map((file) => file.path).sort();
+  const metadataCompatible = !changedFiles.includes('block.json') || await hasOnlyDescriptiveMetadataChange(inspection, generated);
+  return classifyRegenerationChanges(knownExisting, changedFiles, metadataCompatible);
+}
+
+/** Shared policy for direct source and plugin publication, using their sealed byte snapshots. */
+export function classifyRegenerationChanges(knownExisting: boolean, changedFiles: string[], metadataCompatible: boolean): RegenerationImpact {
+  if (!knownExisting) return impact('new-package', [], 'No existing compiler-owned package was observed.', 'Review the create operations before writing.', true);
   if (changedFiles.length === 0) return impact('unchanged', changedFiles, 'Existing source and saved content remain unchanged.', 'No write is needed.', false);
-  const structuralMetadata = changedFiles.includes('block.json') && !await hasOnlyDescriptiveMetadataChange(inspection, generated);
+  const structuralMetadata = changedFiles.includes('block.json') && !metadataCompatible;
   if ((changedFiles.every((file) => STYLE_FILES.has(file)) || changedFiles.every((file) => STYLE_FILES.has(file) || file === 'block.json')) && !structuralMetadata) {
     return impact('style-only', changedFiles, 'Existing saved block markup is unchanged. Styles or referenced assets can still change the rendered appearance where this package is built and deployed.', 'Review the explicit replacements. This source change does not claim a sitewide pattern update.', true);
   }
@@ -60,8 +65,16 @@ async function hasOnlyDescriptiveMetadataChange(inspection: DestinationInspectio
   try {
     const bytes = await readFile(existing.path);
     if (createHash('sha256').update(bytes).digest('hex') !== existing.identity.sha256) return false;
-    const before = JSON.parse(bytes.toString('utf8')) as Record<string, unknown>;
-    const after = JSON.parse(next.content) as Record<string, unknown>;
+    return descriptiveMetadataOnly(bytes.toString('utf8'), next.content);
+  } catch {
+    return false;
+  }
+}
+
+export function descriptiveMetadataOnly(previous: string, next: string): boolean {
+  try {
+    const before = JSON.parse(previous) as Record<string, unknown>;
+    const after = JSON.parse(next) as Record<string, unknown>;
     const descriptive = new Set(['title', 'description', 'category', 'icon', 'keywords']);
     const canonical = (value: unknown): string => JSON.stringify(value, (_key, item) => item && typeof item === 'object' && !Array.isArray(item)
       ? Object.fromEntries(Object.entries(item as Record<string, unknown>).sort(([left], [right]) => left.localeCompare(right)))

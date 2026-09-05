@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -7,6 +7,7 @@ import { inspectAuthoringDestination, writeGeneratedRegisteredBlock } from '../s
 import { compileRegisteredBlock, type GeneratedRegisteredBlock } from '../src/authoring/generate.js';
 import { classifyRegisteredBlockRegeneration } from '../src/authoring/regeneration.js';
 import { validateAuthoringPlan } from '../src/authoring/schema.js';
+import { planExistingPluginOutput, planStandalonePluginOutput, writePluginOutput } from '../src/plugin/profile.js';
 
 function generated(): GeneratedRegisteredBlock {
   return compileRegisteredBlock(validateAuthoringPlan({
@@ -51,6 +52,31 @@ function changed(source: GeneratedRegisteredBlock, file: string, content: string
 }
 
 describe('registered block regeneration', () => {
+  it.each(['standalone', 'existing'] as const)('enforces saved-content compatibility through %s plugin delivery', async (mode) => {
+    const output = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-regeneration-'));
+    const first = compiledDefault('Version one', 'create');
+    const packageOf = (value: GeneratedRegisteredBlock) => ({ name: 'example/default-notice',
+      files: Object.fromEntries(value.files.map((file) => [file.path, file.content])) });
+    await writePluginOutput(await planStandalonePluginOutput(output, packageOf(first)));
+    const makePlan = mode === 'standalone' ? planStandalonePluginOutput : planExistingPluginOutput;
+    const identical = await makePlan(output, packageOf(first));
+    expect(identical.regeneration?.kind).toBe('unchanged');
+    expect((await writePluginOutput(identical)).written).toEqual([]);
+    const metadata = JSON.parse(first.files.find((file) => file.path === 'block.json')!.content);
+    metadata.attributes = { value: { type: 'string', source: 'html', selector: 'p' } };
+    const breaking = await makePlan(output, packageOf(changed(first, 'block.json', JSON.stringify(metadata))));
+    expect(breaking.regeneration).toMatchObject({ kind: 'saved-markup-or-structure', writeAllowed: false });
+    const before = await readFile(path.join(breaking.block.directory, 'block.json'));
+    await expect(writePluginOutput(breaking, { authorizedReplacements: breaking.touchedFiles.map((file) => file.path) }))
+      .rejects.toThrow(/saved-markup or structure changed; no files written/);
+    expect(await readFile(path.join(breaking.block.directory, 'block.json'))).toEqual(before);
+
+    const compatible = await makePlan(output, packageOf(compiledDefault('Version two', 'replace')));
+    expect(compatible.regeneration).toMatchObject({ kind: 'content-defaults', writeAllowed: true });
+    await expect(writePluginOutput(compatible)).rejects.toThrow(/Separate explicit authorization/);
+    await writePluginOutput(compatible, { authorizedReplacements: compatible.touchedFiles.map((file) => file.path) });
+    expect(await readFile(path.join(compatible.block.directory, 'edit.js'), 'utf8')).toContain('Version two');
+  });
   it('classifies an exact package as a no-op and a style replacement without claiming a site migration', async () => {
     const output = await mkdtemp(path.join(tmpdir(), 'block-runner-regeneration-'));
     const first = generated();
