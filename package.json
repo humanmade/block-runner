@@ -79,6 +79,7 @@
     "pack:check": "npm pack --dry-run --ignore-scripts",
     "check:node-support": "node scripts/check-node-support.mjs",
     "smoke:package": "node scripts/smoke-packed-cli.mjs",
+    "smoke:package:unsupported-node": "node scripts/smoke-packed-cli-unsupported-node.mjs",
     "check:private": "node scripts/check-private-refs.mjs",
     "release:check": "node scripts/release-check.mjs",
     "verify": "npm run check:node-support && npm run typecheck && node --import tsx scripts/authoring-hashes.ts --check && npm test && npm run build && npm run check:private && npm run pack:check",

@@ -30,10 +30,6 @@ import { hashAuthoringConfirmation, inspectAuthoringDestination, writeGeneratedR
 import { materializeAuthoringPlan, planRegisteredBlockOutput } from './authoring/generate.js';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
 import { renderAuthoringPreview } from './authoring/preview.js';
-import { assertSupportedNodeVersion } from './node-support.js';
-
-assertSupportedNodeVersion();
-
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };

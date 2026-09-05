@@ -7,6 +7,6 @@ export default defineConfig({
   sourcemap: false,
   // The build script first moves the previous dist to Trash; tsup must not delete it.
   clean: false,
-  splitting: false,
+  splitting: true,
   target: 'node20',
 });

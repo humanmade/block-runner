@@ -1,7 +1,3 @@
-import { assertSupportedNodeVersion } from './node-support.js';
-
-assertSupportedNodeVersion();
-
 export { canonicalize } from './gate/canonicalize.js';
 export { validate } from './gate/validate.js';
 export { convert } from './convert/assemble.js';

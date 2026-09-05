@@ -30,6 +30,9 @@ jobs:
         run: npm run verify
       - name: Smoke the packed CLI in a clean engine-strict consumer
         run: npm run smoke:package
+      - name: Reject unsupported Node before packed CLI dependencies load
+        if: matrix.node == '20.19.0'
+        run: npm run smoke:package:unsupported-node
 
   wordpress-proof:
     runs-on: ubuntu-latest
