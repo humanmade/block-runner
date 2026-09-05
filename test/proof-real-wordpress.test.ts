@@ -29,10 +29,13 @@ const execFileAsync = promisify(execFile);
  * are explicit prerequisites, not optional evidence inputs.
  */
 describe('real WordPress generated-pattern full-profile receipt', () => {
+  let scopedFixture: Awaited<ReturnType<typeof buildPatternOverridesFixture>>;
+  let historicalGates: Awaited<ReturnType<typeof runProof>>['receipt']['gates'];
   it('writes a complete raw WordPress 7.1 receipt with the retained root-grid iframe matrix and a separate acceptance assessment', async () => {
     await requireDocker();
     const outputDir = await proofOutputDirectory();
     const built = await buildPatternOverridesFixture(outputDir);
+    scopedFixture = built;
 
     expect(existsSync(built.pluginZip)).toBe(true);
     expect(built.nativeContainerMarkup).toContain('has-background');
@@ -49,6 +52,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       artifact: built.artifact,
       outputDir,
     });
+    historicalGates = result.receipt.gates;
 
     // Keep the raw receipt and the acceptance decision side by side. The
     // latter may be blocked: this test proves that the result is reported
@@ -155,6 +159,25 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     expect(retainedMediaTypes(result.receipt.gates.find((gate) => gate.gate === 'frontend_assets'))).toContain('image/png');
     await expect(readFile(path.join(outputDir, result.receiptReference.path), 'utf8'))
       .resolves.toBe(canonicalJson(result.receipt));
+  }, 480_000);
+
+  it.each(['editor-verified', 'fidelity-checked', 'pattern-verified'] as const)('executes %s through the real runner and browser', async (profile) => {
+    expect(scopedFixture).toBeDefined();
+    const built = scopedFixture;
+    const outputDir = await proofOutputDirectory(profile);
+    const result = await runProof({ profile, pluginZip: built.pluginZip, artifact: built.artifact,
+      inputPath: built.inputPath, markup: built.nativeContainerMarkup, fixture: built.fixture, outputDir });
+    expect(result.receipt.requirements?.missingInputs).toEqual([]);
+    // Preserve upstream findings, not an artificial all-pass expectation. Every requested gate
+    // must execute just as it did for the same artifact under the historical full profile.
+    for (const record of result.receipt.gates) {
+      expect(record.status, `${profile}: ${record.gate}: ${record.reason}`).toBe(
+        historicalGates.find((original) => original.gate === record.gate)?.status);
+    }
+    expect(result.receipt.gates.find((record) => record.gate === 'pattern_overrides')?.details).toMatchObject({
+      canonicalWpBlockContent: expect.stringContaining(`<!-- wp:${built.fixture.blockName}`),
+      reopenedCoreBlockContent: expect.any(Array), resetCoreBlockContent: expect.any(Array),
+    });
   }, 480_000);
 
   it('retains the minimal root-flex iframe reproduction at desktop and narrow widths', async () => {

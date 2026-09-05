@@ -409,7 +409,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   // Resolve the declared claim before any adapter or Docker work begins. This is
   // retained even for blocked runs so a missing fixture cannot masquerade as N/A.
   const requirements = reportProofRequirements(profile, options.artifact, environment.plugin.zip?.sha256, options.fixture);
-  const runtime = createRuntime(options, environment, wpEnvConfig, evidence);
+  const runtime = createRuntime(options, environment, wpEnvConfig, evidence, requirements.requiredGates);
   // A supplied gate adapter owns its own proof environment. Otherwise report
   // an unavailable package before any profile's runtime gate can reach Docker.
   const unavailable = options.gateRunner ? [] : unavailableProofTooling(profile);
@@ -517,7 +517,7 @@ export function reportProofRequirements(
   if (requiredGates.includes('pattern_overrides')) {
     const pattern = fixture?.patternOverrides;
     if (!fixture?.blockName || !pattern?.title || !pattern.canonicalContent || pattern.instances?.length !== 2
-      || !pattern.canonicalUpdate?.content || !pattern.reset || pattern.requiredBindings.length === 0
+      || !pattern.canonicalUpdate?.content || !pattern.reset || !Array.isArray(pattern.requiredBindings) || pattern.requiredBindings.length === 0
       || !pattern.negative?.value || !pattern.negative.fallback || !pattern.structuralPolicy || !Array.isArray(pattern.requiredBindings)) {
       missingInputs.push('Pattern verification requires the complete two-instance lifecycle fixture.');
     } else {
@@ -638,7 +638,7 @@ function missingProofConfiguration(context: ProofGateContext): string | undefine
       }
     }
     if (!fixture?.blockName || !pattern?.title || !pattern.canonicalContent || pattern.instances?.length !== 2
-      || !pattern.canonicalUpdate?.content || !pattern.reset || pattern.requiredBindings.length === 0
+      || !pattern.canonicalUpdate?.content || !pattern.reset || !Array.isArray(pattern.requiredBindings) || pattern.requiredBindings.length === 0
       || !pattern.negative?.value || !pattern.negative.fallback || !pattern.structuralPolicy || !Array.isArray(pattern.requiredBindings)) {
       return 'Pattern proof requires canonical wp_block content, exactly two instances, reset/canonical-update assertions, required bindings, a structural policy, and a saved negative binding exercise.';
     }
@@ -793,6 +793,7 @@ function createRuntime(
   environment: ProofEnvironment,
   wpEnvConfig: string,
   evidence: EvidenceStore,
+  requiredGates: readonly ProofGateId[],
 ): { run: (context: ProofGateContext) => Promise<ProofGateResult>; stop: () => Promise<void> } {
   let environmentStarted = false;
   let staticPluginDeactivated = false;
@@ -901,7 +902,7 @@ function createRuntime(
     const config = path.join(work, 'proof.json');
     const report = path.join(work, 'result.json');
     try {
-      if (mode === 'active' && options.profile === 'full' && options.fixture.patternOverrides) {
+      if (mode === 'active' && requiredGates.includes('pattern_overrides') && options.fixture.patternOverrides) {
         const prepared = await prepareSyncedPattern();
         if (!prepared) {
           browserResults = Object.fromEntries(browserGateIds.map((gate) => [gate, {
@@ -932,7 +933,7 @@ function createRuntime(
               : undefined,
           }
         : options.fixture;
-      await writeFile(config, JSON.stringify({ fixture, profile: options.profile, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
+      await writeFile(config, JSON.stringify({ fixture, profile: options.profile, requiredGates, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
       const result = await command(process.execPath, [playwrightHelper, '--config', config, '--out', report], {
         cwd: projectRoot,
         timeoutMs: PROOF_COMMAND_TIMEOUTS.browser,

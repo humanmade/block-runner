@@ -45,6 +45,16 @@ describe('WordPress proof profiles', () => {
 
 describe('capability-aware proof requirements', () => {
   const hash = (value: string): `sha256:${string}` => `sha256:${createHash('sha256').update(value).digest('hex')}`;
+  it.each([undefined, null, {}, 'bindings'])('reports invalid requiredBindings %j without short-circuit masking', (requiredBindings) => {
+    const fixture = { blockName: 'acme/proof', editableFields: [{ path: 'copy', surface: 'richText' }],
+      patternOverrides: { title: 'Pattern', canonicalContent: 'canonical', instances: [{}, {}],
+        canonicalUpdate: { content: 'updated' }, reset: { instance: 0 }, requiredBindings,
+        negative: { value: 'wrong', fallback: 'right' }, structuralPolicy: 'contentOnly' } };
+    const result = reportProofRequirements('pattern-verified',
+      { sha256: hash('plugin'), capabilities: { patternOverrides: true } }, hash('plugin'),
+      fixture as unknown as Parameters<typeof reportProofRequirements>[3]);
+    expect(result.missingInputs).toContain('Pattern verification requires the complete two-instance lifecycle fixture.');
+  });
 
   it('derives editor and fidelity claims from a ZIP-bound non-pattern artifact without inventing pattern proof', () => {
     const report = reportProofRequirements(
