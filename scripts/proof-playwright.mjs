@@ -521,7 +521,7 @@ async function proveEditorRootLayoutMatrix(page, fixture, artifactDir) {
       throw new Error(`Expected one generated root with a native heading and image before the matrix, found ${handles.roots.length}.`);
     }
 
-    const keyboard = await exerciseEditorKeyboard(editorCanvas, handles.heading.clientId);
+    const keyboard = await exerciseEditorKeyboard(page, handles.heading.clientId);
     const keyboardPath = path.join(artifactDir, `editor-root-${matrix.rootLayout}-keyboard.png`);
     const keyboardReportPath = path.join(artifactDir, `editor-root-${matrix.rootLayout}-keyboard.json`);
     await editorCanvas.locator(`[data-block=${JSON.stringify(handles.root.clientId)}]`).screenshot({ path: keyboardPath, animations: 'disabled' });
@@ -665,8 +665,12 @@ async function waitForNativeAttributes(page, clientId, expected) {
   }, { id: clientId, values: expected });
 }
 
-async function exerciseEditorKeyboard(canvas, headingId) {
-  const heading = canvas.locator(`[data-block=${JSON.stringify(headingId)}] [contenteditable="true"]`).first();
+async function exerciseEditorKeyboard(page, headingId) {
+  // WordPress can defer mounting a native RichText surface until its block is
+  // selected after reopening a post. Select the exact heading from the active
+  // editor canvas before treating its contenteditable element as ready.
+  await selectNativeBlock(page, headingId);
+  const heading = editorCanvas.locator(`[data-block=${JSON.stringify(headingId)}] [contenteditable="true"]`).first();
   await heading.waitFor({ state: 'visible' });
   const original = (await heading.textContent()) ?? '';
   await heading.click();
