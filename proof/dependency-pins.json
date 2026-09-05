@@ -1,0 +1,26 @@
+{
+  "schemaVersion": 1,
+  "source": "package-lock.json",
+  "packages": {
+    "node_modules/@wordpress/block-editor": {
+      "version": "17.0.0",
+      "integrity": "sha512-RGWvjWLwIKMKEgLt6kZseC+oEO7oNnDFMzfZ56eGuQKZCKM88x5F7jaEly6YWqj8XtonXEz1ihfxL5JrPeSFNg=="
+    },
+    "node_modules/@wordpress/block-library": {
+      "version": "10.5.0",
+      "integrity": "sha512-+zpSxYNHitzBboMdziL/lS9oc1r0VaEiz1EPZCYWqJk6iRINNGYuv0FKCgO87dmeL/rQ2dBvuVsTzpcFERb/Lg=="
+    },
+    "node_modules/@wordpress/blocks": {
+      "version": "15.27.0",
+      "integrity": "sha512-HW8SJBMF2HhZn8/9XKxu37Rspm3Oqb5odGHnpcc29jZKbYRzH/7AhEUYAdjuUedVwXB2UvzaybDMFFOZ6lN4FA=="
+    },
+    "node_modules/@wordpress/e2e-test-utils-playwright": {
+      "version": "1.51.0",
+      "integrity": "sha512-ekxMfC8MUTf0fKjAQd2IO4m/l1jXC9NznveRf7r8ntmx9nXqd9IHOiYJcH2SBo20C53nWdA4w8+Mbqedf0qzEw=="
+    },
+    "node_modules/@wordpress/env": {
+      "version": "11.12.0",
+      "integrity": "sha512-P1mYGEgnkYCbBPRaT9uAyxe3hFfsfkvxXKQ+Pfb00z/mXz5xbPC48ZdXTQmxTcpaj0nDwJfrBz0vzc074B5nrA=="
+    }
+  }
+}
