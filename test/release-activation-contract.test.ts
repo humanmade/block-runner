@@ -193,8 +193,8 @@ describe('release installed skill verification', () => {
   const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
   const digest = (bytes: string | Buffer) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
   function fixture() {
-    const original = 'npx block-runner@latest assemble; npx block-runner@latest skill';
-    const installed = 'npx block-runner@0.9.0 assemble; npx block-runner@latest skill';
+    const original = 'npx block-runner@testing author preview; npx block-runner@testing skill';
+    const installed = 'npx block-runner@0.9.0 author preview; npx block-runner@testing skill';
     const files: Record<string, string> = {
       '/pkg/package.json': JSON.stringify({ version: '0.9.0' }),
       '/pkg/skills/block-runner/SKILL.md': original,

@@ -91,6 +91,49 @@ describe('authoring preview', () => {
     }
   });
 
+  it('leads with a compact review summary while retaining every approval detail before the hash', () => {
+    const reviewed = validateAuthoringPlan({
+      ...plan,
+      styles: {
+        ...plan.styles,
+        outcomes: [...plan.styles.outcomes, { property: 'filter', outcome: 'dropped', reason: 'Unsupported.' }],
+      },
+      coverage: {
+        ...plan.coverage!,
+        styles: [...plan.coverage!.styles,
+          { property: 'display', value: 'grid', outcome: 'scoped-css', scope: 'shared', atRules: [] },
+          { property: 'outline', value: '2px solid blue', outcome: 'scoped-css', scope: 'editor', atRules: [] },
+          { property: 'position', value: 'fixed', outcome: 'blocked', scope: 'shared', atRules: [] },
+        ],
+        assets: [...plan.coverage!.assets, {
+          reference: 'remote.png', kind: 'image', outcome: 'unresolved', reason: 'No approved asset.',
+        }],
+      },
+    });
+    const confirmation = 'e'.repeat(64);
+    const output = renderAuthoringPreview(reviewed, {
+      width: 160,
+      destination: '/work/generated/feature-grid',
+      touchedFiles: [
+        { path: '/work/generated/feature-grid/block.json', operation: 'create', exists: false },
+        { path: '/work/generated/feature-grid/edit.js', operation: 'replace', exists: true },
+      ],
+      confirmationHash: confirmation,
+    });
+
+    expect(output).toContain('Review summary');
+    expect(output).toContain('Editing: 1 fixed, 1 editable, 1 override fields.');
+    expect(output).toContain('Unresolved decisions and losses: 3 style or asset issues; 1 warning.');
+    expect(output).toContain('Asset ownership: 1 package-owned, 0 external, 0 licensed bundled fonts.');
+    expect(output).toContain('Style ownership: 1 native-owned, 1 package-owned shared, 1 editor-only.');
+    expect(output).toContain('/work/generated/feature-grid/block.json [create; path currently absent]');
+    expect(output).toContain('/work/generated/feature-grid/edit.js [replace; existing file; explicit hash-bound replacement approval required]');
+    expect(output).toContain(`Confirmation SHA-256: ${confirmation}`);
+    expect(output.indexOf('Review summary')).toBeLessThan(output.indexOf('Structure'));
+    expect(output.indexOf('Structure')).toBeLessThan(output.indexOf('Warnings'));
+    expect(output.indexOf('Warnings')).toBeLessThan(output.indexOf(`Confirmation SHA-256: ${confirmation}`));
+  });
+
   it('shows the asset binding and license record for a confirmed font face', () => {
     const fontPlan = validateAuthoringPlan({
       ...plan,

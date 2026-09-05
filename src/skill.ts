@@ -264,7 +264,7 @@ function pinPackageVersion(file: BundleFile, packageVersion: string): Buffer {
   }
   return Buffer.from(
     file.content.toString('utf8').replace(
-      /block-runner@latest(?!\s+skill\b)/g,
+      /block-runner@(?:latest|testing)(?!\s+skill\b)/g,
       `block-runner@${packageVersion}`,
     ),
   );

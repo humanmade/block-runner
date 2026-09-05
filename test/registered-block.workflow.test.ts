@@ -54,6 +54,13 @@ describe('registered-block workflow', () => {
       '--approve-replace', replacement!, '--json',
     ], root);
     expect(pluginWrite.code).toBe(0);
+    expect(JSON.parse(pluginWrite.stdout)).toMatchObject({
+      delivery: {
+        status: 'source-delivered',
+        buildRuntimeProof: 'not-run',
+        nextCommand: expect.stringContaining('npm run build'),
+      },
+    });
     await expect(readFile(path.join(host, 'src', 'blocks', 'feature-grid', 'index.js'), 'utf8')).resolves.toContain('registerBlockType');
 
     const markup = path.join(root, 'feature-grid.blocks.html');
