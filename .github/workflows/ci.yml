@@ -27,6 +27,20 @@ jobs:
       - name: Verify
         run: npm run verify
 
+  package-boundary:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci
+      - run: npm run build
+      - name: Verify basic and proof-enabled packed consumers
+        run: npm run test:package
+
   wordpress-proof:
     runs-on: ubuntu-latest
     timeout-minutes: 20

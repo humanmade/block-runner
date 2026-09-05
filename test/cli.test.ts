@@ -321,8 +321,10 @@ describe('CLI', () => {
 
     // relaxed (the default) keeps the off-system value; strict drops it. If the flag were not
     // forwarded, both runs would produce identical output.
-    const relaxed = await runCli(['convert', '-', '--config', configPath, '--json'], html);
-    const strict = await runCli(['convert', '-', '--config', configPath, '--styling', 'strict', '--json'], html);
+    const [relaxed, strict] = await Promise.all([
+      runCli(['convert', '-', '--config', configPath, '--json'], html),
+      runCli(['convert', '-', '--config', configPath, '--styling', 'strict', '--json'], html),
+    ]);
 
     const relaxedReport = JSON.parse(relaxed.stdout) as { output: string };
     const strictReport = JSON.parse(strict.stdout) as { output: string };

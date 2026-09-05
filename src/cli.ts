@@ -418,7 +418,7 @@ program
       console.log(`proof ${result.profile.profile}: ${result.ok ? 'pass' : 'fail'}`);
       console.log(`receipt: ${result.receiptReference.path} (${result.receiptReference.sha256})`);
       for (const failed of result.profile.failedGates) {
-        console.log(`- ${failed.gate}: ${failed.status}`);
+        console.log(`- ${failed.gate}: ${failed.status}${failed.record?.reason ? ` — ${failed.record.reason}` : ''}`);
       }
     }
     process.exitCode = result.ok ? 0 : 1;
