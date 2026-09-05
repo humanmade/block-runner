@@ -29,7 +29,7 @@ const execFileAsync = promisify(execFile);
  * are explicit prerequisites, not optional evidence inputs.
  */
 describe('real WordPress generated-pattern full-profile receipt', () => {
-  it('writes a complete raw WordPress 7.1 receipt and a separate acceptance assessment', async () => {
+  it('writes a complete raw WordPress 7.1 receipt with the retained root-grid iframe matrix and a separate acceptance assessment', async () => {
     await requireDocker();
     const outputDir = await proofOutputDirectory();
     const built = await buildPatternOverridesFixture(outputDir);
@@ -111,9 +111,101 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     expect(lifecycle?.edited?.every((instance) => instance.ok === true && instance.scope?.outsideUnchanged === true)).toBe(true);
     expect(lifecycle?.preSaveCoreBlockContent?.[0]?.content)
       .not.toEqual(lifecycle?.preSaveCoreBlockContent?.[1]?.content);
+
+    const editorReopen = result.receipt.gates.find((gate) => gate.gate === 'editor_reopen');
+    const gridMatrix = (editorReopen?.details as {
+      browserMatrix?: {
+        iframe?: { observed?: boolean };
+        rootLayout?: string;
+        beforeAfter?: {
+          ok?: boolean;
+          longContentObserved?: boolean;
+          emptyContentObserved?: boolean;
+          alteredImageObserved?: boolean;
+          directNativeChildren?: string[];
+        };
+        isolation?: { ok?: boolean; rootCount?: number };
+        keyboard?: { undoRestored?: boolean; scope?: string };
+      };
+    } | undefined)?.browserMatrix;
+    expect(gridMatrix).toMatchObject({
+      iframe: { observed: true },
+      rootLayout: 'grid',
+      beforeAfter: {
+        ok: true,
+        longContentObserved: true,
+        emptyContentObserved: true,
+        alteredImageObserved: true,
+        directNativeChildren: built.fixture.browserMatrix?.directNativeChildren,
+      },
+      isolation: { ok: true, rootCount: 2 },
+      keyboard: { undoRestored: true, scope: 'editor-canvas' },
+    });
+    expect(retainedMediaTypes(editorReopen).filter((mediaType) => mediaType === 'image/png').length).toBeGreaterThanOrEqual(4);
+    expect(retainedMediaTypes(editorReopen)).toContain('application/json');
+    // Keyboard and automated accessibility evidence are retained by separate
+    // gates/artifacts rather than being inferred from one generic screenshot.
+    expect(retainedMediaTypes(result.receipt.gates.find((gate) => gate.gate === 'accessibility_editor'))).toContain('application/json');
+    expect(retainedMediaTypes(result.receipt.gates.find((gate) => gate.gate === 'accessibility_frontend'))).toContain('application/json');
+    const frontendMatrix = (result.receipt.gates.find((gate) => gate.gate === 'frontend_assets')?.details as {
+      browserMatrix?: { display?: string; fontLoaded?: boolean; sharedStyles?: boolean };
+    } | undefined)?.browserMatrix;
+    expect(frontendMatrix).toMatchObject({ display: 'grid', fontLoaded: true, sharedStyles: true });
+    expect(retainedMediaTypes(result.receipt.gates.find((gate) => gate.gate === 'frontend_assets'))).toContain('image/png');
     await expect(readFile(path.join(outputDir, result.receiptReference.path), 'utf8'))
       .resolves.toBe(canonicalJson(result.receipt));
   }, 480_000);
+
+  it('retains the minimal root-flex iframe reproduction at desktop and narrow widths', async () => {
+    await requireDocker();
+    const outputDir = await proofOutputDirectory('root-flex');
+    const built = await buildPatternOverridesFixture(outputDir, { rootLayout: 'flex' });
+    const result = await runProof({
+      profile: 'editor',
+      pluginZip: built.pluginZip,
+      inputPath: built.inputPath,
+      markup: built.nativeContainerMarkup,
+      fixture: built.fixture,
+      outputDir,
+    });
+    const matrix = (result.receipt.gates.find((gate) => gate.gate === 'editor_reopen')?.details as {
+      browserMatrix?: {
+        iframe?: { observed?: boolean };
+        rootLayout?: string;
+        beforeAfter?: { ok?: boolean; directNativeChildren?: string[] };
+        isolation?: { ok?: boolean; rootCount?: number };
+      };
+    } | undefined)?.browserMatrix;
+
+    expect(result.profile.ok).toBe(true);
+    expect(matrix).toMatchObject({
+      iframe: { observed: true },
+      rootLayout: 'flex',
+      beforeAfter: { ok: true, directNativeChildren: built.fixture.browserMatrix?.directNativeChildren },
+      isolation: { ok: true, rootCount: 2 },
+    });
+  }, 480_000);
+
+  it('proves root-owned grid and flex native sibling layouts in the WordPress iframe', async () => {
+    for (const rootLayout of ['grid', 'flex'] as const) {
+      const outputDir = await proofOutputDirectory('root-owned-' + rootLayout);
+      const built = await buildPatternOverridesFixture(outputDir, { rootLayout, rootOwned: true });
+      const result = await runProof({
+        profile: 'editor', pluginZip: built.pluginZip, inputPath: built.inputPath,
+        markup: built.nativeContainerMarkup, fixture: built.fixture, outputDir,
+      });
+      const matrix = (result.receipt.gates.find((gate) => gate.gate === 'editor_reopen')?.details as {
+        browserMatrix?: { iframe?: { observed?: boolean }; rootLayout?: string; beforeAfter?: { ok?: boolean; directNativeChildren?: string[] } };
+      } | undefined)?.browserMatrix;
+      expect(result.profile.ok).toBe(true);
+      expect(built.fixture.browserMatrix?.directNativeChildren).toEqual(expect.arrayContaining(['core/heading', 'core/image']));
+      expect(matrix).toMatchObject({
+        iframe: { observed: true },
+        rootLayout,
+        beforeAfter: { ok: true, directNativeChildren: built.fixture.browserMatrix?.directNativeChildren },
+      });
+    }
+  }, 960_000);
 });
 
 function controlEvidenceFromEnvironment(): ReleaseAcceptanceOptions {
@@ -121,6 +213,12 @@ function controlEvidenceFromEnvironment(): ReleaseAcceptanceOptions {
     nativeHeadingControlEvidence: headingControlEvidenceFromEnvironment(),
     nativeParagraphControlEvidence: paragraphControlEvidenceFromEnvironment(),
   };
+}
+
+function retainedMediaTypes(gate: { evidence?: unknown } | undefined): string[] {
+  if (!Array.isArray(gate?.evidence)) return [];
+  return gate.evidence.flatMap((value) => value && typeof value === 'object' && 'mediaType' in value
+    && typeof value.mediaType === 'string' ? [value.mediaType] : []);
 }
 
 function headingControlEvidenceFromEnvironment(): NativeHeadingControlEvidence | undefined {
@@ -156,10 +254,10 @@ function paragraphControlEvidenceFromEnvironment(): NativeParagraphControlEviden
  * evidence object can be uploaded after this test. Local runs remain isolated
  * in a temporary directory.
  */
-async function proofOutputDirectory(): Promise<string> {
+async function proofOutputDirectory(suffix?: string): Promise<string> {
   const configured = process.env.BLOCK_RUNNER_PROOF_OUTPUT_DIR;
   if (!configured) return mkdtemp(path.join(tmpdir(), 'block-runner-real-proof-'));
-  const outputDir = path.resolve(configured);
+  const outputDir = path.resolve(configured, suffix ?? '.');
   await mkdir(outputDir, { recursive: true });
   return outputDir;
 }

@@ -24,7 +24,7 @@ describe('canonical agent skill', () => {
     expect(skill.startsWith('---\n')).toBe(true);
     expect(skill).toContain('name: block-runner');
     expect(skill).toContain('license: GPL-2.0-or-later');
-    expect(skill).toContain('compatibility: Requires Node.js 20+');
+    expect(skill).toContain('compatibility: Requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0');
     expect(skill).toContain('references/GUIDE.md');
     expect(await readCanonicalSkillGuide()).toContain('# Block Runner — agent guide');
   });

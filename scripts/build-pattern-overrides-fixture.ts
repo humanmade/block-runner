@@ -11,7 +11,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { promisify } from 'node:util';
-import { compileRegisteredBlock } from '../src/authoring/generate.js';
+import { compileRegisteredBlock, registeredBlockFontFamilyPrefix } from '../src/authoring/generate.js';
 import { patternOverrideName } from '../src/authoring/overrides.js';
 import {
   npmEnvironmentForGeneratedPlugin,
@@ -44,7 +44,20 @@ export function fixtureVisualGoldenPath(platform: string = process.platform): st
 const RETAINED_FIXTURE_ASSET_SOURCES = new Map([
   ['canonical-image', 'source/canonical.png'],
   ['static-logo', 'source/logo.svg'],
+  ['proof-font', 'source/proof-font.woff2'],
 ]);
+
+export type RootLayoutReproduction = 'grid' | 'flex';
+
+export interface PatternOverridesFixtureOptions {
+  /**
+   * Both values set the layout on the generated wrapper root. With rootOwned, the
+   * fixture also flattens its semantic group so native siblings exercise that layout.
+   */
+  rootLayout?: RootLayoutReproduction;
+  /** Flatten the fixture into direct native root children for the layout regression matrix. */
+  rootOwned?: boolean;
+}
 
 /**
  * Keep the checked-in proof input independent of the temporary directory used to build it.
@@ -76,12 +89,18 @@ export interface BuiltPatternOverridesFixture {
  * The plugin, native serialization, canonical wp_block values, and runtime
  * visual-baseline location all derive from the checked-in authoring plan.
  */
-export async function buildPatternOverridesFixture(outputDir: string): Promise<BuiltPatternOverridesFixture> {
+export async function buildPatternOverridesFixture(
+  outputDir: string,
+  options: PatternOverridesFixtureOptions = {},
+): Promise<BuiltPatternOverridesFixture> {
   const root = path.resolve(outputDir);
+  const rootLayout = options.rootLayout ?? 'grid';
+  const rootOwned = options.rootOwned ?? false;
   const inputPath = path.join(root, 'pattern-overrides.plan.json');
   const pluginDirectory = path.join(root, pluginSlug);
   const pluginZip = path.join(pluginDirectory, `${pluginSlug}.zip`);
   const plan = JSON.parse(await readFile(planPath, 'utf8')) as AuthoringPlan;
+  const layoutPlan = rootOwned ? rootOwnedLayoutPlan(plan) : plan;
   const sourceImage = path.join(root, 'source', 'canonical.png');
   const imageBytes = Buffer.from(PROOF_IMAGE_BASE64, 'base64');
   await mkdir(path.dirname(sourceImage), { recursive: true });
@@ -89,17 +108,42 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
   const sourceSvg = path.join(root, 'source', 'logo.svg');
   const svgBytes = Buffer.from(PROOF_SVG_SOURCE);
   await writeFile(sourceSvg, svgBytes);
+  const sourceFont = path.join(root, 'source', 'proof-font.woff2');
+  const fontBytes = await readFile(path.join(projectRoot, 'test', 'fixtures', 'fonts', 'IBMPlexMono-Regular.woff2'));
+  await writeFile(sourceFont, fontBytes);
+  const fontFamily = `${registeredBlockFontFamilyPrefix(plan.target.name)}proof`;
   const assetPlan: AuthoringPlan['assets'] = [{ id: 'canonical-image', source: 'source/canonical.png', status: 'ready', destination: 'assets/canonical.png',
     sha256: createHash('sha256').update(imageBytes).digest('hex'), uses: [{ node: 'hero.image', attribute: 'url' }] },
   { id: 'static-logo', source: 'source/logo.svg', status: 'ready', destination: 'assets/logo.svg',
-    sha256: createHash('sha256').update(svgBytes).digest('hex'), uses: [{ node: 'hero.logo', attribute: 'url' }] }];
+    sha256: createHash('sha256').update(svgBytes).digest('hex'), uses: [{ node: 'hero.logo', attribute: 'url' }] },
+  { id: 'proof-font', source: 'source/proof-font.woff2', kind: 'font', status: 'ready', destination: 'assets/proof-font.woff2',
+    sha256: createHash('sha256').update(fontBytes).digest('hex'), fontLicense: {
+      ownership: 'Block Runner test fixture',
+      license: 'SIL Open Font License 1.1',
+      notice: 'IBM Plex Mono fixture font used only to observe shared font loading.',
+    } }];
   // The retained plan stays portable; the compiler receives resolved files for its asset reads.
-  const portablePlan = portableFixturePlan({ ...plan, assets: assetPlan });
+  const portablePlan = portableFixturePlan({
+    ...layoutPlan,
+    assets: assetPlan,
+    styles: {
+      ...layoutPlan.styles,
+      outcomes: [
+        ...layoutPlan.styles.outcomes,
+        { property: 'display', outcome: 'scoped-css', value: rootLayout },
+        ...(rootLayout === 'grid'
+          ? [{ property: 'grid-template-columns', outcome: 'scoped-css' as const, value: 'minmax(0, 1fr)' }]
+          : [{ property: 'flex-direction', outcome: 'scoped-css' as const, value: 'column' }]),
+      ],
+      fonts: [{ assetId: 'proof-font', family: fontFamily, fontDisplay: 'block' }],
+    },
+  });
   const compilerPlan: AuthoringPlan = {
     ...portablePlan,
     assets: portablePlan.assets.map((asset) => ({ ...asset, source: path.resolve(root, asset.source) })),
   };
   const compiled = compileRegisteredBlock(compilerPlan);
+  const directNativeChildren = compiled.template.map(([name]) => name);
   const contract = validatePatternOverrideContract(compiled.template, []);
   const errors = contract.errors;
   if (errors.length > 0) throw new Error(`The generated pattern fixture plan is invalid: ${errors.join('; ')}`);
@@ -147,10 +191,10 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
     ...(children ? [runtimeTemplate(children)] : []),
   ] as AuthoringTemplate[number]);
   const nativeContainerMarkup = await serializeNativeTemplate(runtimeTemplate(compiled.template));
-  assertBackgroundClass(nativeContainerMarkup, 'initial');
+  if (!rootOwned) assertBackgroundClass(nativeContainerMarkup, 'initial');
   const generatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, nativeContainerMarkup);
   const updatedNativeMarkup = await serializeNativeTemplate(runtimeTemplate(updated.template));
-  assertBackgroundClass(updatedNativeMarkup, 'updated');
+  if (!rootOwned) assertBackgroundClass(updatedNativeMarkup, 'updated');
   const updatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, updatedNativeMarkup);
 
   const fixture = proofFixture({
@@ -159,6 +203,9 @@ export async function buildPatternOverridesFixture(outputDir: string): Promise<B
     canonicalUpdateContent: updatedBlockMarkup,
     requiredBindings: contract.bindings.map(({ name, attribute }) => ({ name, attribute })),
     visualGoldenPath,
+    rootLayout,
+    directNativeChildren,
+    fontFamily,
   });
   await Promise.all([
     writeFixed(path.join(root, 'proof-pattern-overrides.fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`),
@@ -251,12 +298,18 @@ function proofFixture({
   canonicalUpdateContent,
   requiredBindings,
   visualGoldenPath,
+  rootLayout,
+  directNativeChildren,
+  fontFamily,
 }: {
   plan: AuthoringPlan;
   canonicalContent: string;
   canonicalUpdateContent: string;
   requiredBindings: ProofPatternRequiredBinding[];
   visualGoldenPath: string;
+  rootLayout: RootLayoutReproduction;
+  directNativeChildren: readonly string[];
+  fontFamily: string;
 }): ProofFixture {
   const nameFor = (pathName: string, attribute: string): string => {
     const field = plan.fields.find((candidate) => candidate.node === pathName && candidate.attribute === attribute);
@@ -276,6 +329,15 @@ function proofFixture({
     // This separate insertion proves the generated wrapper itself exposes a
     // native editor surface before its exact markup becomes a synced pattern.
     editableFields: [{ path: 'hero.title', metadataName: title, surface: 'richText', value: 'Proof editor field' }],
+    browserMatrix: {
+      rootLayout,
+      directNativeChildren,
+      fontFamily,
+      longContent: 'A deliberately long native heading proves that the generated root remains the layout owner while the editor canvas wraps at narrow widths without creating an InnerBlocks intermediary.',
+      image: { width: '240px', height: '60px' },
+      desktopViewport: { width: 1280, height: 900 },
+      narrowViewport: { width: 390, height: 844 },
+    },
     patternOverrides: {
       title: 'Block Runner generated pattern overrides lifecycle',
       canonicalContent,
@@ -335,13 +397,19 @@ function proofFixture({
   };
 }
 
+function rootOwnedLayoutPlan(plan: AuthoringPlan): AuthoringPlan {
+  const layout = plan.structure.find((node) => node.id === 'hero.layout');
+  if (!layout?.children?.length) throw new Error('The root-owned fixture requires the checked-in layout container children.');
+  return { ...plan, structure: structuredClone(layout.children) };
+}
+
 function canonicalUpdatePlan(plan: AuthoringPlan): AuthoringPlan {
   const updated = JSON.parse(JSON.stringify(plan)) as AuthoringPlan;
-  const layout = updated.structure[0];
-  if (!layout) throw new Error('The generated fixture has no native layout container.');
-  layout.attributes = { ...layout.attributes, className: 'block-runner-pattern-layout block-runner-layout-v2' };
-  const title = layout.children?.find((child) => child.id === 'hero.title');
-  const note = layout.children?.find((child) => child.id === 'hero.layout-note');
+  const layout = updated.structure.find((node) => node.id === 'hero.layout');
+  if (layout) layout.attributes = { ...layout.attributes, className: 'block-runner-pattern-layout block-runner-layout-v2' };
+  const children = layout?.children ?? updated.structure;
+  const title = children.find((child) => child.id === 'hero.title');
+  const note = children.find((child) => child.id === 'hero.layout-note');
   if (!title || !note) throw new Error('The generated fixture is missing its title or layout marker.');
   title.attributes = { ...title.attributes, content: 'Canonical fallback after reset' };
   note.attributes = { ...note.attributes, content: 'Canonical layout version two.' };
