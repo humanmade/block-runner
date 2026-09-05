@@ -670,7 +670,7 @@ async function exerciseEditorKeyboard(page, headingId) {
   // selected after reopening a post. Select the exact heading from the active
   // editor canvas before treating its contenteditable element as ready.
   await selectNativeBlock(page, headingId);
-  const heading = editorCanvas.locator(`[data-block=${JSON.stringify(headingId)}] [contenteditable="true"]`).first();
+  const heading = editorCanvas.locator(`[data-block=${JSON.stringify(headingId)}][contenteditable="true"], [data-block=${JSON.stringify(headingId)}] [contenteditable="true"]`).first();
   await heading.waitFor({ state: 'visible' });
   const original = (await heading.textContent()) ?? '';
   await heading.click();
