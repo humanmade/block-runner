@@ -144,8 +144,9 @@ has to be right:
   `has-background-dim`, `wp-image-1234`). Miss one and it breaks or renders wrong.
 - **Images need a real attachment ID**, not just a URL, so you also have to resolve and import
   media into the library and thread the id through the markup.
-- **Colors, spacing, and fonts have to map to your theme presets** (`var:preset|spacing|40`,
-  `has-accent-color`), not raw hex and pixels, or the result is off-brand or rejected outright.
+- **Colors, spacing, and fonts can map to your theme presets** (`var:preset|spacing|40`,
+  `has-accent-color`) only when the captured theme category and literal value match; otherwise
+  the reviewed literal or scoped CSS remains explicit.
 - **Blocks carry deprecations.** Markup that validated against last year's `save()` may not
   validate against this year's.
 - **Anything it can't place collapses into one frozen "Custom HTML" blob**, and the structure,
@@ -635,6 +636,11 @@ deterministic `.wp-block-<namespace>-<slug>` class. Responsive, container-query,
 rules retain their conditions. Preflight/global rules, escaping selectors, imports, and keyframes
 are ledgered and blocked rather than silently scoped. Confirmed local static assets are copied
 into `assets/` and rewritten; remote image URLs remain external by default.
+
+Authoring records the target theme snapshot hash, configured WordPress viewport ranges, unresolved
+custom variables, and reset assumptions in the hash-bound plan preview. It never edits `theme.json`.
+Without that target context it explicitly limits its fidelity claim; conditional source CSS remains
+scoped rather than being mechanically renamed as a responsive native state.
 
 Local WOFF/WOFF2 fonts require an explicit source, SHA-256, ownership, and license decision.
 Approved font families get block-specific names and shared editor/frontend CSS. Full redistribution

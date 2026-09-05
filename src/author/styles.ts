@@ -582,7 +582,7 @@ export interface ScopeStylesheetOptions {
    * Called only for a safe, local style rule. Returning native/preset/literal leaves that
    * declaration out of parity CSS; returning nothing keeps it as scoped CSS.
    */
-  disposition?: (declaration: CssDeclaration, rule: CssStyleRule) => DeclarationDisposition | undefined;
+  disposition?: (declaration: CssDeclaration, rule: CssStyleRule, context: { conditional: boolean }) => DeclarationDisposition | undefined;
   /** Rewrite source selector atoms before the root prefix is applied. */
   selectorTransform?: (selector: string, rule: CssStyleRule) => string;
 }
@@ -626,7 +626,7 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
     });
   };
 
-  const scopeRule = (rule: CssRule): CssRule | undefined => {
+  const scopeRule = (rule: CssRule, conditional = false): CssRule | undefined => {
     if (rootProblem) {
       blockRule(rule, rootProblem);
       return undefined;
@@ -638,7 +638,7 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
     }
 
     if (rule.kind === 'conditional') {
-      const children = rule.rules.map(scopeRule).filter((child): child is CssRule => Boolean(child));
+      const children = rule.rules.map((child) => scopeRule(child, true)).filter((child): child is CssRule => Boolean(child));
       const record = recordsByRule.get(rule.id);
       if (children.length === 0) {
         if (record) {
@@ -674,7 +674,11 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
     const declarations: CssDeclaration[] = [];
     for (const declaration of rule.declarations) {
       const entry = ledgerByDeclaration.get(declaration.id);
-      const disposition = options.disposition?.(declaration, rule) ?? { outcome: 'scoped-css' as const };
+      // A native block style is unconditional. Preserve media/support/container semantics as
+      // exact scoped CSS until a dedicated, equivalent target responsive state is modelled.
+      const disposition = conditional
+        ? { outcome: 'scoped-css' as const }
+        : options.disposition?.(declaration, rule, { conditional }) ?? { outcome: 'scoped-css' as const };
       if (!entry) {
         continue;
       }
@@ -705,7 +709,7 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
     return { ...rule, selector: scoped.selector, declarations };
   };
 
-  const rules = stylesheet.rules.map(scopeRule).filter((rule): rule is CssRule => Boolean(rule));
+  const rules = stylesheet.rules.map((rule) => scopeRule(rule)).filter((rule): rule is CssRule => Boolean(rule));
   const localRule = (rule: CssRule): CssRule => rule.kind === 'style'
     ? { ...rule, selector: localSelectors.get(rule.id)! }
     : { ...rule, rules: rule.rules.map(localRule) };

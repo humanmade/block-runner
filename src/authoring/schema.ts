@@ -72,10 +72,20 @@ export interface AuthoringCoverage {
   stylesheet?: { entry: string; sha256: string };
   /** Explicit editor-only stylesheet bytes scanned by the authoring pass. */
   editorStylesheet?: { entry: string; sha256: string };
+  /** Destination style inputs actually consulted while deciding ownership. */
+  styleContext?: AuthoringStyleContext;
   /** One entry per source declaration observed by the authoring pass. */
   styles: AuthoringCoverageStyle[];
   /** One entry per concrete asset reference observed by the authoring pass. */
   assets: AuthoringCoverageAsset[];
+}
+
+/** A hash-bound description of the target style environment, never a request to edit it. */
+export interface AuthoringStyleContext {
+  theme?: { slug?: string; version?: string; settingsSha256?: string };
+  viewports?: Partial<Record<'mobile' | 'tablet', { min?: string; max?: string }>>;
+  unresolvedVariables?: string[];
+  limitations?: string[];
 }
 
 /**
@@ -437,7 +447,7 @@ function normalizeSource(input: unknown, location: string): AuthoringSource {
 
 function normalizeCoverage(input: unknown, location: string): AuthoringCoverage {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['stylesheet', 'editorStylesheet', 'styles', 'assets']);
+  knownKeys(value, location, ['stylesheet', 'editorStylesheet', 'styleContext', 'styles', 'assets']);
   const styles = arrayAt(value.styles ?? [], `${location}.styles`).map((entry, index) =>
     normalizeCoverageStyle(entry, `${location}.styles[${index}]`),
   );
@@ -449,9 +459,41 @@ function normalizeCoverage(input: unknown, location: string): AuthoringCoverage 
     ...(value.editorStylesheet === undefined
       ? {}
       : { editorStylesheet: normalizeStylesheetFingerprint(value.editorStylesheet, `${location}.editorStylesheet`) }),
+    ...(value.styleContext === undefined ? {} : { styleContext: normalizeStyleContext(value.styleContext, `${location}.styleContext`) }),
     styles,
     assets,
   };
+}
+
+function normalizeStyleContext(input: unknown, location: string): AuthoringStyleContext {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['theme', 'viewports', 'unresolvedVariables', 'limitations']);
+  const theme = value.theme === undefined ? undefined : (() => {
+    const item = objectAt(value.theme, `${location}.theme`);
+    knownKeys(item, `${location}.theme`, ['slug', 'version', 'settingsSha256']);
+    const settingsSha256 = optionalString(item.settingsSha256, `${location}.theme.settingsSha256`);
+    if (settingsSha256 !== undefined && !/^[a-f0-9]{64}$/.test(settingsSha256)) throw invalid(`${location}.theme.settingsSha256`, 'must be a lower-case SHA-256 hexadecimal digest');
+    return withOptional({ slug: optionalString(item.slug, `${location}.theme.slug`), version: optionalString(item.version, `${location}.theme.version`), settingsSha256 });
+  })();
+  const viewports = value.viewports === undefined ? undefined : (() => {
+    const item = objectAt(value.viewports, `${location}.viewports`);
+    knownKeys(item, `${location}.viewports`, ['mobile', 'tablet']);
+    const range = (name: 'mobile' | 'tablet') => item[name] === undefined ? undefined : (() => {
+      const entry = objectAt(item[name], `${location}.viewports.${name}`);
+      knownKeys(entry, `${location}.viewports.${name}`, ['min', 'max']);
+      const min = optionalString(entry.min, `${location}.viewports.${name}.min`);
+      const max = optionalString(entry.max, `${location}.viewports.${name}.max`);
+      if (min === undefined && max === undefined) throw invalid(`${location}.viewports.${name}`, 'needs min or max');
+      return withOptional({ min, max });
+    })();
+    return withOptional({ mobile: range('mobile'), tablet: range('tablet') });
+  })();
+  return withOptional({
+    theme,
+    viewports,
+    unresolvedVariables: value.unresolvedVariables === undefined ? undefined : arrayAt(value.unresolvedVariables, `${location}.unresolvedVariables`).map((entry, index) => nonEmptyString(entry, `${location}.unresolvedVariables[${index}]`)),
+    limitations: value.limitations === undefined ? undefined : arrayAt(value.limitations, `${location}.limitations`).map((entry, index) => nonEmptyString(entry, `${location}.limitations[${index}]`)),
+  });
 }
 
 function normalizeStylesheetFingerprint(input: unknown, location: string): { entry: string; sha256: string } {

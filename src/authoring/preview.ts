@@ -155,6 +155,10 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     addKeyValue(lines, 'Effective stylesheet SHA-256', stylesheet.sha256, width);
     const editorStylesheet = asRecord(coverage.editorStylesheet);
     addKeyValue(lines, 'Editor stylesheet SHA-256', editorStylesheet.sha256, width);
+    const styleContext = asRecord(coverage.styleContext);
+    if (Object.keys(styleContext).length) {
+      bullet(lines, `Style context: ${describeStyleContext(styleContext)}`, width);
+    }
   }
 
   section(lines, 'Pattern readiness', width);
@@ -213,6 +217,20 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   bullet(lines, 'No files written.', width);
 
   return `${lines.join('\n')}\n`;
+}
+
+function describeStyleContext(context: RecordValue): string {
+  const theme = asRecord(context.theme);
+  const viewports = asRecord(context.viewports);
+  const unresolved = asArray(context.unresolvedVariables).map(plain);
+  const limitations = asArray(context.limitations).map(plain);
+  const parts = [
+    Object.keys(theme).length ? `theme ${readString(theme, ['slug']) ?? '<unnamed>'}${readString(theme, ['version']) ? ` ${readString(theme, ['version'])}` : ''}` : 'theme context unavailable',
+    Object.keys(viewports).length ? `viewports ${stableJson(viewports)}` : 'viewport context unavailable',
+    unresolved.length ? `unresolved variables ${unresolved.join(', ')}` : '',
+    ...limitations.map((item) => `limit: ${item}`),
+  ].filter(Boolean);
+  return parts.join('; ');
 }
 
 /** Alias kept concise for programmatic consumers. */
