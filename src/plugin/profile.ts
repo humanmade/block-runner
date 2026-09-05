@@ -509,6 +509,7 @@ export async function planStandalonePluginOutput(
       `Standalone plugin target: ${root}`,
       `Block source target: ${sourceDirectory}`,
       `Build target after npm run build: ${buildDirectory}`,
+      `Complete dependency lock: ${STANDALONE_LOCK_TEMPLATE_VERSION}.`,
       `The release ZIP is ${pluginSlug}.zip and is checked by npm run test:zip.`,
       `ZIP policy excludes source, dependencies, VCS files, local environment files, logs, and nested archives.`,
     ],
@@ -1722,23 +1723,33 @@ function standalonePackageJson(pluginSlug: string): string {
 }
 
 function standalonePackageLock(pluginSlug: string): string {
-  // This seed is replaced with npm's complete dependency tree by writePluginOutput before the
-  // generated project is returned. Keeping it in the preview exposes every file up front.
-  return `${JSON.stringify({
-    name: pluginSlug,
-    version: '0.1.0',
-    lockfileVersion: 3,
-    requires: true,
-    packages: {
-      '': {
-        name: pluginSlug,
-        version: '0.1.0',
-        license: 'GPL-2.0-or-later',
-        engines: { node: '>=20' },
-        devDependencies: { '@wordpress/scripts': STANDALONE_WP_SCRIPTS_VERSION },
-      },
-    },
-  }, null, 2)}\n`;
+  const lock = structuredClone(standalonePackageLockTemplate) as StandalonePackageLock;
+  const rootPackage = lock.packages[''];
+  const wpScripts = lock.packages['node_modules/@wordpress/scripts'];
+  if (
+    lock.lockfileVersion !== 3
+    || !rootPackage
+    || rootPackage.devDependencies?.['@wordpress/scripts'] !== STANDALONE_WP_SCRIPTS_VERSION
+    || wpScripts?.version !== STANDALONE_WP_SCRIPTS_VERSION
+    || Object.keys(lock.packages).length !== STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT
+  ) {
+    throw new Error(`Standalone lock template ${STANDALONE_LOCK_TEMPLATE_VERSION} is incomplete or does not pin @wordpress/scripts ${STANDALONE_WP_SCRIPTS_VERSION}.`);
+  }
+  // The template dependency graph is immutable. A generated plugin only owns the project name
+  // in npm's two root-package locations; both are included in the reviewed file bytes.
+  lock.name = pluginSlug;
+  rootPackage.name = pluginSlug;
+  return `${JSON.stringify(lock, null, 2)}\n`;
+}
+
+interface StandalonePackageLock {
+  name: string;
+  lockfileVersion: number;
+  packages: Record<string, {
+    name?: string;
+    version?: string;
+    devDependencies?: Record<string, string>;
+  }>;
 }
 
 function standaloneBootstrap(input: { pluginSlug: string; displayName: string; textDomain: string; blockName: string; blockLeaf: string }): string {

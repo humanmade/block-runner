@@ -89,7 +89,7 @@ const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
     {
       name: 'save',
       file: 'src/blocks/pattern-overrides-fixture/save.js',
-      mutate: (source) => source.replace('<InnerBlocks.Content />', '<p>Deliberately lost native content</p>'),
+      mutate: (source) => source.replace('<div { ...innerBlocksProps } />', '<div { ...blockProps }><p>Deliberately lost native content</p></div>'),
       target: 'editor_save',
       downstream: ['editor_reopen', 'pattern_overrides', 'frontend_links', 'frontend_media', 'visual_regression'],
     },

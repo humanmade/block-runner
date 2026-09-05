@@ -220,15 +220,15 @@ export interface AuthoringAsset {
 }
 
 /**
- * A prospective generated file. Source generation is intentionally outside the preview: `content`
- * is therefore optional, but when supplied it is hash-bound just like every other plan decision.
+ * A prospective generated file for low-level destination writers. The registered-block compiler
+ * deliberately rejects `content`: declarative AuthoringPlans may only select its own output paths.
  */
 export interface AuthoringFile {
   /** Portable, relative POSIX path below the output directory. */
   path: string;
   kind?: string;
   content?: string;
-  /** Replacing a collision requires this separate explicit, hash-bound plan decision. */
+  /** Replacing a collision requires this separate, hash-bound approval decision. */
   operation?: AuthoringFileOperation;
 }
 
@@ -236,8 +236,8 @@ export interface AuthoringFile {
  * A complete, declarative input to registered-block authoring.
  *
  * The contract keeps human decisions separate from generated source: the structure and editor
- * model are explicit, while files describe intended outputs and may carry materialized content
- * only when another deterministic producer supplied it.
+ * model are explicit, while registered-block compilation treats files as compiler-owned output
+ * paths and collision policy rather than executable source.
  */
 export interface AuthoringPlan {
   version: typeof AUTHORING_PLAN_VERSION;

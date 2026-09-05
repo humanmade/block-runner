@@ -253,7 +253,7 @@ function validateInstalledSkill(destination, bundle) {
   if (JSON.stringify(Object.keys(manifest.files ?? {}).sort()) !== JSON.stringify(names)) throw new Error('Installed skill manifest does not describe the packed bundle.');
   for (const name of names) {
     const bytes = readFileSync(path.join(bundle, name));
-    const expected = hash(name.endsWith('.md') ? bytes.toString('utf8').replace(/block-runner@latest(?!\s+skill\b)/g, `block-runner@${version}`) : bytes);
+    const expected = hash(name.endsWith('.md') ? bytes.toString('utf8').replace(/block-runner@(?:latest|testing)(?!\s+skill\b)/g, `block-runner@${version}`) : bytes);
     if (manifest.files[name].sha256 !== expected || hashFile(path.join(destination, name)) !== expected) {
       throw new Error(`Installed skill hash mismatch: ${name}`);
     }
