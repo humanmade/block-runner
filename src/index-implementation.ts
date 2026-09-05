@@ -52,6 +52,7 @@ export {
   validateGeneratedSources,
 } from './authoring/generate.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
+export { classifyRegisteredBlockRegeneration } from './authoring/regeneration.js';
 export { AuthoringStyleError, authoringRulesFromStylesheet, renderConfirmedStyleRules } from './authoring/styles.js';
 export {
   hashAuthoringConfirmation,

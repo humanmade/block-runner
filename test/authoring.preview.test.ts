@@ -156,6 +156,11 @@ describe('authoring preview', () => {
         { path: '/work/generated/feature-grid/block.json', operation: 'create', exists: false },
         { path: '/work/generated/feature-grid/edit.js', operation: 'replace', exists: true },
       ],
+      regeneration: {
+        kind: 'content-defaults', changedFiles: ['edit.js'], writeAllowed: true,
+        existingInstanceEffect: 'Existing saved markup remains unchanged; opening it can use updated editor behavior.',
+        nextStep: 'Review the replacement before writing.',
+      },
       confirmationHash: confirmation,
     });
 
@@ -164,6 +169,8 @@ describe('authoring preview', () => {
     expect(output).toContain('Unresolved decisions and losses: 3 style or asset issues; 1 warning.');
     expect(output).toContain('Asset ownership: 1 package-owned, 0 external, 0 licensed bundled fonts.');
     expect(output).toContain('Style ownership: 1 native-owned, 1 package-owned shared, 1 editor-only.');
+    expect(output).toContain('Regeneration impact');
+    expect(output).toContain('classification: content-defaults');
     expect(output).toContain('Destination: /work/generated/feature-grid');
     expect(output).toContain('Create path: /work/generated/feature-grid/block.json');
     expect(output).toContain('Replacement path: /work/generated/feature-grid/edit.js');

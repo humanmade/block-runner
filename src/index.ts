@@ -43,6 +43,7 @@ export const {
   canonicalize,
   canonicalizeAuthoringPlan,
   classifyCssUrlReference,
+  classifyRegisteredBlockRegeneration,
   collectSiteContext,
   compileAuthoringBlock,
   compileAuthoringPlan,

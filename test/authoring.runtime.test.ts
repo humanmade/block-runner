@@ -326,3 +326,42 @@ describe('generated registered blocks in WordPress 7.1', () => {
     }
   });
 });
+
+describe('saved authoring content across regeneration', () => {
+  it('reopens v1 saved content under v2 editor defaults while preserving a user edit and stable child identities', async () => {
+    const wp = await getWp();
+    const editor = require('@wordpress/block-editor') as BlockEditorRuntime;
+    const data = require('@wordpress/data') as DataRuntime;
+    const actions = data.dispatch(editor.store);
+    const selectors = data.select(editor.store);
+    const v1 = compileAuthoringPlan(planFor('all'));
+    const v2Plan = planFor('all');
+    v2Plan.root.children![0]!.content = 'New default heading for future insertions';
+    const v2 = compileAuthoringPlan(v2Plan);
+    const name = await registerCompiledBlock(wp, v1);
+
+    try {
+      const initial = mountCompiledBlock(wp, v1, actions, selectors);
+      actions.updateBlockAttributes(initial.childIds[0], { content: 'User edit retained from v1.' });
+      const savedV1 = wp.serialize([selectors.getBlock(initial.rootId) as RuntimeBlock]);
+      const savedFieldNames = (selectors.getBlock(initial.rootId) as RuntimeBlock).innerBlocks.map(runtimeBlock).map((block) => block.name);
+      wp.unregisterBlockType(name);
+      await registerCompiledBlock(wp, v2);
+
+      const reopened = wp.parse(savedV1).map(runtimeBlock);
+      expect(reopened).toHaveLength(1);
+      expect(wp.serialize(reopened)).toContain('User edit retained from v1.');
+      expectValidTree(wp, reopened[0]!);
+      actions.resetBlocks(reopened);
+      const reopenedRoot = (selectors.getBlocks() as RuntimeBlock[])[0]!;
+      expect(reopenedRoot.innerBlocks.map(runtimeBlock).map((block) => block.name)).toEqual(savedFieldNames);
+      expect(wp.serialize([reopenedRoot])).toContain('User edit retained from v1.');
+      expect(wp.serialize([reopenedRoot])).toContain('Original paragraph');
+      expect(wp.serialize([reopenedRoot])).toContain('https://example.test/original.jpg');
+      actions.updateBlockAttributes(reopenedRoot.innerBlocks[1]!.clientId, { content: 'Second user edit after v2.' });
+      expect(wp.serialize([selectors.getBlock(reopenedRoot.clientId) as RuntimeBlock])).toContain('Second user edit after v2.');
+    } finally {
+      wp.unregisterBlockType(name);
+    }
+  });
+});
