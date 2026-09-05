@@ -5,6 +5,7 @@ import path from 'node:path';
 import process from 'node:process';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
+import { createRequire } from 'node:module';
 import { validate } from '../gate/validate.js';
 import { PROOF_IMAGE_BASE64 } from './fixture-image.js';
 import {
@@ -32,8 +33,10 @@ const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json
   version: string;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 const defaultWpEnvConfig = path.join(projectRoot, 'proof', 'wp-env.json');
+const bundledProofDependencyPins = path.join(projectRoot, 'proof', 'dependency-pins.json');
 const playwrightHelper = path.join(projectRoot, 'scripts', 'proof-playwright.mjs');
 const stagedZipDirectory = path.join(projectRoot, '.block-runner-proof-stage');
 // Keep staging outside uploads: a nested Docker mount can create its parent as
@@ -42,6 +45,15 @@ const stagedZipContainerDirectory = '/var/www/html/wp-content/block-runner-proof
 const REQUIRED_WORDPRESS_VERSION = '7.1' as const;
 const REQUIRED_WORDPRESS_CORE_SOURCE = 'WordPress/WordPress#7.1' as const;
 const REQUIRED_PHP_SERIES = '8.3' as const;
+const PROOF_TOOLING = [
+  '@wordpress/env',
+  '@playwright/test',
+  '@wordpress/e2e-test-utils-playwright',
+  'axe-core',
+  'pixelmatch',
+  'pngjs',
+] as const;
+const BROWSER_PROOF_TOOLING = PROOF_TOOLING.slice(0, 4);
 const RUNTIME_OBSERVATION_COMMANDS = [
   'php',
   'database',
@@ -56,9 +68,9 @@ const RUNTIME_OBSERVATION_COMMANDS = [
 ] as const;
 
 export interface WordPressPackagePin {
-  /** Exact version resolved from package-lock.json. */
+  /** Exact version resolved from the source lockfile or packed proof pin snapshot. */
   version: string;
-  /** npm Subresource Integrity value resolved from package-lock.json. */
+  /** npm Subresource Integrity value resolved from the source lockfile or packed proof pin snapshot. */
   integrity: string;
 }
 const PROOF_COMMAND_TIMEOUTS = {
@@ -288,11 +300,12 @@ export interface ProofFilePin {
 export interface ProofEnvironment {
   /** Raw command observations used to populate the runtime fields below. */
   observations?: EvidenceReference;
-  generator: {
-    package: string;
-    version: string;
-    packageJson: ProofFilePin;
-    packageLock?: ProofFilePin;
+    generator: {
+      package: string;
+      version: string;
+      packageJson: ProofFilePin;
+      /** Source package-lock.json, or the packed proof dependency pin snapshot. */
+      packageLock?: ProofFilePin;
   };
   plugin: {
     zip?: ProofFilePin;
@@ -378,6 +391,10 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   const wpEnvConfig = path.resolve(options.wpEnvConfig ?? defaultWpEnvConfig);
   const environment = await collectEnvironmentPins(options, evidence, wpEnvConfig);
   const runtime = createRuntime(options, environment, wpEnvConfig, evidence);
+  // A supplied gate adapter owns its own proof environment. Otherwise report
+  // an unavailable package before any profile's runtime gate can reach Docker.
+  const unavailable = options.gateRunner ? [] : unavailableProofTooling(profile);
+  const toolingError = unavailable.length > 0 ? unavailableProofToolingMessage(profile, unavailable) : undefined;
   const records: ProofGateRecord[] = [];
 
   try {
@@ -398,7 +415,9 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
         },
       };
       const configurationError = missingProofConfiguration(context);
-      const unverifiedResult = configurationError
+      const unverifiedResult = gate !== 'headless_validation' && toolingError
+        ? { status: 'blocked' as const, reason: toolingError }
+        : configurationError
         ? { status: 'blocked' as const, reason: configurationError }
         : gate === 'accessibility_manual_review'
           ? await readManualAccessibilityReview(context, evidence)
@@ -556,13 +575,20 @@ async function collectEnvironmentPins(
   evidence: EvidenceStore,
   wpEnvConfig: string,
 ): Promise<ProofEnvironment> {
+  // npm deliberately excludes a package's package-lock.json from its tarball.
+  // Source and CI runs use the full root lock; packed consumers instead pin the
+  // checked-in proof snapshot so receipt integrity does not depend on a
+  // consumer's unrelated lockfile.
+  const packageLock = existsSync(path.join(projectRoot, 'package-lock.json'))
+    ? path.join(projectRoot, 'package-lock.json')
+    : bundledProofDependencyPins;
   const [packagePin, lockPin, configPin, zipPin, inputPin, wordpressPackages, wpEnvPins] = await Promise.all([
     pinFile(path.join(projectRoot, 'package.json'), evidence),
-    pinFile(path.join(projectRoot, 'package-lock.json'), evidence).catch(() => undefined),
+    pinFile(packageLock, evidence).catch(() => undefined),
     pinFile(wpEnvConfig, evidence),
     options.pluginZip ? pinFile(path.resolve(options.pluginZip), evidence).catch(() => undefined) : undefined,
     pinInput(options, evidence),
-    collectWordPressPackagePins(path.join(projectRoot, 'package-lock.json')).catch(() => ({})),
+    collectWordPressPackagePins(packageLock).catch(() => ({})),
     readWpEnvPins(wpEnvConfig).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
   ]);
   const packages = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
@@ -674,10 +700,24 @@ function createRuntime(
   const logged = async (result: ProofCommandResult): Promise<EvidenceReference> =>
     evidence.putJson(result);
   const start = async (): Promise<ProofGateResult> => {
-    if (options.execute === false) return { status: 'blocked', reason: 'Proof execution was disabled.' };
     if (environmentStarted) return { status: 'pass', reason: 'Pinned wp-env is already running.' };
     if (startupFailure) return startupFailure;
+    const unavailable = unavailableProofTooling(options.profile ?? 'full');
+    if (unavailable.length > 0) {
+      startupFailure = { status: 'blocked', reason: unavailableProofToolingMessage(options.profile ?? 'full', unavailable) };
+      return startupFailure;
+    }
+    if (options.execute === false) return { status: 'blocked', reason: 'Proof execution was disabled.' };
     if (!options.pluginZip) return { status: 'blocked', reason: 'Runtime proof requires --plugin-zip.' };
+    // A browser is a separate, opt-in Playwright download. Check for it before
+    // Docker starts so a missing local browser produces an actionable setup
+    // diagnostic instead of a later generic browser-proof failure. Command
+    // runners are test/adaptor-owned environments and may supply their own
+    // browser implementation, so they retain control of that prerequisite.
+    if (!options.commandRunner && unavailableChromiumBrowser()) {
+      startupFailure = { status: 'blocked', reason: unavailableChromiumBrowserMessage() };
+      return startupFailure;
+    }
     const docker = await command('docker', ['info', '--format', '{{.ServerVersion}}'], {
       cwd: projectRoot,
       timeoutMs: PROOF_COMMAND_TIMEOUTS.docker,
@@ -1640,6 +1680,68 @@ function commandFailure(command: string, error: unknown): ProofCommandResult {
     stdout: '',
     stderr: error instanceof Error ? error.message : String(error),
   };
+}
+
+function proofToolingVersion(name: (typeof PROOF_TOOLING)[number]): string {
+  const version = packageJson.peerDependencies?.[name] ?? packageJson.devDependencies?.[name];
+  if (!version) throw new Error(`Missing pinned proof tooling declaration for ${name}.`);
+  return version;
+}
+
+function unavailableProofTooling(profile: ProofProfileName): string[] {
+  if (profile === 'headless') return [];
+  const required = profile === 'full' ? PROOF_TOOLING : BROWSER_PROOF_TOOLING;
+  const require = createRequire(import.meta.url);
+  const unavailable: string[] = [];
+  for (const name of required) {
+    const expected = proofToolingVersion(name);
+    try {
+      const manifest = JSON.parse(readFileSync(require.resolve(`${name}/package.json`), 'utf8')) as { version?: unknown };
+      if (manifest.version !== expected) {
+        unavailable.push(`${name}@${expected} (found ${typeof manifest.version === 'string' ? manifest.version : 'unknown'})`);
+      }
+    } catch {
+      unavailable.push(`${name}@${expected}`);
+    }
+  }
+  return unavailable;
+}
+
+function unavailableProofToolingMessage(profile: ProofProfileName, unavailable: readonly string[]): string {
+  return [
+    `The ${profile} WordPress proof needs optional tooling that is unavailable or not pinned: ${unavailable.join(', ')}.`,
+    `Install the exact proof toolchain in this project: ${proofToolingInstallCommand(profile)}`,
+    'Then install the browser explicitly: npx --no-install playwright install chromium',
+    'A working Docker CLI and daemon are also required for real-WordPress proof. No tooling was downloaded or started.',
+  ].join(' ');
+}
+
+function unavailableChromiumBrowser(): boolean {
+  const require = createRequire(import.meta.url);
+  try {
+    const playwright = require('@playwright/test') as {
+      chromium?: { executablePath?: () => string };
+    };
+    const executablePath = playwright.chromium?.executablePath?.();
+    return !executablePath || !existsSync(executablePath);
+  } catch {
+    // The package availability preflight reports the exact missing package;
+    // retain this conservative result in case this helper is called directly.
+    return true;
+  }
+}
+
+function unavailableChromiumBrowserMessage(): string {
+  return [
+    'Chromium is not installed for the pinned Playwright proof tooling.',
+    'Install it explicitly: npx --no-install playwright install chromium',
+    'No browser was downloaded and Docker was not started.',
+  ].join(' ');
+}
+
+function proofToolingInstallCommand(profile: ProofProfileName): string {
+  const required = profile === 'full' ? PROOF_TOOLING : BROWSER_PROOF_TOOLING;
+  return `npm install --save-dev --save-exact ${required.map((name) => `${name}@${proofToolingVersion(name)}`).join(' ')}`;
 }
 
 function resolveProjectRoot(modulePath: string): string {

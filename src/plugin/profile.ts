@@ -1,7 +1,8 @@
 import { execFile } from 'node:child_process';
 import { createHash, randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { chmod, link, lstat, mkdir, readFile, readdir, rename, rm, unlink, writeFile } from 'node:fs/promises';
+import { chmod, link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile } from 'node:fs/promises';
+import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import standalonePackageLockTemplate from './standalone-package-lock.34.2.0.json' with { type: 'json' };
@@ -1012,10 +1013,22 @@ function samePluginFileIdentity(left: PluginFileIdentity, right: PluginFileIdent
 }
 
 async function removePublicationStage(stageDirectory: string): Promise<void> {
+  // Only our uniquely named sibling staging directory may be retired. In particular, a
+  // recovery record must not turn cleanup into an operation on the plugin or its parent.
+  if (!path.isAbsolute(stageDirectory)
+    || !/^\..+\.block-runner-publication-[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/.test(path.basename(stageDirectory))) {
+    throw new Error('Unsafe plugin publication cleanup path.');
+  }
+  if (!await lstatMaybe(stageDirectory)) return;
   try {
-    await rm(stageDirectory, { recursive: true, force: true });
-  } catch (error) {
-    if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    await execFileAsync('trash', [stageDirectory]);
+  } catch {
+    // Hosts without the Trash CLI retain the same recoverable inventory in .Trash.
+    // If that move is unavailable too, leave the stage in place; never fall back to deletion.
+    if (!await lstatMaybe(stageDirectory)) return;
+    const trashDirectory = path.join(homedir(), '.Trash');
+    await mkdir(trashDirectory, { recursive: true, mode: 0o700 });
+    await rename(stageDirectory, path.join(trashDirectory, `block-runner-publication-${randomUUID()}`));
   }
 }
 

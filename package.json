@@ -53,16 +53,17 @@
     "skills",
     "scripts/prune-wp-vips.mjs",
     "scripts/proof-playwright.mjs",
+    "proof/dependency-pins.json",
     "proof/wp-env.json"
   ],
   "engines": {
-    "node": ">=20"
+    "node": "^20.19.0 || ^22.13.0 || >=24.0.0"
   },
   "scripts": {
     "build": "npm run clean && tsup",
     "clean": "node scripts/clean-dist.mjs",
-    "dev": "tsx src/cli.ts",
-    "proof": "tsx src/cli.ts proof",
+    "dev": "tsx src/bin.ts",
+    "proof": "tsx src/bin.ts proof",
     "proof:fixture": "tsx scripts/build-pattern-overrides-fixture.ts",
     "proof:control": "node scripts/collect-native-heading-control.mjs",
     "bench": "tsx scripts/bench.ts",
@@ -75,43 +76,75 @@
     "test:proof": "vitest run test/proof.test.ts test/proof-pattern-overrides.test.ts",
     "test:proof:wordpress": "vitest run --config vitest.wordpress.config.ts",
     "test:proof:mutations": "BLOCK_RUNNER_PROOF_MUTATIONS=1 vitest run test/proof-mutations.integration.test.ts",
+    "test:package": "node scripts/package-boundary-check.mjs",
     "typecheck": "tsc --noEmit",
     "pack:check": "npm pack --dry-run --ignore-scripts",
+    "check:node-support": "node scripts/check-node-support.mjs",
+    "smoke:package": "node scripts/smoke-packed-cli.mjs",
+    "smoke:package:unsupported-node": "node scripts/smoke-packed-cli-unsupported-node.mjs",
     "check:private": "node scripts/check-private-refs.mjs",
     "release:check": "node scripts/release-check.mjs",
-    "verify": "npm run typecheck && node --import tsx scripts/authoring-hashes.ts --check && npm test && npm run build && npm run check:private && npm run pack:check",
+    "verify": "npm run check:node-support && npm run typecheck && node --import tsx scripts/authoring-hashes.ts --check && npm test && npm run build && npm run check:private && npm run pack:check",
     "prepare": "npm run build",
     "postinstall": "node scripts/prune-wp-vips.mjs"
   },
   "dependencies": {
     "@babel/parser": "7.29.8",
-    "@playwright/test": "1.61.1",
     "@wordpress/block-editor": "17.0.0",
     "@wordpress/block-library": "10.5.0",
     "@wordpress/blocks": "15.27.0",
-    "@wordpress/e2e-test-utils-playwright": "1.51.0",
-    "@wordpress/env": "11.12.0",
     "ajv": "8.18.0",
-    "axe-core": "4.11.0",
-    "commander": "15.0.0",
+    "commander": "14.0.3",
     "fast-glob": "3.3.3",
     "jsdom": "29.1.1",
     "php-parser": "3.7.0",
-    "pixelmatch": "7.1.0",
-    "pngjs": "7.0.0",
     "postcss": "8.5.26",
     "react": "18.3.1",
     "react-dom": "18.3.1",
     "wesper": "0.0.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.61.1",
     "@types/jsdom": "28.0.0",
     "@types/node": "20.19.0",
+    "@wordpress/e2e-test-utils-playwright": "1.51.0",
+    "@wordpress/env": "11.12.0",
+    "axe-core": "4.11.0",
     "esbuild": "0.28.1",
+    "pixelmatch": "7.1.0",
+    "pngjs": "7.0.0",
     "tsup": "8.5.1",
     "tsx": "4.23.0",
     "typescript": "5.9.3",
     "vitest": "4.1.10"
+  },
+  "peerDependencies": {
+    "@playwright/test": "1.61.1",
+    "@wordpress/e2e-test-utils-playwright": "1.51.0",
+    "@wordpress/env": "11.12.0",
+    "axe-core": "4.11.0",
+    "pixelmatch": "7.1.0",
+    "pngjs": "7.0.0"
+  },
+  "peerDependenciesMeta": {
+    "@playwright/test": {
+      "optional": true
+    },
+    "@wordpress/e2e-test-utils-playwright": {
+      "optional": true
+    },
+    "@wordpress/env": {
+      "optional": true
+    },
+    "axe-core": {
+      "optional": true
+    },
+    "pixelmatch": {
+      "optional": true
+    },
+    "pngjs": {
+      "optional": true
+    }
   },
   "overrides": {
     "uuid": "11.1.1",
