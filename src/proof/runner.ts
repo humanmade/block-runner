@@ -1860,11 +1860,11 @@ function proofToolingInstallCommand(profile: ProofProfileName): string {
 }
 
 function proofToolingForProfile(profile: ProofProfileName): readonly (typeof PROOF_TOOLING)[number][] {
-  const gates = PROOF_PROFILES[profile].requiredGates;
-  if (gates.every((gate) => gate === 'headless_validation')) return [];
-  if (gates.includes('visual_regression') || gates.includes('accessibility_editor') || gates.includes('accessibility_frontend') || gates.includes('accessibility_manual_review')) return PROOF_TOOLING;
-  if (gates.some((gate) => ['editor_inserter', 'editor_field_editing', 'editor_save', 'editor_reopen', 'pattern_overrides', 'frontend_status', 'frontend_semantics', 'frontend_links', 'frontend_media', 'frontend_assets', 'frontend_runtime_errors'].includes(gate))) return BROWSER_PROOF_TOOLING;
-  return ['@wordpress/env'];
+  // `runtime` has historically required the browser proof toolchain for its
+  // registry observations. Keep that contract for its capability alias `built`.
+  if (profile === 'headless' || profile === 'generated') return [];
+  if (profile === 'full' || profile === 'fidelity-checked') return PROOF_TOOLING;
+  return BROWSER_PROOF_TOOLING;
 }
 
 function resolveProjectRoot(modulePath: string): string {
