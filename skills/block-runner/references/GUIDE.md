@@ -45,6 +45,11 @@ design and produces the versioned declarative **`AuthoringPlan`**; the determini
 generator produces all executable source and serializes blocks. This is deliberately different
 from converting a design into page `post_content`.
 
+This 0.9 authoring workflow is available from the testing channel. In this printed source guide,
+run its authoring, plugin, and proof commands with `npx -y block-runner@testing`. An installed
+skill rewrites runtime commands to the exact version that installed it, so its compiler and guide
+cannot drift. Do not substitute `@latest` while stable lacks `author`.
+
 ### The model's job: make the authoring plan, never the implementation
 
 The plan must state the target identity and **final** destination, native structure, field modes
@@ -63,9 +68,9 @@ owns the reviewable design decisions.
 ### `AuthoringPlan` v1 shape
 
 The CLI accepts exactly this versioned JSON shape. Object keys may be in any order; arrays retain
-their order and every listed value participates in the confirmation hash. `files` names the
-generated source outputs and uses only safe relative POSIX paths. The fields are required, though
-the arrays may be empty when a design genuinely has none of that item.
+their order and every listed value participates in the confirmation hash. `files` names
+compiler-owned source outputs and uses only safe relative POSIX paths. Core fields are required;
+list fields may be empty when a design genuinely has none of that item.
 
 | Field | Required shape |
 |---|---|
@@ -195,15 +200,16 @@ declaration-by-declaration accounting, including native mappings and explicit re
 ### Preview the exact plan before asking
 
 ```bash
-npx -y block-runner@latest author preview authoring-plan.json \
+npx -y block-runner@testing author preview authoring-plan.json \
   --output-dir <exact-final-destination>
 ```
 
-`author preview` writes no files. Before requesting consent, paste the literal plain-text
-terminal output verbatim. Do not replace the structure tree or the `Warnings` section with a
-prose summary. The user must see the full confirmation SHA-256, destination, destination
-fingerprint, tree, planned files, replacement markers, and warnings — including the `Warnings`
-section when it says `- none`, and `No files written.`
+`author preview` writes no files. Before requesting consent, lead with a compact plain-English
+summary of editability, unresolved decisions/losses, style and asset ownership, and destination
+changes. Then paste the literal plain-text terminal output verbatim. That summary supplements;
+it never replaces or truncates the structure tree, `Warnings` section, exact touched paths,
+replacement approvals, or full confirmation SHA-256. The user must see all of those details —
+including the `Warnings` section when it says `- none`, and `No files written.`
 
 Confirmation also binds the installed compiler template, which is shown in the preview.
 After upgrading Block Runner, request a fresh preview and approval; an old confirmation
@@ -220,25 +226,26 @@ non-interactive; it never obtains conversational consent for you.
 After that exact approval, run:
 
 ```bash
-npx -y block-runner@latest author write authoring-plan.json \
+npx -y block-runner@testing author write authoring-plan.json \
   --confirm '<full preview hash>' \
   --output-dir '<exact previewed destination>'
 ```
 
 Use the full hash and exact destination from the preview. If either changes, preview again and
 obtain fresh consent. Do not write into `mktemp`, an auto-deleted staging folder, or an
-unspecified location. A source package is incomplete until it lands in the requested existing
-plugin or retained standalone-plugin directory.
+unspecified location. The write report means **source delivered only**: it has not built,
+activated, registered, rendered, or proved the block. Follow its displayed `plugin preview`
+command for the existing-plugin or standalone boundary.
 
 ### Existing-plugin output
 
 Use this only after inspecting the target plugin. Do not guess its build or registration layout.
 
 ```bash
-npx -y block-runner@latest plugin inspect <plugin-root>
-npx -y block-runner@latest plugin preview <generated-block-dir> --host <plugin-root>
+npx -y block-runner@testing plugin inspect <plugin-root>
+npx -y block-runner@testing plugin preview <generated-block-dir> --host <plugin-root>
 # Show this complete preview, then obtain its displayed fingerprint and any separate replacement approvals.
-npx -y block-runner@latest plugin write <generated-block-dir> --host <plugin-root> \
+npx -y block-runner@testing plugin write <generated-block-dir> --host <plugin-root> \
   --confirm '<plugin preview fingerprint>' \
   --approve-replace '<each explicitly approved path>'
 ```
@@ -247,19 +254,39 @@ Write the generated block directly below the existing plugin's lasting source di
 temporary directory. If `plugin inspect` says the layout is unsupported, stop and offer
 standalone output rather than improvising registration or a build configuration.
 
+After that exact plugin write, source integration is delivered but no build or WordPress proof
+has run. The report's next command is the host build:
+
+```bash
+cd <plugin-root> && npm run build
+```
+
+That produces the reviewed build target reported by `plugin preview`. Create the host's normal
+installable ZIP after the build, then run the proof command below against that exact ZIP.
+
 ### Standalone-plugin output
 
 Use a retained, explicitly named plugin directory. Preview the wrapper before it is written,
 then build the final plugin archive from that same directory.
 
 ```bash
-npx -y block-runner@latest plugin preview <generated-block-dir> \
+npx -y block-runner@testing plugin preview <generated-block-dir> \
   --standalone <retained-plugin-directory>
 # Show this complete preview, then obtain its displayed fingerprint and any replacement approvals.
-npx -y block-runner@latest plugin write <generated-block-dir> \
+npx -y block-runner@testing plugin write <generated-block-dir> \
   --standalone <retained-plugin-directory> \
   --confirm '<plugin preview fingerprint>'
 ```
+
+After the exact write, the standalone source and its pinned lock are delivered; it is not built
+or runtime-proven. Run the reported next command without hand-authoring React or PHP:
+
+```bash
+cd <retained-plugin-directory> && npm ci && npm run zip && npm run test:zip
+```
+
+`npm run zip` runs the generated `wp-scripts` build and creates the plugin ZIP; `npm run
+test:zip` verifies its release contents. Those are build checks, not WordPress runtime proof.
 
 ### Proof is part of completion
 
@@ -271,7 +298,7 @@ a browser download or model call from the proof command:
 
 ```bash
 npm install --save-dev --save-exact \
-  block-runner@latest \
+  block-runner@testing \
   @wordpress/env@11.12.0 \
   @playwright/test@1.61.1 \
   @wordpress/e2e-test-utils-playwright@1.51.0 \
@@ -579,25 +606,25 @@ harmless. Read results from stdout or `--json`. Users who run this often can
 If your harness supports skills, install the canonical skill into the current project:
 
 ```bash
-npx -y block-runner@latest skill --install
+npx -y block-runner@testing skill --install
 ```
 
 That writes the same skill to the cross-agent `.agents/skills/block-runner` location and to
 Claude Code's `.claude/skills/block-runner` compatibility location. Narrow it when needed:
 
 ```bash
-npx -y block-runner@latest skill --install --target agents
-npx -y block-runner@latest skill --install --target claude
-npx -y block-runner@latest skill --install --scope user
-npx -y block-runner@latest skill --install --dir .another-agent/skills
-npx -y block-runner@latest skill --install --dry-run
+npx -y block-runner@testing skill --install --target agents
+npx -y block-runner@testing skill --install --target claude
+npx -y block-runner@testing skill --install --scope user
+npx -y block-runner@testing skill --install --dir .another-agent/skills
+npx -y block-runner@testing skill --install --dry-run
 ```
 
 Project discovery is the most portable choice. User-wide discovery paths still vary between
 harnesses, so use `--dir` when a client documents a different global skills root.
 The installer pins runtime examples to its own package version so the guide and CLI contract
-stay aligned. To update later, rerun `npx -y block-runner@latest skill --install`.
+stay aligned. To update later, rerun `npx -y block-runner@testing skill --install`.
 
 **Ask the user first.** This writes files into their project, which is their call, not yours.
 If they decline, or their harness has no skill system, nothing is lost — reading this guide is
-the same information. `npx -y block-runner@latest skill` prints it without installing anything.
+the same information. `npx -y block-runner@testing skill` prints it without installing anything.

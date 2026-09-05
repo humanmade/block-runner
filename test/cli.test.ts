@@ -24,6 +24,7 @@ describe('CLI', () => {
     const resolvedProject = await realpath(project);
     const agentsDestination = path.join(resolvedProject, '.agents', 'skills', 'block-runner');
     const claudeDestination = path.join(resolvedProject, '.claude', 'skills', 'block-runner');
+    const sourceGuide = await readFile(new URL('references/GUIDE.md', sourceSkill), 'utf8');
     const result = await runCli(['skill', '--install'], '', {}, project);
 
     expect(result.code).toBe(0);
@@ -36,8 +37,13 @@ describe('CLI', () => {
       expect(skill).toContain(`block-runner@${packageVersion}`);
       expect(guide).toContain(`block-runner@${packageVersion}`);
       expect(skill).not.toContain('block-runner@latest');
-      expect(guide).toContain('block-runner@latest skill --install');
-      expect(guide).not.toMatch(/block-runner@latest (?:assemble|convert|validate|fix)/);
+      expect(sourceGuide).toContain('block-runner@testing author preview');
+      expect(sourceGuide).not.toMatch(/block-runner@latest (?:author|plugin|proof)/);
+      expect(guide).toContain(`block-runner@${packageVersion} author preview`);
+      expect(guide).toContain(`block-runner@${packageVersion} plugin preview`);
+      expect(guide).toContain(`block-runner@${packageVersion} proof`);
+      expect(guide).toContain('block-runner@testing skill --install');
+      expect(guide).not.toMatch(/block-runner@(?:latest|testing) (?:assemble|convert|validate|fix|author|plugin|proof)/);
       expect(JSON.parse(await readFile(path.join(destination, '.block-runner-install.json'), 'utf8'))).toMatchObject({
         schemaVersion: 1,
         skill: 'block-runner',

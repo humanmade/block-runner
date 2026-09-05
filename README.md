@@ -66,7 +66,7 @@ Block Runner ships a canonical skill in the open Agent Skills layout. Install it
 current project (ask the user before writing files):
 
 ```sh
-npx block-runner skill --install
+npx -y block-runner@testing skill --install
 ```
 
 That installs the same skill to the cross-agent `.agents/skills/block-runner` location and
@@ -75,13 +75,13 @@ default so the instructions can travel with a repository. Use user scope or one 
 that is what you want:
 
 ```sh
-npx block-runner skill --install --scope user
-npx block-runner skill --install --target agents
-npx block-runner skill --install --target claude
+npx -y block-runner@testing skill --install --scope user
+npx -y block-runner@testing skill --install --target agents
+npx -y block-runner@testing skill --install --target claude
 ```
 
 For a harness with another skills directory, use `--dir <skills-directory>`. With no skill
-system, `npx block-runner skill` prints the complete harness-neutral guide to stdout and writes
+system, `npx -y block-runner@testing skill` prints the complete harness-neutral guide to stdout and writes
 nothing. Project discovery is the most portable choice; user-wide discovery paths still vary
 between harnesses, so use `--dir` when a client documents a different global root.
 
@@ -166,7 +166,7 @@ Gutenberg before it reaches the editor.
 | `author <html> --json` | Analyze one authored design into a canonical registered-block plan, checked source, and style/asset ledgers. Does not write source. |
 | `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
 | `author preview <plan\|->` | Validate and render a versioned registered-block AuthoringPlan without writing files. |
-| `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write only the reviewed plan bound to its SHA-256 confirmation and destination. |
+| `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write the reviewed compiler-owned source package bound to its SHA-256 confirmation and destination. Build and runtime proof remain separate. |
 | `validate` | Check block markup against headless Gutenberg. |
 | `fix` | Canonicalize near-miss block markup. |
 | `context` | Read a WordPress site into a `site.context.json` manifest (read-only). |
@@ -197,6 +197,11 @@ block-runner plugin preview ./generated-block --standalone ./my-notice-plugin
 separate replacement approvals, so their absolute preview paths must also be supplied with
 `--approve-replace <path...>` before they can change. An unrecognised host is refused without
 writing and the command offers the standalone form above.
+
+Standalone previews include the complete, versioned npm lock for their pinned local
+`@wordpress/scripts` toolchain. Confirmed writes only materialize the reviewed source and lock
+bytes: they do not resolve dependencies, contact a registry, or run npm. Run `npm ci` separately
+when preparing the generated plugin to build or package it.
 
 ### Registered-block authoring
 
@@ -236,9 +241,60 @@ Missing, stale, or incorrect confirmation values write nothing. If a plan replac
 files, get a distinct, explicit replacement decision; a path collision, traversal or absolute
 path, changed destination, or any destination-prefix symlink fails before any write. The command
 rechecks these conditions immediately before exclusive, atomic writes. Use `-` for plan input
-only—never as a source of confirmation. Source generation is separate: this preview release writes only
-`files[].content` already contained in the confirmed plan, so a plan with descriptions alone is
-a successful no-op.
+only—never as a source of confirmation. `files` may declare only compiler-owned output paths and
+their `create`/`replace` operation; it never accepts file content. The deterministic compiler
+always emits its complete source set (and confirmed assets), including when `files` is empty.
+
+### Complete source-to-build routes
+
+Both routes begin with a reviewed `authoring-plan.json`; use `author <design.html> --name
+<namespace/slug> --json` when you need the deterministic HTML analysis to produce its canonical
+plan. Neither route requires hand-written React, PHP, block metadata, or a repair step.
+
+For a retained standalone plugin:
+
+```sh
+block-runner author preview authoring-plan.json --output-dir generated/feature-grid
+# Review the complete preview and obtain its displayed confirmation hash.
+block-runner author write authoring-plan.json --confirm '<confirmation-hash>' --output-dir generated/feature-grid
+
+block-runner plugin preview generated/feature-grid --standalone plugins/acme-feature-grid
+# Review the complete plugin preview and obtain its displayed fingerprint.
+block-runner plugin write generated/feature-grid --standalone plugins/acme-feature-grid --confirm '<plugin-fingerprint>'
+
+cd plugins/acme-feature-grid
+npm ci
+npm run zip
+npm run test:zip
+```
+
+`npm run zip` builds the compiler-generated source and creates
+`acme-feature-grid.zip`; `npm run test:zip` checks the archive policy. That is build-ready
+delivery, not WordPress runtime proof. Run `block-runner proof acme-feature-grid.zip --profile
+full ...` with the reviewed source, markup, and fixture before claiming activation or editor
+behaviour.
+
+For a recognised existing plugin, inspect before making any integration plan:
+
+```sh
+block-runner plugin inspect plugins/acme-host --json
+block-runner author preview authoring-plan.json --output-dir generated/feature-grid
+# Review and approve the displayed confirmation hash.
+block-runner author write authoring-plan.json --confirm '<confirmation-hash>' --output-dir generated/feature-grid
+
+block-runner plugin preview generated/feature-grid --host plugins/acme-host
+# Review the exact paths and separately approve every displayed replacement path.
+block-runner plugin write generated/feature-grid --host plugins/acme-host \
+  --confirm '<plugin-fingerprint>' --approve-replace '<approved-path>'
+
+cd plugins/acme-host
+npm run build
+```
+
+The recognised profile places the generated source and safe registration update into the host,
+then `npm run build` produces the previewed build target. Create the host's normal delivery ZIP
+and run the same `proof --profile full` route; source integration or a build alone is not a
+runtime verification.
 
 ### WordPress proof profiles
 
@@ -331,10 +387,10 @@ All commands:
 | `--wp-user <user>` | WordPress username for `rest` resolution. |
 | `--wp-app-password-env <name>` | Env var holding a WordPress application password. |
 
-`author` generates exactly one block package. It requires `--name <namespace/slug>` and writes
-to `--out-dir <path>` (or use `--json` to inspect the package without writing). Its `style.css`
-is registered with `block.json`'s `style` field, so parity-critical CSS loads in both editor and
-frontend; `editorStyle` is used only for explicitly supplied editor affordances.
+`author <html> --name <namespace/slug> --json` analyses exactly one design and returns a canonical
+plan; it does not write source. Use `author preview` then the confirmed `author write` command to
+materialize the compiler-owned package. Shared generated CSS is registered through `block.json`'s
+`style` field, while `editorStyle` is reserved for explicitly supplied editor affordances.
 
 `skill --install` adds installation flags:
 
@@ -347,8 +403,8 @@ frontend; `editorStyle` is used only for explicitly supplied editor affordances.
 | `--force` | Replace locally changed or unmanaged files at canonical bundle paths. |
 
 Installed instructions pin runtime commands to the package version that installed them, while
-their explicit update command stays on `@latest`. Re-run
-`npx block-runner@latest skill --install` to update them. Existing local edits are refused
+their explicit update command stays on `@testing` while authoring is testing-only. Re-run
+`npx -y block-runner@testing skill --install` to update them. Existing local edits are refused
 unless `--force` is explicit.
 
 An installation made by 0.7.x predates the managed manifest, so the first upgrade is

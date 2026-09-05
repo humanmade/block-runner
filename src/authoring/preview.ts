@@ -14,6 +14,18 @@ export interface AuthoringPreviewContext {
   destination?: string;
   /** Opaque fingerprint of the destination observed while previewing. */
   destinationFingerprint?: string;
+  /** Exact destination paths inspected for this preview. */
+  touchedFiles?: ReadonlyArray<AuthoringPreviewTouchedFile>;
+}
+
+/** A destination-bound output change shown before the confirmation hash. */
+export interface AuthoringPreviewTouchedFile {
+  /** Absolute path inspected by the preview. */
+  path: string;
+  /** The hash-bound operation selected for this compiler-owned output. */
+  operation: 'create' | 'replace';
+  /** Whether this exact path existed as a regular file during inspection. */
+  exists?: boolean;
 }
 
 export interface AuthoringPreviewOptions extends AuthoringPreviewContext {
@@ -43,11 +55,12 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   const lines: string[] = [];
 
   heading(lines, 'Authoring plan preview', width, '=');
+  renderReviewSummary(lines, value, options, width);
+
+  section(lines, 'Plan identity', width);
   addKeyValue(lines, 'Plan version', value.version, width);
   addKeyValue(lines, 'Generator version', value.generatorVersion, width);
   addKeyValue(lines, 'Compiler template', REGISTERED_BLOCK_TEMPLATE_VERSION, width);
-  addKeyValue(lines, 'Plan SHA-256', options.hash ?? hashAuthoringPlan(plan), width);
-  addKeyValue(lines, 'Confirmation SHA-256', options.confirmationHash, width);
 
   const source = asRecord(value.source);
   if (Object.keys(source).length > 0) {
@@ -68,7 +81,9 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   addKeyValue(lines, 'Text domain', target.textDomain ?? target.textdomain, width);
   addKeyValue(lines, 'WordPress', target.wordpress, width);
   const destination = options.destination ?? readString(target, ['directory', 'destination', 'outputDir']);
-  addKeyValue(lines, 'Destination', destination, width);
+  // The exact destination is part of the confirmation boundary, so it must remain copyable
+  // even when a narrow terminal would otherwise split it across lines.
+  addExactKeyValue(lines, 'Destination', destination);
   addKeyValue(lines, 'Destination fingerprint', options.destinationFingerprint, width);
 
   section(lines, 'Structure', width);
@@ -158,12 +173,35 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     files.forEach((file, index) => bullet(lines, describeFile(file, index), width));
   }
 
+  if (options.touchedFiles) {
+    section(lines, 'Destination changes', width);
+    if (options.touchedFiles.length === 0) {
+      bullet(lines, 'none', width);
+    } else {
+      options.touchedFiles.forEach((file) => renderTouchedFile(lines, file, width));
+    }
+  }
+
   section(lines, 'Warnings', width);
   const warnings = asArray(value.warnings);
   if (warnings.length === 0) {
     bullet(lines, 'none', width);
   } else {
     warnings.forEach((warning) => bullet(lines, plain(warning), width));
+  }
+
+  section(lines, 'Confirmation', width);
+  // These values deliberately come after every authoritative tree, warning, decision, and
+  // destination change. A compact summary helps a human orient themselves; it never replaces
+  // the detail that the confirmation actually binds.
+  const planHash = options.hash ?? hashAuthoringPlan(plan);
+  if (options.confirmationHash) {
+    // A confirmation is a copy-and-paste token. Keep each complete hash on one literal line
+    // instead of wrapping it at the terminal width and making a reviewed value ambiguous.
+    addExactKeyValue(lines, 'Plan SHA-256', planHash);
+    addExactKeyValue(lines, 'Confirmation SHA-256', options.confirmationHash);
+  } else {
+    addKeyValue(lines, 'Plan SHA-256', planHash, width);
   }
 
   section(lines, 'Write status', width);
@@ -174,6 +212,110 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
 
 /** Alias kept concise for programmatic consumers. */
 export const previewAuthoringPlan = renderAuthoringPreview;
+
+function renderReviewSummary(
+  lines: string[],
+  value: RecordValue,
+  options: AuthoringPreviewOptions,
+  width: number,
+): void {
+  section(lines, 'Review summary', width);
+  const fields = asArray(value.fields).map(asRecord);
+  const modes = new Map<'fixed' | 'editable' | 'override', number>([
+    ['fixed', 0], ['editable', 0], ['override', 0],
+  ]);
+  fields.forEach((field) => modes.set(fieldMode(field), (modes.get(fieldMode(field)) ?? 0) + 1));
+  bullet(
+    lines,
+    `Editing: ${modes.get('fixed')} fixed, ${modes.get('editable')} editable, ${modes.get('override')} override field${fields.length === 1 ? '' : 's'}.`,
+    width,
+  );
+
+  const styles = asRecord(value.styles);
+  const coverage = asRecord(value.coverage);
+  const droppedStyles = asArray(styles.outcomes).filter((outcome) => readString(asRecord(outcome), ['outcome']) === 'dropped').length;
+  const blockedCoverageStyles = asArray(coverage.styles).filter((style) => {
+    const outcome = readString(asRecord(style), ['outcome']);
+    return outcome === 'warned' || outcome === 'blocked';
+  }).length;
+  const unresolvedCoverageAssets = asArray(coverage.assets).filter((asset) => {
+    const outcome = readString(asRecord(asset), ['outcome']);
+    return outcome === 'unresolved' || outcome === 'blocked';
+  }).length;
+  const missingPlanAssets = asArray(value.assets).filter((asset) => readString(asRecord(asset), ['status']) === 'missing').length;
+  const warnings = asArray(value.warnings).length;
+  const unresolved = droppedStyles + blockedCoverageStyles + unresolvedCoverageAssets + missingPlanAssets;
+  bullet(
+    lines,
+    unresolved || warnings
+      ? `Unresolved decisions and losses: ${unresolved} style or asset issue${unresolved === 1 ? '' : 's'}; ${warnings} warning${warnings === 1 ? '' : 's'}.`
+      : 'Unresolved decisions and losses: none; no warnings.',
+    width,
+  );
+
+  const assets = asArray(value.assets).map(asRecord);
+  const ownedAssets = assets.filter((asset) => readString(asset, ['status']) === 'ready' || readString(asset, ['destination']) !== undefined);
+  const externalAssets = assets.filter((asset) => readString(asset, ['status']) === 'external');
+  const licensedFonts = ownedAssets.filter((asset) => readString(asset, ['kind']) === 'font' && Object.keys(asRecord(asset.fontLicense)).length > 0);
+  bullet(
+    lines,
+    `Asset ownership: ${ownedAssets.length} package-owned, ${externalAssets.length} external, ${licensedFonts.length} licensed bundled font${licensedFonts.length === 1 ? '' : 's'}.`,
+    width,
+  );
+
+  const styleOwnership = styleOwnershipSummary(styles, coverage);
+  bullet(
+    lines,
+    `Style ownership: ${styleOwnership.native} native-owned, ${styleOwnership.shared} package-owned shared, ${styleOwnership.editor} editor-only.`,
+    width,
+  );
+
+  const touchedFiles = options.touchedFiles ?? [];
+  const creates = touchedFiles.filter((file) => file.operation === 'create').length;
+  const replacements = touchedFiles.filter((file) => file.operation === 'replace').length;
+  const destination = options.destination ?? readString(asRecord(value.target), ['directory', 'destination', 'outputDir']);
+  if (destination || touchedFiles.length > 0) {
+    bullet(
+      lines,
+      `Destination changes: ${destination ? 'selected destination' : 'destination not supplied'}; ${creates} create, ${replacements} replacement${replacements === 1 ? '' : 's'}${replacements ? ' requiring explicit hash-bound approval' : ''}. Exact paths follow below.`,
+      width,
+    );
+  }
+}
+
+function styleOwnershipSummary(styles: RecordValue, coverage: RecordValue): {
+  native: number;
+  shared: number;
+  editor: number;
+} {
+  const ledger = asArray(coverage.styles).map(asRecord);
+  if (ledger.length > 0) {
+    return {
+      native: ledger.filter((style) => readString(style, ['scope']) === 'shared'
+        && ['native', 'preset', 'literal'].includes(readString(style, ['outcome']) ?? '')).length,
+      shared: ledger.filter((style) => readString(style, ['scope']) === 'shared'
+        && readString(style, ['outcome']) === 'scoped-css').length,
+      editor: ledger.filter((style) => readString(style, ['scope']) === 'editor'
+        && readString(style, ['outcome']) === 'scoped-css').length,
+    };
+  }
+
+  const outcomes = asArray(styles.outcomes).map(asRecord);
+  return {
+    native: outcomes.filter((outcome) => ['native', 'token'].includes(readString(outcome, ['outcome']) ?? '')).length,
+    shared: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'scoped-css').length
+      + cssDeclarationCount(asArray(styles.rules)),
+    editor: cssDeclarationCount(asArray(styles.editorRules)),
+  };
+}
+
+function cssDeclarationCount(rules: unknown[]): number {
+  return rules.reduce<number>((count, input) => {
+    const rule = asRecord(input);
+    if (rule.kind === 'conditional') return count + cssDeclarationCount(asArray(rule.rules));
+    return count + asArray(rule.declarations).length;
+  }, 0);
+}
 
 function renderCssRules(lines: string[], rules: unknown[], width: number, prefix = ''): void {
   for (const input of rules) {
@@ -374,6 +516,18 @@ function describeFile(value: unknown, index: number): string {
   return `${path}${kind ? ` [${kind}]` : ''} [${replacement}]`;
 }
 
+function renderTouchedFile(lines: string[], file: AuthoringPreviewTouchedFile, width: number): void {
+  addExactKeyValue(lines, file.operation === 'replace' ? 'Replacement path' : 'Create path', file.path);
+  bullet(lines, describeTouchedFile(file), width);
+}
+
+function describeTouchedFile(file: AuthoringPreviewTouchedFile): string {
+  if (file.operation === 'replace') {
+    return `[replace; ${file.exists ? 'existing file' : 'path currently absent'}; explicit hash-bound replacement approval required]`;
+  }
+  return `[create; ${file.exists ? 'conflict: existing file' : 'path currently absent'}]`;
+}
+
 function describeItem(value: unknown, index: number): string {
   if (typeof value === 'string' || typeof value === 'number' || typeof value === 'boolean') {
     return plain(value);
@@ -416,6 +570,13 @@ function addKeyValue(lines: string[], key: string, value: unknown, width: number
     return;
   }
   wrapped(lines, `${key}: ${describeScalar(value)}`, width, '  ');
+}
+
+function addExactKeyValue(lines: string[], key: string, value: unknown): void {
+  if (value === undefined || value === null || value === '') {
+    return;
+  }
+  lines.push(`${key}: ${plain(value)}`);
 }
 
 function bullet(lines: string[], value: string, width: number): void {
