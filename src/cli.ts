@@ -28,6 +28,7 @@ import { isProofProfileName } from './proof/profiles.js';
 import { BlockRunnerReport, CommonOptions, HeadlessBootError } from './types.js';
 import { hashAuthoringConfirmation, inspectAuthoringDestination, writeGeneratedRegisteredBlock } from './authoring/destination.js';
 import { materializeAuthoringPlan, planRegisteredBlockOutput } from './authoring/generate.js';
+import { classifyRegisteredBlockRegeneration } from './authoring/regeneration.js';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
 import { renderAuthoringPreview } from './authoring/preview.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
@@ -478,6 +479,8 @@ author
     const outputPlan = planRegisteredBlockOutput(plan);
     const destination = authoringDestination(options.outputDir, plan.target.directory);
     const inspection = await inspectAuthoringDestination(destination, outputPlan);
+    const generated = materializeAuthoringPlan(plan);
+    const regeneration = await classifyRegisteredBlockRegeneration(inspection, generated);
     const confirmation = hashAuthoringConfirmation(plan, inspection);
     const touchedFiles = previewTouchedFiles(inspection, outputPlan.files);
     const width = parsePreviewWidth(options.width);
@@ -491,6 +494,7 @@ author
       destination: inspection.directory,
       destinationFingerprint: inspection.fingerprint,
       touchedFiles,
+      regeneration,
     });
     const result = {
       ok: true,
@@ -505,6 +509,7 @@ author
       destination: { directory: inspection.directory, fingerprint: inspection.fingerprint },
       touchedFiles,
       replacementApprovals: touchedFiles.filter((file) => file.operation === 'replace').map((file) => file.path),
+      regeneration,
       preview,
       noFilesWritten: true,
     };

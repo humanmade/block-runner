@@ -1,5 +1,6 @@
 import { hashAuthoringPlan, type AuthoringPlan } from './schema.js';
 import { deriveRegisteredBlockOutputFiles, REGISTERED_BLOCK_TEMPLATE_VERSION } from './generate.js';
+import type { RegenerationImpact } from './regeneration.js';
 
 /**
  * Extra facts collected by the caller for a particular destination.  They deliberately live
@@ -16,6 +17,8 @@ export interface AuthoringPreviewContext {
   destinationFingerprint?: string;
   /** Exact destination paths inspected for this preview. */
   touchedFiles?: ReadonlyArray<AuthoringPreviewTouchedFile>;
+  /** Reviewed source-regeneration effect for this destination snapshot. */
+  regeneration?: RegenerationImpact;
 }
 
 /** A destination-bound output change shown before the confirmation hash. */
@@ -176,6 +179,13 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     bullet(lines, 'none', width);
   } else {
     files.forEach((file, index) => bullet(lines, describeFile(file, index), width));
+  }
+
+  if (options.regeneration) {
+    section(lines, 'Regeneration impact', width);
+    bullet(lines, 'classification: ' + options.regeneration.kind, width);
+    bullet(lines, options.regeneration.existingInstanceEffect, width);
+    bullet(lines, 'next: ' + options.regeneration.nextStep, width);
   }
 
   if (options.touchedFiles) {

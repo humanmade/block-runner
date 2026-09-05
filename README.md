@@ -467,6 +467,21 @@ is a `GeneratedAuthoringPlan` that consumers review and write.
 The runnable [authoring lifecycle example](examples/authoring-plan.ts) uses the same shape as the
 CLI and skill examples from proposal through preview, confirmation identity, and generation.
 
+#### Regeneration and saved content
+
+Compiler-owned output is only replaced after the destination-bound preview marks each replacement
+and its confirmation is supplied. An unchanged package is a no-op. Preview classifies a replacement
+as content-defaults, style-only, or saved-markup/structure. Style and asset changes can alter
+rendered appearance, but do not migrate saved block markup. Updated editor defaults apply to new
+insertions; existing saved content remains its own content record, though changed editor code can alter its editing experience.
+
+A same-identity change to saved markup, registration identity, or attribute schema is refused.
+Use a new block identity, or add a tested WordPress deprecation/migration before replacing it.
+Block Runner does not edit a site's database, templates, or posts. Synced-pattern canonical updates
+are separate site operations and source changes make no sitewide propagation claim. Direct insertion,
+synced-pattern use, and plugin deactivation each need their own WordPress acceptance proof. Generated
+packages are static WordPress source and contain no Block Runner runtime dependency.
+
 | Supported entry point | Compatibility boundary |
 | --- | --- |
 | `GeneratedAuthoringPlan`, `validateAuthoringPlan`, `hashAuthoringPlan`, `renderAuthoringPreview`, `planRegisteredBlockOutput`, `compileRegisteredBlock`, destination inspection/write helpers | Supported v1 confirmation contract. The canonical hash is its sole plan identity. |
