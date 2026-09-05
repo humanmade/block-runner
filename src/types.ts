@@ -606,6 +606,7 @@ export type {
   ProofPatternInstance,
   ProofPatternRequiredBinding,
   PatternOverrideContent,
+  ProofArtifactContract,
 } from './proof/runner.js';
 export type {
   GateId,
@@ -619,6 +620,10 @@ export type {
   ProofGateStatus,
   ProofProfile,
   ProofProfileEvaluation,
+  ProofArtifactRequirement,
+  ProofClaimName,
+  ProofRequirementClaim,
+  ProofRequirementReport,
   ProofProfileName,
   ProofProfileReport,
 } from './proof/profiles.js';

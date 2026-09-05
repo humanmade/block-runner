@@ -28,6 +28,13 @@ if (!configPath || !outputPath) {
 
 const input = JSON.parse(await readFile(configPath, 'utf8'));
 const fixture = input.fixture;
+// The runner resolves historical profiles and artifact capabilities once. Execute that exact
+// requirement set here instead of maintaining a second profile-name ladder in the browser.
+if (!Array.isArray(input.requiredGates)) throw new Error('Browser proof requires resolved requiredGates.');
+const required = new Set(input.requiredGates);
+const needsPattern = required.has('pattern_overrides');
+const needsFrontend = needsPattern || [...required].some((gate) => gate.startsWith('frontend_'))
+  || required.has('visual_regression') || required.has('accessibility_frontend');
 const baseUrl = (input.baseUrl ?? 'http://localhost:8888').replace(/\/$/, '');
 const outputDir = path.dirname(outputPath);
 const artifactDir = path.join(outputDir, 'artifacts');
@@ -125,7 +132,7 @@ try {
     block: fixture.blockName,
   });
 
-  if (input.profile !== 'runtime') {
+  if ([...required].some((gate) => gate.startsWith('editor_')) || needsFrontend) {
   const inserted = await phase('editor-inserter', () => insertThroughVisibleInserter(page, fixture));
   set('editor_inserter', inserted ? 'pass' : 'fail', inserted ? undefined : 'Could not insert the block through the visible inserter.');
 
@@ -178,16 +185,24 @@ try {
     }, [...(prior?.artifacts ?? []), ...matrix.artifacts]);
   }
 
-  if (!input.profile || input.profile === 'full') {
-  patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
+  if (needsPattern) patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
+  if (required.has('accessibility_editor') && !needsFrontend) {
+    await phase('accessibility-editor', () => proveAxeEditor(page, fixture, artifactDir));
+  }
+  if (needsFrontend) {
   const published = await phase('publish', () => publishPost(page, editor));
   const publishedState = await editorState(page);
   publication = published ? await readPublication(page, publishedState.content) : undefined;
-  await phase('accessibility-editor', () => proveAxeEditor(page, fixture, artifactDir));
+  if (required.has('accessibility_editor')) await phase('accessibility-editor', () => proveAxeEditor(page, fixture, artifactDir));
+  // Pattern-only proof still needs its saved publication, but does not claim frontend scope.
+  if (needsPattern && !fixture.frontend?.url && publication?.permalink) {
+    await page.goto(new URL(publication.permalink, baseUrl).toString(), { waitUntil: 'load' });
+  } else {
   await phase('frontend', () => proveFrontend(page, fixture, baseUrl, publication, artifactDir));
-  await phase('pattern-frontend', () => completePatternOverride(page, fixture, publication, patternLifecycle));
-  await phase('visual-regression', () => proveVisual(page, fixture, artifactDir));
-  await phase('accessibility-frontend', () => proveAxeFrontend(page, fixture, artifactDir));
+  }
+  if (needsPattern) await phase('pattern-frontend', () => completePatternOverride(page, fixture, publication, patternLifecycle));
+  if (required.has('visual_regression')) await phase('visual-regression', () => proveVisual(page, fixture, artifactDir));
+  if (required.has('accessibility_frontend')) await phase('accessibility-frontend', () => proveAxeFrontend(page, fixture, artifactDir));
     blocked('accessibility_manual_review', 'Manual review is verified separately against a saved input/ZIP-bound review record, not inferred from browser automation.');
   }
   }

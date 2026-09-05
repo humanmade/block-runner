@@ -52,6 +52,7 @@ export {
   validateGeneratedSources,
 } from './authoring/generate.js';
 export { previewAuthoringPlan, renderAuthoringPreview } from './authoring/preview.js';
+export { classifyRegisteredBlockRegeneration } from './authoring/regeneration.js';
 export { AuthoringStyleError, authoringRulesFromStylesheet, renderConfirmedStyleRules } from './authoring/styles.js';
 export {
   hashAuthoringConfirmation,
@@ -96,6 +97,7 @@ export type {
 export {
   runProof,
   prove,
+  reportProofRequirements,
 } from './proof/runner.js';
 export {
   PATTERN_OVERRIDE_SOURCE,
@@ -110,6 +112,7 @@ export {
 } from './authoring/pattern-overrides.js';
 export type { PatternOverrideBinding, PatternOverrideContract } from './authoring/pattern-overrides.js';
 export {
+  PROOF_CLAIM_NAMES,
   PROOF_GATE_IDS,
   PROOF_GATE_STATUSES,
   PROOF_PROFILE_NAMES,
@@ -124,6 +127,7 @@ export {
   isProofGateStatus,
   isProofProfileName,
   normalizeProofGateId,
+  proofClaimGates,
   reportProofProfile,
 } from './proof/profiles.js';
 export {
@@ -280,6 +284,7 @@ export type {
   ProofPatternNegativeBinding,
   ProofPatternRequiredBinding,
   PatternOverrideContent,
+  ProofArtifactContract,
 } from './proof/runner.js';
 export type {
   GateId,
@@ -293,6 +298,10 @@ export type {
   ProofGateStatus,
   ProofProfile,
   ProofProfileEvaluation,
+  ProofArtifactRequirement,
+  ProofClaimName,
+  ProofRequirementClaim,
+  ProofRequirementReport,
   ProofProfileName,
   ProofProfileReport,
 } from './proof/profiles.js';

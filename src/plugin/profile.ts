@@ -5,6 +5,7 @@ import { chmod, link, lstat, mkdir, readFile, readdir, rename, unlink, writeFile
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
+import { classifyRegenerationChanges, descriptiveMetadataOnly, type RegenerationImpact } from '../authoring/regeneration.js';
 import standalonePackageLockTemplate from './standalone-package-lock.34.2.0.json' with { type: 'json' };
 const execFileAsync = promisify(execFile);
 
@@ -133,6 +134,8 @@ export interface PluginTouchedFile {
 }
 
 export interface PluginOutputPlan {
+  /** Compatibility of the generated block source, distinct from file replacement approval. */
+  regeneration?: RegenerationImpact;
   mode: PluginPlanMode;
   targetDirectory: string;
   block: {
@@ -532,6 +535,11 @@ export async function writePluginOutput(
   plan: PluginOutputPlan,
   options: WritePluginOutputOptions = {},
 ): Promise<WritePluginOutputResult> {
+  // Classification and publication must observe the same bytes across asynchronous inspection.
+  plan = { ...plan, block: { ...plan.block }, touchedFiles: plan.touchedFiles.map((file) => ({
+    ...file, content: Buffer.from(file.content),
+    ...(file.previousContent === undefined ? {} : { previousContent: Buffer.from(file.previousContent) }),
+  })) };
   const root = path.resolve(plan.mode === 'standalone' ? plan.targetDirectory : plan.profile!.root);
   const approved = new Set(options.authorizedReplacements ?? []);
   if (fingerprintPlan(plan) !== plan.fingerprint) {
@@ -542,6 +550,11 @@ export async function writePluginOutput(
   // checks run again immediately before every rename because another process may race the
   // preview or staging work.
   const inspected = await inspectPluginPublication(root, plan.touchedFiles, approved);
+  const regeneration = pluginRegeneration(plan);
+  if (!regeneration.writeAllowed && regeneration.kind !== 'unchanged') {
+    throw new Error('saved-markup or structure changed; no files written. ' + regeneration.nextStep);
+  }
+  if (inspected.length === 0) return { directory: root, written: [], fingerprint: plan.fingerprint };
   const stageDirectory = publicationStageDirectory(root);
   const stageRoot = path.join(stageDirectory, 'output');
   let staged: StagedPluginPublicationFile[] = [];
@@ -756,13 +769,15 @@ async function inspectPluginPublication(
     if (!stats?.isFile()) {
       throw new Error(`Previewed file is no longer a regular file: ${file.path}`);
     }
-    if (!file.requiresSeparateAuthorization || !approved.has(file.path)) {
+    const unchanged = file.previousContent?.equals(file.content) === true;
+    if (!unchanged && (!file.requiresSeparateAuthorization || !approved.has(file.path))) {
       throw new Error(`Separate explicit authorization is required to replace: ${file.path}`);
     }
     const current = await readFile(file.path);
     if (!file.previousContent || !current.equals(file.previousContent)) {
       throw new Error(`Previewed file changed after inspection: ${file.path}`);
     }
+    if (unchanged) continue;
     inspected.push({
       file,
       target: file.path,
@@ -1593,12 +1608,26 @@ function appendBlocksManifest(packageText: string): string | undefined {
 function finalizePlan(input: Omit<PluginOutputPlan, 'fingerprint'>): PluginOutputPlan {
   const duplicate = input.touchedFiles.find((file, index, all) => all.findIndex((candidate) => candidate.path === file.path) !== index);
   if (duplicate) throw new Error(`Plugin preview has duplicate target: ${duplicate.path}`);
-  const plan = { ...input, touchedFiles: [...input.touchedFiles].sort((left, right) => left.path.localeCompare(right.path)), fingerprint: '' };
+  const regeneration = pluginRegeneration(input);
+  const plan = { ...input, regeneration,
+    notes: [...input.notes, `Regeneration: ${regeneration.kind}. ${regeneration.existingInstanceEffect} ${regeneration.nextStep}`],
+    touchedFiles: [...input.touchedFiles].sort((left, right) => left.path.localeCompare(right.path)), fingerprint: '' };
   return { ...plan, fingerprint: fingerprintPlan(plan) };
+}
+
+function pluginRegeneration(plan: Pick<PluginOutputPlan, 'block' | 'touchedFiles'>): RegenerationImpact {
+  const files = plan.touchedFiles.filter((file) => file.path.startsWith(plan.block.directory + path.sep));
+  const relative = (file: PluginTouchedFile) => path.relative(plan.block.directory, file.path).split(path.sep).join('/');
+  const changed = files.filter((file) => !file.previousContent?.equals(file.content)).map(relative).sort();
+  const metadata = files.find((file) => relative(file) === 'block.json');
+  const metadataCompatible = !changed.includes('block.json') || Boolean(metadata?.previousContent
+    && descriptiveMetadataOnly(metadata.previousContent.toString('utf8'), metadata.content.toString('utf8')));
+  return classifyRegenerationChanges(files.some((file) => file.previousContent !== undefined), changed, metadataCompatible);
 }
 
 function fingerprintPlan(plan: Omit<PluginOutputPlan, 'fingerprint'> | PluginOutputPlan): string {
   const view = {
+    regeneration: plan.regeneration,
     mode: plan.mode,
     targetDirectory: plan.targetDirectory,
     block: plan.block,

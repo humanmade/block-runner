@@ -22,7 +22,7 @@ import type { AuthoringPlan } from '../src/authoring/schema.js';
 import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
 import { getWp } from '../src/headless/wp.js';
 import type { AuthoringTemplate, WpBlock } from '../src/types.js';
-import type { ProofFixture, ProofPatternRequiredBinding } from '../src/proof/runner.js';
+import type { ProofArtifactContract, ProofFixture, ProofPatternRequiredBinding } from '../src/proof/runner.js';
 import { PROOF_IMAGE_BASE64, PROOF_SVG_SOURCE } from '../src/proof/fixture-image.js';
 
 const execFileAsync = promisify(execFile);
@@ -82,6 +82,8 @@ export interface BuiltPatternOverridesFixture {
   generatedBlockMarkup: string;
   /** Native Core subtree used by the inexpensive headless validation gate. */
   nativeContainerMarkup: string;
+  /** Capability record bound to the exact generated ZIP, never inferred from the fixture. */
+  artifact: ProofArtifactContract;
   fixture: ProofFixture;
 }
 
@@ -197,6 +199,10 @@ export async function buildPatternOverridesFixture(
   if (!rootOwned) assertBackgroundClass(updatedNativeMarkup, 'updated');
   const updatedBlockMarkup = wrapGeneratedBlock(compilerPlan.target.name, updatedNativeMarkup);
 
+  const artifact: ProofArtifactContract = {
+    sha256: `sha256:${createHash('sha256').update(await readFile(pluginZip)).digest('hex')}`,
+    capabilities: { patternOverrides: contract.bindings.length > 0 },
+  };
   const fixture = proofFixture({
     plan: compilerPlan,
     canonicalContent: generatedBlockMarkup,
@@ -213,7 +219,7 @@ export async function buildPatternOverridesFixture(
     writeFixed(path.join(root, 'generated-pattern.blocks.html'), `${generatedBlockMarkup}\n`),
   ]);
 
-  return { inputPath, pluginDirectory, pluginZip, generatedBlockMarkup, nativeContainerMarkup, fixture };
+  return { inputPath, pluginDirectory, pluginZip, generatedBlockMarkup, nativeContainerMarkup, artifact, fixture };
 }
 
 /**

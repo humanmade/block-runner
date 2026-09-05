@@ -75,6 +75,9 @@ try {
   await writeJson(fixturePath, {
     baseUrl,
     profile: 'full',
+    // This control invokes the browser helper directly, without the proof runner. Its scope is
+    // native editor persistence and automated accessibility, not pattern or fidelity claims.
+    requiredGates: ['client_registry', 'editor_inserter', 'editor_field_editing', 'editor_save', 'editor_reopen', 'accessibility_editor'],
     fixture: {
       blockName: control.blockName,
       blockTitle: control.blockTitle,
