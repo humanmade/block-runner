@@ -360,7 +360,7 @@ plugin
 
 plugin
   .command('write <blockDirectory>')
-  .description('Write exactly a previewed plugin plan after its fingerprint and replacement approvals are supplied.')
+  .description('Write exactly a previewed plugin source plan; build and runtime proof remain separate.')
   .requiredOption('--confirm <fingerprint>', 'exact fingerprint printed by plugin preview')
   .option('--host <directory>', 'recognised existing wp-scripts plugin root')
   .option('--standalone <directory>', 'write a complete standalone plugin wrapper instead')
@@ -372,12 +372,15 @@ plugin
       throw new Error('plugin confirmation does not match the reviewed preview; no files written');
     }
     const result = await writePluginOutput(plan, { authorizedReplacements: options.approveReplace });
+    const delivery = pluginDelivery(plan.mode, result.directory);
     if (options.json) {
-      console.log(JSON.stringify({ ok: true, ...result }, null, 2));
+      console.log(JSON.stringify({ ok: true, ...result, delivery }, null, 2));
       return;
     }
     console.log(`plugin write: ${result.written.length} file${result.written.length === 1 ? '' : 's'} written to ${result.directory}`);
     for (const file of result.written) console.log(`- ${file}`);
+    console.log('Source delivery: complete. Build and WordPress runtime proof have not run.');
+    console.log(`Next: ${delivery.nextCommand}`);
   });
 
 program
@@ -469,7 +472,7 @@ program
 
 author
   .command('preview <planOrStdin>')
-  .description('Validate and render an authoring plan without writing files.')
+  .description('Validate and review a declarative authoring plan without writing files.')
   .option('--output-dir <dir>', 'exact destination directory to fingerprint (default: plan directory or current directory)')
   .option('--width <columns>', 'preview width in terminal columns')
   .option('--json', 'emit a machine-readable preview')
@@ -480,6 +483,7 @@ author
     const destination = authoringDestination(options.outputDir, plan.target.directory);
     const inspection = await inspectAuthoringDestination(destination, outputPlan);
     const confirmation = hashAuthoringConfirmation(plan, inspection);
+    const touchedFiles = previewTouchedFiles(inspection, outputPlan.files);
     const width = parsePreviewWidth(options.width);
     const preview = renderAuthoringPreview({ ...plan, files: outputPlan.files.map((file) => ({ ...file })) }, {
       hash,
@@ -490,6 +494,7 @@ author
       color: !process.env.NO_COLOR,
       destination: inspection.directory,
       destinationFingerprint: inspection.fingerprint,
+      touchedFiles,
     });
     const result = {
       ok: true,
@@ -502,6 +507,8 @@ author
       canonicalJson: serializeAuthoringPlan(plan),
       plan,
       destination: { directory: inspection.directory, fingerprint: inspection.fingerprint },
+      touchedFiles,
+      replacementApprovals: touchedFiles.filter((file) => file.operation === 'replace').map((file) => file.path),
       preview,
       noFilesWritten: true,
     };
@@ -514,7 +521,7 @@ author
 
 author
   .command('write <planOrStdin>')
-  .description('Generate and write a sealed registered-block package from a confirmed authoring plan.')
+  .description('Generate and write a sealed registered-block source package; build and runtime proof remain separate.')
   .requiredOption('--confirm <hash>', 'exact destination-bound SHA-256 from author preview')
   .requiredOption('--output-dir <dir>', 'exact destination directory')
   .option('--json', 'emit a machine-readable write result')
@@ -538,6 +545,7 @@ author
       throw new Error('generated registered-block package does not match the confirmed plan; no files written');
     }
     const result = await writeGeneratedRegisteredBlock(destination, generated, inspection);
+    const delivery = authoringDelivery(result.directory);
     const output = {
       ok: true,
       command: 'author write',
@@ -546,6 +554,7 @@ author
       destination: { directory: result.directory, fingerprint: result.fingerprint },
       written: result.written,
       noFilesWritten: result.written.length === 0,
+      delivery,
     };
     if (options.json) {
       console.log(JSON.stringify(output, null, 2));
@@ -562,6 +571,9 @@ author
     for (const file of result.written) {
       console.log(`Wrote: ${file}`);
     }
+    console.log('Source delivery: complete. Build and WordPress runtime proof have not run.');
+    console.log(`Next (existing plugin): ${delivery.next.existingPlugin}`);
+    console.log(`Next (standalone plugin): ${delivery.next.standalonePlugin}`);
   });
 
 async function main(): Promise<void> {
@@ -715,6 +727,61 @@ function authoringDestination(outputDirectory: string | undefined, packageDirect
   return packageDirectory && packageDirectory !== '.'
     ? path.resolve(process.cwd(), ...packageDirectory.split('/'))
     : path.resolve(process.cwd());
+}
+
+function previewTouchedFiles(
+  inspection: Awaited<ReturnType<typeof inspectAuthoringDestination>>,
+  files: ReadonlyArray<{ path: string; operation: 'create' | 'replace' }>,
+): Array<{ path: string; operation: 'create' | 'replace'; exists: boolean }> {
+  return files.map((file) => {
+    const target = path.resolve(inspection.directory, ...file.path.split('/'));
+    return {
+      path: target,
+      operation: file.operation,
+      exists: inspection.entries.some((entry) => entry.path === target && entry.kind === 'file'),
+    };
+  });
+}
+
+function authoringDelivery(directory: string): {
+  status: 'source-delivered';
+  buildRuntimeProof: 'not-run';
+  next: { existingPlugin: string; standalonePlugin: string };
+} {
+  const runtime = pinnedBlockRunnerRuntime();
+  return {
+    status: 'source-delivered',
+    buildRuntimeProof: 'not-run',
+    next: {
+      existingPlugin: `${runtime} plugin preview ${shellDisplay(directory)} --host <existing-plugin-root>`,
+      standalonePlugin: `${runtime} plugin preview ${shellDisplay(directory)} --standalone <retained-plugin-directory>`,
+    },
+  };
+}
+
+function pluginDelivery(mode: 'existing' | 'standalone', directory: string): {
+  status: 'source-delivered';
+  buildRuntimeProof: 'not-run';
+  nextCommand: string;
+} {
+  return {
+    status: 'source-delivered',
+    buildRuntimeProof: 'not-run',
+    nextCommand: mode === 'standalone'
+      ? `cd ${shellDisplay(directory)} && npm ci && npm run zip && npm run test:zip`
+      : `cd ${shellDisplay(directory)} && npm run build`,
+  };
+}
+
+function shellDisplay(value: string): string {
+  // These strings are explicitly offered as the next command to run. JSON quoting is not shell
+  // quoting: a double-quoted `$()` or backtick still executes. Single-quote every argument and
+  // reopen around literal single quotes, which is safe in POSIX-compatible shells.
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
+
+function pinnedBlockRunnerRuntime(): string {
+  return `npx -y block-runner@${packageVersion}`;
 }
 
 function parsePreviewWidth(value: string | undefined): number | undefined {
@@ -879,7 +946,7 @@ async function pluginPlanForCli(
     return await planExistingPluginOutput(options.host!, generated);
   } catch (error) {
     if (error instanceof UnsupportedPluginLayoutError) {
-      throw new Error(`${error.message} Offer: plugin preview ${JSON.stringify(blockDirectory)} --standalone <output-dir>.`);
+      throw new Error(`${error.message} Offer: ${pinnedBlockRunnerRuntime()} plugin preview ${shellDisplay(blockDirectory)} --standalone <output-dir>.`);
     }
     throw error;
   }

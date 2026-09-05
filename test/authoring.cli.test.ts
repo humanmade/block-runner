@@ -1,11 +1,13 @@
 import { spawn } from 'node:child_process';
 import { mkdir, mkdtemp, readFile, stat, writeFile } from 'node:fs/promises';
+import { createRequire } from 'node:module';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { hashAuthoringPlan } from '../src/authoring/schema.js';
 
 const tsxImport = import.meta.resolve('tsx');
+const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as { version: string };
 
 function plan(overrides: Record<string, unknown> = {}): Record<string, unknown> {
   return {
@@ -71,10 +73,28 @@ describe('author CLI', () => {
       project,
     );
     expect(written.code).toBe(0);
-    expect(JSON.parse(written.stdout)).toMatchObject({
+    const result = JSON.parse(written.stdout) as {
+      destination: { directory: string };
+      delivery: { next: { existingPlugin: string; standalonePlugin: string } };
+    };
+    expect(result).toMatchObject({
       written: ['block.json', 'index.js', 'edit.js', 'save.js', 'style.scss', 'editor.scss', 'block.php'],
       noFilesWritten: false,
+      delivery: {
+        status: 'source-delivered',
+        buildRuntimeProof: 'not-run',
+        next: {
+          existingPlugin: expect.stringContaining('plugin preview'),
+          standalonePlugin: expect.stringContaining('plugin preview'),
+        },
+      },
     });
+    expect(result.delivery.next.existingPlugin).toBe(
+      `npx -y block-runner@${packageVersion} plugin preview ${shellQuote(result.destination.directory)} --host <existing-plugin-root>`,
+    );
+    expect(result.delivery.next.standalonePlugin).toBe(
+      `npx -y block-runner@${packageVersion} plugin preview ${shellQuote(result.destination.directory)} --standalone <retained-plugin-directory>`,
+    );
     expect(JSON.parse(await readFile(path.join(project, 'generated', 'block.json'), 'utf8'))).toMatchObject({
       name: 'example/notice',
       title: 'Notice',
@@ -92,7 +112,19 @@ describe('author CLI', () => {
 
     const preview = await runCli(['author', 'preview', 'plan.json', '--output-dir', 'generated', '--json'], project);
     expect(preview.code).toBe(0);
-    const previewJson = JSON.parse(preview.stdout) as { hash: string };
+    const previewJson = JSON.parse(preview.stdout) as {
+      hash: string;
+      preview: string;
+      touchedFiles: Array<{ path: string; operation: string; exists: boolean }>;
+      replacementApprovals: string[];
+    };
+    const replacement = previewJson.touchedFiles.find((file) => file.operation === 'replace');
+    expect(replacement).toMatchObject({ path: expect.stringMatching(/\/generated\/block\.json$/), exists: true });
+    expect(previewJson.replacementApprovals).toEqual([replacement!.path]);
+    expect(previewJson.preview).toContain(replacement!.path);
+    expect(previewJson.preview).toContain('explicit hash-bound replacement approval required');
+    expect(previewJson.preview).toContain(`Confirmation SHA-256: ${previewJson.hash}`);
+    expect(previewJson.preview.indexOf('Warnings')).toBeLessThan(previewJson.preview.indexOf('Confirmation SHA-256:'));
     await writeFile(path.join(destination, 'block.json'), 'changed after preview\n');
 
     const result = await runCli(
@@ -114,7 +146,56 @@ describe('author CLI', () => {
     expect(result.code).toBe(2);
     await expect(stat(path.join(project, 'generated'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
+
+  it('reports source delivery and its next integration commands without claiming proof', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
+    await writeFile(path.join(project, 'plan.json'), JSON.stringify(plan()));
+    const preview = await runCli(['author', 'preview', 'plan.json', '--output-dir', 'generated', '--json'], project);
+    const previewJson = JSON.parse(preview.stdout) as { hash: string; destination: { directory: string } };
+
+    const written = await runCli(
+      ['author', 'write', 'plan.json', '--confirm', previewJson.hash, '--output-dir', 'generated'],
+      project,
+    );
+
+    expect(written.code).toBe(0);
+    expect(written.stdout).toContain('Source delivery: complete. Build and WordPress runtime proof have not run.');
+    expect(written.stdout).toContain(
+      `Next (existing plugin): npx -y block-runner@${packageVersion} plugin preview ${shellQuote(previewJson.destination.directory)} --host <existing-plugin-root>`,
+    );
+    expect(written.stdout).toContain(
+      `Next (standalone plugin): npx -y block-runner@${packageVersion} plugin preview ${shellQuote(previewJson.destination.directory)} --standalone <retained-plugin-directory>`,
+    );
+  });
+
+  it('quotes shell metacharacters in JSON next commands', async () => {
+    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
+    const outputDirectory = "generated;$(printf unsafe)`&| ' space";
+    await writeFile(path.join(project, 'plan.json'), JSON.stringify(plan()));
+    const preview = await runCli(['author', 'preview', 'plan.json', '--output-dir', outputDirectory, '--json'], project);
+    const previewJson = JSON.parse(preview.stdout) as { hash: string };
+    const written = await runCli(
+      ['author', 'write', 'plan.json', '--confirm', previewJson.hash, '--output-dir', outputDirectory, '--json'],
+      project,
+    );
+
+    expect(written.code).toBe(0);
+    const result = JSON.parse(written.stdout) as {
+      destination: { directory: string };
+      delivery: { next: { existingPlugin: string; standalonePlugin: string } };
+    };
+    expect(result.delivery.next.existingPlugin).toBe(
+      `npx -y block-runner@${packageVersion} plugin preview ${shellQuote(result.destination.directory)} --host <existing-plugin-root>`,
+    );
+    expect(result.delivery.next.standalonePlugin).toBe(
+      `npx -y block-runner@${packageVersion} plugin preview ${shellQuote(result.destination.directory)} --standalone <retained-plugin-directory>`,
+    );
+  });
 });
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\''")}'`;
+}
 
 function runCli(args: string[], cwd: string): Promise<{ code: number | null; stdout: string; stderr: string }> {
   return new Promise((resolve, reject) => {

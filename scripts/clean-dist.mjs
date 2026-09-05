@@ -20,11 +20,27 @@ const result = spawnSync('trash', [target], { encoding: 'utf8' });
 if (!result.error && result.status === 0) {
   console.log('Moved previous dist to Trash.');
 } else {
-  // Hosts without the macOS CLI still retain the output in the user's Trash directory.
-  // A failed rename fails the build rather than falling back to permanent deletion.
+  // Hosts without the macOS CLI retain the output in the user's Trash directory. Sandboxed
+  // environments may deny that location, so retain it beside the checkout instead of deleting.
   const trashDirectory = path.join(homedir(), '.Trash');
-  await mkdir(trashDirectory, { recursive: true });
-  const destination = path.join(trashDirectory, `block-runner-dist-${randomUUID()}`);
-  await rename(target, destination);
+  let destination;
+  try {
+    destination = await moveToRecoverableDirectory(trashDirectory);
+  } catch (error) {
+    if (!isUnavailableTrash(error)) throw error;
+    destination = await moveToRecoverableDirectory(path.join(projectRoot, '.block-runner-trash'));
+  }
   console.log(`Moved previous dist to ${destination}`);
+}
+
+async function moveToRecoverableDirectory(directory) {
+  await mkdir(directory, { recursive: true });
+  const destination = path.join(directory, `block-runner-dist-${randomUUID()}`);
+  await rename(target, destination);
+  return destination;
+}
+
+function isUnavailableTrash(error) {
+  return error && typeof error === 'object'
+    && ['EACCES', 'EPERM', 'EROFS'].includes(error.code);
 }

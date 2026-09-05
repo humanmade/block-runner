@@ -63,6 +63,8 @@ export {
   detectWpScriptsPlugin,
   planExistingPluginOutput,
   planStandalonePluginOutput,
+  STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT,
+  STANDALONE_LOCK_TEMPLATE_VERSION,
   STANDALONE_WP_SCRIPTS_VERSION,
   UnsupportedPluginLayoutError,
   WP_SCRIPTS_PROFILE,

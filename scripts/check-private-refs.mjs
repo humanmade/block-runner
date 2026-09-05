@@ -49,7 +49,13 @@ if (badPaths.length > 0) {
 }
 
 const textFiles = files.filter((file) => /\.(md|js|mjs|cjs|ts|json|html|txt|yml|yaml)$/.test(file));
-const forbiddenPattern = new RegExp(forbiddenTerms.map(escapeRegExp).join('|'), 'i');
+// `md/` identifies the repository's private top-level directory. Require a path boundary so
+// public package names such as `transform-modules-amd` and arbitrary integrity hashes in a
+// bundled npm lock cannot be mistaken for that directory.
+const forbiddenPattern = new RegExp([
+  ...forbiddenTerms.filter((term) => term !== 'md/').map(escapeRegExp),
+  String.raw`(?:^|[^A-Za-z0-9_])md/`,
+].join('|'), 'i');
 const hits = [];
 
 for (const file of textFiles) {
