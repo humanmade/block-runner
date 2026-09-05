@@ -135,7 +135,7 @@ async function verifyProofConsumer({ consumer, packageRoot, cli, require }) {
     '--markup', 'proof-markup.html', '--input', 'proof-input.html', '--no-run', '--json',
   ], { cwd: consumer, expectedStatus: 1 });
   const receipt = JSON.parse(noRun.stdout);
-  const reasons = receipt.profile.failedGates.map((gate) => gate.reason ?? '').join(' ');
+  const reasons = receipt.profile.failedGates.map((gate) => gate.reason ?? gate.record?.reason ?? '').join(' ');
   if (!reasons.includes('Proof execution was disabled.') || reasons.includes('optional tooling that is unavailable')) {
     throw new Error(`Explicit proof tooling did not reach the no-run receipt path: ${reasons}`);
   }
