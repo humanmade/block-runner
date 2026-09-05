@@ -186,6 +186,9 @@ try {
   }
 
   if (needsPattern) patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
+  if (required.has('accessibility_editor') && !needsFrontend) {
+    await phase('accessibility-editor', () => proveAxeEditor(page, fixture, artifactDir));
+  }
   if (needsFrontend) {
   const published = await phase('publish', () => publishPost(page, editor));
   const publishedState = await editorState(page);
