@@ -1,5 +1,5 @@
 import { hashAuthoringPlan, type AuthoringPlan } from './schema.js';
-import { REGISTERED_BLOCK_TEMPLATE_VERSION } from './generate.js';
+import { deriveRegisteredBlockOutputFiles, REGISTERED_BLOCK_TEMPLATE_VERSION } from './generate.js';
 
 /**
  * Extra facts collected by the caller for a particular destination.  They deliberately live
@@ -80,6 +80,9 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   addKeyValue(lines, 'Icon', target.icon, width);
   addKeyValue(lines, 'Text domain', target.textDomain ?? target.textdomain, width);
   addKeyValue(lines, 'WordPress', target.wordpress, width);
+  if (target.metadata !== undefined) {
+    addKeyValue(lines, 'Native metadata', stableJson(target.metadata), width);
+  }
   const destination = options.destination ?? readString(target, ['directory', 'destination', 'outputDir']);
   // The exact destination is part of the confirmation boundary, so it must remain copyable
   // even when a narrow terminal would otherwise split it across lines.
@@ -166,7 +169,9 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   }
 
   section(lines, 'Planned files', width);
-  const files = asArray(value.files);
+  // Output paths are compiler-owned. Derive them here so every public caller reviews the same
+  // shape as CLI preview/write even when a declarative plan intentionally has files: [].
+  const files = deriveRegisteredBlockOutputFiles(plan);
   if (files.length === 0) {
     bullet(lines, 'none', width);
   } else {

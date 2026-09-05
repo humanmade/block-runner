@@ -155,7 +155,6 @@ export type {
   AuthoringNodeLock,
   AuthoringPattern,
   AuthoringPatternOverride,
-  AuthoringPlan as GeneratedAuthoringPlan,
   AuthoringCoverage,
   AuthoringCoverageAsset,
   AuthoringCoverageAssetOutcome,
@@ -173,6 +172,8 @@ export type {
   JsonPrimitive,
   JsonValue,
 } from './authoring/schema.js';
+/** The confirmation-bound registered-block plan used for preview, generation, and writing. */
+export type { AuthoringPlan as GeneratedAuthoringPlan } from './authoring/schema.js';
 export type { AuthoringPreviewContext, AuthoringPreviewOptions } from './authoring/preview.js';
 export type { AuthoringDestinationApproval, AuthoringOutputFile, AuthoringOutputPlan, DestinationEntry, DestinationInspection } from './authoring/destination.js';
 export type {
@@ -189,7 +190,10 @@ export type {
   AuthoringDiagnostic,
   AuthoringEditableField,
   AuthoringNode,
+  /** The pre-confirmation semantic plan retained for compatibility through this API line. */
   AuthoringPlan,
+  /** Additive name for the semantic AuthoringPlan compatibility contract. */
+  AuthoringPlan as SemanticAuthoringPlan,
   AuthoringRole,
   AuthoringTemplate,
   AssetLedgerEntry,

@@ -161,7 +161,7 @@ Gutenberg before it reaches the editor.
 | `convert` | Authored HTML to native post-content blocks, including the legacy styling path. |
 | `author <html> --json` | Analyze one authored design into a canonical registered-block plan, checked source, and style/asset ledgers. Does not write source. |
 | `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
-| `author preview <plan\|->` | Validate and render a versioned registered-block AuthoringPlan without writing files. |
+| `author preview <plan\|->` | Validate and render a versioned registered-block GeneratedAuthoringPlan without writing files. |
 | `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write the reviewed compiler-owned source package bound to its SHA-256 confirmation and destination. Build and runtime proof remain separate. |
 | `validate` | Check block markup against headless Gutenberg. |
 | `fix` | Canonicalize near-miss block markup. |
@@ -206,7 +206,7 @@ native structure and editing policy, then use the same preview/write workflow be
 Successful analysis uses the canonical source compiler; unresolved Custom HTML regions,
 unsafe assets, and unsupported CSS produce explicit failures, not a ready-to-install package.
 
-For a reusable registered block, first make a versioned **AuthoringPlan** rather than jumping
+For a reusable registered block, first make a versioned **GeneratedAuthoringPlan** rather than jumping
 from a description or design directly to source. The plan records the block target and native
 structure, editable and locked fields, style outcomes, pattern overrides, assets, planned files,
 and warnings. Review it before any write:
@@ -416,9 +416,40 @@ const fixed = await canonicalize(markup);
 const converted = await convert(html, { resolver: 'noop' });
 ```
 
+### Registered-block authoring contract
+
+`GeneratedAuthoringPlan` is the public authoring contract at the preview/confirmation/write
+boundary. `AuthoringPlan` remains the semantic input contract for existing consumers, with
+`SemanticAuthoringPlan` available as its additive alias. HTML analysis (`author()`) and the
+deprecated semantic `compileAuthoringPlan()` adapt that contract; their returned `canonicalPlan`
+is a `GeneratedAuthoringPlan` that consumers review and write.
+The runnable [authoring lifecycle example](examples/authoring-plan.ts) uses the same shape as the
+CLI and skill examples from proposal through preview, confirmation identity, and generation.
+
+| Supported entry point | Compatibility boundary |
+| --- | --- |
+| `GeneratedAuthoringPlan`, `validateAuthoringPlan`, `hashAuthoringPlan`, `renderAuthoringPreview`, `planRegisteredBlockOutput`, `compileRegisteredBlock`, destination inspection/write helpers | Supported v1 confirmation contract. The canonical hash is its sole plan identity. |
+| `AuthoringPlan` / `SemanticAuthoringPlan`, `author()` and `compileAuthoringPlan()` / `compileAuthoringBlock()` | Supported semantic adapters. They return a `GeneratedAuthoringPlan`; semantic input is not a second preview/write contract. The compile names are deprecated through 1.x. |
+| `generateRegisteredBlock`, `materializeAuthoringPlan` | Deprecated compatibility aliases through 1.x. Migrate to `compileRegisteredBlock`; no runtime behaviour changes. |
+| `emit*`, `validateBlockMetadata`, generated-source and destination primitives | Advanced/internal-facing helpers. |
+| `convert`, `assemble`, `validate`, `fix`/`canonicalize`, `extractIntent`, `realize` | Existing page-content APIs, unchanged and outside registered-block authoring. |
+
+`target.metadata` carries hash-bound native `block.json` metadata without forcing a reduced
+vendor schema at plan parsing time. The static compiler validates capabilities: executable keys
+and string `metadata.variations` PHP-file references fail with a precise compilation error.
+Inline declarative variation records and safe native metadata pass through unchanged.
+
+Migration boundary: `AuthoringPlan` remains the supported semantic import throughout this
+compatibility line, and `SemanticAuthoringPlan` is an additive alias. Use
+`GeneratedAuthoringPlan` for every confirmation flow. Existing semantic values remain accepted
+by the deprecated adapters.
+Passing one to `compileRegisteredBlock` intentionally fails with
+`invalid authoring plan: $.version must be 1`; adapt it first and preview the returned canonical
+plan. No page-content API is renamed or removed by this migration.
+
 ## Synced-pattern overrides (WordPress 7.1)
 
-`compileAuthoringPlan()` makes native content regions of a generated wrapper ready for
+The semantic adapter `compileAuthoringPlan()` makes native content regions of a generated wrapper ready for
 WordPress's synced-pattern override flow. It adds a deterministic `metadata.name` and explicit
 `core/pattern-overrides` binding only to supported Core child attributes: rich text
 `content`, image `id`/`url`/`alt`, and button `text`/`url`. Layout remains the one canonical

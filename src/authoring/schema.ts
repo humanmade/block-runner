@@ -93,6 +93,12 @@ export interface AuthoringTarget {
   textDomain?: string;
   wordpress?: string;
   directory?: string;
+  /**
+   * Additional declarative block.json metadata. It is hash-bound and rendered in preview.
+   * Static capability checks happen at compilation, where unsafe code-loading forms can be
+   * rejected without narrowing this transport to a particular vendor schema revision.
+   */
+  metadata?: { [key: string]: JsonValue };
 }
 
 export interface AuthoringNodeLock {
@@ -509,7 +515,7 @@ function normalizeCoverageAsset(input: unknown, location: string): AuthoringCove
 
 function normalizeTarget(input: unknown, location: string): AuthoringTarget {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['name', 'title', 'description', 'category', 'icon', 'textDomain', 'wordpress', 'directory']);
+  knownKeys(value, location, ['name', 'title', 'description', 'category', 'icon', 'textDomain', 'wordpress', 'directory', 'metadata']);
   const name = nonEmptyString(value.name, `${location}.name`);
   if (!/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/.test(name)) {
     throw invalid(`${location}.name`, 'must be a lowercase WordPress block name such as my-plugin/feature-grid');
@@ -533,6 +539,7 @@ function normalizeTarget(input: unknown, location: string): AuthoringTarget {
     textDomain: optionalString(value.textDomain, `${location}.textDomain`),
     wordpress,
     directory,
+    metadata: value.metadata === undefined ? undefined : jsonObjectAt(value.metadata, `${location}.metadata`),
   });
 }
 

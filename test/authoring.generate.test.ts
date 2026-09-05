@@ -141,6 +141,23 @@ describe('registered-block source compiler', () => {
     })).toThrow(/metadata-schema-invalid/);
   });
 
+  it('passes safe native metadata through while refusing PHP variations-file capabilities', () => {
+    const safe = plan();
+    safe.target.metadata = {
+      keywords: ['callout'],
+      variations: [{ name: 'compact', title: 'Compact', attributes: { className: 'is-compact' } }],
+    };
+    const metadata = JSON.parse(sourceFile(compileRegisteredBlock(safe).files, 'block.json').content) as Record<string, unknown>;
+    expect(metadata).toMatchObject({ keywords: ['callout'], variations: [{ name: 'compact', title: 'Compact' }] });
+    expect(hashAuthoringPlan(safe)).not.toBe(hashAuthoringPlan(plan()));
+
+    for (const variationFile of ['file:./variations.php', 'file:../../outside.php']) {
+      const unsafe = plan();
+      unsafe.target.metadata = { variations: variationFile };
+      expect(() => compileRegisteredBlock(unsafe)).toThrow(/unsupported-metadata-capability.*target\.metadata\.variations/);
+    }
+  });
+
   it('rejects event-bearing rich text deeply nested in a table-cell attribute with a source path', async () => {
     const unsafe = plan();
     unsafe.structure = [
