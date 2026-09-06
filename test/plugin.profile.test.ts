@@ -472,7 +472,7 @@ describe('standalone plugin profile', () => {
     const sharedCssPath = entries.find((entry) => entry.endsWith('/blocks/notice/style-index.css'))!;
     const editorCssPath = entries.find((entry) => entry.endsWith('/blocks/notice/index.css'))!;
     const css = (await archiveBytes(sharedCssPath)).toString('utf8');
-    expect(css).toContain('.wp-block-acme-notice .card');
+    expect(css).toContain(':where(.wp-block-acme-notice) .card');
     expect(css).toMatch(/@media\s*\(min-width:\s*48rem\)/);
     expect(css).toContain('translateY(-2px)');
     expect(css).not.toContain('./assets/photo.png');
