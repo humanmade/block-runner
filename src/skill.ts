@@ -263,10 +263,15 @@ function pinPackageVersion(file: BundleFile, packageVersion: string): Buffer {
     return file.content;
   }
   return Buffer.from(
-    file.content.toString('utf8').replace(
-      /block-runner@(?:latest|testing)(?!\s+skill\b)/g,
-      `block-runner@${packageVersion}`,
-    ),
+    file.content.toString('utf8')
+      .replace(
+        /npx[ \t]+--no-install[ \t]+block-runner[ \t]+(?=(?:assemble|convert|validate|fix|author|plugin|proof|context)\b)/g,
+        `npx -y block-runner@${packageVersion} `,
+      )
+      .replace(
+        /block-runner@(?:latest|testing)(?!\s+skill\b)/g,
+        `block-runner@${packageVersion}`,
+      ),
   );
 }
 

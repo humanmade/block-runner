@@ -68,20 +68,20 @@ mkdir -p "$EVIDENCE/responsive-panel-grid"
 node --input-type=module -e '
   import { readFile, writeFile } from "node:fs/promises";
   const css = await readFile(process.argv[1], "utf8");
-  await writeFile(process.argv[2], `${JSON.stringify({ author: { styles: { mode: "css", css } } }, null, 2)}\\n`);
+  await writeFile(process.argv[2], `${JSON.stringify({ author: { styles: { mode: "css", css } } }, null, 2)}\n`);
 ' "$EVIDENCE/inputs/responsive-panel-grid/benchmarks/authoring/sources/utility/tailwind-responsive.css" \
-  "$EVIDENCE/responsive-panel-grid/block-runner.config.mjs"
+  "$EVIDENCE/responsive-panel-grid/block-runner.config.json"
 cd "$EVIDENCE/responsive-panel-grid"
 "$BLOCK_RUNNER" author \
   "$EVIDENCE/inputs/responsive-panel-grid/benchmarks/authoring/sources/utility/tailwind-responsive.html" \
-  --name block-runner/responsive-panel-grid --config block-runner.config.mjs --json > analysis.json
+  --name block-runner/responsive-panel-grid --config block-runner.config.json --json > analysis.json
 
 # Run this in each journey directory after analysis. It stops if no usable canonical plan was produced.
 node --input-type=module -e '
   import { readFile, writeFile } from "node:fs/promises";
   const report = JSON.parse(await readFile(process.argv[1], "utf8"));
   if (!report.ok || !report.package?.canonicalPlan) throw new Error("No canonical plan in analysis report");
-  await writeFile(process.argv[2], `${JSON.stringify(report.package.canonicalPlan, null, 2)}\\n`);
+  await writeFile(process.argv[2], `${JSON.stringify(report.package.canonicalPlan, null, 2)}\n`);
 ' analysis.json authoring-plan.json
 "$BLOCK_RUNNER" author preview authoring-plan.json --output-dir "$PWD/generated" > preview.txt
 ```
