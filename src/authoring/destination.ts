@@ -5,7 +5,7 @@ import { REGISTERED_BLOCK_TEMPLATE_VERSION, REGISTERED_BLOCK_STYLE_EMITTER_VERSI
   type GeneratedRegisteredBlock } from './generate.js';
 import { hashAuthoringPlan, type AuthoringPlan, type AuthoringFileOperation } from './schema.js';
 import { classifyRegisteredBlockRegeneration } from './regeneration.js';
-import { hashBytes, isNotFound as publicationNotFound, publicationHash, publishStagedFile, readStableRegularFile, regularFileIdentity, replacePublicationJournal, sameFileIdentity, stagePublicationBytes, verifyPublicationTargets } from '../publication.js';
+import { hashBytes, isNotFound as publicationNotFound, publicationHash, publishPublicationEntries, publishStagedFile, readStableRegularFile, reconcilePublicationCompletion, regularFileIdentity, replacePublicationJournal, sameFileIdentity, stagePublicationBytes, validatePublicationRetry, verifyPublicationTargets, verifyStagedPublicationBytes } from '../publication.js';
 
 /** A read-only representation of the filesystem state relevant to a plan. */
 export interface DestinationInspection {
@@ -283,13 +283,11 @@ export async function writeAuthoringOutput(
     };
     await writePublicationRecord(runtime);
 
-    for (const item of runtime.entries) {
-      publicationAttempted = true;
-      await publishStagedTarget(runtime, item);
-      item.published = true;
-      await writePublicationRecord(runtime);
-      await afterPublicationStep(runtime, item, options);
-    }
+    await publishPublicationEntries(runtime.entries, (item) => item.published,
+      async (item) => { publicationAttempted = true; await publishStagedTarget(runtime!, item); },
+      (item) => { item.published = true; },
+      async () => writePublicationRecord(runtime!),
+      async (item) => afterPublicationStep(runtime!, item, options));
 
     const after = await inspectAuthoringDestination(preflight.directory, output);
     await verifyPublishedTargets(runtime, options);
@@ -490,18 +488,9 @@ async function afterPublicationStep(
 }
 
 async function reconcilePublishedTargets(runtime: PublicationRuntime): Promise<void> {
-  for (const entry of runtime.entries) {
-    entry.published = false;
-    try {
-      const current = await readRegularFile(entry.target, entry.file.path);
-      if (sha256(current) === entry.afterHash) {
-        entry.published = true;
-      }
-    } catch {
-      // Preserve the original publication error. A malformed or linked target cannot count as a
-      // completed publication and remains pending in the recovery inventory.
-    }
-  }
+  const completed = await reconcilePublicationCompletion(runtime.entries,
+    (entry) => `planned destination changed while reading: ${entry.file.path}`);
+  for (const entry of runtime.entries) entry.published = completed.has(entry);
 }
 
 async function cleanupStaging(entries: ReadonlyArray<PublicationRuntimeEntry>): Promise<void> {
@@ -539,14 +528,11 @@ async function resumeAuthoringPublication(
   try {
     await validateRecoveryRuntime(runtime);
     await writePublicationRecord(runtime);
-    for (const entry of runtime.entries) {
-      if (entry.published) continue;
-      publicationAttempted = true;
-      await publishStagedTarget(runtime, entry);
-      entry.published = true;
-      await writePublicationRecord(runtime);
-      await afterPublicationStep(runtime, entry, options);
-    }
+    await publishPublicationEntries(runtime.entries, (entry) => entry.published,
+      async (entry) => { publicationAttempted = true; await publishStagedTarget(runtime, entry); },
+      (entry) => { entry.published = true; },
+      async () => writePublicationRecord(runtime),
+      async (entry) => afterPublicationStep(runtime, entry, options));
     const after = await inspectAuthoringDestination(runtime.directory, { files: runtime.entries.map(({ file }) => file) });
     await verifyPublishedTargets(runtime, options);
     publicationComplete = true;
@@ -577,38 +563,33 @@ async function validateRecoveryRuntime(runtime: PublicationRuntime): Promise<voi
   if (inspection.directory !== runtime.directory) {
     throw new Error('authoring publication recovery directory changed unexpectedly');
   }
-  for (const entry of runtime.entries) {
-    const current = await readRegularFileMaybe(entry.target, entry.file.path);
-    if (entry.published) {
-      if (!current || sha256(current) !== entry.afterHash) {
-        throw new Error(`published file changed after interrupted publication: ${entry.file.path}`);
+  const completed = await validatePublicationRetry(
+    runtime.entries,
+    (entry) => entry.published,
+    async (entry) => {
+      const current = await readRegularFileMaybe(entry.target, entry.file.path);
+      return Boolean(current && sha256(current) === entry.afterHash);
+    },
+    async (entry) => { throw new Error(`published file changed after interrupted publication: ${entry.file.path}`); },
+    async (entry) => {
+      const current = await readRegularFileMaybe(entry.target, entry.file.path);
+      if (entry.beforeHash) {
+        if (!current || sha256(current) !== entry.beforeHash || !entry.beforeIdentity) {
+          throw new Error(`planned file changed after interrupted publication: ${entry.file.path}`);
+        }
+        await assertReplacementUnchanged(entry);
+      } else if (current) {
+        throw new Error(`planned create file appeared after interrupted publication: ${entry.file.path}`);
       }
-      continue;
-    }
-    if (current && sha256(current) === entry.afterHash) {
-      // An error from the kernel after publication is ambiguous. Treat an exact staged hash as
-      // completed rather than overwrite it on retry.
-      entry.published = true;
-      continue;
-    }
-    if (entry.beforeHash) {
-      if (!current || sha256(current) !== entry.beforeHash || !entry.beforeIdentity) {
-        throw new Error(`planned file changed after interrupted publication: ${entry.file.path}`);
-      }
-      await assertReplacementUnchanged(entry);
-    } else if (current) {
-      throw new Error(`planned create file appeared after interrupted publication: ${entry.file.path}`);
-    }
-    await assertStagedFile(entry);
-  }
+      await assertStagedFile(entry);
+    },
+  );
+  for (const entry of runtime.entries) entry.published = completed.has(entry);
 }
 
 async function assertStagedFile(entry: PublicationRuntimeEntry): Promise<void> {
   assertStagingPath(entry);
-  const staged = await readRegularFile(entry.temporary, entry.file.path);
-  if (sha256(staged) !== entry.afterHash) {
-    throw new Error(`staged authoring bytes changed after interrupted publication: ${entry.file.path}`);
-  }
+  await verifyStagedPublicationBytes(entry, `staged authoring bytes changed after interrupted publication: ${entry.file.path}`);
 }
 
 function assertStagingPath(entry: Pick<PublicationRuntimeEntry, 'file' | 'target' | 'temporary'>): void {

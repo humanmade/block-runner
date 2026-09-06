@@ -64,6 +64,86 @@ export async function publishStagedFile(temporary: string, target: string, repla
   await unlink(temporary);
 }
 
+/** The small common shape used while reconciling an interrupted publication. */
+export interface PublicationLifecycleEntry {
+  target: string;
+  temporary: string;
+  afterHash: string;
+}
+
+/**
+ * Observe completion from stable target bytes.  A failed observation is deliberately not a
+ * completion: the caller retains its last durable inventory and can report its own conflict.
+ */
+export async function reconcilePublicationCompletion<T extends PublicationLifecycleEntry>(
+  entries: readonly T[],
+  invalidTarget: (entry: T) => string,
+): Promise<Set<T>> {
+  const completed = new Set<T>();
+  for (const entry of entries) {
+    try {
+      const { content } = await readStableRegularFile(entry.target, invalidTarget(entry));
+      if (publicationHash(content) === entry.afterHash) completed.add(entry);
+    } catch {
+      // A target that cannot be read stably cannot safely be reconciled as complete.
+    }
+  }
+  return completed;
+}
+
+/**
+ * Share the recovery decision order without absorbing adapter policy.  Adapters still own
+ * containment, symlink, approval and replacement-byte checks through the supplied callbacks.
+ */
+export async function validatePublicationRetry<T extends PublicationLifecycleEntry>(
+  entries: readonly T[],
+  wasCompleted: (entry: T) => boolean,
+  isPublished: (entry: T) => Promise<boolean>,
+  onPreviouslyPublishedChanged: (entry: T) => Promise<void>,
+  validatePending: (entry: T) => Promise<void>,
+): Promise<Set<T>> {
+  const completed = new Set<T>();
+  for (const entry of entries) {
+    if (await isPublished(entry)) {
+      completed.add(entry);
+      continue;
+    }
+    if (wasCompleted(entry)) {
+      await onPreviouslyPublishedChanged(entry);
+      continue;
+    }
+    await validatePending(entry);
+  }
+  return completed;
+}
+
+/** Verify pending staged bytes with the same stable-file protection as final targets. */
+export async function verifyStagedPublicationBytes<T extends PublicationLifecycleEntry>(
+  entry: T,
+  error: string,
+): Promise<void> {
+  const { content } = await readStableRegularFile(entry.temporary, error);
+  if (publicationHash(content) !== entry.afterHash) throw new Error(error);
+}
+
+/** Publish in plan order, recording completion before any adapter progress callback runs. */
+export async function publishPublicationEntries<T>(
+  entries: readonly T[],
+  completed: (entry: T) => boolean,
+  publish: (entry: T) => Promise<void>,
+  markCompleted: (entry: T) => void,
+  persist: () => Promise<void>,
+  onPublished: (entry: T) => Promise<void>,
+): Promise<void> {
+  for (const entry of entries) {
+    if (completed(entry)) continue;
+    await publish(entry);
+    markCompleted(entry);
+    await persist();
+    await onPublished(entry);
+  }
+}
+
 /** Atomically replace a private JSON journal after flushing its temporary file. */
 export async function replacePublicationJournal(recordPath: string, record: unknown): Promise<void> {
   const temporary = `${recordPath}.${randomUUID()}.tmp`;
@@ -84,17 +164,22 @@ export async function verifyPublicationTargets<T>(
 ): Promise<void> {
   const observed = new Map<T, PublicationFileIdentity>();
   for (const entry of entries) {
+    let stable: { content: Buffer; identity: PublicationFileIdentity };
     try {
-      const stable = await readStableRegularFile(target(entry), `published target changed: ${target(entry)}`);
-      if (publicationHash(stable.content) !== expectedHash(entry)) throw conflict(entry);
-      observed.set(entry, stable.identity);
-      await onValidated?.(entry);
-    } catch (error) { throw error instanceof Error && error.message.startsWith('published target changed:') ? conflict(entry) : error; }
+      stable = await readStableRegularFile(target(entry), `published target changed: ${target(entry)}`);
+    } catch {
+      // Native lstat/read failures (including ENOENT and EACCES) are final-target conflicts,
+      // not interruptions. Keep callbacks below this boundary so their errors stay distinct.
+      throw conflict(entry);
+    }
+    if (publicationHash(stable.content) !== expectedHash(entry)) throw conflict(entry);
+    observed.set(entry, stable.identity);
+    await onValidated?.(entry);
   }
   for (const entry of entries) {
     try {
       if (!sameFileIdentity(observed.get(entry)!, await regularFileIdentity(target(entry), `published target changed: ${target(entry)}`))) throw conflict(entry);
-    } catch (error) { throw error instanceof Error && error.message.startsWith('published target changed:') ? conflict(entry) : error; }
+    } catch { throw conflict(entry); }
   }
 }
 

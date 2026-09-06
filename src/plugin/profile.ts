@@ -6,7 +6,7 @@ import { homedir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { classifyRegenerationChanges, descriptiveMetadataOnly, type RegenerationImpact } from '../authoring/regeneration.js';
-import { isNotFound, publicationHash, publishStagedFile, readStableRegularFile, replacePublicationJournal, stagePublicationBytes, verifyPublicationTargets } from '../publication.js';
+import { isNotFound, publicationHash, publishPublicationEntries, publishStagedFile, readStableRegularFile, reconcilePublicationCompletion, replacePublicationJournal, stagePublicationBytes, validatePublicationRetry, verifyPublicationTargets, verifyStagedPublicationBytes } from '../publication.js';
 import standalonePackageLockTemplate from './standalone-package-lock.34.2.0.json' with { type: 'json' };
 const execFileAsync = promisify(execFile);
 
@@ -572,28 +572,23 @@ export async function writePluginOutput(
     recordPath = path.join(stageDirectory, 'recovery.json');
     await persistPublicationRecord(recordPath, record);
 
-    for (const item of staged) {
+    await publishPublicationEntries(staged, (item) => completed.has(item.target), async (item) => {
       await recheckPluginPublicationTarget(root, item, approved);
       await mkdir(path.dirname(item.target), { recursive: true });
       // mkdir can race with an attacker replacing a newly made parent. Recheck after it too.
       await recheckPluginPublicationTarget(root, item, approved);
       publicationStarted = true;
       await publishStagedPluginFile(item);
-      if (item.operation === 'modify') {
-        // rename(2) preserves the temporary file's mode. Keep the previewed target mode explicit
-        // in case a platform's creation mask changed it while the temporary file was written.
-        await chmod(item.target, item.mode);
-      }
-      completed.add(item.target);
-      publishedSteps += 1;
+      if (item.operation === 'modify') await chmod(item.target, item.mode);
+    }, (item) => { completed.add(item.target); }, async () => {
       record.completed = [...completed].sort();
-      await persistPublicationRecord(recordPath, record);
+      await persistPublicationRecord(recordPath!, record);
+    }, async (item) => {
+      publishedSteps += 1;
       const recovery = publicationRecovery(root, staged, completed, recordPath);
-      if (options.failAfterPublishStep === publishedSteps) {
-        throw new Error(`Injected failure after plugin publication step ${publishedSteps}.`);
-      }
+      if (options.failAfterPublishStep === publishedSteps) throw new Error(`Injected failure after plugin publication step ${publishedSteps}.`);
       await options.onPublished?.(publicationEntry(item), recovery);
-    }
+    });
 
     await verifyPublishedPluginTargets(staged, completed, options);
     publicationComplete = true;
@@ -655,24 +650,22 @@ export async function retryPluginPublication(
   try {
     staged = await stageStoredPluginPublication(record, path.join(retryStageDirectory, 'output'));
     completed = await confirmRetryPreconditions(root, staged, completedAtInterruption);
-    for (const item of staged) {
-      if (completed.has(item.target)) continue;
+    await publishPublicationEntries(staged, (item) => completed.has(item.target), async (item) => {
       await recheckStoredPublicationTarget(root, item);
       await mkdir(path.dirname(item.target), { recursive: true });
       await recheckStoredPublicationTarget(root, item);
       publicationStarted = true;
       await publishStagedPluginFile(item);
       if (item.operation === 'modify') await chmod(item.target, item.mode);
-      completed.add(item.target);
-      publishedSteps += 1;
+    }, (item) => { completed.add(item.target); }, async () => {
       record.completed = [...completed].sort();
       await persistPublicationRecord(recordPath, record);
+    }, async (item) => {
+      publishedSteps += 1;
       const currentRecovery = publicationRecovery(root, staged, completed, recordPath);
-      if (options.failAfterPublishStep === publishedSteps) {
-        throw new Error(`Injected failure after plugin publication step ${publishedSteps}.`);
-      }
+      if (options.failAfterPublishStep === publishedSteps) throw new Error(`Injected failure after plugin publication step ${publishedSteps}.`);
       await options.onPublished?.(publicationEntry(item), currentRecovery);
-    }
+    });
     await verifyPublishedPluginTargets(staged, completed, options);
     publicationComplete = true;
     return { directory: root, written: [...completed].sort(), fingerprint: record.fingerprint };
@@ -922,16 +915,9 @@ async function persistPublicationRecord(recordPath: string, record: StoredPlugin
 }
 
 async function observedCompleted(staged: readonly StagedPluginPublicationFile[]): Promise<Set<string>> {
-  const observed = new Set<string>();
-  for (const item of staged) {
-    try {
-      const { content } = await readStableRegularFile(item.target, `plugin target is no longer a regular file: ${item.target}`);
-      if (publicationHash(content) === item.afterHash) observed.add(item.target);
-    } catch {
-      // The saved completion state remains the best report if the filesystem cannot be read.
-    }
-  }
-  return observed;
+  const completed = await reconcilePublicationCompletion(staged,
+    (item) => `plugin target is no longer a regular file: ${item.target}`);
+  return new Set([...completed].map((item) => item.target));
 }
 
 async function verifyPublishedPluginTargets(
@@ -1080,28 +1066,38 @@ async function confirmRetryPreconditions(
   completedAtInterruption: ReadonlySet<string>,
 ): Promise<Set<string>> {
   await assertPluginPublicationRoot(root);
-  const completed = new Set<string>();
-  for (const item of staged) {
-    assertTargetInside(root, item.target);
-    await assertNoSymlinkedParents(root, item.target);
-    const stats = await lstatMaybe(item.target);
-    const current = stats?.isFile() ? await readFile(item.target) : undefined;
-    if (current && publicationHash(current) === item.afterHash) {
-      completed.add(item.target);
-      continue;
-    }
-    if (completedAtInterruption.has(item.target)) {
-      throw new Error(`Refusing recovery because a previously published file changed: ${item.target}`);
-    }
-    if (item.operation === 'create') {
-      if (stats) throw new Error(`Refusing recovery because a pending target appeared: ${item.target}`);
-      continue;
-    }
-    if (!stats?.isFile() || !item.beforeContent || !current?.equals(item.beforeContent)) {
-      throw new Error(`Refusing recovery because a pending replacement changed: ${item.target}`);
-    }
-  }
-  return completed;
+  const completed = await validatePublicationRetry(
+    staged,
+    (item) => completedAtInterruption.has(item.target),
+    async (item) => {
+      await verifyStagedPublicationBytes(item, `Plugin publication recovery record has corrupt staged bytes: ${item.target}`);
+      assertTargetInside(root, item.target);
+      await assertNoSymlinkedParents(root, item.target);
+      const stats = await lstatMaybe(item.target);
+      if (!stats?.isFile()) return false;
+      try {
+        const { content } = await readStableRegularFile(item.target, `plugin target is no longer a regular file: ${item.target}`);
+        return publicationHash(content) === item.afterHash;
+      } catch {
+        return false;
+      }
+    },
+    async (item) => { throw new Error(`Refusing recovery because a previously published file changed: ${item.target}`); },
+    async (item) => {
+      assertTargetInside(root, item.target);
+      await assertNoSymlinkedParents(root, item.target);
+      const stats = await lstatMaybe(item.target);
+      const current = stats?.isFile() ? await readFile(item.target) : undefined;
+      if (item.operation === 'create') {
+        if (stats) throw new Error(`Refusing recovery because a pending target appeared: ${item.target}`);
+        return;
+      }
+      if (!stats?.isFile() || !item.beforeContent || !current?.equals(item.beforeContent)) {
+        throw new Error(`Refusing recovery because a pending replacement changed: ${item.target}`);
+      }
+    },
+  );
+  return new Set([...completed].map((item) => item.target));
 }
 
 async function recheckStoredPublicationTarget(root: string, item: StagedPluginPublicationFile): Promise<void> {
