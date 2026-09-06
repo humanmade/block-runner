@@ -12,12 +12,13 @@
   graph. CI installs the lockfile and packed tarball with engine-strict at each
   exact floor.
 
-## 0.9.0 — 2026-09-04 — testing release
+## 0.9.0 — 2026-09-04 — unreleased testing candidate
 
-This is the 0.9 testing release line, distributed through the `testing` npm tag. The stable
-`latest` channel remains on 0.8.0. The release workflow requires the receipt-backed matrix to
-pass before publication; 1.0 remains contingent on real-project feedback and resolved
-release-relevant failures.
+This is an unreleased 0.9 testing candidate. The public registry currently offers stable
+`latest: 0.8.0`; no `testing` tag is available. Review the pinned checkout or its supplied packed
+candidate rather than naming an npm channel that does not exist. The release workflow requires the
+receipt-backed matrix and explicit owner approval before publication; 1.0 remains contingent on
+real-project feedback and resolved release-relevant failures.
 
 ### Added
 
@@ -59,20 +60,17 @@ release-relevant failures.
 
 ### Release status
 
-Node 20, 22 and 24 verification and the WordPress 7.1 automated proof passed in
-[CI](https://github.com/humanmade/block-runner/actions/runs/33879578421). Local production font
-ZIP, existing-plugin second-block, and all four deliberate-mutation checks also passed.
-Those historical major-line jobs used ordinary installs and do not establish the exact
-engine-strict floors documented in the Unreleased compatibility decision above.
-A keyboard and screenshot review is saved
-against the reproducible fixture's exact input and ZIP hashes. The narrow 0.9 testing exception
-covers separately reproduced native Heading and Paragraph accessibility findings; raw failures
-remain in the receipts, and the agent-assisted review is not human accessibility certification.
+No final-candidate release matrix, packed-artifact receipt, or owner-acceptance record is claimed
+here. Historical CI, WordPress fixture, ZIP, and mutation evidence remains attached to its own
+revision and artifact; it is not success evidence for a later candidate. An agent-assisted
+keyboard/screenshot review is likewise not a human accessibility certification or owner
+acceptance.
 
-The publishing workflow runs the complete release matrix before uploading the package. Passing
-unit tests or historical page-content benchmark scores does not establish that release acceptance.
-The separate registered-block benchmark remains pending and unscored; no new model benchmark
-results are claimed for this candidate.
+The publishing workflow may upload a package only after the exact final candidate has its required
+receipt-backed matrix and explicit owner release approval. Automated proof establishes only its
+named artifact and claim; prepared-but-unrun owner-acceptance inputs retain required human visual,
+editing-feel, and manual-accessibility decisions. The separate registered-block benchmark remains
+pending and unscored; no new model benchmark results are claimed for this candidate.
 
 ## 0.8.0 — 2026-09-02
 

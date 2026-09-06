@@ -37,13 +37,14 @@ describe('CLI', () => {
       expect(skill).toContain(`block-runner@${packageVersion}`);
       expect(guide).toContain(`block-runner@${packageVersion}`);
       expect(skill).not.toContain('block-runner@latest');
-      expect(sourceGuide).toContain('block-runner@testing author preview');
-      expect(sourceGuide).not.toMatch(/block-runner@latest (?:author|plugin|proof)/);
-      expect(guide).toContain(`block-runner@${packageVersion} author preview`);
-      expect(guide).toContain(`block-runner@${packageVersion} plugin preview`);
-      expect(guide).toContain('npx --no-install block-runner proof');
-      expect(guide).toContain('block-runner@testing skill --install');
-      expect(guide).not.toMatch(/block-runner@(?:latest|testing) (?:assemble|convert|validate|fix|author|plugin|proof)/);
+      expect(sourceGuide).toContain('npx --no-install block-runner author preview');
+      expect(sourceGuide).toContain('npx --no-install block-runner skill --install');
+      expect(sourceGuide).not.toMatch(/npx(?:\s+-y)?\s+block-runner@(?:latest|testing)\s+(?:author|plugin|proof)\b/);
+      expect(guide).toContain(`npx -y block-runner@${packageVersion} author preview`);
+      expect(guide).toContain(`npx -y block-runner@${packageVersion} plugin preview`);
+      expect(guide).toContain(`npx -y block-runner@${packageVersion} proof`);
+      expect(guide).toContain('npx --no-install block-runner skill --install');
+      expect(guide).not.toMatch(/block-runner@(?:latest|testing)\s+(?:assemble|convert|validate|fix|author|plugin|proof|skill)\b/);
       expect(JSON.parse(await readFile(path.join(destination, '.block-runner-install.json'), 'utf8'))).toMatchObject({
         schemaVersion: 1,
         skill: 'block-runner',

@@ -45,10 +45,12 @@ design and produces the versioned declarative **`GeneratedAuthoringPlan`**; the 
 generator produces all executable source and serializes blocks. This is deliberately different
 from converting a design into page `post_content`.
 
-This 0.9 authoring workflow is available from the testing channel. In this printed source guide,
-run its authoring, plugin, and proof commands with `npx -y block-runner@testing`. An installed
-skill rewrites runtime commands to the exact version that installed it, so its compiler and guide
-cannot drift. Do not substitute `@latest` while stable lacks `author`.
+The 0.9 authoring workflow is an unreleased candidate. Until its npm channel is
+published and independently verified, install a reviewed, pinned candidate tarball in
+the project and run `npx --no-install block-runner`. Do not substitute `@latest` or a
+nonexistent `@testing` tag: stable `latest` remains on 0.8.0. An installed skill
+rewrites runtime commands to the exact version that installed it, so its compiler and
+guide cannot drift.
 
 ### The model's job: make the authoring plan, never the implementation
 
@@ -218,7 +220,7 @@ declaration-by-declaration accounting, including native mappings and explicit re
 ### Preview the exact plan before asking
 
 ```bash
-npx -y block-runner@testing author preview authoring-plan.json \
+npx --no-install block-runner author preview authoring-plan.json \
   --output-dir <exact-final-destination>
 ```
 
@@ -244,7 +246,7 @@ non-interactive; it never obtains conversational consent for you.
 After that exact approval, run:
 
 ```bash
-npx -y block-runner@testing author write authoring-plan.json \
+npx --no-install block-runner author write authoring-plan.json \
   --confirm '<full preview hash>' \
   --output-dir '<exact previewed destination>'
 ```
@@ -260,10 +262,10 @@ command for the existing-plugin or standalone boundary.
 Use this only after inspecting the target plugin. Do not guess its build or registration layout.
 
 ```bash
-npx -y block-runner@testing plugin inspect <plugin-root>
-npx -y block-runner@testing plugin preview <generated-block-dir> --host <plugin-root>
+npx --no-install block-runner plugin inspect <plugin-root>
+npx --no-install block-runner plugin preview <generated-block-dir> --host <plugin-root>
 # Show this complete preview, then obtain its displayed fingerprint and any separate replacement approvals.
-npx -y block-runner@testing plugin write <generated-block-dir> --host <plugin-root> \
+npx --no-install block-runner plugin write <generated-block-dir> --host <plugin-root> \
   --confirm '<plugin preview fingerprint>' \
   --approve-replace '<each explicitly approved path>'
 ```
@@ -288,10 +290,10 @@ Use a retained, explicitly named plugin directory. Preview the wrapper before it
 then build the final plugin archive from that same directory.
 
 ```bash
-npx -y block-runner@testing plugin preview <generated-block-dir> \
+npx --no-install block-runner plugin preview <generated-block-dir> \
   --standalone <retained-plugin-directory>
 # Show this complete preview, then obtain its displayed fingerprint and any replacement approvals.
-npx -y block-runner@testing plugin write <generated-block-dir> \
+npx --no-install block-runner plugin write <generated-block-dir> \
   --standalone <retained-plugin-directory> \
   --confirm '<plugin preview fingerprint>'
 ```
@@ -309,14 +311,16 @@ test:zip` verifies its release contents. Those are build checks, not WordPress r
 ### Proof is part of completion
 
 Headless validation, source generation, or a successful build is not a full success claim. Build
-the final plugin ZIP and run a full proof against the exact reviewed input and generated package.
+the final plugin ZIP, then select the narrowest proof claim that matches the artifact. A full
+proof is exhaustive; it is not the only credible claim for an artifact that does not promise
+pattern overrides.
 Real-WordPress proof is an explicit optional setup: install the exact proof tooling alongside the
 same locally installed Block Runner version, then install Chromium yourself. This never triggers
 a browser download or model call from the proof command:
 
 ```bash
 npm install --save-dev --save-exact \
-  block-runner@testing \
+  /absolute/path/to/block-runner-0.9.0.tgz \
   @wordpress/env@11.12.0 \
   @playwright/test@1.61.1 \
   @wordpress/e2e-test-utils-playwright@1.51.0 \
@@ -339,10 +343,18 @@ npx --no-install block-runner proof dist/acme-feature-grid.zip \
   --receipt-dir artifacts/proof
 ```
 
-Call the result fully successful only after a passing immutable `proof --profile full` receipt.
-That profile must include real WordPress runtime registration/activation and editor gates plus a
-passing `pattern_overrides` gate. `skip`, `blocked`, missing, or failed runtime or override gates
-mean the source is still unproven; report it as incomplete rather than successful.
+Name the proof claim in the result. `generated`, `built`, `editor-verified`, and
+`fidelity-checked` establish progressively broader behavior. A hash-matched artifact that
+declares `patternOverrides: false` does not require or claim pattern behavior for the
+editor/fidelity claims. `pattern-verified` requires `patternOverrides: true` plus the complete
+two-instance pattern fixture. `full` is exhaustive and includes the pattern, visual, and manual
+review gates. `skip`, `blocked`, missing, or failed required gates mean the named claim remains
+unproven; report it as incomplete rather than successful.
+
+An automated receipt establishes only its named artifact and claim. A prepared owner session is
+not a passed session, and an agent-assisted keyboard/screenshot review is not a human
+accessibility certification. Keep owner visual, editing-feel, and manual-accessibility decisions
+required until their hash-bound record exists; none of these records authorises publication.
 
 ---
 
@@ -624,25 +636,26 @@ harmless. Read results from stdout or `--json`. Users who run this often can
 If your harness supports skills, install the canonical skill into the current project:
 
 ```bash
-npx -y block-runner@testing skill --install
+npx --no-install block-runner skill --install
 ```
 
 That writes the same skill to the cross-agent `.agents/skills/block-runner` location and to
 Claude Code's `.claude/skills/block-runner` compatibility location. Narrow it when needed:
 
 ```bash
-npx -y block-runner@testing skill --install --target agents
-npx -y block-runner@testing skill --install --target claude
-npx -y block-runner@testing skill --install --scope user
-npx -y block-runner@testing skill --install --dir .another-agent/skills
-npx -y block-runner@testing skill --install --dry-run
+npx --no-install block-runner skill --install --target agents
+npx --no-install block-runner skill --install --target claude
+npx --no-install block-runner skill --install --scope user
+npx --no-install block-runner skill --install --dir .another-agent/skills
+npx --no-install block-runner skill --install --dry-run
 ```
 
 Project discovery is the most portable choice. User-wide discovery paths still vary between
 harnesses, so use `--dir` when a client documents a different global skills root.
 The installer pins runtime examples to its own package version so the guide and CLI contract
-stay aligned. To update later, rerun `npx -y block-runner@testing skill --install`.
+stay aligned. To update an unreleased candidate, install the reviewed replacement tarball first,
+then rerun `npx --no-install block-runner skill --install`.
 
 **Ask the user first.** This writes files into their project, which is their call, not yours.
 If they decline, or their harness has no skill system, nothing is lost — reading this guide is
-the same information. `npx -y block-runner@testing skill` prints it without installing anything.
+the same information. `npx --no-install block-runner skill` prints it without installing anything.
