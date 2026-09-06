@@ -6,6 +6,7 @@ import { describe, expect, it } from 'vitest';
 import { compileRegisteredBlock, planRegisteredBlockOutput } from '../src/authoring/generate.js';
 import { hashAuthoringPlan, validateAuthoringPlan, type AuthoringPlan, type AuthoringCssRule } from '../src/authoring/schema.js';
 import { renderAuthoringPreview } from '../src/authoring/preview.js';
+import { validateCoverageFulfillment } from '../src/author/plan.js';
 import { authoringRulesFromStylesheet, renderConfirmedStyleRules } from '../src/authoring/styles.js';
 import { scanStylesheet, scopeStylesheet } from '../src/author/styles.js';
 import { writeGeneratedRegisteredBlock } from '../src/authoring/destination.js';
@@ -21,6 +22,30 @@ const plan = (): AuthoringPlan => ({
 });
 
 describe('confirmed residual CSS', () => {
+  it('binds a WP 7.1 responsive native declaration to its exact emitted node and state', () => {
+    const input = plan();
+    input.structure = [{
+      id: 'source.0', block: 'core/paragraph', attributes: {
+        className: 'card', style: { '@mobile': { typography: { fontSize: '1rem' } } },
+      },
+    }];
+    input.source = { entry: 'design.html', sha256: 'a'.repeat(64), format: 'html' };
+    input.coverage = {
+      styles: [{
+        property: 'font-size', value: '1rem', outcome: 'native', scope: 'shared',
+        atRules: ['@media (width <= 30rem)'], source: { selector: '.card' },
+        node: 'source.0', responsive: 'mobile',
+      }],
+      assets: [],
+      styleContext: { viewports: { mobile: { max: '30rem' } } },
+    };
+    validateCoverageFulfillment(input);
+    expect(JSON.stringify(compileRegisteredBlock(input).template)).toContain('"@mobile":{"typography":{"fontSize":"1rem"}}');
+
+    input.coverage.styles[0]!.node = 'source.missing';
+    expect(() => validateCoverageFulfillment(input)).toThrow(/has no matching native block attribute/);
+  });
+
   it('retains selectors, ordered fallbacks, importance, and nested responsive/container rules', () => {
     const input = plan();
     input.styles.rules = [rule('.card:hover, .card:focus-visible'), {
@@ -35,10 +60,10 @@ describe('confirmed residual CSS', () => {
     }];
     const generated = compileRegisteredBlock(input);
     const css = generated.files.find(({ path }) => path === 'style.scss')!.content;
-    expect(css).toContain('.wp-block-acme-cards .card:hover, .wp-block-acme-cards .card:focus-visible');
+    expect(css).toContain(':where(.wp-block-acme-cards) .card:hover, :where(.wp-block-acme-cards) .card:focus-visible');
     expect(css).toContain('@media (min-width: 48rem)');
     expect(css).toContain('@container cards (inline-size > 30rem)');
-    expect(css).toContain('.wp-block-acme-cards .card > .label::before { display: block; display: grid !important; content: "New"; }');
+    expect(css).toContain(':where(.wp-block-acme-cards) .card > .label::before { display: block; display: grid !important; content: "New"; }');
     expect(generated.sourcePlanHash).toBe(hashAuthoringPlan(input));
     expect(compileRegisteredBlock(input)).toEqual(generated);
   });
@@ -58,7 +83,7 @@ describe('confirmed residual CSS', () => {
     const input = plan();
     input.styles.rules = [rule('.\\32xl\\:open:is(#hero, .marker)')];
     expect(compileRegisteredBlock(input).files.find(({ path }) => path === 'style.scss')!.content)
-      .toContain('.wp-block-acme-cards .\\32xl\\:open:is(#hero, .marker)');
+      .toContain(':where(.wp-block-acme-cards) .\\32xl\\:open:is(#hero, .marker)');
   });
 
   it('keeps editor-only rules separate and shows all confirmed rules in the terminal preview', () => {

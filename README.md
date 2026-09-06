@@ -654,8 +654,9 @@ into `assets/` and rewritten; remote image URLs remain external by default.
 
 Authoring records the target theme snapshot hash, configured WordPress viewport ranges, unresolved
 custom variables, and reset assumptions in the hash-bound plan preview. It never edits `theme.json`.
-Without that target context it explicitly limits its fidelity claim; conditional source CSS remains
-scoped rather than being mechanically renamed as a responsive native state.
+Without that target context it explicitly limits its fidelity claim. Only an exact WordPress 7.1
+viewport interval on one unambiguous, supported native child can use a responsive state; every
+other conditional source rule remains scoped CSS.
 
 Local WOFF/WOFF2 fonts require an explicit source, SHA-256, ownership, and license decision.
 Approved font families get block-specific names and shared editor/frontend CSS. Full redistribution

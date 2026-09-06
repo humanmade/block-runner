@@ -49,6 +49,16 @@ export interface AuthoringCoverageStyle {
   reason?: string;
   atRules: string[];
   source?: AuthoringCoverageLocation;
+  /**
+   * Required when a source declaration is carried by a particular native block rather than
+   * residual CSS. This prevents another node with the same property/value from satisfying
+   * source coverage by accident.
+   */
+  node?: string;
+  /** The WP 7.1 responsive style state that carries this native declaration, when applicable. */
+  responsive?: 'mobile' | 'tablet';
+  /** Exact target theme preset provenance for a preset outcome. */
+  preset?: { category: 'color' | 'spacing' | 'font-size' | 'font-family'; slug: string };
 }
 
 export type AuthoringCoverageAssetOutcome = 'prepared' | 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
@@ -520,7 +530,7 @@ function normalizeCoverageLocation(input: unknown, location: string): AuthoringC
 
 function normalizeCoverageStyle(input: unknown, location: string): AuthoringCoverageStyle {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source']);
+  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'node', 'responsive', 'preset']);
   return withOptional({
     property: nonEmptyString(value.property, `${location}.property`),
     value: stringAt(value.value, `${location}.value`),
@@ -529,6 +539,13 @@ function normalizeCoverageStyle(input: unknown, location: string): AuthoringCove
     reason: optionalString(value.reason, `${location}.reason`),
     atRules: arrayAt(value.atRules ?? [], `${location}.atRules`).map((rule, index) => nonEmptyString(rule, `${location}.atRules[${index}]`)),
     source: value.source === undefined ? undefined : normalizeCoverageLocation(value.source, `${location}.source`),
+    node: optionalString(value.node, `${location}.node`),
+    responsive: value.responsive === undefined ? undefined : enumAt(value.responsive, `${location}.responsive`, ['mobile', 'tablet'] as const),
+    preset: value.preset === undefined ? undefined : (() => {
+      const preset = objectAt(value.preset, `${location}.preset`);
+      knownKeys(preset, `${location}.preset`, ['category', 'slug']);
+      return { category: enumAt(preset.category, `${location}.preset.category`, ['color', 'spacing', 'font-size', 'font-family'] as const), slug: nonEmptyString(preset.slug, `${location}.preset.slug`) };
+    })(),
   });
 }
 

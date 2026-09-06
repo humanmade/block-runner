@@ -18,6 +18,7 @@ import {
   planStandalonePluginOutput,
   writePluginOutput,
 } from '../src/plugin/profile.js';
+import { author } from '../src/author/index.js';
 import type { AuthoringPlan } from '../src/authoring/schema.js';
 import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
 import { getWp } from '../src/headless/wp.js';
@@ -31,6 +32,7 @@ const projectRoot = path.resolve(scriptDirectory, '..');
 const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'pattern-overrides.plan.json');
 const visualGoldenPath = fixtureVisualGoldenPath();
 const pluginSlug = 'block-runner-pattern-overrides-fixture';
+const responsivePluginSlug = 'block-runner-responsive-style-fixture';
 const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z');
 const fixedZipMode = 0o644;
 
@@ -85,6 +87,99 @@ export interface BuiltPatternOverridesFixture {
   /** Capability record bound to the exact generated ZIP, never inferred from the fixture. */
   artifact: ProofArtifactContract;
   fixture: ProofFixture;
+}
+
+/** A public-author() package for the focused responsive ownership proof. */
+export interface BuiltResponsiveStyleFixture {
+  inputPath: string;
+  pluginDirectory: string;
+  pluginZip: string;
+  nativeContainerMarkup: string;
+  artifact: ProofArtifactContract;
+  fixture: ProofFixture;
+}
+
+/**
+ * Build a deliberately small author()-produced block. The native @mobile
+ * style must originate in the public authoring pass; this helper refuses to
+ * synthesize it in a plan. The `!important` color is retained as scoped CSS so
+ * the external same-class sentinel can prove it does not leak.
+ */
+export async function buildResponsiveStyleProofFixture(outputDir: string): Promise<BuiltResponsiveStyleFixture> {
+  const root = path.resolve(outputDir);
+  const inputPath = path.join(root, 'responsive-style.authored.html');
+  const pluginDirectory = path.join(root, responsivePluginSlug);
+  const pluginZip = path.join(pluginDirectory, `${responsivePluginSlug}.zip`);
+  const source = '<h2 class="card">Responsive native style</h2>\n';
+  const stylesheet = '.card { font-size: 2rem; color: rgb(128, 0, 0) !important; } @media (width <= 480px) { .card { font-size: 1rem; } }';
+  await writeFixed(inputPath, source);
+  const result = await author(source, {
+    sourcePath: inputPath,
+    author: {
+      name: 'block-runner/responsive-style-fixture',
+      styles: {
+        mode: 'css', css: stylesheet,
+        context: { theme: { slug: 'proof-theme', version: '1', settings: { viewport: { mobile: '480px', tablet: '782px' } } } },
+      },
+    },
+  });
+  if (!result.ok || !result.package?.canonicalPlan) {
+    throw new Error(`Public author() did not produce the responsive proof package: ${result.items.map((item) => item.reason).join('; ')}`);
+  }
+  const plan = result.package.canonicalPlan;
+  const persistedSource = await readFile(inputPath, 'utf8');
+  const persistedSourceHash = createHash('sha256').update(persistedSource, 'utf8').digest('hex');
+  if (plan.source?.sha256 !== persistedSourceHash) {
+    throw new Error('Responsive proof fixture plan source hash does not match its retained authored input bytes.');
+  }
+  const mobile = plan.coverage?.styles.find((entry) => entry.property === 'font-size' && entry.value === '1rem');
+  if (mobile?.outcome !== 'native' || mobile.responsive !== 'mobile' || !mobile.node) {
+    throw new Error('Public author() did not transport the exact mobile font-size declaration to a native @mobile child style.');
+  }
+  const residual = plan.coverage?.styles.find((entry) => entry.property === 'color' && entry.value.includes('rgb(128'));
+  if (residual?.outcome !== 'scoped-css') {
+    throw new Error('Responsive proof fixture requires the !important source color to remain scoped CSS.');
+  }
+  const generated = compileRegisteredBlock(plan);
+  const nativeContainerMarkup = await serializeNativeTemplate(generated.template);
+  await mkdir(pluginDirectory, { recursive: true });
+  const packagePlan = await planStandalonePluginOutput(pluginDirectory, {
+    name: plan.target.name,
+    files: result.package.files,
+  });
+  await writePluginOutput(packagePlan);
+  const npmEnvironment = await npmEnvironmentForGeneratedPlugin(pluginDirectory);
+  await execFileAsync('npm', ['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+    cwd: pluginDirectory, timeout: 180_000, env: npmEnvironment,
+  });
+  await buildDeterministicPluginZip(pluginDirectory, npmEnvironment);
+  await execFileAsync('npm', ['run', 'test:zip', '--', pluginZip], {
+    cwd: pluginDirectory, timeout: 30_000, env: { ...npmEnvironment, TZ: 'UTC' },
+  });
+  const artifact: ProofArtifactContract = {
+    sha256: `sha256:${createHash('sha256').update(await readFile(pluginZip)).digest('hex')}`,
+    capabilities: { patternOverrides: false },
+  };
+  const fixture: ProofFixture = {
+    blockName: plan.target.name,
+    pluginSlug: responsivePluginSlug,
+    blockTitle: plan.target.title,
+    responsiveStyleMatrix: {
+      targetSelector: '.card', siblingClass: 'card', property: 'font-size',
+      siblingProperty: 'color', siblingInlineStyle: 'color: rgb(1, 2, 3)',
+      samples: [
+        { label: 'below-mobile', viewport: { width: 640, height: 844 }, surfaceViewport: { width: 479 }, target: '16px', sibling: 'rgb(1, 2, 3)' },
+        { label: 'mobile-boundary', viewport: { width: 640, height: 844 }, surfaceViewport: { width: 480 }, target: '16px', sibling: 'rgb(1, 2, 3)' },
+        { label: 'above-mobile', viewport: { width: 640, height: 844 }, surfaceViewport: { width: 481 }, target: '32px', sibling: 'rgb(1, 2, 3)' },
+      ],
+    },
+    frontend: { url: 'http://localhost:8888/', subtreeSelector: '.wp-block-post-content', expectedLinks: [], expectedMedia: [] },
+  };
+  await Promise.all([
+    writeFixed(path.join(root, 'responsive-style.fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`),
+    writeFixed(path.join(root, 'responsive-style.native.blocks.html'), `${nativeContainerMarkup}\n`),
+  ]);
+  return { inputPath, pluginDirectory, pluginZip, nativeContainerMarkup, artifact, fixture };
 }
 
 /**

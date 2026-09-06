@@ -185,6 +185,21 @@ try {
     }, [...(prior?.artifacts ?? []), ...matrix.artifacts]);
   }
 
+  if (fixture.responsiveStyleMatrix) {
+    const frame = page.frames().find((candidate) => candidate.name() === 'editor-canvas');
+    const rootClientId = reopenedState.tree.filter((block) => block.name === fixture.blockName).map((block) => block.clientId);
+    const matrix = frame && rootClientId.length === 1
+      ? await phase('editor-responsive-style-matrix', () => proveResponsiveStyles(page, frame, fixture, rootClientId[0], fixture.responsiveStyleMatrix, 'editor-canvas'))
+      : { ok: false, details: { error: frame ? 'Expected exactly one reopened generated root for responsive style proof.' : 'WordPress editor-canvas iframe was not present.' } };
+    const prior = gates.editor_reopen;
+    const passed = prior?.status === 'pass' && matrix.ok;
+    set('editor_reopen', passed ? 'pass' : 'fail', passed ? undefined
+      : prior?.reason ?? 'The responsive style matrix did not complete.', {
+      ...(prior?.details ?? {}),
+      responsiveStyleMatrix: matrix.details,
+    }, prior?.artifacts);
+  }
+
   if (needsPattern) patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
   if (required.has('accessibility_editor') && !needsFrontend) {
     await phase('accessibility-editor', () => proveAxeEditor(page, fixture, artifactDir));
@@ -551,6 +566,10 @@ async function proveEditorRootLayoutMatrix(page, fixture, artifactDir) {
     await editorCanvas.locator(`[data-block=${JSON.stringify(handles.root.clientId)}]`).screenshot({ path: beforeImage, animations: 'disabled' });
     artifacts.push({ path: `artifacts/${path.basename(beforeImage)}`, mediaType: 'image/png' });
 
+    const responsive = matrix.responsive
+      ? await proveResponsiveStyles(page, frame, fixture, handles.root.clientId, matrix.responsive, 'editor-canvas')
+      : undefined;
+
     await updateNativeBlockAttributes(page, handles.heading.clientId, { content: matrix.longContent });
     await waitForNativeAttribute(page, handles.heading.clientId, 'content', matrix.longContent);
     const long = await editorRootSnapshot(page, fixture, handles.root.clientId, matrix);
@@ -598,7 +617,7 @@ async function proveEditorRootLayoutMatrix(page, fixture, artifactDir) {
     const isolated = isolation.ok && isolation.instances[0]?.text.includes(isolatedContent)
       && !isolation.instances[1]?.text.includes(isolatedContent);
     const ok = beforeAfterRoots && long.text.includes(matrix.longContent) && empty.headingContent === ''
-      && imageChanged && isolated && keyboard.ok;
+      && imageChanged && isolated && keyboard.ok && (responsive?.ok ?? true);
     details.beforeAfter = {
       ok: beforeAfterRoots,
       beforeDomHash: sha256(before.outerHTML),
@@ -611,6 +630,7 @@ async function proveEditorRootLayoutMatrix(page, fixture, artifactDir) {
     };
     details.isolation = { ok: isolated, rootCount: isolation.instances.length, domHash: sha256(JSON.stringify(isolation)) };
     details.keyboard = keyboard.summary;
+    if (responsive) details.responsive = responsive.details;
     return { ok, reason: ok ? undefined : 'Iframe root layout, content variants, image proportions, instance isolation, or keyboard evidence did not match the fixture.', details, artifacts };
   } catch (error) {
     details.error = error instanceof Error ? error.message : String(error);
@@ -762,6 +782,81 @@ async function editorInstanceIsolationSnapshot(page, fixture, clientIds, matrix)
     ok: snapshots.every((snapshot) => snapshot.ok),
     instances: snapshots.map(({ outerHTML, ...snapshot }) => ({ ...snapshot, outerHTML })),
   };
+}
+
+/**
+ * Read a native child and an intentionally same-class sibling at each target
+ * viewport. The sibling lives outside the generated root, so this fails if a
+ * residual source selector loses its block prefix. It runs in the real editor
+ * iframe and again on the published frontend; no screenshot golden is used.
+ */
+async function proveResponsiveStyles(page, surface, fixture, rootClientId, responsive, scope) {
+  const root = scope === 'editor-canvas'
+    ? surface.locator(`[data-block=${JSON.stringify(rootClientId)}]`)
+    : surface.locator(`.wp-block-${fixture.blockName.replace('/', '-')}`).first();
+  const snapshots = [];
+  const originalViewport = page.viewportSize();
+  try {
+    await root.waitFor({ state: 'visible' });
+    for (const sample of responsive.samples) {
+      const surfaceViewport = await setResponsiveSurfaceViewport(page, surface, sample);
+      const targets = responsive.targetSelector === ':scope' ? root : root.locator(responsive.targetSelector);
+      if (await targets.count() !== 1) throw new Error(`Responsive target ${JSON.stringify(responsive.targetSelector)} must match exactly one element inside the generated root.`);
+      const target = targets.first();
+      const sibling = await ensureResponsiveSibling(surface, responsive.siblingClass, scope, responsive.siblingInlineStyle);
+      const observed = await Promise.all([
+        target.evaluate((element, property) => getComputedStyle(element).getPropertyValue(property).trim(), responsive.property),
+        sibling.evaluate((element, property) => getComputedStyle(element).getPropertyValue(property).trim(), responsive.siblingProperty ?? responsive.property),
+      ]);
+      snapshots.push({ label: sample.label, viewport: { requested: sample.viewport, surface: surfaceViewport }, target: observed[0], sibling: observed[1], expected: { target: sample.target, sibling: sample.sibling } });
+    }
+    const ok = snapshots.every((snapshot) => snapshot.target === snapshot.expected.target && snapshot.sibling === snapshot.expected.sibling);
+    return { ok, details: { scope, property: responsive.property, siblingProperty: responsive.siblingProperty ?? responsive.property, targetSelector: responsive.targetSelector, siblingClass: responsive.siblingClass, snapshots } };
+  } finally {
+    await removeResponsiveSibling(surface).catch(() => undefined);
+    if (originalViewport) await page.setViewportSize(originalViewport).catch(() => undefined);
+  }
+}
+
+async function setResponsiveSurfaceViewport(page, surface, sample) {
+  await page.setViewportSize(sample.viewport);
+  let observed = await surface.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  if (!sample.surfaceViewport) return observed;
+  for (let attempt = 0; attempt < 3 && (observed.width !== sample.surfaceViewport.width
+    || (sample.surfaceViewport.height !== undefined && observed.height !== sample.surfaceViewport.height)); attempt += 1) {
+    const current = page.viewportSize();
+    if (!current) throw new Error('Playwright did not expose the requested browser viewport.');
+    await page.setViewportSize({
+      width: Math.max(1, current.width + sample.surfaceViewport.width - observed.width),
+      height: Math.max(1, current.height + (sample.surfaceViewport.height === undefined ? 0 : sample.surfaceViewport.height - observed.height)),
+    });
+    observed = await surface.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
+  }
+  if (observed.width !== sample.surfaceViewport.width
+    || (sample.surfaceViewport.height !== undefined && observed.height !== sample.surfaceViewport.height)) {
+    throw new Error(`Responsive sample ${JSON.stringify(sample.label)} required surface viewport ${JSON.stringify(sample.surfaceViewport)}, observed ${JSON.stringify(observed)}.`);
+  }
+  return observed;
+}
+
+async function ensureResponsiveSibling(surface, className, scope, inlineStyle) {
+  await surface.evaluate(({ className: siblingClass, scope: surfaceScope, inlineStyle: style }) => {
+    document.querySelector('[data-block-runner-responsive-sibling]')?.remove();
+    const sibling = document.createElement('p');
+    sibling.dataset.blockRunnerResponsiveSibling = surfaceScope;
+    sibling.className = siblingClass;
+    if (style) sibling.setAttribute('style', style);
+    sibling.textContent = 'Unrelated responsive style sentinel';
+    const container = surfaceScope === 'editor-canvas'
+      ? document.querySelector('.editor-styles-wrapper') ?? document.body
+      : document.querySelector('main') ?? document.body;
+    container.append(sibling);
+  }, { className, scope, inlineStyle });
+  return surface.locator(`[data-block-runner-responsive-sibling=${JSON.stringify(scope)}]`);
+}
+
+async function removeResponsiveSibling(surface) {
+  await surface.evaluate(() => document.querySelector('[data-block-runner-responsive-sibling]')?.remove());
 }
 
 async function readPublication(page, savedContent) {
@@ -1750,10 +1845,15 @@ async function proveFrontend(page, fixture, baseUrl, activePublication, artifact
   const ownedStyles = ownedAssets.filter((asset) => asset.resourceType === 'stylesheet');
   const healthyAssets = ownedAssets.every((asset) => asset.delivery === 'inline' || (asset.status >= 200 && asset.status < 400));
   const sharedMatrix = fixture.browserMatrix ? await frontendSharedStyleSnapshot(page, fixture, artifactDir) : undefined;
-  const assetsPass = ownedStyles.length > 0 && healthyAssets && (sharedMatrix?.ok ?? true);
+  const responsiveStyleMatrix = fixture.responsiveStyleMatrix
+    ? await proveResponsiveStyles(page, page, fixture, undefined, fixture.responsiveStyleMatrix, 'frontend')
+    : undefined;
+  const assetsPass = ownedStyles.length > 0 && healthyAssets && (sharedMatrix?.ok ?? true) && (responsiveStyleMatrix?.ok ?? true);
   set('frontend_assets', assetsPass ? 'pass' : 'fail', assetsPass ? undefined
     : sharedMatrix && !sharedMatrix.ok
       ? 'The generated shared stylesheet/font did not load on the published frontend root.'
+      : responsiveStyleMatrix && !responsiveStyleMatrix.ok
+        ? 'The author-produced responsive style matrix did not match on the published frontend.'
       : 'No successful plugin-owned stylesheet was observed on the published post, or a plugin asset failed.', {
     postId: activePublication.id,
     permalink: activePublication.permalink,
@@ -1761,7 +1861,8 @@ async function proveFrontend(page, fixture, baseUrl, activePublication, artifact
     ownedAssets,
     ownedStyles,
     ...(sharedMatrix ? { browserMatrix: sharedMatrix.details } : {}),
-  }, sharedMatrix?.artifacts);
+    ...(responsiveStyleMatrix ? { responsiveStyleMatrix: responsiveStyleMatrix.details } : {}),
+  }, [...(sharedMatrix?.artifacts ?? [])]);
   activePublication.frontendAssets = ownedAssets;
   const scopedErrors = { consoleErrors: consoleErrors.slice(consoleStart), pageErrors: pageErrors.slice(pageErrorStart) };
   const runtimePass = scopedErrors.consoleErrors.length === 0 && scopedErrors.pageErrors.length === 0;
@@ -1802,8 +1903,11 @@ async function frontendSharedStyleSnapshot(page, fixture, artifactDir) {
       { path: `artifacts/${path.basename(imagePath)}`, mediaType: 'image/png' },
       { path: `artifacts/${path.basename(jsonPath)}`, mediaType: 'application/json' },
     );
-    const ok = details.display === matrix.rootLayout && details.fontLoaded && details.sharedStyles;
-    return { ok, details: { ...details, outerHTMLHash: sha256(details.outerHTML) }, artifacts };
+    const responsive = matrix.responsive
+      ? await proveResponsiveStyles(page, page, fixture, undefined, matrix.responsive, 'frontend')
+      : undefined;
+    const ok = details.display === matrix.rootLayout && details.fontLoaded && details.sharedStyles && (responsive?.ok ?? true);
+    return { ok, details: { ...details, outerHTMLHash: sha256(details.outerHTML), ...(responsive ? { responsive: responsive.details } : {}) }, artifacts };
   } catch (error) {
     return { ok: false, details: { error: error instanceof Error ? error.message : String(error) }, artifacts };
   }

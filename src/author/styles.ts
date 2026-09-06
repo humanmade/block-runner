@@ -723,7 +723,14 @@ export function renderResidualCss(stylesheet: Pick<ScopedStylesheet, 'rules'>): 
   return stylesheet.rules.map((rule) => renderRule(rule, 0)).filter(Boolean).join('\n');
 }
 
-/** Prefix a safe selector list, retaining pseudo states and a comma-list's original ordering. */
+/**
+ * Scope a safe selector list without changing the authored selector's cascade weight.
+ *
+ * The generated block root must contain every match, but its class is an implementation detail:
+ * placing it directly in the selector would add one class of specificity and make otherwise
+ * deliberately weak rules (notably `:where(...)`) win against their source peers. `:where()`
+ * supplies the containment boundary with zero specificity.
+ */
 export function scopeLocalSelectorList(
   selectorList: string,
   root: string,
@@ -745,7 +752,8 @@ export function scopeLocalSelectorList(
     }
   }
 
-  return { ok: true, selector: selectors.map((selector) => `${root.trim()} ${selector}`).join(', ') };
+  const scope = `:where(${root.trim()})`;
+  return { ok: true, selector: selectors.map((selector) => `${scope} ${selector}`).join(', ') };
 }
 
 export interface SelectorDependencyTransport {

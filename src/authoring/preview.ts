@@ -299,7 +299,7 @@ function renderReviewSummary(
   const styleOwnership = styleOwnershipSummary(styles, coverage);
   bullet(
     lines,
-    `Style ownership: ${styleOwnership.native} native-owned, ${styleOwnership.shared} package-owned shared, ${styleOwnership.editor} editor-only.`,
+    `Style ownership: ${styleOwnership.preset} theme preset/inherited, ${styleOwnership.native} fixed native, ${styleOwnership.literal} literal transport, ${styleOwnership.shared} package-owned shared, ${styleOwnership.editor} editor-only.`,
     width,
   );
 
@@ -317,15 +317,21 @@ function renderReviewSummary(
 }
 
 function styleOwnershipSummary(styles: RecordValue, coverage: RecordValue): {
+  preset: number;
   native: number;
+  literal: number;
   shared: number;
   editor: number;
 } {
   const ledger = asArray(coverage.styles).map(asRecord);
   if (ledger.length > 0) {
     return {
+      preset: ledger.filter((style) => readString(style, ['scope']) === 'shared'
+        && readString(style, ['outcome']) === 'preset').length,
       native: ledger.filter((style) => readString(style, ['scope']) === 'shared'
-        && ['native', 'preset', 'literal'].includes(readString(style, ['outcome']) ?? '')).length,
+        && readString(style, ['outcome']) === 'native').length,
+      literal: ledger.filter((style) => readString(style, ['scope']) === 'shared'
+        && readString(style, ['outcome']) === 'literal').length,
       shared: ledger.filter((style) => readString(style, ['scope']) === 'shared'
         && readString(style, ['outcome']) === 'scoped-css').length,
       editor: ledger.filter((style) => readString(style, ['scope']) === 'editor'
@@ -335,7 +341,9 @@ function styleOwnershipSummary(styles: RecordValue, coverage: RecordValue): {
 
   const outcomes = asArray(styles.outcomes).map(asRecord);
   return {
-    native: outcomes.filter((outcome) => ['native', 'token'].includes(readString(outcome, ['outcome']) ?? '')).length,
+    preset: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'token').length,
+    native: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'native').length,
+    literal: 0,
     shared: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'scoped-css').length
       + cssDeclarationCount(asArray(styles.rules)),
     editor: cssDeclarationCount(asArray(styles.editorRules)),

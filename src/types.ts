@@ -104,6 +104,9 @@ export interface AuthoredStyleLedgerEntry {
   reason?: string;
   atRules: string[];
   source?: SourceLocation;
+  /** Native-node evidence for a conservatively lifted WordPress responsive declaration. */
+  node?: string;
+  responsive?: 'mobile' | 'tablet';
 }
 
 /** The terminal disposition of a source asset. */

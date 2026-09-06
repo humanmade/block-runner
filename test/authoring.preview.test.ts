@@ -97,6 +97,18 @@ describe('authoring preview', () => {
     expect(output).toContain('fidelity is not asserted');
   });
 
+  it('separates theme presets, fixed native values, literal transport, shared CSS, and editor CSS in ownership', () => {
+    const reviewed = validateAuthoringPlan({ ...plan, coverage: { ...plan.coverage!, styles: [
+      { property: 'color', value: '#112233', outcome: 'preset', scope: 'shared', atRules: [] },
+      { property: 'font-size', value: '18px', outcome: 'native', scope: 'shared', atRules: [] },
+      { property: 'background-image', value: 'url(example.png)', outcome: 'literal', scope: 'shared', atRules: [] },
+      { property: 'display', value: 'grid', outcome: 'scoped-css', scope: 'shared', atRules: [] },
+      { property: 'outline', value: '2px solid blue', outcome: 'scoped-css', scope: 'editor', atRules: [] },
+    ] } });
+    const output = renderAuthoringPreview(reviewed, { width: 300 });
+    expect(output).toContain('Style ownership: 1 theme preset/inherited, 1 fixed native, 1 literal transport, 1 package-owned shared, 1 editor-only.');
+  });
+
   it('derives compiler-owned files and renders hash-bound native metadata for every public caller', () => {
     const reviewed = validateAuthoringPlan({
       ...plan,
@@ -179,7 +191,7 @@ describe('authoring preview', () => {
     expect(output).toContain('Editing: 1 fixed, 1 editable, 1 override fields.');
     expect(output).toContain('Unresolved decisions and losses: 3 style or asset issues; 1 warning.');
     expect(output).toContain('Asset ownership: 1 package-owned, 0 external, 0 licensed bundled fonts.');
-    expect(output).toContain('Style ownership: 1 native-owned, 1 package-owned shared, 1 editor-only.');
+    expect(output).toContain('Style ownership: 0 theme preset/inherited, 1 fixed native, 0 literal transport, 1 package-owned shared, 1 editor-only.');
     expect(output).toContain('Regeneration impact');
     expect(output).toContain('classification: content-defaults');
     expect(output).toContain('Destination: /work/generated/feature-grid');
