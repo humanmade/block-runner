@@ -1,0 +1,85 @@
+{
+  "version": 1,
+  "candidateRevision": "58dc3b973313c75563610a6ea5cf532c98efa83b",
+  "status": "prepared-not-run",
+  "purpose": "Two repository-controlled inputs for the 0.9 owner-acceptance journeys. This manifest is not a benchmark receipt and does not claim real-project coverage.",
+  "sourceProvenance": {
+    "commit": "af0808fbf5e0f0487bbc7954c119fe6de0de0739",
+    "author": "Noel Tock",
+    "repositoryLicense": "GPL-2.0-or-later",
+    "notice": "These are repository fixtures. They are suitable for preparing the two bounded workflows, but do not establish that equivalent real-project inputs are already available."
+  },
+  "journeys": [
+    {
+      "id": "local-asset-feature",
+      "title": "Semantic local-asset feature",
+      "source": {
+        "html": "../../benchmarks/authoring/sources/semantic/local-assets.html",
+        "sha256": "sha256:35b26914c6b3dc05d8c3b3bfa205bf05be27240defc35f61bfbbc7a57b0f595b"
+      },
+      "dependencies": [
+        {
+          "path": "../../benchmarks/authoring/sources/assets/aurora-dashboard.svg",
+          "sha256": "sha256:18ab15d443086fa3fc379734c0f0e86b891535ea222f6499e0b37170067e6cf9",
+          "role": "bundled local SVG"
+        }
+      ],
+      "target": {
+        "name": "block-runner/asset-feature",
+        "title": "Asset feature"
+      },
+      "requiredObservations": [
+        "The SVG is copied as a bundled asset and the built URL is used; no network or data URL substitute is accepted.",
+        "The supplied alternative text is editable, survives save/reopen, and remains meaningful on the frontend.",
+        "Fixed structure and editable copy are visible in the ordinary editor."
+      ]
+    },
+    {
+      "id": "responsive-panel-grid",
+      "title": "Responsive utility-CSS panel grid",
+      "source": {
+        "html": "../../benchmarks/authoring/sources/utility/tailwind-responsive.html",
+        "sha256": "sha256:511be4b715b86583db068aeeabb02a39e6d307bff22835d84bacc14a2ed4eea0"
+      },
+      "dependencies": [
+        {
+          "path": "../../benchmarks/authoring/sources/utility/tailwind-responsive.css",
+          "sha256": "sha256:79e70276b0bd916229d1cc19c344891493f94b07aedef8594d7e4de6ffb0d3af",
+          "role": "compiled responsive utility CSS"
+        }
+      ],
+      "target": {
+        "name": "block-runner/responsive-panel-grid",
+        "title": "Responsive panel grid"
+      },
+      "requiredObservations": [
+        "The generated package has no Tailwind runtime dependency.",
+        "The 1/2/4-column breakpoints and reduced-motion rule are retained in the generated frontend stylesheet.",
+        "The editor exposes understandable layout controls without making the structural panel grid unintelligible."
+      ]
+    }
+  ],
+  "evidenceContract": {
+    "retainPerJourney": [
+      "copied source inputs and SHA-256 checks",
+      "analysis JSON, canonical plan, and every manual correction",
+      "readable author and plugin previews plus their confirmation hashes",
+      "generated source manifest, build log, packed CLI tarball, plugin ZIP, and hashes",
+      "command and environment logs, diagnostics, proof receipt, editor save/reopen screenshot, and frontend screenshot"
+    ],
+    "sharedExercises": [
+      "two pattern instances where overrides are declared, canonical update, and individual reset",
+      "one supported existing-plugin integration",
+      "one later generated-source change that preserves user-edited content and refuses incompatible structural regeneration"
+    ],
+    "unrunState": "Every item is pending until its retained receipt exists. A missing, blocked, or failed gate is not a pass."
+  },
+  "ownerAcceptance": {
+    "status": "required",
+    "humanOnlyDecisions": [
+      "authorise the exact preview confirmation hashes and any existing-plugin replacement paths",
+      "judge visual fidelity and editing feel on the prepared WordPress target",
+      "perform the retained manual accessibility review"
+    ]
+  }
+}

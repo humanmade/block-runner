@@ -104,6 +104,12 @@ npm run authoring:prove -- --plans /path/to/saved-plans
 The runner never creates plans by calling a model or copying expected answers. A
 later scored benchmark needs its own retained receipt.
 
+Issue #54's two owner-acceptance inputs live in
+[`../../acceptance/0.9-testing/`](../../acceptance/0.9-testing/). They are
+repository-controlled preparation fixtures, not benchmark rows or completed
+real-project evidence. Their candidate index keeps the human visual,
+editing-feel, and manual-accessibility decisions explicitly required.
+
 The release checker builds its activation ZIP through the production compiler and
 standalone-plugin builder, then uses the built-in WordPress proof runner. ZIP
 activation is a narrower claim than a passing full proof.
