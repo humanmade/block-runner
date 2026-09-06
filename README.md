@@ -29,12 +29,30 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 npm install block-runner          # requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0
 ```
 
-This is the basic install: deterministic `convert`, `assemble`, `validate`, `fix`, and
-authoring commands work without Docker, browser binaries, `wp-env`, or browser-proof
-dependencies.
+This stable install provides deterministic `convert`, `assemble`, `validate`, `fix`, and
+skill commands without Docker, browser binaries, `wp-env`, or browser-proof dependencies.
 
-For the **0.9 registered-block authoring testing release**, use
-`npm install block-runner@testing`. The stable `latest` channel remains on 0.8.0.
+The public registry currently offers stable **0.8.0** on `latest`. The 0.9
+registered-block authoring work is an unreleased candidate: use a tarball supplied
+for a pinned candidate revision, not a nonexistent `@testing` tag. In a clean
+consumer project, install that reviewed artifact by path:
+
+```sh
+npm install /absolute/path/to/block-runner-0.9.0.tgz
+```
+
+Candidate preparation and release evidence are described in
+[`release/0.9-testing`](release/0.9-testing/README.md). Publishing or changing
+npm tags remains a manual owner decision. The registered-block `author`, `plugin`, and
+`proof` workflow below refers to that reviewed candidate, while the page-content
+conversion workflow remains available on stable 0.8.
+
+A packed candidate proves only that its named tarball can be consumed. Automated
+proof can establish the specific runtime/editor claim named in its receipt. Neither a
+prepared owner-acceptance checklist nor an agent-assisted keyboard/screenshot review
+records the owner's visual, editing-feel, or manual-accessibility judgement; those
+remain required until a hash-bound owner record is retained. None of these states
+publishes 0.9 or changes an npm tag.
 
 Then just ask your coding agent:
 
@@ -66,7 +84,8 @@ Block Runner ships a canonical skill in the open Agent Skills layout. Install it
 current project (ask the user before writing files):
 
 ```sh
-npx -y block-runner@testing skill --install
+# after installing the reviewed candidate tarball in this project
+npx --no-install block-runner skill --install
 ```
 
 That installs the same skill to the cross-agent `.agents/skills/block-runner` location and
@@ -75,15 +94,15 @@ default so the instructions can travel with a repository. Use user scope or one 
 that is what you want:
 
 ```sh
-npx -y block-runner@testing skill --install --scope user
-npx -y block-runner@testing skill --install --target agents
-npx -y block-runner@testing skill --install --target claude
+npx --no-install block-runner skill --install --scope user
+npx --no-install block-runner skill --install --target agents
+npx --no-install block-runner skill --install --target claude
 ```
 
 For a harness with another skills directory, use `--dir <skills-directory>`. With no skill
-system, `npx -y block-runner@testing skill` prints the complete harness-neutral guide to stdout and writes
-nothing. Project discovery is the most portable choice; user-wide discovery paths still vary
-between harnesses, so use `--dir` when a client documents a different global root.
+system, `npx --no-install block-runner skill` prints the complete harness-neutral guide to stdout
+and writes nothing. Project discovery is the most portable choice; user-wide discovery paths
+still vary between harnesses, so use `--dir` when a client documents a different global root.
 
 ## Benchmark
 
@@ -297,16 +316,26 @@ then `npm run build` produces the previewed build target. Create the host's norm
 and run the same `proof --profile full` route; source integration or a build alone is not a
 runtime verification.
 
-### WordPress proof profiles
+### WordPress proof requirements
 
-Headless validation is a fast first rung. A generated plugin needs a separate real-WordPress proof before any claim that it activates, registers, edits, renders, or supports pattern overrides is credible. The `proof` command runs the cumulative profile you select against an installable ZIP and a checked-in JSON fixture:
+Headless validation is a fast first rung. A generated plugin needs a separate
+real-WordPress proof before any claim that it activates, registers, edits, or
+renders is credible. Before running, the proof report derives the required gates
+from the selected claim and the hash-matched artifact contract rather than treating
+every artifact as pattern-override-ready:
 
-| Entry point | Basic install requirements | Optional proof requirements |
+| Claim / profile | What it establishes | Extra proof requirements |
 | --- | --- | --- |
-| Library plus `convert`, `assemble`, `validate`, `fix`, `author`, `plugin`, `context`, and `skill` | Block Runner's production dependencies. WP-CLI remains an external requirement only when selected for context, token, or media resolution. | None. |
-| `proof --profile headless` | The same deterministic Gutenberg validator. | None; it does not start Docker. |
-| `proof --profile runtime` or `editor` | — | Exact `wp-env`, Playwright, WordPress Playwright helpers, and Axe; Docker; an explicitly installed Chromium browser. |
-| `proof --profile full` | — | The runtime/editor toolchain plus exact `pixelmatch` and `pngjs` visual-proof packages. |
+| `generated` | Deterministic Gutenberg validation. | None; it does not start Docker. |
+| `built` | ZIP installation, activation, and runtime registration. | Exact `wp-env`, Playwright, WordPress Playwright helpers, and Axe; Docker; an explicitly installed Chromium browser. |
+| `editor-verified` | Built behavior plus insertion, declared editable fields, save, and reopen. | The runtime/editor toolchain. |
+| `fidelity-checked` | Editor behavior plus frontend, visual, and automated accessibility checks. | The runtime/editor toolchain plus exact `pixelmatch` and `pngjs`. |
+| `pattern-verified` | The two-instance pattern-override lifecycle. | A hash-matched artifact contract that declares `capabilities.patternOverrides: true` and its complete pattern fixture. |
+| `full` | The exhaustive release-profile gate set. | All full-profile inputs, including pattern, visual, and manual-review evidence. |
+
+Library plus `convert`, `assemble`, `validate`, `fix`, `author`, `plugin`, `context`,
+and `skill` need only Block Runner's production dependencies. WP-CLI remains an
+external requirement only when selected for context, token, or media resolution.
 
 The 0.9.0 package inventory moves the six real-WordPress/browser packages from the
 19 direct production dependencies to six exact optional peers (retained as development
@@ -345,9 +374,22 @@ block-runner proof dist/acme-hero.zip --profile headless --markup fixtures/hero.
 block-runner proof dist/acme-hero.zip --profile full --markup fixtures/hero.blocks.html --input fixtures/hero.source.html --fixture fixtures/hero.proof.json --receipt-dir artifacts/proof
 ```
 
-Profiles build on each other: `headless` validates Gutenberg markup; `runtime` installs and activates the ZIP and checks PHP, REST, client registries, and observed runtime pins independently; `editor` adds visible insertion, every declared editable field, save, and reopen; `full` adds frontend, static deactivation, pattern override, visual, and accessibility gates. A required `fail`, `skip`, `blocked`, or missing result fails the selected profile. `not_applicable` can pass only for media when the fixture explicitly has no media; it never substitutes for omitted proof configuration.
+`headless`, `runtime`, and `editor` remain cumulative operational profiles;
+`full` adds frontend, static deactivation, pattern, visual, and accessibility gates.
+For an artifact that declares `patternOverrides: false`, `editor-verified` and
+`fidelity-checked` do not claim or require pattern behavior. `pattern-verified`
+and `full` do. A required `fail`, `skip`, `blocked`, or missing result fails the
+selected claim. `not_applicable` can pass only for media when the fixture explicitly
+has no media; it never substitutes for omitted proof configuration.
 
-The fixture supplies the generated block name, a non-empty editable field inventory, a titled pattern fixture with edits to persist, frontend scope/expectations, reviewed visual golden/masks/threshold, and Axe/manual-review scopes. The browser always navigates to the post it created and published during the run, then records that ID and permalink. Golden images are read-only inputs: the runner stores expected, actual, and diff evidence but never refreshes a golden. Axe output is preserved in full; it is an automated check plus a separately recorded manual-review status, not a claim of complete WCAG conformance.
+The fixture supplies the generated block name, a non-empty editable field inventory,
+frontend scope/expectations, reviewed visual golden/masks/threshold, and Axe/manual-review
+scopes. A pattern fixture with edits to persist is required only when the selected claim
+requires pattern behavior. The browser always navigates to the post it created and
+published during the run, then records that ID and permalink. Golden images are
+read-only inputs: the runner stores expected, actual, and diff evidence but never
+refreshes a golden. Axe output is preserved in full; it is an automated check plus a
+separately recorded manual-review status, not a claim of complete WCAG conformance.
 
 Proof tooling is exact-pinned as optional peers and retained in this repository's development dependencies. The included `proof/wp-env.json` pins WordPress core 7.1 and PHP 8.3, while the packed `proof/dependency-pins.json` preserves the direct WordPress package integrity pins that npm intentionally omits from package tarballs. The receipt additionally captures running-container image IDs, database/PHP/core/theme/browser observations, observed plugin metadata, Node and WordPress-package pins, generator/input/plugin/ZIP hashes, command logs, and every evidence object. The environment gate verifies that every retained observation command exited successfully, parses each value against its requested version/hash format, and requires the lockfile or packed pin snapshot plus integrity-pinned direct `@wordpress/*` packages. Missing or malformed observations block the runtime profile. Use `--no-run` only to produce an honest blocked diagnostic receipt after proof tooling is available.
 
@@ -403,10 +445,11 @@ materialize the compiler-owned package. Shared generated CSS is registered throu
 | `--dry-run` | Show resolved destinations without writing files. |
 | `--force` | Replace locally changed or unmanaged files at canonical bundle paths. |
 
-Installed instructions pin runtime commands to the package version that installed them, while
-their explicit update command stays on `@testing` while authoring is testing-only. Re-run
-`npx -y block-runner@testing skill --install` to update them. Existing local edits are refused
-unless `--force` is explicit.
+Installed instructions pin runtime commands to the package version that installed them. To
+update an unreleased candidate, first install the newly reviewed tarball, then re-run
+`npx --no-install block-runner skill --install`. Existing local edits are refused unless
+`--force` is explicit. After a published release, verify its available npm channel before
+using it in an update command.
 
 An installation made by 0.7.x predates the managed manifest, so the first upgrade is
 deliberately refused as unmanaged. Review that copy, rerun once with `--force`, and remove the
@@ -547,12 +590,15 @@ npm run test:proof:wordpress
 frontend lifecycle. The latter requires a working Docker CLI and daemon. Proof commands record bounded
 Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
 specific blocked or failed phase instead of exhausting the general test timeout.
-
 On GitHub Actions, the separate WordPress proof job uploads a
 `wordpress-7.1-pattern-overrides-receipt` artifact on success or failure, retained for 14 days. It contains
 `receipt-index.json`, the content-addressed `receipts/sha256` record, and its
 `evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
 the relevant build without committing environment-specific run output.
+
+These are automated repository-fixture checks for their exact artifact and revision. They do not
+run the prepared owner-acceptance journeys or establish a human judgement about visual fidelity,
+editing feel, or accessibility.
 
 ## Media Resolution
 
