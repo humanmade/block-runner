@@ -252,7 +252,7 @@ export function renderConfirmedStyleRules(
       if (!rule.declarations.length) fail('empty style rule', ruleAt);
       const declarations = rule.declarations.map((declaration, declarationIndex) => {
         const declarationAt = `${ruleAt}.declarations[${declarationIndex}]`;
-        if (!/^(?:--[a-zA-Z_][a-zA-Z0-9_-]*|-?[a-z][a-z0-9-]*)$/.test(declaration.property)
+        if (!/^(?:--[a-zA-Z_][a-zA-Z0-9_-]*|-?[a-z][a-z0-9-]*)$/i.test(declaration.property)
           || /^(?:behavior|-moz-binding)$/i.test(declaration.property)) {
           fail('unsupported or unsafe CSS property', `${declarationAt}.property`);
         }

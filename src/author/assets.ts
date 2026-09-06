@@ -306,7 +306,7 @@ export function fallbackUnlicensedFonts(
   // family and src descriptors are part of the license-bound record, not ordinary component CSS.
   for (const declaration of scanFontDeclarations(stylesheet)) {
     if (blocks.some((block) => declaration.source.start.offset >= block.source.start.offset && declaration.source.end.offset <= block.source.end.offset)) continue;
-    const sanitized = sanitizeFontDeclaration(declaration.property as 'font-family' | 'font', declaration.value, safeFamilies, fallbackStack);
+    const sanitized = sanitizeFontDeclaration(declaration.property, declaration.value, safeFamilies, fallbackStack);
     if (!sanitized.changed) continue;
     edits.push({ start: declaration.valueSource.start.offset, end: declaration.valueSource.end.offset, value: `${sanitized.value}${declaration.important ? ' !important' : ''}` });
     warnings.push({
@@ -645,12 +645,15 @@ function findFontLicense(
   return decision;
 }
 
-function scanFontDeclarations(stylesheet: CssStylesheet) {
+function scanFontDeclarations(stylesheet: CssStylesheet): Array<CssDeclaration & { property: 'font-family' | 'font' }> {
   // Rules retain raw declaration spans; flattening here is traversal, not a second declaration parser.
-  const facts: CssDeclaration[] = [];
+  const facts: Array<CssDeclaration & { property: 'font-family' | 'font' }> = [];
   forEachCssRule(stylesheet.rules, (rule) => {
     if (rule.kind === 'style' || rule.kind === 'blocked') {
-      facts.push(...rule.declarations.filter((declaration) => /^(?:font-family|font)$/i.test(declaration.property)));
+      for (const declaration of rule.declarations) {
+        const property = declaration.property.toLowerCase();
+        if (property === 'font-family' || property === 'font') facts.push({ ...declaration, property });
+      }
     }
   });
   return facts;

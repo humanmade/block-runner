@@ -972,7 +972,8 @@ function namespaceFontDeclarations(css: string, families: ReadonlyMap<string, st
     if (rule.kind === 'style' || rule.kind === 'blocked') declarations.push(...rule.declarations);
   });
   for (const entry of declarations) {
-    if (entry.property !== 'font-family' && entry.property !== 'font') continue;
+    const property = entry.property.toLowerCase();
+    if (property !== 'font-family' && property !== 'font') continue;
     const valueStart = entry.valueSource.start.offset;
     const valueEnd = entry.valueSource.end.offset;
     const value = css.slice(valueStart, valueEnd);

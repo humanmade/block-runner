@@ -12,7 +12,12 @@ describe('component CSS selector scoping', () => {
   });
 
   it('keeps escaped selector commas and exact raw declaration value ranges in shared facts', () => {
-    const css = '/* heading */\n.thing\\,part, .two { background-image: url("a,b.png"); color: red !important; }';
+    const css = [
+      '/* heading */',
+      '.thing\\,part, .two { background-image: url("a,b.png"); color:',
+      '  /* palette: decoy */',
+      '  red !important; }',
+    ].join('\n');
     const stylesheet = scanStylesheet(css);
     const rule = stylesheet.rules[0]!;
     expect(rule.kind).toBe('style');
@@ -21,7 +26,8 @@ describe('component CSS selector scoping', () => {
     // explicitly reject selector syntax it cannot prove safe rather than rewriting it.
     expect(scopeLocalSelectorList(rule.selector, '.wp-block-acme-card').ok).toBe(false);
     expect(css.slice(rule.declarations[0]!.valueSource.start.offset, rule.declarations[0]!.valueSource.end.offset)).toBe('url("a,b.png")');
-    expect(css.slice(rule.declarations[1]!.valueSource.start.offset, rule.declarations[1]!.valueSource.end.offset)).toBe('red !important');
+    expect(css.slice(rule.declarations[1]!.valueSource.start.offset, rule.declarations[1]!.valueSource.end.offset)).toBe('/* palette: decoy */\n  red !important');
+    expect(rule.declarations[1]!.valueSource.start).toMatchObject({ line: 3, column: 3 });
     expect(stylesheet.ledger).toHaveLength(2);
   });
 });
