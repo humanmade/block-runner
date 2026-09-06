@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { buildPatternOverridesFixture } from '../scripts/build-pattern-overrides-fixture.js';
+import { buildPatternOverridesFixture, buildResponsiveStyleProofFixture } from '../scripts/build-pattern-overrides-fixture.js';
 import {
   PROOF_PROFILES,
   canonicalJson,
@@ -22,6 +22,17 @@ import {
 } from '../src/proof/release-acceptance.js';
 
 const execFileAsync = promisify(execFile);
+
+type ResponsiveStyleMatrixEvidence = {
+  scope?: string;
+  snapshots?: Array<{
+    label?: string;
+    target?: string;
+    sibling?: string;
+    expected?: { target?: string; sibling?: string };
+    viewport?: { surface?: { width?: number } };
+  }>;
+};
 
 /**
  * This deliberately runs only through `npm run test:proof:wordpress`, after
@@ -159,6 +170,48 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     expect(retainedMediaTypes(result.receipt.gates.find((gate) => gate.gate === 'frontend_assets'))).toContain('image/png');
     await expect(readFile(path.join(outputDir, result.receiptReference.path), 'utf8'))
       .resolves.toBe(canonicalJson(result.receipt));
+  }, 480_000);
+
+  it('proves an author()-produced exact @mobile child style in the WordPress iframe and frontend without sibling leakage', async () => {
+    await requireDocker();
+    const outputDir = await proofOutputDirectory('responsive-style');
+    const built = await buildResponsiveStyleProofFixture(outputDir);
+    const result = await runProof({
+      // This existing profile runs the frontend browser gates. Its visual/a11y
+      // gates remain intentionally blocked for this no-golden focused probe;
+      // the assertions below are limited to the style transport evidence.
+      profile: 'fidelity-checked',
+      pluginZip: built.pluginZip,
+      inputPath: built.inputPath,
+      markup: built.nativeContainerMarkup,
+      fixture: built.fixture,
+      artifact: built.artifact,
+      outputDir,
+    });
+    const editor = result.receipt.gates.find((gate) => gate.gate === 'editor_reopen');
+    const frontend = result.receipt.gates.find((gate) => gate.gate === 'frontend_assets');
+    const editorMatrix = (editor?.details as { responsiveStyleMatrix?: ResponsiveStyleMatrixEvidence } | undefined)?.responsiveStyleMatrix;
+    const frontendMatrix = (frontend?.details as { responsiveStyleMatrix?: ResponsiveStyleMatrixEvidence } | undefined)?.responsiveStyleMatrix;
+    const editorStates = editor?.details as {
+      preEdit?: { tree?: Array<{ innerBlocks?: Array<{ name?: string; attributes?: { content?: unknown } }> }> };
+      reopened?: { tree?: Array<{ innerBlocks?: Array<{ name?: string; attributes?: { content?: unknown } }> }> };
+    } | undefined;
+    const initialHeading = editorStates?.preEdit?.tree?.[0]?.innerBlocks?.find((block) => block.name === 'core/heading');
+    const reopenedHeading = editorStates?.reopened?.tree?.[0]?.innerBlocks?.find((block) => block.name === 'core/heading');
+
+    expect(editor?.status, editor?.reason).toBe('pass');
+    expect(frontend?.status, frontend?.reason).toBe('pass');
+    expect(initialHeading?.attributes?.content).toBe('Responsive native style');
+    expect(reopenedHeading?.attributes?.content).toBe('Responsive native style (proof edited)');
+    for (const matrix of [editorMatrix, frontendMatrix]) {
+      expect(matrix?.scope).toMatch(/editor-canvas|frontend/);
+      expect(matrix?.snapshots).toHaveLength(3);
+      expect(matrix?.snapshots).toEqual(expect.arrayContaining([
+        expect.objectContaining({ label: 'below-mobile', target: '16px', sibling: 'rgb(1, 2, 3)', expected: { target: '16px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 479 }) }) }),
+        expect.objectContaining({ label: 'mobile-boundary', target: '16px', sibling: 'rgb(1, 2, 3)', expected: { target: '16px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 480 }) }) }),
+        expect.objectContaining({ label: 'above-mobile', target: '32px', sibling: 'rgb(1, 2, 3)', expected: { target: '32px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 481 }) }) }),
+      ]));
+    }
   }, 480_000);
 
   it.each(['editor-verified', 'fidelity-checked', 'pattern-verified'] as const)('executes %s through the real runner and browser', async (profile) => {

@@ -37,8 +37,11 @@ import {
   scanStylesheet,
   scopeStylesheet,
   validateCssBuildGraph,
+  type CssRule,
 } from './styles.js';
 import { sourceDeclarationKey, type StyleLedgerEntry } from '../styles/apply.js';
+import { exactThemePresetTransport, themePresetTokens } from './style-context.js';
+import { baseStyleDeclarationIdsRequiringScopedCss } from './cascade.js';
 
 /**
  * Produce the small, static source package for one registered block.
@@ -51,6 +54,27 @@ import { sourceDeclarationKey, type StyleLedgerEntry } from '../styles/apply.js'
 export async function author(input: string, options: AuthorOptions = {}): Promise<BlockRunnerReport> {
   const config = await loadConfig(options);
   const definition = mergeAuthorConfig(config.author, options.author);
+  // A supplied target snapshot is evidence, not writable theme configuration. Its preset values
+  // do, however, become the only authoritative token values for this authoring pass: a slug is
+  // eligible only because the category and literal value came from that snapshot.
+  const themeSettings = definition.styles?.context?.theme?.settings;
+  const contextTokens = themePresetTokens(themeSettings);
+  const authorConfig = themeSettings
+    ? {
+        ...config,
+        // Do not let an unverified local token slug stand in for a missing target preset. Other
+        // token settings (resolver/match/context) remain intact, while each preset category comes
+        // exclusively from the hash-bound target snapshot.
+        tokens: {
+          ...config.tokens,
+          match: 'exact' as const,
+          colors: contextTokens.colors,
+          fonts: contextTokens.fonts,
+          fontSizes: contextTokens.fontSizes,
+          spacing: contextTokens.spacing,
+        },
+      }
+    : config;
   const source = { entry: options.sourcePath ?? '<inline>', sha256: createHash('sha256').update(input, 'utf8').digest('hex'), format: 'html' as const };
   const evidence = collectSourceEvidence(input, source, options.sourcePath);
   const name = definition.name;
@@ -133,7 +157,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     preparedAssets.set(asset.destination, asset);
   };
   const fontLicenses = definition.styles?.fontLicenses ?? [];
-  const destinationFontFamilies = destinationFontFamilyNames(config.tokens?.fonts);
+  const destinationFontFamilies = destinationFontFamilyNames(authorConfig.tokens?.fonts);
   const licensedFamilies = licensedFontFamilies(styleInput, fontLicenses, options.sourcePath);
   const sharedFallback = fallbackUnlicensedFonts(styleInput, {
     sourcePath: options.sourcePath,
@@ -319,12 +343,13 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     };
   }
   const stylesheet = scanStylesheet(styleInput);
+  const cascadeSensitiveDeclarations = nativeCascadeSensitiveDeclarations(input, stylesheet.rules);
   // The converter's native-mapping probe must see the same compiled stylesheet as the CSS
   // scanner, including the final local-asset rewrites. A configured stylesheet otherwise has no
   // `<style>` node for its class rules, and Tailwind source would be incorrectly treated as an
   // empty stylesheet.
   const sourceStyledInput = withAuthorStyles(input, styleInput);
-  const nativeSource = await collectNativeSourceDeclarations(sourceStyledInput, authorAnalysisOptions(options), config);
+  const nativeSource = await collectNativeSourceDeclarations(sourceStyledInput, authorAnalysisOptions(options), authorConfig);
   const preflightStyleLedger = [...safetyLedger, ...nativeSource.inlineLedger];
   const preflightInlineFailure = nativeSource.inlineLedger.some(
     (entry) => entry.outcome === 'blocked' || entry.outcome === 'warned',
@@ -350,14 +375,18 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     selectorTransform: selectorTransport.rewrite,
     disposition: (declaration, rule) =>
       unsafeResidualDeclaration(declaration.property, declaration.value)
-      ?? (nativeSource.declarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id))
+      // Native block attributes cannot encode priority. Retain !important source CSS exactly;
+      // silently strengthening or weakening its cascade would be a fidelity regression.
+      ?? (!declaration.important && !cascadeSensitiveDeclarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id)) && nativeSource.declarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id))
         ? {
             outcome: 'native' as const,
             reason: 'mapped through the destination block support; omitted from residual CSS',
           }
         : undefined),
   });
-  const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(scopedStyles.localRules)));
+  // Retain source selectors even when native promotion emptied their residual CSS rule; coverage
+  // provenance must identify the original element, not fall back to any matching output node.
+  const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(stylesheet.rules)));
   const hardStyleFailure = scopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || scopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
 
@@ -367,10 +396,18 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     // The author package carries residual authored selectors/properties in style.scss; the
     // legacy open sidecar would duplicate it as a global post stylesheet.
     styling: 'relaxed',
-    config,
-    preserveSourceClasses: referencedCssClasses(scopedStyles.css),
+    config: authorConfig,
+    // Keep source classes referenced by any authored rule, including rules promoted to native
+    // supports. They bind coverage evidence to the actual emitted node; retaining a class alone
+    // carries no stylesheet/global behaviour.
+    preserveSourceClasses: [...new Set([
+      ...referencedCssClasses(scopedStyles.css),
+      // Native-only simple class rules need provenance too. Do not reparse arbitrary escaped or
+      // compound selector syntax here: selectorTransport remains its single authority.
+      ...referencedCssClasses(styleInput).filter((name) => /^[_a-zA-Z][-_a-zA-Z0-9]*$/.test(name)),
+    ])],
     preserveSourceSelectorDependencies: selectorTransport.dependencies,
-    suppressSourceDeclarations: [...nativeSource.suppressedDeclarations],
+    suppressSourceDeclarations: [...nativeSource.suppressedDeclarations, ...cascadeSensitiveDeclarations],
     preserveAssetForms: true,
     styleLedgerObserver(entries, source) {
       for (const entry of entries) {
@@ -403,9 +440,15 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       const supplied = validateAuthoringPlan(options.plan);
       // Both sides must take the schema's optional-field normalization path. In particular,
       // source locations legitimately omit path/line data for inline input.
-      const expectedCoverage = validateAuthoringPlan({ ...supplied, coverage: sourceCoverage(
+      const expectedCoverageInput = sourceCoverage(
         styleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings,
-      ) }).coverage!;
+      );
+      // The scan observes source literals; the canonical plan proves whether an exact target
+      // preset carries that same declaration. Reapply that deterministic ownership classification
+      // before equality, rather than accepting a caller's altered ledger.
+      classifyConfirmedPresetCoverage(expectedCoverageInput, supplied, definition.styles?.context?.theme?.settings);
+      classifyConfirmedResponsiveCoverage(expectedCoverageInput, supplied);
+      const expectedCoverage = validateAuthoringPlan({ ...supplied, coverage: expectedCoverageInput }).coverage!;
       if (supplied.source?.entry !== source.entry || supplied.source.sha256 !== source.sha256 || supplied.source.format !== 'html') {
         throw new Error('Supplied authoring plan is not bound to this exact HTML source hash.');
       }
@@ -496,6 +539,25 @@ function mergeAuthorConfig(configured: AuthorConfig | undefined, explicit: Autho
     ...explicit,
     styles: { ...configured?.styles, ...explicit?.styles },
   };
+}
+
+/** Keep an unconditional native support out of the inline cascade when source CSS has a competing
+ * conditional/pseudo/other-selector declaration that WordPress's state !important would distort. */
+function nativeCascadeSensitiveDeclarations(source: string, rules: readonly CssRule[]): Set<string> {
+  const dom = new JSDOM(source);
+  const ids = baseStyleDeclarationIdsRequiringScopedCss({ document: dom.window.document, rules });
+  dom.window.close();
+  const entries: Array<{ selector: string; property: string; value: string; id: string; ruleId: string; conditional: boolean }> = [];
+  const visit = (items: readonly CssRule[], conditional = false): void => {
+    for (const rule of items) {
+      if (rule.kind === 'conditional') visit(rule.rules, true);
+      else if (rule.kind === 'style') for (const declaration of rule.declarations) {
+        entries.push({ selector: rule.selector, property: declaration.property, value: declaration.value, id: declaration.id, ruleId: rule.id, conditional });
+      }
+    }
+  };
+  visit(rules);
+  return new Set(entries.filter((entry) => ids.has(entry.id)).map((entry) => sourceDeclarationKey(entry.selector, entry.property, entry.value, entry.ruleId)));
 }
 
 /**
@@ -638,6 +700,50 @@ function sourceCoverage(
     editorStyleLedger,
     fontWarnings,
   });
+}
+
+function classifyConfirmedPresetCoverage(
+  coverage: NonNullable<AuthorSourceEvidence['coverage']>,
+  plan: import('../authoring/schema.js').AuthoringPlan,
+  settings: unknown,
+): void {
+  const nodes = (items: readonly import('../authoring/schema.js').AuthoringStructureNode[]): import('../authoring/schema.js').AuthoringStructureNode[] =>
+    items.flatMap((item) => [item, ...nodes(item.children ?? [])]);
+  const structure = nodes(plan.structure);
+  for (const entry of coverage.styles) {
+    if (entry.outcome !== 'native' || entry.atRules.length) continue;
+    const transport = exactThemePresetTransport(settings, entry.property, entry.value);
+    if (!transport) continue;
+    const { preset } = transport;
+    const classMatch = entry.source?.selector && /^\.([_a-zA-Z][-_a-zA-Z0-9]*)$/.exec(entry.source.selector);
+    const node = structure.find((candidate) => candidate.id && ('attribute' in transport
+      ? candidate.attributes?.[transport.attribute] === preset.slug : JSON.stringify(candidate.attributes?.style).includes(transport.value))
+      && (!classMatch || (typeof candidate.attributes?.className === 'string' && candidate.attributes.className.split(/\s+/).includes(classMatch[1]!))));
+    if (preset && node?.id) {
+      entry.outcome = 'preset';
+      entry.reason = `exact target theme ${preset.category} preset "${preset.slug}"`;
+      entry.node = node.id;
+      entry.preset = { category: preset.category, slug: preset.slug };
+    }
+  }
+}
+
+/** Reconcile only source-identical conditional entries to a plan's already-validated WP state. */
+function classifyConfirmedResponsiveCoverage(
+  coverage: NonNullable<AuthorSourceEvidence['coverage']>,
+  plan: import('../authoring/schema.js').AuthoringPlan,
+): void {
+  for (const entry of coverage.styles) {
+    if (entry.outcome !== 'scoped-css' || entry.atRules.length === 0) continue;
+    const confirmed = plan.coverage?.styles.find((candidate) => candidate.outcome === 'native' && candidate.responsive
+      && candidate.property === entry.property && candidate.value === entry.value && candidate.scope === entry.scope
+      && stableJson(candidate.atRules) === stableJson(entry.atRules) && candidate.source?.selector === entry.source?.selector);
+    if (!confirmed) continue;
+    entry.outcome = 'native';
+    entry.reason = confirmed.reason;
+    entry.node = confirmed.node;
+    entry.responsive = confirmed.responsive;
+  }
 }
 
 function stableJson(value: unknown): string {

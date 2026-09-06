@@ -104,6 +104,9 @@ export interface AuthoredStyleLedgerEntry {
   reason?: string;
   atRules: string[];
   source?: SourceLocation;
+  /** Native-node evidence for a conservatively lifted WordPress responsive declaration. */
+  node?: string;
+  responsive?: 'mobile' | 'tablet';
 }
 
 /** The terminal disposition of a source asset. */
@@ -180,6 +183,8 @@ export interface AuthorStyleConfig {
   fontLicenses?: readonly FontLicenseDecision[];
   /** Optional destination-approved fallback stack for fonts which cannot be redistributed. */
   fallbackStack?: string;
+  /** Target facts used for ownership decisions; copied into the hash-bound plan coverage. */
+  context?: { theme?: { slug?: string; version?: string; settings?: Record<string, unknown> }; viewports?: Partial<Record<'mobile' | 'tablet', { min?: string; max?: string }>> };
 }
 
 export interface AuthorConfig {

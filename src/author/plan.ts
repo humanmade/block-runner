@@ -10,14 +10,19 @@ import type {
   AuthoringCoverageStyle,
   AuthoringFontFace,
   AuthoringPlan,
+  AuthoringStyleContext,
   AuthoringStructureNode,
   JsonValue,
 } from '../authoring/schema.js';
 import { authoringRulesFromStylesheet } from '../authoring/styles.js';
 import { BACKGROUND_COLOR_TARGET, GRADIENT_TARGET, classifyBackground, lookupDeclaration } from '../styles/declarations.js';
+import { querySupports } from '../styles/capabilities.js';
 import type { AssetLedgerEntry, AuthoredStyleLedgerEntry, AuthorConfig, WpBlock } from '../types.js';
 import { scanCssUrlReferences, type FontAssetWarning, type FontLicenseDecision, type PreparedCssAsset } from './assets.js';
 import { scanStylesheet, scopeLocalSelectorList, scopeStylesheet, type CssRule } from './styles.js';
+import { exactThemePresetTransport, styleContextFrom } from './style-context.js';
+import { mapExactWordPressResponsiveMedia, resolveWordPressViewportRanges } from './responsive.js';
+import { hasUnsafeResponsiveNativeCascade } from './cascade.js';
 
 export interface PreparedAuthoringFonts {
   /** CSS after removing global @font-face rules and namespacing their owned families. */
@@ -151,13 +156,27 @@ export function compileAnalyzedDesign(input: {
   const nodes: AuthoringStructureNode[] = [];
   const convert = (block: WpBlock, id: string): AuthoringStructureNode => {
     if (block.name === 'core/html') throw new Error(`Unresolved native structure at ${id}: describe this region as native blocks before authoring source; Custom HTML is not a registered-block substitute.`);
+    // Gutenberg parses rich-text attributes as RichTextData instances. They stringify to the
+    // authored HTML, but copying their enumerable properties produces `{}` and loses text when
+    // the plan crosses the JSON-only compiler boundary.
+    const attributes = JSON.parse(JSON.stringify(
+      Object.fromEntries(Object.entries(block.attributes).filter(([key]) => !key.startsWith('__blockRunner'))),
+    )) as Record<string, JsonValue>;
     const node: AuthoringStructureNode = { id, block: block.name,
-      attributes: Object.fromEntries(Object.entries(block.attributes).filter(([key]) => !key.startsWith('__blockRunner'))) as Record<string, JsonValue>,
+      attributes,
       children: block.innerBlocks.map((child, index) => convert(child, `${id}.${index}`)) };
     nodes.push(node);
     return node;
   };
   const structure = input.blocks.map((block, index) => convert(block, `source.${index}`));
+  const responsive = liftExactResponsiveStyles({
+    structure,
+    rules: input.rules,
+    styleLedger: input.styleLedger,
+    definition,
+    source: input.source,
+    stylesheet: input.stylesheet,
+  });
   const sourceEntry = input.sourcePath ?? '<inline>';
   const assets: AuthoringPlan['assets'] = input.preparedAssets.map((asset, index) => {
     const destination = `assets/${path.basename(asset.destination)}`;
@@ -204,7 +223,7 @@ export function compileAnalyzedDesign(input: {
     definition,
     source: input.source,
     sourcePath: input.sourcePath,
-    styleLedger: input.styleLedger,
+    styleLedger: responsive.styleLedger,
     assets: input.assets,
     preparedAssets: input.preparedAssets,
     stylesheet: input.stylesheet,
@@ -212,6 +231,7 @@ export function compileAnalyzedDesign(input: {
     editorStyleLedger,
     fontWarnings: input.fontWarnings,
   });
+  annotatePresetCoverage(coverage, structure, definition.styles?.context?.theme?.settings);
   const plan: AuthoringPlan = {
     version: 1, generatorVersion: '0.9.0', target: { name,
       title: definition.title ?? name.split('/')[1]!.replace(/[-_]+/g, ' ').replace(/\b\w/g, (letter) => letter.toUpperCase()),
@@ -223,8 +243,8 @@ export function compileAnalyzedDesign(input: {
     }))),
     // Analysis proposes the legacy unrestricted policy; the returned plan exposes it for review.
     locking: definition.locking ?? { mode: 'none' },
-    styles: { strategy: input.rules.length ? 'mixed' : 'native', outcomes: [],
-      rules: authoringRulesFromStylesheet(input.rules), editorRules: authoringRulesFromStylesheet(editor.localRules),
+    styles: { strategy: responsive.rules.length ? 'mixed' : 'native', outcomes: [],
+      rules: authoringRulesFromStylesheet(responsive.rules), editorRules: authoringRulesFromStylesheet(editor.localRules),
       ...(input.fonts?.length ? { fonts: [...input.fonts] } : {}) },
     pattern: { ready: false, overrides: [] }, assets, files: [],
     warnings: (input.fontWarnings ?? []).map(({ warning }) => warning.reason),
@@ -238,6 +258,166 @@ function cssRuleSelectors(rules: readonly CssRule[], output = new Map<string, st
     else if (rule.kind === 'style') output.set(rule.id, rule.selector);
   }
   return output;
+}
+
+/** Mark only a preset that is both an exact target-snapshot value and the emitted native attribute. */
+function annotatePresetCoverage(coverage: AuthoringCoverage, structure: readonly AuthoringStructureNode[], settings: unknown): void {
+  for (const entry of coverage.styles) {
+    if (entry.outcome !== 'native' || entry.atRules.length) continue;
+    const transport = exactThemePresetTransport(settings, entry.property, entry.value);
+    if (!transport) continue;
+    const { preset } = transport;
+    const sourceClass = entry.source?.selector ? simpleClassSelector(entry.source.selector) : undefined;
+    const node = structure.find((candidate) => candidate.id && structureNodeHasPreset(candidate, transport)
+      && (sourceClass === undefined || classList(candidate).includes(sourceClass)));
+    if (!node?.id) continue;
+    entry.outcome = 'preset';
+    entry.reason = `exact target theme ${preset.category} preset "${preset.slug}"`;
+    entry.node = node.id;
+    entry.preset = { category: preset.category, slug: preset.slug };
+  }
+}
+
+function structureNodeHasPreset(node: AuthoringStructureNode, transport: NonNullable<ReturnType<typeof exactThemePresetTransport>>): boolean {
+  if (!transport) return false;
+  if ('attribute' in transport) return node.attributes?.[transport.attribute] === transport.preset.slug;
+  let value: unknown = node.attributes?.style;
+  for (const key of transport.stylePath) value = value && typeof value === 'object' && !Array.isArray(value) ? (value as Record<string, unknown>)[key] : undefined;
+  return value === transport.value;
+}
+
+interface ResponsiveCandidate {
+  declarationId: string;
+  selector: string;
+  property: string;
+  value: string;
+  atRule: string;
+  state: 'mobile' | 'tablet';
+  node: AuthoringStructureNode;
+  path: readonly string[];
+}
+
+/**
+ * Lift only the narrow WP 7.1 case we can prove: an exact target viewport interval, a single
+ * local class resolving to one emitted Core block, a supported longhand, and no competing source
+ * selector/condition/priority. Everything even slightly less direct remains authored CSS.
+ */
+function liftExactResponsiveStyles(input: {
+  structure: readonly AuthoringStructureNode[];
+  rules: readonly CssRule[];
+  styleLedger: readonly AuthoredStyleLedgerEntry[];
+  definition: AuthorConfig;
+  source: string;
+  stylesheet?: string;
+}): { rules: CssRule[]; styleLedger: AuthoredStyleLedgerEntry[] } {
+  const context = input.definition.styles?.context;
+  const themeViewport = context?.theme?.settings && typeof context.theme.settings === 'object' && !Array.isArray(context.theme.settings)
+    ? (context.theme.settings as Record<string, unknown>).viewport
+    : undefined;
+  const settings = themeViewport && typeof themeViewport === 'object' && !Array.isArray(themeViewport)
+    ? themeViewport
+    : context?.viewports
+      ? { ...(context.viewports.mobile?.max ? { mobile: context.viewports.mobile.max } : {}), ...(context.viewports.tablet?.max ? { tablet: context.viewports.tablet.max } : {}) }
+      : undefined;
+  // Missing target context is a fidelity limitation, never a licence to use WP defaults.
+  if (!settings) return { rules: [...input.rules], styleLedger: [...input.styleLedger] };
+
+  const nodes = flattenNodes(input.structure);
+  const declarations = flattenStyleDeclarations(input.rules);
+  const candidates: ResponsiveCandidate[] = [];
+  for (const item of declarations) {
+    if (item.conditions.length !== 1 || item.conditions[0]!.name !== 'media' || item.declaration.important) continue;
+    const state = mapExactWordPressResponsiveMedia(item.conditions[0]!.prelude, settings);
+    const className = simpleClassSelector(item.rule.selector);
+    const target = lookupDeclaration(item.declaration.property);
+    if (!state || !className || target?.kind !== 'style') continue;
+    const matching = nodes.filter((node) => node.block.startsWith('core/') && classList(node).includes(className));
+    if (matching.length !== 1 || !matching[0]!.id || !supportsNativeStyle(matching[0]!.block, target.supports)) continue;
+    // Any pseudo, compound, competing interval, specificity, or priority could change the
+    // browser cascade. The native state renderer intentionally uses !important, so preserve CSS.
+    if (hasUnsafeCandidateCascade(input.source, scanStylesheet(input.stylesheet ?? '').rules, item)) continue;
+    candidates.push({ declarationId: item.declaration.id, selector: item.rule.selector, property: item.declaration.property,
+      value: item.declaration.value, atRule: `@media ${item.conditions[0]!.prelude}`, state, node: matching[0]!, path: target.path });
+  }
+  if (!candidates.length) return { rules: [...input.rules], styleLedger: [...input.styleLedger] };
+
+  for (const candidate of candidates) setResponsiveStyle(candidate.node, candidate.state, candidate.path, candidate.value);
+  const lifted = new Map(candidates.map((candidate) => [candidate.declarationId, candidate]));
+  return {
+    rules: removeLiftedDeclarations(input.rules, lifted),
+    styleLedger: input.styleLedger.map((entry) => {
+      const candidate = candidates.find((item) => item.selector === entry.source?.selector && item.property === entry.property
+        && item.value === entry.value && entry.atRules.length === 1 && entry.atRules[0] === item.atRule);
+      return candidate ? { ...entry, outcome: 'native', reason: `mapped to WordPress @${candidate.state} on ${candidate.node.id}`,
+        node: candidate.node.id, responsive: candidate.state } : entry;
+    }),
+  };
+}
+
+function hasUnsafeCandidateCascade(
+  source: string,
+  rules: readonly CssRule[],
+  item: ReturnType<typeof flattenStyleDeclarations>[number],
+): boolean {
+  const dom = new JSDOM(source);
+  try {
+    return hasUnsafeResponsiveNativeCascade({ document: dom.window.document, rules,
+      candidate: { selector: item.rule.selector, declarationId: item.declaration.id, property: item.declaration.property } });
+  } finally {
+    dom.window.close();
+  }
+}
+
+function flattenNodes(nodes: readonly AuthoringStructureNode[]): AuthoringStructureNode[] {
+  return nodes.flatMap((node) => [node, ...flattenNodes(node.children ?? [])]);
+}
+
+function classList(node: AuthoringStructureNode): string[] {
+  const value = node.attributes?.className;
+  return typeof value === 'string' ? value.split(/\s+/).filter(Boolean) : [];
+}
+
+function simpleClassSelector(selector: string): string | undefined {
+  const match = /^\.([_a-zA-Z][-_a-zA-Z0-9]*)$/.exec(selector.trim());
+  return match?.[1];
+}
+
+function supportsNativeStyle(block: string, query: Parameters<typeof querySupports>[1]): boolean {
+  const wp = bootHeadlessWordPressSync();
+  return querySupports((wp.getBlockType(block) as { supports?: Record<string, unknown> } | undefined)?.supports, query);
+}
+
+function flattenStyleDeclarations(rules: readonly CssRule[], conditions: Array<Extract<CssRule, { kind: 'conditional' }>> = []): Array<{ rule: Extract<CssRule, { kind: 'style' }>; declaration: Extract<CssRule, { kind: 'style' }>['declarations'][number]; conditions: Array<Extract<CssRule, { kind: 'conditional' }>> }> {
+  return rules.flatMap((rule) => {
+    if (rule.kind === 'conditional') return flattenStyleDeclarations(rule.rules, [...conditions, rule]);
+    if (rule.kind !== 'style') return [];
+    return rule.declarations.map((declaration) => ({ rule, declaration, conditions }));
+  });
+}
+
+function setResponsiveStyle(node: AuthoringStructureNode, state: 'mobile' | 'tablet', path: readonly string[], value: string): void {
+  const attributes = node.attributes ?? (node.attributes = {});
+  const style = typeof attributes.style === 'object' && attributes.style && !Array.isArray(attributes.style)
+    ? attributes.style as Record<string, JsonValue>
+    : (attributes.style = {});
+  let current = style[`@${state}`] ?? (style[`@${state}`] = {});
+  for (const key of path.slice(0, -1)) {
+    if (!current || typeof current !== 'object' || Array.isArray(current)) return;
+    current = (current as Record<string, JsonValue>)[key] ?? ((current as Record<string, JsonValue>)[key] = {});
+  }
+  if (current && typeof current === 'object' && !Array.isArray(current)) (current as Record<string, JsonValue>)[path[path.length - 1]!] = value;
+}
+
+function removeLiftedDeclarations(rules: readonly CssRule[], lifted: ReadonlyMap<string, ResponsiveCandidate>): CssRule[] {
+  return rules.flatMap((rule): CssRule[] => {
+    if (rule.kind === 'conditional') {
+      const children = removeLiftedDeclarations(rule.rules, lifted);
+      return children.length ? [{ ...rule, rules: children }] : [];
+    }
+    if (rule.kind !== 'style') return [rule];
+    const declarations = rule.declarations.filter((declaration) => !lifted.has(declaration.id));
+    return declarations.length ? [{ ...rule, declarations }] : [];
+  });
 }
 
 /** Build the source-bound coverage shared by rules-derived and caller-supplied proposals. */
@@ -264,6 +444,7 @@ export function createAnalyzedDesignCoverage(input: {
     ...(input.editorStylesheet === undefined ? {} : {
       editorStylesheet: { entry: '<author.styles.editorCss>', sha256: sha256(input.editorStylesheet) },
     }),
+    styleContext: coverageStyleContext(input.definition, `${input.stylesheet ?? ''}\n${input.editorStylesheet ?? ''}`),
     styles: [
       ...input.styleLedger.map((entry) => toCoverageStyle(entry, 'shared')),
       ...input.editorStyleLedger.map((entry) => toCoverageStyle(entry, 'editor')),
@@ -271,6 +452,46 @@ export function createAnalyzedDesignCoverage(input: {
     ],
     assets: input.assets.map((entry) => toCoverageAsset(entry, input.preparedAssets)),
   };
+}
+
+/** Keep target inputs reviewable without importing or mutating global theme.json. */
+function coverageStyleContext(definition: AuthorConfig, css: string): AuthoringStyleContext {
+  const supplied = definition.styles?.context;
+  const theme = supplied?.theme;
+  const facts = styleContextFrom(theme, css);
+  const unresolvedVariables = facts.unresolvedVariables;
+  const themeViewport = theme?.settings && typeof theme.settings === 'object' && !Array.isArray(theme.settings)
+    ? (theme.settings as Record<string, unknown>).viewport
+    : undefined;
+  const resolvedThemeViewports = themeViewport && typeof themeViewport === 'object' && !Array.isArray(themeViewport)
+    ? resolveWordPressViewportRanges(themeViewport)
+    : undefined;
+  if (supplied?.viewports && resolvedThemeViewports && stableJson(supplied.viewports) !== stableJson(resolvedThemeViewports)) {
+    throw new Error('author.styles.context.viewports conflicts with target theme settings.viewport; use the WordPress-resolved viewport ranges.');
+  }
+  const viewports = resolvedThemeViewports ?? supplied?.viewports;
+  const limitations: string[] = [];
+  if (!theme?.settings) limitations.push('No target theme settings snapshot was supplied; native/theme-preset fidelity is not asserted.');
+  if (!viewports) limitations.push('No configured WordPress viewport ranges were supplied; responsive source conditions remain exact scoped CSS.');
+  if (unresolvedVariables.length) limitations.push('Custom CSS variables are unresolved outside this block stylesheet; their provider and cascade remain a destination assumption.');
+  limitations.push('Global foundation/reset CSS is not injected; source rules requiring it are blocked instead of being approximated.');
+  limitations.push(...facts.limitations);
+  return {
+    ...(theme ? { theme: {
+      ...(theme.slug ? { slug: theme.slug } : {}),
+      ...(theme.version ? { version: theme.version } : {}),
+      ...(facts.settingsSha256 ? { settingsSha256: facts.settingsSha256 } : {}),
+    } } : {}),
+    ...(viewports ? { viewports } : {}),
+    ...(unresolvedVariables.length ? { unresolvedVariables } : {}),
+    limitations,
+  };
+}
+
+function stableJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(',')}]`;
+  if (value && typeof value === 'object') return `{${Object.entries(value as Record<string, unknown>).sort(([a], [b]) => a.localeCompare(b)).map(([key, item]) => `${JSON.stringify(key)}:${stableJson(item)}`).join(',')}}`;
+  return JSON.stringify(value);
 }
 
 /**
@@ -305,17 +526,24 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
         }
         continue;
       }
-      const nativeAttribute = hasNativeAttribute(plan.structure, entry.property, entry.value);
+      const nativeAttribute = hasNativeAttribute(plan.structure, entry.property, entry.value, entry.node, entry.responsive);
       if (entry.outcome === 'native') {
+        assertResponsiveCoverage(coverage.styleContext, entry, label);
         // A native ledger outcome records intended transport, but structure is compiler input.
         if (!nativeAttribute) throw new Error(`${label} is marked native but has no matching native block attribute.`);
+        if (entry.responsive && !hasCompiledResponsiveAttribute(plan, entry)) {
+          throw new Error(`${label} is responsive native styling but the final compiled node does not carry it.`);
+        }
         continue;
       }
       const explicitDisposition = plan.styles.outcomes.some((outcome) => outcome.property === entry.property
         && outcome.value === entry.value
         && ((entry.outcome === 'preset' && outcome.outcome === 'token')
           || (entry.outcome === 'literal' && outcome.outcome === 'scoped-css')));
-      if (!explicitDisposition && !nativeAttribute) {
+      if (entry.outcome === 'preset' && entry.preset && !hasCompiledPresetAttribute(plan, entry)) {
+        throw new Error(`${label} is preset-owned but the final compiled node does not carry its bound preset.`);
+      }
+      if (!explicitDisposition && !nativeAttribute && !(entry.outcome === 'preset' && hasCompiledPresetAttribute(plan, entry))) {
         throw new Error(`${label} has no explicit native or literal plan disposition.`);
       }
     }
@@ -341,13 +569,108 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
   }
 }
 
+function hasCompiledPresetAttribute(plan: AuthoringPlan, entry: AuthoringCoverageStyle): boolean {
+  if (!entry.node || !entry.preset) return false;
+  const attribute = entry.property === 'color' ? 'textColor'
+    : entry.property === 'background-color' ? 'backgroundColor'
+      : entry.property === 'font-size' ? 'fontSize'
+        : entry.property === 'font-family' ? 'fontFamily' : undefined;
+  const path = nodeIndexPath(plan.structure, entry.node);
+  if (!path) return false;
+  let compiled: unknown = compileRegisteredBlock(plan).template;
+  for (const [depth, index] of path.entries()) {
+    if (!Array.isArray(compiled) || !Array.isArray(compiled[index])) return false;
+    const tuple = compiled[index] as unknown[];
+    compiled = depth < path.length - 1 ? tuple[2] : tuple;
+  }
+  if (!Array.isArray(compiled) || !compiled[1] || typeof compiled[1] !== 'object' || Array.isArray(compiled[1])) return false;
+  const attributes = compiled[1] as Record<string, unknown>;
+  if (attribute) return attributes[attribute] === entry.preset.slug;
+  const spacing = /^(margin|padding)-(top|right|bottom|left)$/.exec(entry.property);
+  if (!spacing) return false;
+  const value = (((attributes.style as Record<string, unknown> | undefined)?.spacing as Record<string, unknown> | undefined)?.[spacing[1]!] as Record<string, unknown> | undefined)?.[spacing[2]!];
+  return value === `var:preset|spacing|${entry.preset.slug}`;
+}
+
+/** Recheck responsive evidence after compiler defaults/fixed-field handling, not only in the plan. */
+function hasCompiledResponsiveAttribute(plan: AuthoringPlan, entry: AuthoringCoverageStyle): boolean {
+  if (!entry.node || !entry.responsive) return false;
+  const path = nodeIndexPath(plan.structure, entry.node);
+  if (!path) return false;
+  let compiled: unknown = compileRegisteredBlock(plan).template;
+  for (const [depth, index] of path.entries()) {
+    if (!Array.isArray(compiled) || !Array.isArray(compiled[index])) return false;
+    const tuple = compiled[index] as unknown[];
+    compiled = tuple;
+    if (depth < path.length - 1) compiled = tuple[2];
+  }
+  if (!Array.isArray(compiled) || !compiled[1] || typeof compiled[1] !== 'object' || Array.isArray(compiled[1])) return false;
+  const target = nativeStyleTarget(entry.property, entry.value);
+  if (!target) return false;
+  let value: unknown = compiled[1] as Record<string, unknown>;
+  for (const key of ['style', `@${entry.responsive}`, ...target]) {
+    if (!value || typeof value !== 'object' || Array.isArray(value)) return false;
+    value = (value as Record<string, unknown>)[key];
+  }
+  return value === entry.value;
+}
+
+function nodeIndexPath(nodes: readonly AuthoringStructureNode[], id: string, prefix: number[] = []): number[] | undefined {
+  for (const [index, node] of nodes.entries()) {
+    const current = [...prefix, index];
+    if (node.id === id) return current;
+    const nested = nodeIndexPath(node.children ?? [], id, current);
+    if (nested) return nested;
+  }
+  return undefined;
+}
+
+/**
+ * A responsive block style is only honest when the reviewed source query is one of the exact
+ * states WordPress will generate from the same target viewport configuration.  In particular,
+ * never treat a default fallback as target proof when the plan did not carry viewport context.
+ */
+function assertResponsiveCoverage(
+  context: AuthoringStyleContext | undefined,
+  entry: AuthoringCoverageStyle,
+  label: string,
+): void {
+  if (!entry.responsive) {
+    if (entry.atRules.length) throw new Error(`${label} is conditional native styling without a WordPress responsive-state binding.`);
+    return;
+  }
+  if (!entry.node) throw new Error(`${label} is responsive native styling but names no native node.`);
+  const viewports = context?.viewports;
+  if (!viewports) throw new Error(`${label} is responsive native styling without target viewport context.`);
+  const settings = {
+    ...(viewports.mobile?.max ? { mobile: viewports.mobile.max } : {}),
+    ...(viewports.tablet?.max ? { tablet: viewports.tablet.max } : {}),
+  };
+  const resolved = resolveWordPressViewportRanges(settings);
+  if (stableJson(resolved) !== stableJson(viewports)) {
+    throw new Error(`${label} has viewport context that is not the WordPress 7.1 resolved range.`);
+  }
+  const sourceMedia = entry.atRules[0]?.replace(/^@media\s+/i, '');
+  if (entry.atRules.length !== 1 || !sourceMedia || mapExactWordPressResponsiveMedia(sourceMedia, settings) !== entry.responsive) {
+    throw new Error(`${label} source media condition is not exactly equivalent to WordPress @${entry.responsive}.`);
+  }
+}
+
 /** Match a native declaration only where the requested property and value coexist in an emitted
  * block attribute object; a value-only search would allow unrelated text to satisfy coverage. */
-function hasNativeAttribute(nodes: readonly AuthoringStructureNode[], property: string, value: string): boolean {
+function hasNativeAttribute(
+  nodes: readonly AuthoringStructureNode[],
+  property: string,
+  value: string,
+  nodeId?: string,
+  responsive?: 'mobile' | 'tablet',
+): boolean {
   const target = nativeStyleTarget(property, value);
   if (!target) return false;
-  const path = ['style', ...target];
-  const matches = (attributes: JsonValue | undefined): boolean => {
+  const path = ['style', ...(responsive ? [`@${responsive}`] : []), ...target];
+  const matches = (node: AuthoringStructureNode): boolean => {
+    if (nodeId !== undefined && node.id !== nodeId) return false;
+    const attributes = node.attributes;
     let current: unknown = attributes;
     for (const key of path) {
       if (!current || typeof current !== 'object' || Array.isArray(current)) return false;
@@ -355,7 +678,7 @@ function hasNativeAttribute(nodes: readonly AuthoringStructureNode[], property: 
     }
     return current === value;
   };
-  return nodes.some((node) => matches(node.attributes) || hasNativeAttribute(node.children ?? [], property, value));
+  return nodes.some((node) => matches(node) || hasNativeAttribute(node.children ?? [], property, value, nodeId, responsive));
 }
 
 /** Use the same finite declaration registry as conversion. This proves transport only through
@@ -740,7 +1063,7 @@ function sha256(value: string): string {
 }
 
 function toCoverageStyle(
-  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source'>, 'outcome'> & { outcome: string },
+  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'node' | 'responsive'>, 'outcome'> & { outcome: string },
   scope: AuthoringCoverageStyle['scope'],
 ): AuthoringCoverageStyle {
   const outcome: AuthoringCoverageStyle['outcome'] = entry.outcome === 'native' || entry.outcome === 'preset'
@@ -755,6 +1078,8 @@ function toCoverageStyle(
     ...(entry.reason ? { reason: entry.reason } : {}),
     atRules: [...entry.atRules],
     ...(entry.source ? { source: entry.source } : {}),
+    ...(entry.node ? { node: entry.node } : {}),
+    ...(entry.responsive ? { responsive: entry.responsive } : {}),
   };
 }
 

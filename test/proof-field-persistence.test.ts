@@ -4,6 +4,13 @@ import { describe, expect, it } from 'vitest';
 
 // Exercise the shipped browser helper's pure assertion, not a copied test implementation.
 const helper = readFileSync(new URL('../scripts/proof-playwright.mjs', import.meta.url), 'utf8');
+const stateStart = helper.indexOf('async function editorState(');
+const attributesStart = helper.indexOf('const canonicalAttributes =', stateStart);
+const attributesEnd = helper.indexOf(';\n    const semantic =', attributesStart);
+const canonicalEditorAttributes = runInNewContext(`(${helper.slice(attributesStart, attributesEnd).replace(/^const canonicalAttributes = /, '')})`) as (
+  attributes: Record<string, unknown>,
+  definitions: Record<string, { default?: unknown }> | undefined,
+) => Record<string, unknown>;
 const start = helper.indexOf('function editedValuesPersisted(');
 const end = helper.indexOf('\nfunction ', start + 1);
 const check = runInNewContext(`(${helper.slice(start, end)})`) as (...args: unknown[]) => { ok: boolean; checks: unknown[] };
@@ -28,6 +35,14 @@ const state = (children: unknown[], others: unknown[] = []) => ({
 });
 
 describe('native field persistence scope', () => {
+  it('canonicalizes an omitted registered default without hiding real or unknown attributes', () => {
+    const definitions = { content: { default: '' }, level: { default: 2 } };
+    expect(canonicalEditorAttributes({}, definitions)).toEqual({});
+    expect(canonicalEditorAttributes({ content: '', level: 2 }, definitions)).toEqual({});
+    expect(canonicalEditorAttributes({ content: 'Changed', level: 2 }, definitions)).toEqual({ content: 'Changed' });
+    expect(canonicalEditorAttributes({ content: '', unknown: '' }, definitions)).toEqual({ unknown: '' });
+  });
+
   it.each(['true', 'false'])('opens link settings without closing a remembered open drawer (%s)', async (initial) => {
     let expanded = initial;
     let clicks = 0;

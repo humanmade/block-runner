@@ -37,10 +37,19 @@ describe('registered-block stylesheet graph', () => {
     );
 
     expect(scoped.css).toContain('@media (min-width: 48rem)');
-    expect(scoped.css).toContain('.wp-block-acme-hero .hero:hover');
+    expect(scoped.css).toContain(':where(.wp-block-acme-hero) .hero:hover');
     expect(scoped.css).toContain('@container card (inline-size > 30rem)');
-    expect(scoped.css).toContain('.wp-block-acme-hero .card::before');
+    expect(scoped.css).toContain(':where(.wp-block-acme-hero) .card::before');
     expect(scoped.ledger.every((entry) => entry.outcome === 'scoped-css')).toBe(true);
+  });
+
+  it('never turns a conditional source declaration into an unconditional native style', () => {
+    const scoped = scopeStylesheet(scanStylesheet('@media (min-width: 48rem) { .hero { color: red; } }'), {
+      root: '.wp-block-acme-hero',
+      disposition: () => ({ outcome: 'native', reason: 'simulated support' }),
+    });
+    expect(scoped.css).toContain('@media (min-width: 48rem)');
+    expect(scoped.ledger).toContainEqual(expect.objectContaining({ property: 'color', outcome: 'scoped-css' }));
   });
 
   it('blocks global foundation and escaping selectors rather than pretending that a prefix preserves them', () => {
@@ -49,7 +58,7 @@ describe('registered-block stylesheet graph', () => {
       { root: '.wp-block-acme-hero' },
     );
 
-    expect(scoped.css).toContain('.wp-block-acme-hero .card');
+    expect(scoped.css).toContain(':where(.wp-block-acme-hero) .card');
     expect(scoped.css).not.toContain('box-sizing');
     expect(scoped.ledger.filter((entry) => entry.outcome === 'blocked')).toHaveLength(3);
     expect(scoped.ruleRecords.filter((rule) => rule.outcome === 'blocked').map((rule) => rule.reason).join('\n')).toMatch(
@@ -319,6 +328,35 @@ describe('registered-block authoring parity ledger', () => {
     expect(report.package?.files['edit.js']).toContain('"color"');
   });
 
+  it('uses an exact category-and-value target theme preset without editing its snapshot', async () => {
+    const settings = { color: { palette: [{ slug: 'brand', color: '#112233' }] } };
+    const report = await author('<style>.notice { color: #112233; }</style><p class="notice">Hello</p>', {
+      author: {
+        name: 'acme/notice',
+        styles: { mode: 'css', context: { theme: { slug: 'fixture', settings } } },
+      },
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.package?.canonicalPlan?.structure[0]?.attributes).toMatchObject({ textColor: 'brand' });
+    expect(report.package?.canonicalPlan?.coverage?.styleContext?.theme?.settingsSha256).toMatch(/^[a-f0-9]{64}$/);
+    expect(settings).toEqual({ color: { palette: [{ slug: 'brand', color: '#112233' }] } });
+  });
+
+  it('lifts only an exact target WordPress mobile interval onto its unique native child', async () => {
+    const report = await author(
+      '<style>.notice { color: red; } @media (width <= 480px) { .notice { color: blue; } }</style><p class="notice">Hello</p>',
+      { author: { name: 'acme/notice', styles: { mode: 'css', context: { theme: { settings: { viewport: { mobile: '480px', tablet: '782px' } } } } } } },
+    );
+
+    expect(report.ok).toBe(true);
+    expect(report.package?.canonicalPlan?.structure[0]?.attributes).toMatchObject({ style: { '@mobile': { color: { text: 'blue' } } } });
+    expect(report.package?.canonicalPlan?.coverage?.styles).toContainEqual(expect.objectContaining({
+      property: 'color', value: 'blue', outcome: 'native', responsive: 'mobile', node: 'source.0', atRules: ['@media (width <= 480px)'],
+    }));
+    expect(report.package?.files['style.scss']).not.toContain('@media (width <= 480px)');
+  });
+
   it('refuses to write a package after dropping a blocked selector or declaration', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
     scratch.push(directory);
@@ -355,7 +393,7 @@ describe('registered-block authoring parity ledger', () => {
     expect(report.styleLedger?.filter((entry) => entry.property === 'color')).toEqual([
       expect.objectContaining({ outcome: 'scoped-css' }),
     ]);
-    expect(report.package?.files['style.scss']).toContain('.wp-block-acme-notice .notice { color: red; }');
+    expect(report.package?.files['style.scss']).toContain(':where(.wp-block-acme-notice) .notice { color: red; }');
     expect(report.package?.files['edit.js']).not.toContain('"color": "red"');
   });
 
@@ -367,11 +405,11 @@ describe('registered-block authoring parity ledger', () => {
 
     expect(report.ok).toBe(true);
     expect(report.styleLedger).toEqual(expect.arrayContaining([
-      expect.objectContaining({ property: 'color', outcome: 'native', atRules: [] }),
+      expect.objectContaining({ property: 'color', outcome: 'scoped-css', atRules: [] }),
       expect.objectContaining({ property: 'color', outcome: 'scoped-css', atRules: ['@media (min-width: 40rem)'] }),
     ]));
     expect(report.package?.files['style.scss']).toContain('@media (min-width: 40rem)');
-    expect(report.package?.files['style.scss']).toContain('.wp-block-acme-notice .notice { color: red; }');
+    expect(report.package?.files['style.scss']).toContain(':where(.wp-block-acme-notice) .notice { color: red; }');
   });
 
   it('suppresses rewritten mixed declarations with the same identity used by final conversion', async () => {

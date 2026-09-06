@@ -120,6 +120,40 @@ export interface ProofBrowserMatrix {
   image: { width: string; height: string };
   desktopViewport: { width: number; height: number };
   narrowViewport: { width: number; height: number };
+  /**
+   * Opt-in computed-style assertions for an author()-produced responsive
+   * native mapping. The sibling deliberately repeats the source class outside
+   * the generated root, so an omitted root prefix cannot masquerade as
+   * component-local CSS.
+   */
+  responsive?: ProofResponsiveStyleMatrix;
+}
+
+export interface ProofResponsiveStyleMatrix {
+  /** Selector relative to the generated root for the native child being proved. */
+  targetSelector: string;
+  /** Source class repeated on an unrelated paragraph outside the generated root. */
+  siblingClass: string;
+  /** Keep this intentionally narrow until another computed-style claim needs evidence. */
+  property: 'font-size' | 'color';
+  /** A separate sibling property makes the same fixture prove scoped residual CSS. */
+  siblingProperty?: 'font-size' | 'color';
+  /** Controlled baseline for the external same-class sentinel. */
+  siblingInlineStyle?: string;
+  /** At least narrow and desktop; boundary samples may be supplied as well. */
+  samples: readonly {
+    label: string;
+    /** Browser viewport requested before measuring the actual proof surface. */
+    viewport: { width: number; height: number };
+    /**
+     * Optional exact editor-canvas/frontend viewport. The helper adjusts the
+     * top-level viewport to reach this width, then fails if WordPress's iframe
+     * still cannot supply it. Use this for below/equal/above breakpoint proof.
+     */
+    surfaceViewport?: { width: number; height?: number };
+    target: string;
+    sibling: string;
+  }[];
 }
 
 /** The exact per-instance map WordPress stores at core/block.attributes.content. */
@@ -162,6 +196,11 @@ export interface ProofFixture {
    * at both declared viewport widths.
    */
   browserMatrix?: ProofBrowserMatrix;
+  /**
+   * A focused author()-produced responsive-style probe. Unlike browserMatrix,
+   * it does not require the historical heading/image layout reproduction.
+   */
+  responsiveStyleMatrix?: ProofResponsiveStyleMatrix;
   patternOverrides?: {
     /** Exact pattern title inserted through the visible inserter. */
     title: string;

@@ -112,6 +112,19 @@ describe('HTML analysis uses the confirmed compiler', () => {
     await expect(readFile(path.join(outDir, 'block.json'))).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('preserves authored rich text through the JSON-only plan and native template', async () => {
+    const result = await author('<h2 class="card">Responsive native style</h2>', {
+      author: { name: 'example/design', styles: { mode: 'css', css: '@media (min-width: 48rem) { .card { color: red; } }' } },
+    });
+
+    expect(result.ok, JSON.stringify(result.items)).toBe(true);
+    const plan = result.package!.canonicalPlan!;
+    expect(plan.structure[0]?.attributes?.content).toBe('Responsive native style');
+    expect(compileRegisteredBlock(plan).template).toContainEqual([
+      'core/heading', expect.objectContaining({ content: 'Responsive native style', level: 2 }),
+    ]);
+  });
+
   it('binds supplied coverage to the requested target and its actual CSS output', async () => {
     const markup = '<custom-card class="notice">Hello</custom-card>';
     const options = { author: { name: 'example/design', styles: { mode: 'css' as const, css: '.notice { color: red; }' } } };

@@ -158,6 +158,10 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     addKeyValue(lines, 'Effective stylesheet SHA-256', stylesheet.sha256, width);
     const editorStylesheet = asRecord(coverage.editorStylesheet);
     addKeyValue(lines, 'Editor stylesheet SHA-256', editorStylesheet.sha256, width);
+    const styleContext = asRecord(coverage.styleContext);
+    if (Object.keys(styleContext).length) {
+      bullet(lines, `Style context: ${describeStyleContext(styleContext)}`, width);
+    }
   }
 
   section(lines, 'Pattern readiness', width);
@@ -225,6 +229,20 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
   return `${lines.join('\n')}\n`;
 }
 
+function describeStyleContext(context: RecordValue): string {
+  const theme = asRecord(context.theme);
+  const viewports = asRecord(context.viewports);
+  const unresolved = asArray(context.unresolvedVariables).map(plain);
+  const limitations = asArray(context.limitations).map(plain);
+  const parts = [
+    Object.keys(theme).length ? `theme ${readString(theme, ['slug']) ?? '<unnamed>'}${readString(theme, ['version']) ? ` ${readString(theme, ['version'])}` : ''}` : 'theme context unavailable',
+    Object.keys(viewports).length ? `viewports ${stableJson(viewports)}` : 'viewport context unavailable',
+    unresolved.length ? `unresolved variables ${unresolved.join(', ')}` : '',
+    ...limitations.map((item) => `limit: ${item}`),
+  ].filter(Boolean);
+  return parts.join('; ');
+}
+
 /** Alias kept concise for programmatic consumers. */
 export const previewAuthoringPlan = renderAuthoringPreview;
 
@@ -281,7 +299,7 @@ function renderReviewSummary(
   const styleOwnership = styleOwnershipSummary(styles, coverage);
   bullet(
     lines,
-    `Style ownership: ${styleOwnership.native} native-owned, ${styleOwnership.shared} package-owned shared, ${styleOwnership.editor} editor-only.`,
+    `Style ownership: ${styleOwnership.preset} theme preset/inherited, ${styleOwnership.native} fixed native, ${styleOwnership.literal} literal transport, ${styleOwnership.shared} package-owned shared, ${styleOwnership.editor} editor-only.`,
     width,
   );
 
@@ -299,15 +317,21 @@ function renderReviewSummary(
 }
 
 function styleOwnershipSummary(styles: RecordValue, coverage: RecordValue): {
+  preset: number;
   native: number;
+  literal: number;
   shared: number;
   editor: number;
 } {
   const ledger = asArray(coverage.styles).map(asRecord);
   if (ledger.length > 0) {
     return {
+      preset: ledger.filter((style) => readString(style, ['scope']) === 'shared'
+        && readString(style, ['outcome']) === 'preset').length,
       native: ledger.filter((style) => readString(style, ['scope']) === 'shared'
-        && ['native', 'preset', 'literal'].includes(readString(style, ['outcome']) ?? '')).length,
+        && readString(style, ['outcome']) === 'native').length,
+      literal: ledger.filter((style) => readString(style, ['scope']) === 'shared'
+        && readString(style, ['outcome']) === 'literal').length,
       shared: ledger.filter((style) => readString(style, ['scope']) === 'shared'
         && readString(style, ['outcome']) === 'scoped-css').length,
       editor: ledger.filter((style) => readString(style, ['scope']) === 'editor'
@@ -317,7 +341,9 @@ function styleOwnershipSummary(styles: RecordValue, coverage: RecordValue): {
 
   const outcomes = asArray(styles.outcomes).map(asRecord);
   return {
-    native: outcomes.filter((outcome) => ['native', 'token'].includes(readString(outcome, ['outcome']) ?? '')).length,
+    preset: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'token').length,
+    native: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'native').length,
+    literal: 0,
     shared: outcomes.filter((outcome) => readString(outcome, ['outcome']) === 'scoped-css').length
       + cssDeclarationCount(asArray(styles.rules)),
     editor: cssDeclarationCount(asArray(styles.editorRules)),
