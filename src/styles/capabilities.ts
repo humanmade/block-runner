@@ -189,8 +189,12 @@ function capitalize(value: string): string {
   return value.charAt(0).toUpperCase() + value.slice(1);
 }
 
+type ContextBlock = { name?: unknown; supports?: unknown };
+
 interface Manifest {
-  blocks?: { types?: Array<{ name?: unknown; supports?: unknown }> };
+  // SiteContext keeps its registry under blocks.types. FocusedContext is a
+  // projection and exposes the explicitly selected registry directly.
+  blocks?: { types?: ContextBlock[] } | ContextBlock[];
 }
 
 /** Read and parse the manifest. Undefined means unreadable/invalid — a hard error for the caller. */
@@ -209,11 +213,12 @@ function readManifest(manifestPath: string): Manifest | undefined {
 }
 
 /**
- * Pull `blocks.types[] → { name, supports }` out of a wesper manifest. Returns undefined when the
- * manifest carries no registry, so the caller can say so rather than silently trusting the pin.
+ * Pull a SiteContext `blocks.types[]` or FocusedContext `blocks[]` registry into the common
+ * capability view. Returns undefined when the context carries no usable registry, so the caller
+ * can say so rather than silently trusting the pin.
  */
 function manifestSupports(manifest: Manifest): Map<string, Record<string, unknown>> | undefined {
-  const types = manifest.blocks?.types;
+  const types = Array.isArray(manifest.blocks) ? manifest.blocks : manifest.blocks?.types;
   if (!Array.isArray(types) || types.length === 0) {
     return undefined;
   }

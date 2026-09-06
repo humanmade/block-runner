@@ -498,6 +498,20 @@ describe('CLI', () => {
     expect(report.output).toContain('<p>Hello</p>');
   });
 
+  it('accepts a Wesper FocusedContext through --context', async () => {
+    const fixture = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures', 'wesper.focused-context.json');
+    const result = await runCli(
+      ['convert', '-', '--context', fixture, '--styling', 'relaxed', '--token-match', 'exact', '--json'],
+      '<p style="color:#0057ff">Text</p>',
+    );
+    const report = JSON.parse(result.stdout) as { ok: boolean; output: string };
+
+    expect(result.code).toBe(0);
+    expect(report.ok).toBe(true);
+    expect(report.output).toContain('has-primary-color');
+    expect(report.output).not.toContain('#0057ff');
+  });
+
   it('rejects validate --out instead of ignoring it', async () => {
     const result = await runCli(['validate', '-', '--out', 'report.txt'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->');
 

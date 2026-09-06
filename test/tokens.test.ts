@@ -1,8 +1,15 @@
 import path from 'node:path';
+import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
+import { collect } from 'wesper';
 import { canonicalize } from '../src/index.js';
 import { createTokenResolver } from '../src/tokens/resolver.js';
+
+vi.mock('wesper', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('wesper')>();
+  return { ...actual, collect: vi.fn() };
+});
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -21,6 +28,7 @@ const rawGroupBg = (hex: string) =>
 describe('token repair', () => {
   afterEach(() => {
     vi.restoreAllMocks();
+    vi.mocked(collect).mockReset();
   });
 
   it('repairs an exact hex background to a preset slug', async () => {
@@ -168,29 +176,33 @@ describe('token resolution', () => {
     expect(report.output).not.toContain('32px');
   });
 
-  it('repairs through the context resolver against a site.context.json fixture', async () => {
-    // No explicit tokenResolver — a provided --context must implicitly select
-    // the 'context' resolver and repair from the manifest's theme settings slice.
-    const report = await canonicalize(rawGroupBg('#0073aa'), {
-      context: path.join(FIXTURES, 'site.context.json'),
-    });
+  it.each(['wesper.consumer-manifest.json', 'wesper.focused-context.json'])(
+    'repairs through the context resolver against %s native presets',
+    async (fixture) => {
+      const report = await canonicalize(rawGroupBg('#0057ff'), {
+        context: path.join(FIXTURES, fixture),
+      });
 
-    expect(report.ok).toBe(true);
-    expect(report.output).toContain('has-primary-background-color');
-    expect(report.output).not.toContain('#0073aa');
-  });
+      expect(report.ok).toBe(true);
+      expect(report.output).toContain('has-primary-background-color');
+      expect(report.output).not.toContain('#0057ff');
+    },
+  );
 
-  it('parses fonts and font sizes distinctly from the manifest theme.settings slice', async () => {
+  it.each(['wesper.consumer-manifest.json', 'wesper.focused-context.json'])(
+    'adapts all native preset kinds from %s',
+    async (fixture) => {
     const tokens = await createTokenResolver(
       {},
-      { tokenResolver: 'context', context: path.join(FIXTURES, 'site.context.json') },
+      { tokenResolver: 'context', context: path.join(FIXTURES, fixture) },
     ).resolve();
 
-    expect(tokens.colors).toMatchObject({ primary: '#0073aa' });
+    expect(tokens.colors).toMatchObject({ primary: '#0057ff' });
     expect(tokens.fonts).toMatchObject({ body: 'Inter, sans-serif' });
     expect(tokens.fontSizes).toMatchObject({ large: '2rem' });
-    expect(tokens.spacing).toMatchObject({ '40': '1.5rem' });
-  });
+    expect(tokens.spacing).toMatchObject({ '40': '1rem' });
+    },
+  );
 
   it('fails open to empty tokens when the context manifest is missing or malformed', async () => {
     const missing = await createTokenResolver(
@@ -203,43 +215,45 @@ describe('token resolution', () => {
       {},
       { tokenResolver: 'context', context: path.join(FIXTURES, 'theme.json') },
     ).resolve();
-    // theme.json has no top-level `theme.settings`, so the context resolver yields nothing.
+    // A theme.json is not a SiteContext or FocusedContext.
     expect(malformed).toEqual({ colors: {}, fonts: {}, fontSizes: {}, spacing: {} });
   });
 
-  it('resolves theme tokens from the REST API', async () => {
-    const fetchMock = vi.fn(async (url: string | URL) => {
-      const href = String(url);
-      if (href.includes('/wp/v2/themes')) {
-        return new Response(JSON.stringify([{ stylesheet: 'twentytwentyfive' }]), { status: 200 });
-      }
-      return new Response(
-        JSON.stringify({
-          settings: {
-            color: { palette: [{ slug: 'primary', color: '#0073aa' }] },
-            typography: {
-              fontFamilies: [{ slug: 'body', fontFamily: 'Inter, sans-serif' }],
-              fontSizes: [{ slug: 'large', size: '32px' }],
-            },
-            spacing: { spacingSizes: [{ slug: '40', size: 'clamp(1.5rem, 5vw, 3rem)' }] },
-          },
-        }),
-        { status: 200 },
-      );
-    });
-    vi.stubGlobal('fetch', fetchMock);
+  it('forwards REST credentials to Wesper collection and resolves native presets', async () => {
+    vi.mocked(collect).mockResolvedValue(JSON.parse(readFixture('wesper.consumer-manifest.json')));
 
     const resolver = createTokenResolver(
-      { media: { wpUrl: 'https://example.test' }, tokens: { resolver: 'rest' } },
+      { media: { wpUrl: 'https://example.test', wpUser: 'editor', wpAppPassword: 'secret' }, tokens: { resolver: 'rest' } },
       { tokenResolver: 'rest' },
     );
     const resolved = await resolver.resolve();
 
     expect(resolved).toEqual({
-      colors: { primary: '#0073aa' },
+      colors: { primary: '#0057ff' },
       fonts: { body: 'Inter, sans-serif' },
-      fontSizes: { large: '32px' },
-      spacing: { '40': 'clamp(1.5rem, 5vw, 3rem)' },
+      fontSizes: { large: '2rem' },
+      spacing: { '40': '1rem' },
+    });
+    expect(collect).toHaveBeenCalledWith({
+      collector: 'rest', wpUrl: 'https://example.test', wpUser: 'editor', wpAppPassword: 'secret',
     });
   });
+
+  it('collects WP-CLI tokens through Wesper rather than evaluating theme settings', async () => {
+    vi.mocked(collect).mockResolvedValue(JSON.parse(readFixture('wesper.consumer-manifest.json')));
+
+    const resolved = await createTokenResolver(
+      { media: { wpUrl: 'https://example.test' }, tokens: { resolver: 'wpcli' } },
+      { tokenResolver: 'wpcli' },
+    ).resolve();
+
+    expect(resolved.colors).toEqual({ primary: '#0057ff' });
+    expect(collect).toHaveBeenCalledWith(expect.objectContaining({
+      collector: 'wp-cli', wpUrl: 'https://example.test', wpPath: expect.any(String),
+    }));
+  });
 });
+
+function readFixture(name: string): string {
+  return readFileSync(path.join(FIXTURES, name), 'utf8');
+}

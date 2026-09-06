@@ -1,0 +1,22 @@
+{
+  "contextVersion": 1,
+  "site": {},
+  "wordpress": {},
+  "provenance": { "collectedAt": "2026-09-06T00:00:00.000Z", "collector": "fixture", "collectorVersion": "consumer-example", "sourceHash": "sha256:0000000000000000000000000000000000000000000000000000000000000000" },
+  "theme": { "settings": {}, "tokens": { "presets": [
+    { "id": "color:primary", "kind": "color", "slug": "primary", "value": "#0057ff", "valueSource": "declared", "origin": "theme", "references": { "cssCustomProperty": "--wp--preset--color--primary", "cssValue": "var(--wp--preset--color--primary)", "blockStyle": "var:preset|color|primary" } },
+    { "id": "font-family:body", "kind": "font-family", "slug": "body", "value": "Inter, sans-serif", "valueSource": "declared", "origin": "theme", "references": { "cssCustomProperty": "--wp--preset--font-family--body", "cssValue": "var(--wp--preset--font-family--body)", "blockStyle": "var:preset|font-family|body" } },
+    { "id": "font-size:large", "kind": "font-size", "slug": "large", "value": "2rem", "valueSource": "declared", "origin": "theme", "references": { "cssCustomProperty": "--wp--preset--font-size--large", "cssValue": "var(--wp--preset--font-size--large)", "blockStyle": "var:preset|font-size|large" } },
+    { "id": "spacing:40", "kind": "spacing", "slug": "40", "value": "1rem", "valueSource": "declared", "origin": "theme", "references": { "cssCustomProperty": "--wp--preset--spacing--40", "cssValue": "var(--wp--preset--spacing--40)", "blockStyle": "var:preset|spacing|40" } }
+  ] } },
+  "plugins": [],
+  "blocks": { "types": [
+    { "name": "core/paragraph", "title": "Paragraph", "attributes": { "content": { "type": "rich-text" } }, "supports": { "color": true }, "source": "core" },
+    { "name": "core/group", "title": "Group", "attributes": {}, "supports": { "spacing": true }, "source": "core" }
+  ] },
+  "bindings": { "available": true, "sources": [], "supportedAttributes": {} },
+  "contentModel": { "postTypes": [] },
+  "patterns": { "items": [] },
+  "media": { "imageSizes": [] },
+  "warnings": []
+}

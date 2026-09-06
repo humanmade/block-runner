@@ -632,7 +632,7 @@ function addTokenOptions(command: Command, options: { styling?: boolean } = {}):
   const withTokens = command
     .option('--token-resolver <kind>', 'token resolver: noop, file, wpcli, rest, context')
     .option('--theme-json <path>', 'path to a theme.json for the file token resolver')
-    .option('--context <path>', 'path to a wesper site.context.json manifest (token source)')
+    .option('--context <path>', 'path to a Wesper SiteContext or FocusedContext (token and capability source)')
     .option('--token-match <mode>', 'token match mode: exact, nearest');
 
   return options.styling === false

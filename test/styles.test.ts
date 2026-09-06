@@ -923,6 +923,17 @@ describe('styling — capability source', () => {
     expect(report.ok).toBe(false);
     expect(report.items.some((item) => /no usable block registry/.test(item.reason))).toBe(true);
   });
+
+  it('uses a focused Wesper block registry without widening styling capabilities', async () => {
+    const report = await convert(`<p style="color:#0057ff">Text</p>`, {
+      context: 'test/fixtures/wesper.focused-context.json',
+      tokenMatch: 'exact',
+    });
+
+    expect(report.ok).toBe(true);
+    expect(report.output).toContain('has-primary-color');
+    expect(report.output).not.toContain('#0057ff');
+  });
 });
 
 describe('styling — rung validation', () => {
