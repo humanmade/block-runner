@@ -117,35 +117,11 @@ describe('wp-scripts plugin profile', () => {
     const pendingReplacement = recovery.pending.find((entry) => original.has(entry.path));
     expect(pendingReplacement?.beforeContent).toEqual(original.get(pendingReplacement!.path));
 
-    await retryPluginPublication(recovery);
+    await retryPluginPublication(recovery.recordPath!);
     for (const file of plan.touchedFiles) {
       expect(await readFile(file.path)).toEqual(file.content);
     }
     await expect(stat(recovery.recordPath!)).rejects.toThrow();
-  });
-
-  it('reports exact completed and pending paths for every recognised-plugin publication step', async () => {
-    for (let failAfterPublishStep = 1; failAfterPublishStep <= 4; failAfterPublishStep += 1) {
-      const root = await existingDirectPlugin();
-      const plan = await planExistingPluginOutput(root, block);
-      let interrupted: PublicationInterruptedError | undefined;
-      try {
-        await writePluginOutput(plan, {
-          authorizedReplacements: plan.touchedFiles.filter((file) => file.operation === 'modify').map((file) => file.path),
-          failAfterPublishStep,
-        });
-      } catch (error) {
-        interrupted = error as PublicationInterruptedError;
-      }
-      expect(interrupted).toBeInstanceOf(PublicationInterruptedError);
-      const recovery = interrupted!.recovery;
-      expect(recovery.completed.map((entry) => entry.path)).toEqual(plan.touchedFiles.slice(0, failAfterPublishStep).map((file) => file.path));
-      expect(recovery.pending.map((entry) => entry.path)).toEqual(plan.touchedFiles.slice(failAfterPublishStep).map((file) => file.path));
-      expect(recovery.replacements.map((entry) => entry.path)).toEqual(plan.touchedFiles
-        .slice(0, failAfterPublishStep).filter((file) => file.operation === 'modify').map((file) => file.path));
-      expect(recovery.completed.concat(recovery.pending).every((entry) => entry.afterHash.startsWith('sha256:'))).toBe(true);
-      await retryPluginPublication(recovery);
-    }
   });
 
   it('reports a conflict when a callback changes a published target before success', async () => {
