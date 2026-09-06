@@ -1,6 +1,7 @@
 {
   "version": 1,
-  "candidateRevision": "58dc3b973313c75563610a6ea5cf532c98efa83b",
+  "preparedAgainstRevision": "3cb0d50292a59af1c0b77a3aa14c093516651cae",
+  "candidateRevisionRequirement": "The prepared candidate must record its exact Git revision and packed tarball SHA-256 in its immutable evidence receipt. Do not reuse this preparation revision as a release-candidate claim.",
   "status": "prepared-not-run",
   "purpose": "Two repository-controlled inputs for the 0.9 owner-acceptance journeys. This manifest is not a benchmark receipt and does not claim real-project coverage.",
   "sourceProvenance": {

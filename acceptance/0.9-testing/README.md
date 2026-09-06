@@ -15,18 +15,90 @@ licensed explicitly before making that claim.
 
 ## Prepare one candidate
 
-Work from the revision pinned in `inputs.json`, or update that revision and all
-input hashes together. Pack the CLI and use the packed tarball and its shipped
-skill in a clean consumer project. Copy the input HTML and its listed local
-dependencies into the candidate evidence directory before analysis; retain the
-copy and hash, not merely a path back to this checkout.
+Start from a fresh checkout of the candidate and record its full Git revision;
+the preparation revision in `inputs.json` is not a release-candidate claim.
+Before any analysis, use the small staging harness below. It checks the pinned
+source bytes and refuses to overwrite an evidence directory:
 
-For each journey, follow the shipped guide's sequence: `author` analysis,
-save the canonical plan, `author preview`, obtain an explicit confirmation for
-the displayed hash, `author write`, `plugin preview/write`, build the plugin
-ZIP, then run the applicable `proof` profile. Source generation alone is not
-an installable-plugin claim. Record corrections to the plan as corrections,
-not as if they had been in the original input.
+```sh
+node acceptance/0.9-testing/prepare-inputs.mjs --check
+node acceptance/0.9-testing/prepare-inputs.mjs \
+  --output /absolute/path/to/evidence/inputs \
+  --candidate-revision "$(git rev-parse HEAD)"
+```
+
+The staged layout preserves each input's relative CSS and asset references and
+writes `input-receipt.json`. Pack the CLI and use the packed tarball and its
+shipped skill in a clean consumer project. Retain the tarball and its hash; do
+not analyse from this checkout after staging.
+
+```sh
+mkdir -p /absolute/path/to/evidence/package /absolute/path/to/evidence/consumer
+npm pack --pack-destination /absolute/path/to/evidence/package
+cd /absolute/path/to/evidence/consumer
+npm init -y
+npm install --ignore-scripts --save-exact /absolute/path/to/evidence/package/block-runner-0.9.0.tgz
+npx --no-install block-runner skill --install --dir .agents/skills
+```
+
+For each journey, run analysis with the packed CLI and save the whole JSON
+report before extracting `package.canonicalPlan`. Keep plans in the evidence
+directory and invoke the packed binary by absolute path: `author preview` and
+`author write` intentionally accept only safe, relative plan paths. The
+responsive input has a linked stylesheet, so create a consumer-local
+configuration that supplies the staged `tailwind-responsive.css` as
+`author.styles.css` with `author.styles.mode: 'css'`; it is compiled CSS, not
+permission to run a Tailwind project. The local-asset journey needs no
+stylesheet configuration.
+
+```sh
+# Set these after installing the packed tarball.
+export EVIDENCE=/absolute/path/to/evidence
+export BLOCK_RUNNER="$EVIDENCE/consumer/node_modules/.bin/block-runner"
+
+# Journey 1: local SVG. Run from the journey directory so the plan path is safe and relative.
+mkdir -p "$EVIDENCE/local-asset-feature"
+cd "$EVIDENCE/local-asset-feature"
+"$BLOCK_RUNNER" author \
+  "$EVIDENCE/inputs/local-asset-feature/benchmarks/authoring/sources/semantic/local-assets.html" \
+  --name block-runner/asset-feature --json > analysis.json
+
+# Journey 2: retain compiled CSS explicitly; do not run Tailwind or load its config.
+mkdir -p "$EVIDENCE/responsive-panel-grid"
+node --input-type=module -e '
+  import { readFile, writeFile } from "node:fs/promises";
+  const css = await readFile(process.argv[1], "utf8");
+  await writeFile(process.argv[2], `${JSON.stringify({ author: { styles: { mode: "css", css } } }, null, 2)}\\n`);
+' "$EVIDENCE/inputs/responsive-panel-grid/benchmarks/authoring/sources/utility/tailwind-responsive.css" \
+  "$EVIDENCE/responsive-panel-grid/block-runner.config.mjs"
+cd "$EVIDENCE/responsive-panel-grid"
+"$BLOCK_RUNNER" author \
+  "$EVIDENCE/inputs/responsive-panel-grid/benchmarks/authoring/sources/utility/tailwind-responsive.html" \
+  --name block-runner/responsive-panel-grid --config block-runner.config.mjs --json > analysis.json
+
+# Run this in each journey directory after analysis. It stops if no usable canonical plan was produced.
+node --input-type=module -e '
+  import { readFile, writeFile } from "node:fs/promises";
+  const report = JSON.parse(await readFile(process.argv[1], "utf8"));
+  if (!report.ok || !report.package?.canonicalPlan) throw new Error("No canonical plan in analysis report");
+  await writeFile(process.argv[2], `${JSON.stringify(report.package.canonicalPlan, null, 2)}\\n`);
+' analysis.json authoring-plan.json
+"$BLOCK_RUNNER" author preview authoring-plan.json --output-dir "$PWD/generated" > preview.txt
+```
+
+Show the complete preview. Only after the owner authorises its exact hash, run
+`author write` with that hash and exact destination. Then use `plugin inspect`,
+`plugin preview`, and `plugin write` against a supported existing-plugin target
+(with separately approved replacements), build its normal ZIP, and invoke
+`proof --profile full` with a fixture whose editable fields, visual baseline,
+and manual-review scope were created for that generated package. Source
+generation alone is not an installable-plugin claim. Record corrections to the
+plan as corrections, not as if they had been in the original input.
+
+The full proof cannot be prefilled from this manifest: its fixture must bind
+the generated block name/markup, editable inventory, pattern assertions,
+reviewed golden, and manual-review file to the final ZIP. Until those inputs
+exist, `proof` is correctly blocked rather than runnable evidence.
 
 The standard proof fixture may be used for the shared pattern and regeneration
 exercises named in `inputs.json`; it does not replace either of these supplied
