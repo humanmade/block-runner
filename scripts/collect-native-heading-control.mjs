@@ -12,12 +12,12 @@
  * validates the retained JSON and its hash before using it.
  */
 import { createHash } from 'node:crypto';
-import { constants as fsConstants } from 'node:fs';
 import { execFile } from 'node:child_process';
-import { access, mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { promisify } from 'node:util';
+import { startWithPreparedStageMount } from './proof-control-startup.mjs';
 
 const execFileAsync = promisify(execFile);
 const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..');
@@ -59,8 +59,10 @@ await mkdir(outputDirectory, { recursive: true });
 
 try {
   const startedAt = new Date().toISOString();
-  await prepareStageMount();
-  const start = await runCommand('npx', ['--no-install', 'wp-env', `--config=${WP_ENV_CONFIG}`, 'start'], 'start');
+  const start = await startWithPreparedStageMount({
+    root: ROOT,
+    start: () => runCommand('npx', ['--no-install', 'wp-env', `--config=${WP_ENV_CONFIG}`, 'start'], 'start'),
+  });
   if (start.exitCode !== 0) throw new Error(`Pinned WordPress 7.1 environment did not start (exit ${start.exitCode}).`);
 
   const before = await observeVersion('before');
@@ -166,14 +168,6 @@ try {
   if (!keepEnvironment) {
     await runCommand('npx', ['--no-install', 'wp-env', `--config=${WP_ENV_CONFIG}`, 'stop'], 'stop');
   }
-}
-
-async function prepareStageMount() {
-  // Create the later ZIP bind mount as the host user before Docker can create
-  // a root-owned directory on Linux. Never repair existing permissions silently.
-  const directory = path.join(ROOT, '.block-runner-proof-stage');
-  await mkdir(directory, { recursive: true });
-  await access(directory, fsConstants.W_OK);
 }
 
 function valueFor(flag) {

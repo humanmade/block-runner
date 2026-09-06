@@ -554,6 +554,65 @@ On GitHub Actions, the separate WordPress proof job uploads a
 `evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
 the relevant build without committing environment-specific run output.
 
+### Testing workflow
+
+For ordinary changes, run the focused affected tests first:
+
+```sh
+npx vitest run <affected files>
+```
+
+For changes to proof startup or publication recovery, run:
+
+```sh
+npx vitest run test/proof-control-setup.test.ts test/proof.test.ts test/publication.test.ts test/publication.public-api.test.ts
+npm run typecheck
+```
+
+`npm run verify` remains the required repository gate. Run `npm run build && npm run test:package`
+when changing exports, packed files, dependency pins, or consumer behavior. Run
+`npm run test:proof:wordpress` for proof-runner, browser, emitted-editor layout, persistence,
+or pattern changes; it requires Docker. Run the opt-in `npm run test:proof:mutations` only when
+detector wiring changes, and run the existing release check only for release candidates or release
+automation. Do not relax the visible mutation skips, runtime-proof gates, thresholds, or the
+intentional `fileParallelism: false` Gutenberg serialization.
+
+The following inventory makes the focused checks auditable:
+
+- The control-startup helper replaces VM extraction and script-order assertions. Its test proves a
+  writable `.block-runner-proof-stage`, retained existing ZIPs before startup, and that an
+  incompatible path is preserved without invoking startup.
+- A proof-runner command test replaces the staged-container-directory literal check: `wp plugin
+  install` receives a byte-identical ZIP beneath `/var/www/html/wp-content/block-runner-proof/`,
+  never an uploads path. The exact `proof/wp-env.json` mapping remains a schema contract.
+- The `wp_upload_bits`, upload-error, retained-byte hash, and no-direct-write checks remain the
+  media byte contract: successful WordPress execution cannot deterministically inject both upload
+  failure and corrupt retained bytes.
+- The one-command staging-failure receipt test remains. The former receipt-index source-order
+  assertion is protected by the failed-full-proof content-addressed readable-receipt case in
+  `test/proof.test.ts`. Named CI and release artifact-upload checks retain their `if: always()`
+  and `node_modules` exclusions.
+- The `src/publication.ts` call-site assertions were removed because the shared lifecycle matrix in
+  `test/publication.test.ts` covers interruption, reconciliation, pending-file races,
+  corrupt/missing/linked staging, and final verification. Authoring and plugin adapters retain
+  their recovery, approval, conflict, and user-visible-error coverage; the public cleanup guard
+  retains its recursive-deletion prohibition and guarded-trash fallback.
+
+Unchanged behavioral coverage includes `authoring.runtime.test.ts` for emitted-component layout
+and v1-to-v2 content persistence; `proof-real-wordpress.test.ts` and
+`proof-pattern-overrides.test.ts` for native editor layout and isolated pattern instances;
+`plugin.profile.test.ts` plus `test:package` for packaged assets;
+`authoring.destination.test.ts` and `registered-block.workflow.test.ts` for confirmation; the
+shared publication matrix plus adapter suites for concurrent edits and interruption;
+`proof-visual-baselines.test.ts` for reviewed bytes; and the visibly skipped mutation suite for
+real-ZIP detector checks.
+
+Timing is recorded only as comparable observed samples, never as a general speed claim. The
+baseline is `npm test` at head `631a13bd` with the same lockfile on the same Mini: started
+`2026-09-06T05:08:49.668Z`, finished `2026-09-06T05:14:44.746Z`, duration `355.078s`. Record the
+single required #52 Foundry-gate sample beside it with its exact tested head, command, start time,
+exit time, and duration; do not compare unrelated CI lanes, machines, or workloads.
+
 ## Media Resolution
 
 A `<img src="hero.jpg">` in generated HTML is just a URL, but WordPress image and cover blocks
