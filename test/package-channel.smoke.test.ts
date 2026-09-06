@@ -9,7 +9,7 @@ const cliPath = new URL('../src/cli.ts', import.meta.url).pathname;
 const sourceGuide = new URL('../skills/block-runner/references/GUIDE.md', import.meta.url);
 
 describe('package channel authoring smoke', () => {
-  it('uses testing for the shipped authoring workflow while stable intentionally lacks author', async () => {
+  it('uses an installed candidate for authoring while stable intentionally lacks author', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-channel-smoke-'));
     const bin = path.join(root, 'bin');
     const fakeNpx = path.join(bin, 'npx');
@@ -17,14 +17,14 @@ describe('package channel authoring smoke', () => {
     await writeFile(fakeNpx, `#!/usr/bin/env node
 import { spawnSync } from 'node:child_process';
 const args = process.argv.slice(2);
-const packageIndex = args.findIndex((value) => value === 'block-runner@latest' || value === 'block-runner@testing');
-const channel = args[packageIndex];
-const command = args.slice(packageIndex + 1);
-if (channel === 'block-runner@latest') {
+const latestIndex = args.indexOf('block-runner@latest');
+if (latestIndex >= 0) {
   process.stderr.write('stable fixture: author is unavailable\\n');
   process.exit(2);
 }
-if (channel !== 'block-runner@testing') process.exit(3);
+const packageIndex = args.indexOf('block-runner');
+if (packageIndex < 1 || args[packageIndex - 1] !== '--no-install') process.exit(3);
+const command = args.slice(packageIndex + 1);
 const result = spawnSync(process.execPath, ['--import', ${JSON.stringify(tsxImport)}, ${JSON.stringify(cliPath)}, ...command], { stdio: 'inherit' });
 process.exit(result.status ?? 1);
 `, 'utf8');
@@ -32,14 +32,16 @@ process.exit(result.status ?? 1);
     await writeFile(path.join(root, 'plan.json'), JSON.stringify(plan()), 'utf8');
 
     const guide = await readFile(sourceGuide, 'utf8');
-    expect(guide).toContain('npx -y block-runner@testing author preview authoring-plan.json');
-    expect(guide).not.toContain('block-runner@latest author preview');
+    expect(guide).toContain('npx --no-install block-runner author preview authoring-plan.json');
+    expect(guide).toContain('npx --no-install block-runner skill --install');
+    expect(guide).not.toMatch(/npx(?:\s+-y)?\s+block-runner@testing\s+(?:author|plugin|proof)\b/);
+    expect(guide).not.toMatch(/npx(?:\s+-y)?\s+block-runner@latest\s+(?:author|plugin|proof)\b/);
 
-    const testing = await run(fakeNpx, [
-      '-y', 'block-runner@testing', 'author', 'preview', 'plan.json', '--output-dir', 'generated', '--json',
+    const candidate = await run(fakeNpx, [
+      '--no-install', 'block-runner', 'author', 'preview', 'plan.json', '--output-dir', 'generated', '--json',
     ], root);
-    expect(testing.code).toBe(0);
-    expect(JSON.parse(testing.stdout)).toMatchObject({ command: 'author preview', noFilesWritten: true });
+    expect(candidate.code).toBe(0);
+    expect(JSON.parse(candidate.stdout)).toMatchObject({ command: 'author preview', noFilesWritten: true });
 
     const stable = await run(fakeNpx, ['-y', 'block-runner@latest', 'author', 'preview', 'plan.json'], root);
     expect(stable.code).toBe(2);
