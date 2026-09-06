@@ -192,9 +192,13 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     const frontend = result.receipt.gates.find((gate) => gate.gate === 'frontend_assets');
     const editorMatrix = (editor?.details as { responsiveStyleMatrix?: ResponsiveStyleMatrixEvidence } | undefined)?.responsiveStyleMatrix;
     const frontendMatrix = (frontend?.details as { responsiveStyleMatrix?: ResponsiveStyleMatrixEvidence } | undefined)?.responsiveStyleMatrix;
+    const reopenedHeading = (editor?.details as {
+      reopened?: { tree?: Array<{ innerBlocks?: Array<{ name?: string; attributes?: { content?: unknown } }> }> };
+    } | undefined)?.reopened?.tree?.[0]?.innerBlocks?.find((block) => block.name === 'core/heading');
 
     expect(editor?.status, editor?.reason).toBe('pass');
     expect(frontend?.status, frontend?.reason).toBe('pass');
+    expect(reopenedHeading?.attributes?.content).toBe('Responsive native style');
     for (const matrix of [editorMatrix, frontendMatrix]) {
       expect(matrix?.scope).toMatch(/editor-canvas|frontend/);
       expect(matrix?.snapshots).toHaveLength(3);

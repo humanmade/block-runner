@@ -156,8 +156,14 @@ export function compileAnalyzedDesign(input: {
   const nodes: AuthoringStructureNode[] = [];
   const convert = (block: WpBlock, id: string): AuthoringStructureNode => {
     if (block.name === 'core/html') throw new Error(`Unresolved native structure at ${id}: describe this region as native blocks before authoring source; Custom HTML is not a registered-block substitute.`);
+    // Gutenberg parses rich-text attributes as RichTextData instances. They stringify to the
+    // authored HTML, but copying their enumerable properties produces `{}` and loses text when
+    // the plan crosses the JSON-only compiler boundary.
+    const attributes = JSON.parse(JSON.stringify(
+      Object.fromEntries(Object.entries(block.attributes).filter(([key]) => !key.startsWith('__blockRunner'))),
+    )) as Record<string, JsonValue>;
     const node: AuthoringStructureNode = { id, block: block.name,
-      attributes: Object.fromEntries(Object.entries(block.attributes).filter(([key]) => !key.startsWith('__blockRunner'))) as Record<string, JsonValue>,
+      attributes,
       children: block.innerBlocks.map((child, index) => convert(child, `${id}.${index}`)) };
     nodes.push(node);
     return node;

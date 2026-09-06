@@ -503,12 +503,27 @@ async function editorState(page) {
     const blocks = globalThis.wp?.data?.select('core/block-editor')?.getBlocks?.() ?? [];
     const content = globalThis.wp?.data?.select('core/editor')?.getEditedPostContent?.() ?? '';
     // Parser bookkeeping (originalContent, validationIssues) appears only
-    // after reload. Compare the actual block contract, not transient internals.
+    // after reload. A parser can also materialize a registered attribute's
+    // declared default (for example Heading's empty `content`) that the
+    // inserter omitted. Compare the actual block contract, not those
+    // serialization-equivalent representations.
     const stable = (value) => Array.isArray(value) ? value.map(stable)
       : value && typeof value === 'object'
         ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, stable(value[key])])) : value;
+    const canonicalAttributes = (attributes, definitions) => {
+      const canonical = (value) => Array.isArray(value) ? value.map(canonical)
+        : value && typeof value === 'object'
+          ? Object.fromEntries(Object.keys(value).sort().map((key) => [key, canonical(value[key])])) : value;
+      return Object.fromEntries(Object.entries(attributes ?? {}).filter(([key, value]) => {
+        const definition = definitions?.[key];
+        return !Object.prototype.hasOwnProperty.call(definition ?? {}, 'default')
+          || JSON.stringify(canonical(value)) !== JSON.stringify(canonical(definition.default));
+      }));
+    };
     const semantic = (nodes) => nodes.map((block) => ({
-      name: block.name, attributes: stable(block.attributes ?? {}), innerBlocks: semantic(block.innerBlocks ?? []),
+      name: block.name,
+      attributes: stable(canonicalAttributes(block.attributes, globalThis.wp?.blocks?.getBlockType?.(block.name)?.attributes)),
+      innerBlocks: semantic(block.innerBlocks ?? []),
     }));
     const canonical = JSON.stringify(semantic(blocks));
     const digest = async (value) => {
