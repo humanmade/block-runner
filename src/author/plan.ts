@@ -19,7 +19,7 @@ import { BACKGROUND_COLOR_TARGET, GRADIENT_TARGET, classifyBackground, lookupDec
 import { querySupports } from '../styles/capabilities.js';
 import type { AssetLedgerEntry, AuthoredStyleLedgerEntry, AuthorConfig, WpBlock } from '../types.js';
 import { scanCssUrlReferences, type FontAssetWarning, type FontLicenseDecision, type PreparedCssAsset } from './assets.js';
-import { scanStylesheet, scopeLocalSelectorList, scopeStylesheet, type CssRule } from './styles.js';
+import { decodeCssEscapes, fontFaceRules, forEachCssRule, scanStylesheet, scopeLocalSelectorList, scopeStylesheet, splitCssTopLevel, type CssDeclaration, type CssRule, type CssStylesheet } from './styles.js';
 import { exactThemePresetTransport, styleContextFrom } from './style-context.js';
 import { mapExactWordPressResponsiveMedia, resolveWordPressViewportRanges } from './responsive.js';
 import { hasUnsafeResponsiveNativeCascade } from './cascade.js';
@@ -44,10 +44,12 @@ export function prepareAuthoringFonts(
   blockName: string,
   preparedAssets: readonly PreparedCssAsset[],
   assets: readonly AssetLedgerEntry[],
+  stylesheetFacts: CssStylesheet = scanStylesheet(stylesheet),
 ): PreparedAuthoringFonts {
-  const scanned = scanStylesheet(stylesheet);
-  const faces: Array<{ rule: Extract<CssRule, { kind: 'blocked' }>; declarations: Map<string, string> }> = [];
-  collectFontFaceRules(scanned.rules, faces);
+  const faces = fontFaceRules(stylesheetFacts).map((rule) => ({
+    rule,
+    declarations: new Map(rule.declarations.map((declaration) => [declaration.property.toLowerCase(), declaration.value])),
+  }));
   if (faces.length === 0) {
     return { css: stylesheet, fonts: [], familyNames: new Map() };
   }
@@ -140,6 +142,8 @@ export function compileAnalyzedDesign(input: {
   styleLedger: readonly AuthoredStyleLedgerEntry[];
   /** Effective stylesheet bytes used for conversion, after deterministic asset rewrites. */
   stylesheet?: string;
+  /** Original effective source facts, retained separately from residual rules for cascade checks. */
+  stylesheetFacts?: CssStylesheet;
   /** Effective editor-only stylesheet after the same deterministic asset gate. */
   editorStylesheet?: string;
   /** Shared editor/frontend faces extracted from the effective stylesheet. */
@@ -175,7 +179,7 @@ export function compileAnalyzedDesign(input: {
     styleLedger: input.styleLedger,
     definition,
     source: input.source,
-    stylesheet: input.stylesheet,
+    sourceRules: input.stylesheetFacts?.rules ?? input.rules,
   });
   const sourceEntry = input.sourcePath ?? '<inline>';
   const assets: AuthoringPlan['assets'] = input.preparedAssets.map((asset, index) => {
@@ -308,7 +312,7 @@ function liftExactResponsiveStyles(input: {
   styleLedger: readonly AuthoredStyleLedgerEntry[];
   definition: AuthorConfig;
   source: string;
-  stylesheet?: string;
+  sourceRules: readonly CssRule[];
 }): { rules: CssRule[]; styleLedger: AuthoredStyleLedgerEntry[] } {
   const context = input.definition.styles?.context;
   const themeViewport = context?.theme?.settings && typeof context.theme.settings === 'object' && !Array.isArray(context.theme.settings)
@@ -335,7 +339,7 @@ function liftExactResponsiveStyles(input: {
     if (matching.length !== 1 || !matching[0]!.id || !supportsNativeStyle(matching[0]!.block, target.supports)) continue;
     // Any pseudo, compound, competing interval, specificity, or priority could change the
     // browser cascade. The native state renderer intentionally uses !important, so preserve CSS.
-    if (hasUnsafeCandidateCascade(input.source, scanStylesheet(input.stylesheet ?? '').rules, item)) continue;
+    if (hasUnsafeCandidateCascade(input.source, input.sourceRules, item)) continue;
     candidates.push({ declarationId: item.declaration.id, selector: item.rule.selector, property: item.declaration.property,
       value: item.declaration.value, atRule: `@media ${item.conditions[0]!.prelude}`, state, node: matching[0]!, path: target.path });
   }
@@ -938,54 +942,14 @@ function closingParenthesis(value: string, open: number): number | undefined {
   return undefined;
 }
 
-function collectFontFaceRules(
-  rules: readonly CssRule[],
-  output: Array<{ rule: Extract<CssRule, { kind: 'blocked' }>; declarations: Map<string, string> }>,
-): void {
-  for (const rule of rules) {
-    if (rule.kind === 'conditional') {
-      collectFontFaceRules(rule.rules, output);
-      continue;
-    }
-    if (rule.kind !== 'blocked' || rule.name.toLowerCase() !== 'font-face') continue;
-    output.push({
-      rule,
-      declarations: new Map(rule.declarations.map((declaration) => [declaration.property.toLowerCase(), declaration.value])),
-    });
-  }
-}
-
 function splitFontFamilyList(value: string): string[] {
-  const families: string[] = [];
-  let start = 0;
-  let quote: string | undefined;
-  let parentheses = 0;
-  for (let index = 0; index <= value.length; index += 1) {
-    const char = value[index];
-    if (quote) {
-      if (char === '\\') index += 1;
-      else if (char === quote) quote = undefined;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === '(') parentheses += 1;
-    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
-    if (index === value.length || (char === ',' && parentheses === 0)) {
-      const family = value.slice(start, index).trim();
-      if (family) families.push(stripFontFamilyQuotes(family));
-      start = index + 1;
-    }
-  }
-  return families;
+  return splitCssTopLevel(value, ',').map((family) => family.trim()).filter(Boolean).map(stripFontFamilyQuotes);
 }
 
 function stripFontFamilyQuotes(value: string): string {
   const trimmed = value.trim();
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return trimmed.slice(1, -1).replace(/\\([\\"'])/g, '$1');
+    return decodeCssEscapes(trimmed.slice(1, -1));
   }
   return trimmed;
 }
@@ -1003,18 +967,15 @@ function namespaceFontDeclarations(css: string, families: ReadonlyMap<string, st
   if (families.size === 0) return css;
   const scanned = scanStylesheet(css);
   const edits: Array<{ start: number; end: number; value: string }> = [];
-  for (const entry of scanned.ledger) {
-    if (entry.property !== 'font-family' && entry.property !== 'font') continue;
-    const start = entry.source.start.offset;
-    const end = entry.source.end.offset;
-    const segment = css.slice(start, end);
-    const colon = declarationColon(segment);
-    if (colon < 0) continue;
-    const rawValue = segment.slice(colon + 1);
-    const leading = rawValue.length - rawValue.trimStart().length;
-    const trailing = rawValue.length - rawValue.trimEnd().length;
-    const valueStart = start + colon + 1 + leading;
-    const valueEnd = end - trailing;
+  const declarations: CssDeclaration[] = [];
+  forEachCssRule(scanned.rules, (rule) => {
+    if (rule.kind === 'style' || rule.kind === 'blocked') declarations.push(...rule.declarations);
+  });
+  for (const entry of declarations) {
+    const property = entry.property.toLowerCase();
+    if (property !== 'font-family' && property !== 'font') continue;
+    const valueStart = entry.valueSource.start.offset;
+    const valueEnd = entry.valueSource.end.offset;
     const value = css.slice(valueStart, valueEnd);
     const rewritten = rewriteFontValue(value, families);
     if (rewritten !== value) edits.push({ start: valueStart, end: valueEnd, value: rewritten });
@@ -1023,27 +984,6 @@ function namespaceFontDeclarations(css: string, families: ReadonlyMap<string, st
     css = `${css.slice(0, edit.start)}${edit.value}${css.slice(edit.end)}`;
   }
   return css;
-}
-
-function declarationColon(value: string): number {
-  let quote: string | undefined;
-  let parentheses = 0;
-  for (let index = 0; index < value.length; index += 1) {
-    const char = value[index];
-    if (quote) {
-      if (char === '\\') index += 1;
-      else if (char === quote) quote = undefined;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === '(') parentheses += 1;
-    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
-    else if (char === ':' && parentheses === 0) return index;
-  }
-  return -1;
 }
 
 function rewriteFontValue(value: string, families: ReadonlyMap<string, string>): string {

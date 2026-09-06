@@ -658,6 +658,15 @@ Without that target context it explicitly limits its fidelity claim. Only an exa
 viewport interval on one unambiguous, supported native child can use a responsive state; every
 other conditional source rule remains scoped CSS.
 
+CSS analysis has one tolerant source-facts pass: it retains rule/declaration IDs, exact
+line/column/byte ranges, malformed-declaration and blocked-rule evidence, then feeds asset,
+scope, native, and cascade decisions. PostCSS remains an output validation boundary rather than
+a replacement for this pass: malformed author input and byte-exact URL rewrites need the original
+spans. The URL and `image-set()` value lexer remains specialized because it must distinguish direct
+strings from `url()` tokens and rewrite escaped tokens tail-to-head. Selector cascade matching and
+responsive lifting likewise remain conservative semantic checks; ambiguous conflicts and
+non-equivalent media conditions stay exact scoped CSS or explicit warnings.
+
 Local WOFF/WOFF2 fonts require an explicit source, SHA-256, ownership, and license decision.
 Approved font families get block-specific names and shared editor/frontend CSS. Full redistribution
 notices are retained separately in the production archive because minifiers can remove CSS comments.

@@ -189,6 +189,14 @@ archives. Remote fonts, other font formats, and editor-only font faces are not s
 Unlicensed HTML font faces fall back with explicit warnings; destination theme presets do not
 authorize copying font files. Keep the analyzer's `source` and `coverage` records in the plan.
 
+CSS input is analysed once into source facts with exact ranges, declaration/asset ledgers, and
+blocked-input records. Exact target-backed declarations may become native mappings; safe local
+rules remain scoped residual CSS; ambiguous or unsupported input remains warned or blocked. This
+is intentionally not a browser engine: the offset-sensitive `url()`/`image-set()` lexer stays
+separate for byte-exact rewrites, while selector cascade matching and responsive media equivalence
+stay separate conservative semantic checks. PostCSS validates generated output, not malformed
+author input, so it does not replace the tolerant source-facts scanner.
+
 For styling that native block supports cannot express, use `styles.rules`. Each rule is
 either `{ "kind": "style", "selector": ".card:hover", "declarations": [
 { "property": "transform", "value": "translateY(-2px)" } ] }`, or a conditional rule:

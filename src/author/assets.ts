@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat, mkdir, readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { decodeCssEscapes, fontFaceRules, forEachCssRule, scanStylesheet, splitCssTopLevel, type CssDeclaration, type CssStylesheet } from './styles.js';
 
 /** The only outcomes an authored CSS asset can have in a generated bundle. */
 export type AssetOutcome = 'prepared' | 'copied' | 'external' | 'unresolved' | 'blocked';
@@ -179,8 +180,8 @@ const DANGEROUS_SCHEMES = new Set(['javascript', 'vbscript']);
  * This is a lexer, not a CSS formatter: the original CSS is retained byte-for-byte unless a local
  * asset is successfully copied and needs its URL rewritten.
  */
-export function scanCssUrlReferences(sourceCss: string, sourcePath?: string): CssUrlReference[] {
-  const ranges = fontFaceBlocks(sourceCss).map(({ bodyStart, bodyEnd }) => ({ start: bodyStart, end: bodyEnd }));
+export function scanCssUrlReferences(sourceCss: string, sourcePath?: string, stylesheet = scanStylesheet(sourceCss)): CssUrlReference[] {
+  const ranges = fontFaceRules(stylesheet).map((rule) => ({ start: rule.source.start.offset, end: rule.source.end.offset }));
   const references: CssUrlReference[] = [];
 
   let index = 0;
@@ -242,19 +243,18 @@ export function scanCssUrlReferences(sourceCss: string, sourcePath?: string): Cs
  * parser: descriptors are retained as source CSS, while family names and concrete URL sources are
  * extracted so the caller can make an explicit ownership decision.
  */
-export function scanFontFaces(sourceCss: string, sourcePath?: string): FontFaceRecord[] {
-  return fontFaceBlocks(sourceCss).map((block) => {
-    const declarations = parseDeclarationSegments(sourceCss, block.bodyStart, block.bodyEnd);
-    const family = declarations.find((declaration) => declaration.property === 'font-family');
-    const source = declarations.find((declaration) => declaration.property === 'src');
+export function scanFontFaces(sourceCss: string, sourcePath?: string, stylesheet = scanStylesheet(sourceCss)): FontFaceRecord[] {
+  return fontFaceRules(stylesheet).map((rule) => {
+    const family = rule.declarations.find((declaration) => declaration.property.toLowerCase() === 'font-family');
+    const source = rule.declarations.find((declaration) => declaration.property.toLowerCase() === 'src');
     return {
       families: family ? parseFamilyList(family.value) : [],
       sourceUrls: source
         ? scanCssUrlReferences(source.value, sourcePath).map((reference) => reference.url)
         : [],
-      start: block.start,
-      end: block.end,
-      source: locationAt(sourceCss, block.start, sourcePath),
+      start: rule.source.start.offset,
+      end: rule.source.end.offset,
+      source: locationAt(sourceCss, rule.source.start.offset, sourcePath),
     };
   });
 }
@@ -276,8 +276,9 @@ export function fallbackUnlicensedFonts(
     ...licensedFamilies,
     ...(options.destinationFamilies ?? []).map(normalizeFamilyName).filter(Boolean),
   ]);
-  const blocks = fontFaceBlocks(sourceCss);
-  const faces = scanFontFaces(sourceCss, options.sourcePath);
+  const stylesheet = scanStylesheet(sourceCss);
+  const blocks = fontFaceRules(stylesheet);
+  const faces = scanFontFaces(sourceCss, options.sourcePath, stylesheet);
   const removed = new Set<number>();
   const removedFamilies = new Set<string>();
   const warnings: FontAssetWarning[] = [];
@@ -298,19 +299,19 @@ export function fallbackUnlicensedFonts(
 
   const edits: Array<{ start: number; end: number; value: string }> = [];
   for (const [index, block] of blocks.entries()) {
-    if (removed.has(index)) edits.push({ start: block.start, end: block.end, value: '' });
+    if (removed.has(index)) edits.push({ start: block.source.start.offset, end: block.source.end.offset, value: '' });
   }
 
   // Do not rewrite descriptors inside any @font-face block, including an approved one. A face's
   // family and src descriptors are part of the license-bound record, not ordinary component CSS.
-  for (const declaration of scanFontDeclarations(sourceCss)) {
-    if (blocks.some((block) => declaration.start >= block.start && declaration.end <= block.end)) continue;
+  for (const declaration of scanFontDeclarations(stylesheet)) {
+    if (blocks.some((block) => declaration.source.start.offset >= block.source.start.offset && declaration.source.end.offset <= block.source.end.offset)) continue;
     const sanitized = sanitizeFontDeclaration(declaration.property, declaration.value, safeFamilies, fallbackStack);
     if (!sanitized.changed) continue;
-    edits.push({ start: declaration.valueStart, end: declaration.valueEnd, value: sanitized.value });
+    edits.push({ start: declaration.valueSource.start.offset, end: declaration.valueSource.end.offset, value: `${sanitized.value}${declaration.important ? ' !important' : ''}` });
     warnings.push({
       reason: `${declaration.property} references an unlicensed font; retained safe fallback ${sanitized.value}`,
-      source: locationAt(sourceCss, declaration.start, options.sourcePath),
+      source: locationAt(sourceCss, declaration.source.start.offset, options.sourcePath),
     });
   }
 
@@ -346,7 +347,7 @@ export function sanitizeFontFamilyValue(
 ): SanitizedFontValue {
   const fallbackStack = safeFallbackStack(options.fallbackStack);
   const licensedFamilies = new Set((options.licensedFamilies ?? []).map(normalizeFamilyName).filter(Boolean));
-  const families = splitTopLevel(value, ',').map((family) => family.trim()).filter(Boolean);
+  const families = splitCssTopLevel(value, ',').map((family) => family.trim()).filter(Boolean);
   if (!families.length) return { value: fallbackStack, changed: value !== fallbackStack, removedFamilies: [] };
   const safe = families.filter((family) => isSafeFamily(family, licensedFamilies));
   const removedFamilies = families.filter((family) => !isSafeFamily(family, licensedFamilies));
@@ -644,190 +645,18 @@ function findFontLicense(
   return decision;
 }
 
-interface FontFaceBlock {
-  start: number;
-  bodyStart: number;
-  bodyEnd: number;
-  end: number;
-}
-
-interface DeclarationSegment {
-  property: string;
-  value: string;
-  start: number;
-  end: number;
-}
-
-interface FontDeclaration {
-  property: 'font-family' | 'font';
-  value: string;
-  start: number;
-  end: number;
-  valueStart: number;
-  valueEnd: number;
-}
-
-function fontFaceBlocks(css: string): FontFaceBlock[] {
-  const blocks: FontFaceBlock[] = [];
-  let index = 0;
-  while (index < css.length) {
-    if (startsComment(css, index)) {
-      index = skipComment(css, index + 2);
-      continue;
-    }
-    if (isQuote(css[index])) {
-      index = skipQuoted(css, index);
-      continue;
-    }
-    const match = /^@font-face\b/i.exec(css.slice(index));
-    if (!match || (index > 0 && /[-_A-Za-z0-9]/.test(css[index - 1]!))) {
-      index += 1;
-      continue;
-    }
-    let cursor = index + match[0].length;
-    while (cursor < css.length && css[cursor] !== '{') {
-      if (startsComment(css, cursor)) cursor = skipComment(css, cursor + 2);
-      else if (isQuote(css[cursor])) cursor = skipQuoted(css, cursor);
-      else cursor += 1;
-    }
-    if (css[cursor] !== '{') {
-      index += match[0].length;
-      continue;
-    }
-    const close = matchingBrace(css, cursor);
-    if (close === -1) {
-      index += match[0].length;
-      continue;
-    }
-    blocks.push({ start: index, bodyStart: cursor + 1, bodyEnd: close, end: close + 1 });
-    index = close + 1;
-  }
-  return blocks;
-}
-
-function matchingBrace(css: string, open: number): number {
-  let depth = 1;
-  let index = open + 1;
-  while (index < css.length) {
-    if (startsComment(css, index)) {
-      index = skipComment(css, index + 2);
-      continue;
-    }
-    if (isQuote(css[index])) {
-      index = skipQuoted(css, index);
-      continue;
-    }
-    if (css[index] === '{') depth += 1;
-    if (css[index] === '}') {
-      depth -= 1;
-      if (depth === 0) return index;
-    }
-    index += 1;
-  }
-  return -1;
-}
-
-function parseDeclarationSegments(css: string, start: number, end: number): DeclarationSegment[] {
-  const declarations: DeclarationSegment[] = [];
-  let segmentStart = start;
-  let index = start;
-  let parentheses = 0;
-  let brackets = 0;
-  let quote = '';
-  while (index <= end) {
-    const char = css[index];
-    if (quote) {
-      if (char === '\\') index += 2;
-      else {
-        if (char === quote) quote = '';
-        index += 1;
+function scanFontDeclarations(stylesheet: CssStylesheet): Array<CssDeclaration & { property: 'font-family' | 'font' }> {
+  // Rules retain raw declaration spans; flattening here is traversal, not a second declaration parser.
+  const facts: Array<CssDeclaration & { property: 'font-family' | 'font' }> = [];
+  forEachCssRule(stylesheet.rules, (rule) => {
+    if (rule.kind === 'style' || rule.kind === 'blocked') {
+      for (const declaration of rule.declarations) {
+        const property = declaration.property.toLowerCase();
+        if (property === 'font-family' || property === 'font') facts.push({ ...declaration, property });
       }
-      continue;
     }
-    if (startsComment(css, index)) {
-      index = Math.min(end, skipComment(css, index + 2));
-      continue;
-    }
-    if (isQuote(char)) {
-      quote = char;
-      index += 1;
-      continue;
-    }
-    if (char === '(') parentheses += 1;
-    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
-    else if (char === '[') brackets += 1;
-    else if (char === ']') brackets = Math.max(0, brackets - 1);
-    const boundary = index === end || (char === ';' && parentheses === 0 && brackets === 0);
-    if (boundary) {
-      const rawStart = segmentStart;
-      const rawEnd = index;
-      const raw = css.slice(rawStart, rawEnd);
-      const colon = topLevelColon(raw);
-      if (colon >= 0) {
-        const property = stripCssComments(raw.slice(0, colon)).trim().toLowerCase();
-        const value = stripCssComments(raw.slice(colon + 1)).trim();
-        if (property && value) declarations.push({ property, value, start: rawStart, end: rawEnd });
-      }
-      segmentStart = index + 1;
-    }
-    index += 1;
-  }
-  return declarations;
-}
-
-function scanFontDeclarations(css: string): FontDeclaration[] {
-  const declarations: FontDeclaration[] = [];
-  const expression = /(?:^|[;{])([ \t\r\n]*)(font-family|font)([ \t]*):/gi;
-  let match: RegExpExecArray | null;
-  while ((match = expression.exec(css))) {
-    const property = match[2]!.toLowerCase() as FontDeclaration['property'];
-    const valueStart = expression.lastIndex;
-    const valueEnd = declarationValueEnd(css, valueStart);
-    const value = css.slice(valueStart, valueEnd).trim();
-    const trimmedStart = valueStart + (css.slice(valueStart, valueEnd).length - css.slice(valueStart, valueEnd).trimStart().length);
-    const trimmedEnd = trimmedStart + value.length;
-    declarations.push({
-      property,
-      value,
-      start: match.index,
-      end: valueEnd,
-      valueStart: trimmedStart,
-      valueEnd: trimmedEnd,
-    });
-    expression.lastIndex = valueEnd + (css[valueEnd] === ';' ? 1 : 0);
-  }
-  return declarations;
-}
-
-function declarationValueEnd(css: string, start: number): number {
-  let index = start;
-  let parentheses = 0;
-  let quote = '';
-  while (index < css.length) {
-    const char = css[index];
-    if (quote) {
-      if (char === '\\') index += 2;
-      else {
-        if (char === quote) quote = '';
-        index += 1;
-      }
-      continue;
-    }
-    if (startsComment(css, index)) {
-      index = skipComment(css, index + 2);
-      continue;
-    }
-    if (isQuote(char)) {
-      quote = char;
-      index += 1;
-      continue;
-    }
-    if (char === '(') parentheses += 1;
-    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
-    else if ((char === ';' || char === '}') && parentheses === 0) return index;
-    index += 1;
-  }
-  return css.length;
+  });
+  return facts;
 }
 
 function topLevelColon(value: string): number {
@@ -859,13 +688,13 @@ function stripCssComments(value: string): string {
 }
 
 function parseFamilyList(value: string): string[] {
-  return splitTopLevel(value, ',').map((family) => family.trim()).filter(Boolean).map(stripFamilyQuotes);
+  return splitCssTopLevel(value, ',').map((family) => family.trim()).filter(Boolean).map(stripFamilyQuotes);
 }
 
 function stripFamilyQuotes(value: string): string {
   const trimmed = value.trim();
   if ((trimmed.startsWith('"') && trimmed.endsWith('"')) || (trimmed.startsWith("'") && trimmed.endsWith("'"))) {
-    return unescapeCssUrl(trimmed.slice(1, -1));
+    return decodeCssEscapes(trimmed.slice(1, -1));
   }
   return trimmed;
 }
@@ -874,34 +703,6 @@ function normalizeFamilyName(value: string): string {
   return stripFamilyQuotes(value).replace(/\s+/g, ' ').trim().toLowerCase();
 }
 
-function splitTopLevel(value: string, delimiter: ',' | ' '): string[] {
-  const parts: string[] = [];
-  let start = 0;
-  let parentheses = 0;
-  let quote = '';
-  for (let index = 0; index <= value.length; index += 1) {
-    const char = value[index];
-    if (quote) {
-      if (char === '\\') index += 1;
-      else if (char === quote) quote = '';
-      continue;
-    }
-    if (isQuote(char)) {
-      quote = char;
-      continue;
-    }
-    if (char === '(') parentheses += 1;
-    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
-    const boundary = index === value.length || (delimiter === ',' && char === ',' && parentheses === 0)
-      || (delimiter === ' ' && /\s/.test(char ?? '') && parentheses === 0);
-    if (boundary) {
-      parts.push(value.slice(start, index));
-      start = index + 1;
-      while (delimiter === ' ' && /\s/.test(value[start] ?? '')) start += 1;
-    }
-  }
-  return parts;
-}
 
 const SAFE_FONT_FAMILIES = new Set([
   'serif', 'sans-serif', 'monospace', 'cursive', 'fantasy', 'system-ui', 'ui-serif', 'ui-sans-serif',
@@ -1337,14 +1138,7 @@ function skipCssSpaceAndComments(css: string, start: number, end: number): numbe
 }
 
 function unescapeCssUrl(value: string): string {
-  return value.replace(/\\([0-9A-Fa-f]{1,6}[ \t\r\n\f]?|.)/g, (_, escaped: string) => {
-    const hexadecimal = /^([0-9A-Fa-f]{1,6})/.exec(escaped)?.[1];
-    if (!hexadecimal) {
-      return escaped;
-    }
-    const codePoint = Number.parseInt(hexadecimal, 16);
-    return codePoint === 0 || codePoint > 0x10ffff ? '\uFFFD' : String.fromCodePoint(codePoint);
-  });
+  return decodeCssEscapes(value);
 }
 
 function locationAt(css: string, offset: number, sourcePath?: string): CssAssetLocation {

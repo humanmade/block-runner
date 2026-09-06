@@ -136,12 +136,37 @@ describe('registered-block font transport', () => {
     expect(result.warnings[0]!.source).toMatchObject({ path: '/design/style.css', line: 1 });
   });
 
+  it('matches uppercase font properties while retaining authored declaration text and importance', () => {
+    const css = [
+      '@font-face { FONT-FAMILY: "Inter"; SRC: url(Inter.woff2); }',
+      '.card { FONT-FAMILY: "Inter", Arial !important; FONT: 700 1rem "Inter", system-ui !important; }',
+    ].join('\n');
+    const result = fallbackUnlicensedFonts(css);
+
+    expect(result.css).not.toContain('@font-face');
+    expect(result.css).toContain('FONT-FAMILY: Arial !important;');
+    expect(result.css).toContain('FONT: 700 1rem system-ui !important;');
+    expect(result.rewrittenDeclarations).toBe(2);
+  });
+
   it('preserves a face and declarations only when its family is explicitly approved', () => {
     const css = '@font-face{font-family:Inter;src:url(Inter.woff2)} .card{font-family:Inter,Arial,sans-serif}';
     const result = fallbackUnlicensedFonts(css, { licensedFamilies: ['Inter'] });
     expect(result.css).toBe(css);
     expect(result.warnings).toEqual([]);
     expect(scanFontFaces(css)[0]).toMatchObject({ families: ['Inter'], sourceUrls: ['Inter.woff2'] });
+  });
+
+  it('derives font facts from the shared scanner without treating comments or strings as faces', () => {
+    const css = [
+      '/* @font-face { font-family: Fake; src: url(fake.woff2) } */',
+      '.note::before { content: "@font-face { src: url(fake.woff2) }"; }',
+      '@font-face {\n font-family: "My\\2c Font";\n src: url("fonts/My\\20 Font.woff2");\n}',
+    ].join('\n');
+    const [face] = scanFontFaces(css, '/design/style.css');
+    expect(face).toMatchObject({ families: ['My,Font'], sourceUrls: ['fonts/My Font.woff2'] });
+    expect(face!.start).toBe(css.lastIndexOf('@font-face'));
+    expect(face!.source).toMatchObject({ line: 3, column: 1 });
   });
 
   it('validates generated font faces and preserves a safe redistribution notice', () => {
@@ -203,9 +228,23 @@ describe('registered-block font transport', () => {
     expect(first.fonts[0]!.family).not.toBe(second.fonts[0]!.family);
   });
 
+  it('namespaces uppercase licensed font declarations without changing their surrounding text', () => {
+    const css = '@font-face { FONT-FAMILY: Inter; SRC: url(Inter.woff2); } .card { FONT-FAMILY: "Inter", Arial !important; FONT: italic 1rem Inter, serif !important; }';
+    const prepared: PreparedCssAsset = {
+      source: '/design/Inter.woff2', destination: '/package/assets/Inter-abcd.woff2', content: Buffer.from('wOF2font'),
+      sha256: 'a'.repeat(64), kind: 'font',
+    };
+    const ledger = [{ reference: 'Inter.woff2', rewritten: './assets/Inter-abcd.woff2', kind: 'font' as const, outcome: 'prepared' as const, reason: 'prepared' }];
+    const result = prepareAuthoringFonts(css, 'acme/card', [prepared], ledger);
+    const family = result.fonts[0]!.family;
+
+    expect(result.css).toContain(`FONT-FAMILY: "${family}", Arial !important;`);
+    expect(result.css).toContain(`FONT: italic 1rem ${family}, serif !important;`);
+  });
+
   it('carries an explicitly licensed HTML font through the canonical authoring plan', async () => {
     const { root, sourcePath, source, bytes, hash } = await fixture();
-    const css = '@font-face{font-family:Inter;src:url("Inter.woff2") format("woff2");font-display:swap}.copy{font-family:Inter,Arial,sans-serif}';
+    const css = '@font-face{FONT-FAMILY:Inter;SRC:url("Inter.woff2") format("woff2");font-display:swap}.copy{FONT-FAMILY:Inter,Arial,sans-serif !important}';
     const report = await author(`<style>${css}</style><p class="copy">Hello</p>`, {
       sourcePath,
       author: {
@@ -228,7 +267,8 @@ describe('registered-block font transport', () => {
     expect(report.package?.files['style.scss']).toContain('/*! Block Runner font redistribution record');
     expect(report.package?.files['style.scss']).toContain('Retain the OFL notice.');
     expect(report.package?.files['style.scss']).toContain('@font-face');
-    expect(report.package?.files['style.scss']).toContain('font-family: "block-runner-acme-font-card-');
+    expect(report.package?.files['style.scss']).toContain('FONT-FAMILY: block-runner-acme-font-card-');
+    expect(report.package?.files['style.scss']).toContain(' !important;');
     expect(report.package?.files['style.scss']).not.toContain(source);
     expect(report.assets).toContainEqual(expect.objectContaining({ reference: 'Inter.woff2', kind: 'font', outcome: 'prepared' }));
     expect(report.package?.assets).toEqual([expect.objectContaining({ path: expect.stringMatching(/^assets\/Inter-/), sha256: hash })]);
