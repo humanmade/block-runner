@@ -140,7 +140,15 @@ export async function buildResponsiveStyleProofFixture(outputDir: string): Promi
   if (residual?.outcome !== 'scoped-css') {
     throw new Error('Responsive proof fixture requires the !important source color to remain scoped CSS.');
   }
+  const editableHeading = plan.fields.find((field) => field.node === 'source.0' && field.attribute === 'content');
+  if (!editableHeading || editableHeading.mode !== 'editable') {
+    throw new Error('Public author() did not expose the responsive Heading as an editable native content field.');
+  }
   const generated = compileRegisteredBlock(plan);
+  const generatedHeading = generated.template.find(([block]) => block === 'core/heading');
+  if (generatedHeading?.[1].lock && (generatedHeading[1].lock as { edit?: unknown }).edit === true) {
+    throw new Error('Responsive proof fixture must retain an editable native Heading.');
+  }
   const nativeContainerMarkup = await serializeNativeTemplate(generated.template);
   await mkdir(pluginDirectory, { recursive: true });
   const packagePlan = await planStandalonePluginOutput(pluginDirectory, {
@@ -164,6 +172,7 @@ export async function buildResponsiveStyleProofFixture(outputDir: string): Promi
     blockName: plan.target.name,
     pluginSlug: responsivePluginSlug,
     blockTitle: plan.target.title,
+    editableFields: [{ path: editableHeading.id, surface: 'richText', value: 'Responsive native style (proof edited)' }],
     responsiveStyleMatrix: {
       targetSelector: '.card', siblingClass: 'card', property: 'font-size',
       siblingProperty: 'color', siblingInlineStyle: 'color: rgb(1, 2, 3)',
