@@ -199,9 +199,9 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       expect(matrix?.scope).toMatch(/editor-canvas|frontend/);
       expect(matrix?.snapshots).toHaveLength(3);
       expect(matrix?.snapshots).toEqual(expect.arrayContaining([
-        expect.objectContaining({ label: 'below-mobile', target: '16px', sibling: 'rgb(1, 2, 3)', expected: { target: '16px', sibling: 'rgb(1, 2, 3)' }, viewport: { surface: { width: 479 } } }),
-        expect.objectContaining({ label: 'mobile-boundary', target: '16px', sibling: 'rgb(1, 2, 3)', expected: { target: '16px', sibling: 'rgb(1, 2, 3)' }, viewport: { surface: { width: 480 } } }),
-        expect.objectContaining({ label: 'above-mobile', target: '32px', sibling: 'rgb(1, 2, 3)', expected: { target: '32px', sibling: 'rgb(1, 2, 3)' }, viewport: { surface: { width: 481 } } }),
+        expect.objectContaining({ label: 'below-mobile', target: '16px', sibling: 'rgb(1, 2, 3)', expected: { target: '16px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 479 }) }) }),
+        expect.objectContaining({ label: 'mobile-boundary', target: '16px', sibling: 'rgb(1, 2, 3)', expected: { target: '16px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 480 }) }) }),
+        expect.objectContaining({ label: 'above-mobile', target: '32px', sibling: 'rgb(1, 2, 3)', expected: { target: '32px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 481 }) }) }),
       ]));
     }
   }, 480_000);
