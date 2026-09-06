@@ -497,6 +497,8 @@ export interface CssDeclaration {
   value: string;
   important: boolean;
   source: CssSourceRange;
+  /** Exact raw value span, excluding declaration whitespace but retaining `!important`. */
+  valueSource: CssSourceRange;
 }
 
 export interface CssStyleRule {
@@ -568,6 +570,37 @@ export interface CssStylesheet {
  */
 export function scanStylesheet(css: string): CssStylesheet {
   return new StylesheetScanner(css).scan();
+}
+
+/** Visit every parsed rule without making callers reimplement conditional traversal. */
+export function forEachCssRule(rules: readonly CssRule[], visit: (rule: CssRule) => void): void {
+  for (const rule of rules) {
+    visit(rule);
+    if (rule.kind === 'conditional' || rule.kind === 'blocked') forEachCssRule(rule.rules, visit);
+  }
+}
+
+/** Shared structural facts for the deliberately supported global font transport. */
+export function fontFaceRules(stylesheet: CssStylesheet): Extract<CssRule, { kind: 'blocked' }>[] {
+  const faces: Extract<CssRule, { kind: 'blocked' }>[] = [];
+  forEachCssRule(stylesheet.rules, (rule) => {
+    if (rule.kind === 'blocked' && rule.name.toLowerCase() === 'font-face') faces.push(rule);
+  });
+  return faces;
+}
+
+/** Split a list at top-level delimiters while preserving CSS quotes, escapes, functions, and attributes. */
+export function splitCssTopLevel(value: string, separator: string): string[] {
+  return splitTopLevel(value, separator);
+}
+
+/** Decode CSS escapes for identifiers, family names, and URL values without changing raw spans. */
+export function decodeCssEscapes(value: string): string {
+  return value.replace(/\\(?:([0-9a-f]{1,6})[ \t\r\n\f]?|\r\n|[\s\S])/gi, (_whole, hex: string | undefined) => {
+    if (!hex) return _whole.slice(1);
+    const codePoint = Number.parseInt(hex, 16);
+    return codePoint === 0 || codePoint > 0x10ffff ? '\ufffd' : String.fromCodePoint(codePoint);
+  });
 }
 
 export interface DeclarationDisposition {
@@ -1374,6 +1407,7 @@ class StylesheetScanner {
       value,
       important: Boolean(importantMatch),
       source: this.range(start, end),
+      valueSource: this.rawValueRange(start, end),
     };
     this.ledger.push({
       declarationId: declaration.id,
@@ -1386,6 +1420,16 @@ class StylesheetScanner {
       outcome: 'pending',
     });
     return declaration;
+  }
+
+  private rawValueRange(start: number, end: number): CssSourceRange {
+    const raw = this.css.slice(start, end);
+    const colon = indexOfTopLevelRaw(raw, ':');
+    if (colon < 0) return this.range(end, end);
+    const value = raw.slice(colon + 1);
+    const leading = value.length - value.trimStart().length;
+    const trailing = value.length - value.trimEnd().length;
+    return this.range(start + colon + 1 + leading, end - trailing);
   }
 
   private recordMalformedDeclaration(
@@ -1676,6 +1720,36 @@ function indexOfTopLevel(value: string, separator: string): number {
     } else if (char === separator && parens === 0 && brackets === 0) {
       return index;
     }
+  }
+  return -1;
+}
+
+/** Like `indexOfTopLevel`, but keeps source offsets stable by skipping comments in raw CSS. */
+function indexOfTopLevelRaw(value: string, separator: string): number {
+  let quote: string | undefined;
+  let escaped = false;
+  let parens = 0;
+  let brackets = 0;
+  for (let index = 0; index < value.length; index += 1) {
+    const char = value[index];
+    if (quote) {
+      if (escaped) escaped = false;
+      else if (char === '\\') escaped = true;
+      else if (char === quote) quote = undefined;
+      continue;
+    }
+    if (char === '/' && value[index + 1] === '*') {
+      const close = value.indexOf('*/', index + 2);
+      if (close < 0) return -1;
+      index = close + 1;
+      continue;
+    }
+    if (char === '"' || char === "'") quote = char;
+    else if (char === '(') parens += 1;
+    else if (char === ')') parens = Math.max(0, parens - 1);
+    else if (char === '[') brackets += 1;
+    else if (char === ']') brackets = Math.max(0, brackets - 1);
+    else if (char === separator && parens === 0 && brackets === 0) return index;
   }
   return -1;
 }

@@ -35,6 +35,7 @@ import {
   hasTailwindSignal,
   referencedCssClasses,
   scanStylesheet,
+  splitCssTopLevel,
   scopeStylesheet,
   validateCssBuildGraph,
   type CssRule,
@@ -219,7 +220,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     const fontBindingAssets = assets.map((asset) => asset.kind === 'font' && asset.rewritten
       ? { ...asset, reference: asset.rewritten }
       : asset);
-    sharedFonts = prepareAuthoringFonts(styleInput, name, [...preparedAssets.values()], fontBindingAssets);
+    sharedFonts = prepareAuthoringFonts(styleInput, name, [...preparedAssets.values()], fontBindingAssets, scanStylesheet(styleInput));
   } catch (error) {
     return authorFailure(error instanceof Error ? error.message : String(error), source);
   }
@@ -236,9 +237,11 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     editorStyleInput = namespaceAuthoringFontReferences(editorStyleInput, sharedFonts.familyNames);
   }
 
-  const safetyStylesheet = scanStylesheet(styleInput);
+  // This effective CSS version is parsed once and its facts feed safety scoping, native/cascade
+  // decisions, and the canonical-plan responsive pass. Residual rules remain a distinct view.
+  const stylesheet = scanStylesheet(styleInput);
   const selectorTransport = createSelectorDependencyTransport();
-  const safetyScopedStyles = scopeStylesheet(safetyStylesheet, {
+  const safetyScopedStyles = scopeStylesheet(stylesheet, {
     root: rootSelector,
     disposition: (declaration) => unsafeResidualDeclaration(declaration.property, declaration.value),
     selectorTransform: selectorTransport.rewrite,
@@ -342,7 +345,6 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       evidence: { ...evidence, coverage: sourceCoverage(safetyLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
     };
   }
-  const stylesheet = scanStylesheet(styleInput);
   const cascadeSensitiveDeclarations = nativeCascadeSensitiveDeclarations(input, stylesheet.rules);
   // The converter's native-mapping probe must see the same compiled stylesheet as the CSS
   // scanner, including the final local-asset rewrites. A configured stylesheet otherwise has no
@@ -480,6 +482,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         assets,
         styleLedger,
         stylesheet: styleInput,
+        stylesheetFacts: stylesheet,
         editorStylesheet: editorStyleInput,
         fonts: sharedFonts.fonts,
         fontWarnings,
@@ -1205,34 +1208,11 @@ function destinationFontFamilyNames(tokens: Record<string, string> | undefined):
 }
 
 function splitFontFamilyNames(value: string): string[] {
-  const families: string[] = [];
-  let start = 0;
-  let quote: string | undefined;
-  let parentheses = 0;
-  for (let index = 0; index <= value.length; index += 1) {
-    const char = value[index];
-    if (quote) {
-      if (char === '\\') index += 1;
-      else if (char === quote) quote = undefined;
-      continue;
-    }
-    if (char === '"' || char === "'") {
-      quote = char;
-      continue;
-    }
-    if (char === '(') parentheses += 1;
-    else if (char === ')') parentheses = Math.max(0, parentheses - 1);
-    if (index === value.length || (char === ',' && parentheses === 0)) {
-      const family = value.slice(start, index).trim();
-      if (family) families.push(
-        (family.startsWith('"') && family.endsWith('"')) || (family.startsWith("'") && family.endsWith("'"))
-          ? family.slice(1, -1)
-          : family,
-      );
-      start = index + 1;
-    }
-  }
-  return families;
+  return splitCssTopLevel(value, ',').map((family) => family.trim()).filter(Boolean).map((family) =>
+    (family.startsWith('"') && family.endsWith('"')) || (family.startsWith("'") && family.endsWith("'"))
+      ? family.slice(1, -1)
+      : family,
+  );
 }
 
 

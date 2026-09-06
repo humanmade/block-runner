@@ -144,6 +144,18 @@ describe('registered-block font transport', () => {
     expect(scanFontFaces(css)[0]).toMatchObject({ families: ['Inter'], sourceUrls: ['Inter.woff2'] });
   });
 
+  it('derives font facts from the shared scanner without treating comments or strings as faces', () => {
+    const css = [
+      '/* @font-face { font-family: Fake; src: url(fake.woff2) } */',
+      '.note::before { content: "@font-face { src: url(fake.woff2) }"; }',
+      '@font-face {\n font-family: "My\\2c Font";\n src: url("fonts/My\\20 Font.woff2");\n}',
+    ].join('\n');
+    const [face] = scanFontFaces(css, '/design/style.css');
+    expect(face).toMatchObject({ families: ['My,Font'], sourceUrls: ['fonts/My Font.woff2'] });
+    expect(face!.start).toBe(css.lastIndexOf('@font-face'));
+    expect(face!.source).toMatchObject({ line: 3, column: 1 });
+  });
+
   it('validates generated font faces and preserves a safe redistribution notice', () => {
     const face = renderLicensedFontFace({
       family: 'Inter',
