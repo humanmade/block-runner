@@ -74,32 +74,30 @@ describe('authoring destination', () => {
     expect(await readFile(existing, 'utf8')).toBe('replacement\n');
   });
 
-  it('retains an exact recovery inventory after each possible new-file publication step', async () => {
-    for (const failAfterPublishStep of [1, 2]) {
-      const destination = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
-      let interrupted: unknown;
-      try {
-        await writeAuthoringOutput(destination, plan([
-          { path: 'block.json', content: 'first\n' },
-          { path: 'index.js', content: 'second\n' },
-        ]), undefined, { failAfterPublishStep });
-      } catch (error) {
-        interrupted = error;
-      }
-
-      expect(interrupted).toBeInstanceOf(PublicationInterruptedError);
-      const recovery = (interrupted as PublicationInterruptedError).recovery;
-      expect(recovery.completed.map((entry) => entry.path)).toEqual(failAfterPublishStep === 1 ? ['block.json'] : ['block.json', 'index.js']);
-      expect(recovery.pending.map((entry) => entry.path)).toEqual(failAfterPublishStep === 1 ? ['index.js'] : []);
-      expect(recovery.completed.every((entry) => entry.afterHash.startsWith('sha256:'))).toBe(true);
-      expect(recovery.recordPath).toBeTruthy();
-
-      const receipt = await retryAuthoringPublication(JSON.parse(JSON.stringify(recovery)));
-      expect(receipt.written).toEqual(['block.json', 'index.js']);
-      expect(await readFile(path.join(destination, 'block.json'), 'utf8')).toBe('first\n');
-      expect(await readFile(path.join(destination, 'index.js'), 'utf8')).toBe('second\n');
-      expect((await readdir(destination)).filter((name) => name.startsWith('.block-runner-'))).toEqual([]);
+  it('recovers one authoring interruption from a JSON-round-tripped recovery object', async () => {
+    const destination = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    let interrupted: unknown;
+    try {
+      await writeAuthoringOutput(destination, plan([
+        { path: 'block.json', content: 'first\n' },
+        { path: 'index.js', content: 'second\n' },
+      ]), undefined, { failAfterPublishStep: 1 });
+    } catch (error) {
+      interrupted = error;
     }
+
+    expect(interrupted).toBeInstanceOf(PublicationInterruptedError);
+    const recovery = (interrupted as PublicationInterruptedError).recovery;
+    expect(recovery.completed.map((entry) => entry.path)).toEqual(['block.json']);
+    expect(recovery.pending.map((entry) => entry.path)).toEqual(['index.js']);
+    expect(recovery.completed.every((entry) => entry.afterHash.startsWith('sha256:'))).toBe(true);
+    expect(recovery.recordPath).toBeTruthy();
+
+    const receipt = await retryAuthoringPublication(JSON.parse(JSON.stringify(recovery)));
+    expect(receipt.written).toEqual(['block.json', 'index.js']);
+    expect(await readFile(path.join(destination, 'block.json'), 'utf8')).toBe('first\n');
+    expect(await readFile(path.join(destination, 'index.js'), 'utf8')).toBe('second\n');
+    expect((await readdir(destination)).filter((name) => name.startsWith('.block-runner-'))).toEqual([]);
   });
 
   it('rejects an altered published journal staging path without unlinking the supplied file', async () => {

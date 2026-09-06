@@ -1,4 +1,4 @@
-import { lstat, mkdtemp, readFile, symlink, unlink, writeFile } from 'node:fs/promises';
+import { lstat, mkdir, mkdtemp, readFile, symlink, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { expect, it } from 'vitest';
@@ -39,70 +39,116 @@ it('classifies every unreadable, missing, linked, or changed final target as its
     .rejects.toThrow('callback failure');
 });
 
-it('reconciles only stable completed bytes and validates staged retry inputs before adapter publication', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-publication-'));
-  const target = path.join(directory, 'target.txt');
-  const temporary = path.join(directory, '.target.tmp');
-  const afterHash = await stagePublicationBytes(temporary, Buffer.from('approved'));
-  const entry = { target, temporary, afterHash };
-  expect(await reconcilePublicationCompletion([entry], () => 'not regular')).toEqual(new Set());
-  await writeFile(target, 'approved');
-  expect(await reconcilePublicationCompletion([entry], () => 'not regular')).toEqual(new Set([entry]));
-  await writeFile(temporary, 'changed');
-  await expect(verifyStagedPublicationBytes(entry, 'staged bytes changed')).rejects.toThrow('staged bytes changed');
-  await expect(validatePublicationRetry([entry], () => true, async () => false,
-    async () => { throw new Error('completed target changed'); }, async () => undefined)).rejects.toThrow('completed target changed');
-});
+type LifecycleEntry = { name: string; target: string; temporary: string; afterHash: string; replace: boolean; before?: string };
+type LifecycleJournal = { version: 1; entries: LifecycleEntry[]; completed: string[] };
 
-it('keeps the common interrupted lifecycle inventory ordered and durable across restart checks', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-publication-'));
+async function lifecycle(directory: string): Promise<LifecycleEntry[]> {
   const entries = await Promise.all(['create.txt', 'replace.txt', 'later.txt'].map(async (name) => {
     const target = path.join(directory, name);
     const temporary = path.join(directory, `.${name}.tmp`);
     const afterHash = await stagePublicationBytes(temporary, Buffer.from(`after-${name}`));
-    return { target, temporary, afterHash, replace: name === 'replace.txt' };
+    return { name, target, temporary, afterHash, replace: name === 'replace.txt', ...(name === 'replace.txt' ? { before: 'before-replace' } : {}) };
   }));
-  await writeFile(entries[1].target, 'before-replace');
-  const completed = new Set<typeof entries[number]>();
-  const journal = path.join(directory, 'recovery.json');
-  const inventories: string[][] = [];
-  await replacePublicationJournal(journal, { version: 1, completed: [] }); // durable before target one
-  await expect(publishPublicationEntries(entries, (entry) => completed.has(entry),
-    (entry) => publishStagedFile(entry.temporary, entry.target, entry.replace),
-    (entry) => completed.add(entry), async () => {
-      inventories.push(entries.filter((entry) => completed.has(entry)).map((entry) => path.basename(entry.target)));
-      await replacePublicationJournal(journal, { version: 1, completed: inventories.at(-1) });
-    }, async (entry) => { if (entry === entries[1]) throw new Error('stop after durable second target'); }))
-    .rejects.toThrow('stop after durable second target');
-  expect(inventories).toEqual([['create.txt'], ['create.txt', 'replace.txt']]);
-  expect(JSON.parse(await readFile(journal, 'utf8')).completed).toEqual(['create.txt', 'replace.txt']);
-  expect(await readFile(entries[1].target, 'utf8')).toBe('after-replace.txt');
-  expect(await lstat(entries[2].temporary)).toBeTruthy();
+  await writeFile(entries[1]!.target, entries[1]!.before!);
+  return entries;
+}
 
-  await writeFile(entries[2].target, 'raced-create');
-  await expect(validatePublicationRetry(entries, (entry) => completed.has(entry),
-    async (entry) => publicationHash(await readFile(entry.target)) === entry.afterHash,
-    async () => { throw new Error('completed target changed'); }, async (entry) => {
-      if (entry === entries[2]) throw new Error('pending create appeared');
-    })).rejects.toThrow('pending create appeared');
-  expect(await readFile(entries[2].target, 'utf8')).toBe('raced-create');
-});
+// Version 1 stays adapter-owned. This tiny codec deliberately gives recovery a new object graph.
+function encodeJournal(entries: LifecycleEntry[], completed: Set<LifecycleEntry>): LifecycleJournal {
+  return { version: 1, entries, completed: entries.filter((entry) => completed.has(entry)).map((entry) => entry.name) };
+}
 
-it('rejects corrupt, linked, or non-regular staging and reconciles ambiguous post-publication bytes as pending', async () => {
-  const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-publication-'));
-  const temporary = path.join(directory, '.entry.tmp');
-  const target = path.join(directory, 'entry.txt');
-  const afterHash = await stagePublicationBytes(temporary, Buffer.from('approved'));
-  const entry = { target, temporary, afterHash };
-  await writeFile(temporary, 'corrupt');
-  await expect(verifyStagedPublicationBytes(entry, 'corrupt staging')).rejects.toThrow('corrupt staging');
-  await unlink(temporary);
-  await symlink(target, temporary);
-  await expect(verifyStagedPublicationBytes(entry, 'unsafe staging')).rejects.toThrow('unsafe staging');
-  await unlink(temporary);
-  await writeFile(temporary, 'approved');
-  await writeFile(target, 'ambiguous other bytes');
-  expect(await reconcilePublicationCompletion([entry], () => 'not regular')).toEqual(new Set());
-  await expect(publishStagedFile(temporary, target, false)).rejects.toThrow();
-  expect(await readFile(target, 'utf8')).toBe('ambiguous other bytes');
+async function decodeJournal(journal: string): Promise<{ entries: LifecycleEntry[]; completed: Set<LifecycleEntry> }> {
+  const parsed = JSON.parse(await readFile(journal, 'utf8')) as LifecycleJournal;
+  expect(parsed.version).toBe(1);
+  const entries = parsed.entries.map((entry) => ({ ...entry }));
+  return { entries, completed: new Set(entries.filter((entry) => parsed.completed.includes(entry.name))) };
+}
+
+async function published(entry: LifecycleEntry): Promise<boolean> {
+  try { return publicationHash((await readStableRegularFile(entry.target, 'published target changed')).content) === entry.afterHash; } catch { return false; }
+}
+
+async function validatePending(entry: LifecycleEntry): Promise<void> {
+  if (entry.replace) {
+    if (await readFile(entry.target, 'utf8') !== entry.before) throw new Error('pending replacement changed');
+  } else {
+    try { await lstat(entry.target); } catch { await verifyStagedPublicationBytes(entry, 'unsafe staged publication bytes'); return; }
+    throw new Error('pending create appeared');
+  }
+  await verifyStagedPublicationBytes(entry, 'unsafe staged publication bytes');
+}
+
+it('runs the shared version-1 publication lifecycle matrix across interruption, restart, reconciliation, and pending failures', async () => {
+  for (const interruptedAfter of [1, 2, 3]) {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-publication-'));
+    const entries = await lifecycle(directory);
+    const journal = path.join(directory, 'recovery.json');
+    const completed = new Set<LifecycleEntry>();
+    await replacePublicationJournal(journal, encodeJournal(entries, completed)); // durable before target one
+    await expect(publishPublicationEntries(entries, (entry) => completed.has(entry),
+      (entry) => publishStagedFile(entry.temporary, entry.target, entry.replace),
+      (entry) => completed.add(entry), () => replacePublicationJournal(journal, encodeJournal(entries, completed)),
+      async () => { if (completed.size === interruptedAfter) throw new Error(`interrupt ${interruptedAfter}`); }))
+      .rejects.toThrow(`interrupt ${interruptedAfter}`);
+
+    const restarted = await decodeJournal(journal);
+    expect(restarted.entries.filter((entry) => restarted.completed.has(entry)).map((entry) => entry.name))
+      .toEqual(entries.slice(0, interruptedAfter).map((entry) => entry.name));
+    expect(restarted.entries.filter((entry) => !restarted.completed.has(entry)).map((entry) => entry.name))
+      .toEqual(entries.slice(interruptedAfter).map((entry) => entry.name));
+    expect(restarted.entries[1]!.before).toBe('before-replace');
+    const reconciled = await reconcilePublicationCompletion(restarted.entries, () => 'invalid target');
+    expect([...reconciled].map((entry) => entry.name)).toEqual(entries.slice(0, interruptedAfter).map((entry) => entry.name));
+    const retryCompleted = await validatePublicationRetry(restarted.entries, (entry) => restarted.completed.has(entry), published,
+      async () => { throw new Error('completed target changed'); }, validatePending);
+    await publishPublicationEntries(restarted.entries, (entry) => retryCompleted.has(entry),
+      (entry) => publishStagedFile(entry.temporary, entry.target, entry.replace), (entry) => retryCompleted.add(entry),
+      () => replacePublicationJournal(journal, encodeJournal(restarted.entries, retryCompleted)), async () => undefined);
+    await verifyPublicationTargets(restarted.entries, (entry) => entry.target, (entry) => entry.afterHash, () => new Error('final target changed'));
+    for (const entry of restarted.entries) expect(await readFile(entry.target, 'utf8')).toBe(`after-${entry.name}`);
+  }
+
+  { // A crash after publication but before journal progression is reconciled without overwriting entry one.
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-publication-'));
+    const entries = await lifecycle(directory);
+    const journal = path.join(directory, 'recovery.json');
+    await replacePublicationJournal(journal, encodeJournal(entries, new Set()));
+    await publishStagedFile(entries[0]!.temporary, entries[0]!.target, false);
+    const restarted = await decodeJournal(journal);
+    const reconciled = await reconcilePublicationCompletion(restarted.entries, () => 'invalid target');
+    expect([...reconciled].map((entry) => entry.name)).toEqual(['create.txt']);
+    await publishPublicationEntries(restarted.entries, (entry) => reconciled.has(entry),
+      (entry) => publishStagedFile(entry.temporary, entry.target, entry.replace), (entry) => reconciled.add(entry),
+      () => replacePublicationJournal(journal, encodeJournal(restarted.entries, reconciled)), async () => undefined);
+    expect(await readFile(entries[0]!.target, 'utf8')).toBe('after-create.txt');
+  }
+
+  const negativeCases: Array<{ name: string; mutate: (entries: LifecycleEntry[]) => Promise<void>; error: string; unchanged: (entries: LifecycleEntry[]) => Promise<void> }> = [
+    { name: 'appeared pending create', mutate: async ([, , entry]) => { await writeFile(entry!.target, 'raced-create'); }, error: 'pending create appeared', unchanged: async ([, , entry]) => { expect(await readFile(entry!.target, 'utf8')).toBe('raced-create'); } },
+    { name: 'changed pending replacement', mutate: async ([, entry]) => { await writeFile(entry!.target, 'raced-replacement'); }, error: 'pending replacement changed', unchanged: async ([, entry]) => { expect(await readFile(entry!.target, 'utf8')).toBe('raced-replacement'); } },
+    { name: 'missing staging', mutate: async ([, , entry]) => { await unlink(entry!.temporary); }, error: 'ENOENT', unchanged: async () => undefined },
+    { name: 'hash-corrupt staging', mutate: async ([, , entry]) => { await writeFile(entry!.temporary, 'corrupt'); }, error: 'unsafe staged publication bytes', unchanged: async () => undefined },
+    { name: 'symlinked staging', mutate: async ([, , entry]) => { await unlink(entry!.temporary); await symlink(entry!.target, entry!.temporary); }, error: 'unsafe staged publication bytes', unchanged: async () => undefined },
+    { name: 'directory staging', mutate: async ([, , entry]) => { await unlink(entry!.temporary); await mkdir(entry!.temporary); }, error: 'unsafe staged publication bytes', unchanged: async () => undefined },
+  ];
+  for (const scenario of negativeCases) {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-publication-'));
+    const entries = await lifecycle(directory);
+    const journal = path.join(directory, 'recovery.json');
+    const completed = new Set<LifecycleEntry>();
+    await replacePublicationJournal(journal, encodeJournal(entries, completed));
+    await expect(publishPublicationEntries(entries, (entry) => completed.has(entry),
+      (entry) => publishStagedFile(entry.temporary, entry.target, entry.replace),
+      (entry) => completed.add(entry), () => replacePublicationJournal(journal, encodeJournal(entries, completed)),
+      async () => { throw new Error('interrupt with pending work'); })).rejects.toThrow('interrupt with pending work');
+    await scenario.mutate(entries);
+    const restarted = await decodeJournal(journal);
+    await expect(validatePublicationRetry(restarted.entries, (entry) => restarted.completed.has(entry), published,
+      async () => { throw new Error('completed target changed'); }, validatePending)).rejects.toThrow(scenario.error);
+    expect(await readFile(entries[0]!.target, 'utf8')).toBe('after-create.txt');
+    if (scenario.name !== 'changed pending replacement') expect(await readFile(entries[1]!.target, 'utf8')).toBe('before-replace');
+    if (scenario.name !== 'appeared pending create') await expect(lstat(entries[2]!.target)).rejects.toThrow();
+    await scenario.unchanged(entries);
+  }
 });
