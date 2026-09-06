@@ -1,10 +1,11 @@
-import { createHash, randomBytes } from 'node:crypto';
-import { link, lstat, mkdir, open, readFile, readlink, rename, unlink } from 'node:fs/promises';
+import { randomBytes } from 'node:crypto';
+import { lstat, mkdir, readFile, readlink, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import { REGISTERED_BLOCK_TEMPLATE_VERSION, REGISTERED_BLOCK_STYLE_EMITTER_VERSION, WORDPRESS_BLOCK_SCHEMA_VERSION,
   type GeneratedRegisteredBlock } from './generate.js';
 import { hashAuthoringPlan, type AuthoringPlan, type AuthoringFileOperation } from './schema.js';
 import { classifyRegisteredBlockRegeneration } from './regeneration.js';
+import { hashBytes, isNotFound as publicationNotFound, publicationHash, publishStagedFile, readStableRegularFile, regularFileIdentity, replacePublicationJournal, sameFileIdentity, stagePublicationBytes, verifyPublicationTargets } from '../publication.js';
 
 /** A read-only representation of the filesystem state relevant to a plan. */
 export interface DestinationInspection {
@@ -236,14 +237,8 @@ export async function writeAuthoringOutput(
     for (const file of files) {
       const target = toOutputPath(preflight.directory, file.path);
       const temporary = path.join(path.dirname(target), `.${path.basename(target)}.block-runner-${randomBytes(12).toString('hex')}.tmp`);
-      const handle = await open(temporary, 'wx', 0o600);
-      try {
-        await handle.writeFile(file.content, 'utf8');
-        await handle.sync();
-      } finally {
-        await handle.close();
-      }
-      staged.push({ file, target, temporary, afterHash: sha256(Buffer.from(file.content)), published: false });
+      const bytes = Buffer.from(file.content);
+      staged.push({ file, target, temporary, afterHash: await stagePublicationBytes(temporary, bytes), published: false });
     }
 
     // Staging changes directory mtimes, so the fingerprint deliberately tracks directory
@@ -443,29 +438,9 @@ async function writePublicationRecord(runtime: PublicationRuntime): Promise<void
   if (parent !== runtime.directory || !isPublicationRecordPath(runtime.recordPath)) {
     throw new Error('unsafe authoring publication recovery record path');
   }
-  const temporary = path.join(parent, `.${path.basename(runtime.recordPath)}-${randomBytes(12).toString('hex')}.tmp`);
-  const handle = await open(temporary, 'wx', 0o600);
-  try {
-    await handle.writeFile(`${JSON.stringify(storedPublicationRecord(runtime))}\n`, 'utf8');
-    await handle.sync();
-  } finally {
-    await handle.close();
-  }
-  try {
-    const existing = await lstatMaybe(runtime.recordPath);
-    if (existing && (existing.isSymbolicLink() || !existing.isFile())) {
-      throw new Error('authoring publication recovery record changed unexpectedly');
-    }
-    // This is only our randomized journal. Target publication itself never uses rename for a
-    // create, and every replacement is still checked immediately before its rename.
-    await rename(temporary, runtime.recordPath);
-  } finally {
-    try {
-      await unlink(temporary);
-    } catch (error) {
-      if (!isNotFound(error)) throw error;
-    }
-  }
+  const existing = await lstatMaybe(runtime.recordPath);
+  if (existing && (existing.isSymbolicLink() || !existing.isFile())) throw new Error('authoring publication recovery record changed unexpectedly');
+  await replacePublicationJournal(runtime.recordPath, storedPublicationRecord(runtime));
 }
 
 async function publishStagedTarget(runtime: PublicationRuntime, entry: PublicationRuntimeEntry): Promise<void> {
@@ -475,7 +450,7 @@ async function publishStagedTarget(runtime: PublicationRuntime, entry: Publicati
   await inspectAuthoringDestination(runtime.directory, { files: runtime.entries.map(({ file }) => file) });
   if (entry.beforeHash) {
     await assertReplacementUnchanged(entry);
-    await rename(entry.temporary, entry.target);
+    await publishStagedFile(entry.temporary, entry.target, true);
     return;
   }
   if (await lstatMaybe(entry.target)) {
@@ -483,8 +458,7 @@ async function publishStagedTarget(runtime: PublicationRuntime, entry: Publicati
   }
   // `link` has O_EXCL-like publication semantics: it cannot replace a file that appeared after
   // preflight. Temp and target share a directory, so each individual create is atomic.
-  await link(entry.temporary, entry.target);
-  await unlink(entry.temporary);
+  await publishStagedFile(entry.temporary, entry.target, false);
 }
 
 async function assertReplacementUnchanged(entry: PublicationRuntimeEntry): Promise<void> {
@@ -649,33 +623,9 @@ function assertStagingPath(entry: Pick<PublicationRuntimeEntry, 'file' | 'target
 
 async function verifyPublishedTargets(runtime: PublicationRuntime, options: AuthoringPublicationOptions): Promise<void> {
   const validated: PublicationRecoveryEntry[] = [];
-  const observed = new Map<string, FileIdentity>();
-  for (const entry of runtime.entries) {
-    observed.set(entry.target, await assertPublishedTarget(entry));
-    validated.push(publicationEntry(entry));
-    await options.onFinalValidationTarget?.(publicationEntry(entry), validated);
-  }
-  // Recheck exact identities after every target's content has been read. This catches an
-  // earlier target replaced while a later target was being validated. The guarantee ends at
-  // this final observation and makes no perpetual or cross-filesystem atomicity claim.
-  for (const entry of runtime.entries) {
-    if (!sameIdentity(observed.get(entry.target)!, await lstatRegular(entry.target, entry.file.path, false))) {
-      throw new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`);
-    }
-  }
-}
-
-async function assertPublishedTarget(entry: PublicationRuntimeEntry): Promise<FileIdentity> {
-  try {
-    const { content, identity } = await readRegularFileWithIdentity(entry.target, entry.file.path);
-    if (sha256(content) !== entry.afterHash) {
-      throw new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`);
-    }
-    return identity;
-  } catch (error) {
-    if (error instanceof PublicationConflictError) throw error;
-    throw new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`);
-  }
+  await verifyPublicationTargets(runtime.entries, (entry) => entry.target, (entry) => entry.afterHash,
+    (entry) => new PublicationConflictError(`authoring publication conflict: completed target changed: ${entry.file.path}`),
+    async (entry) => { validated.push(publicationEntry(entry)); await options.onFinalValidationTarget?.(publicationEntry(entry), validated); });
 }
 
 async function readPublicationRuntime(recovery: PublicationRecovery): Promise<PublicationRuntime> {
@@ -965,11 +915,7 @@ async function identityFor(file: string, stats: Awaited<ReturnType<typeof lstat>
 }
 
 async function lstatRegular(file: string, plannedPath: string, includeContent = true): Promise<FileIdentity> {
-  const stats = await lstat(file);
-  if (stats.isSymbolicLink() || !stats.isFile()) {
-    throw new Error(`planned destination is no longer a regular file: ${plannedPath}`);
-  }
-  return identityFor(file, stats, includeContent);
+  return regularFileIdentity(file, `planned destination is no longer a regular file: ${plannedPath}`, includeContent);
 }
 
 async function readRegularFile(file: string, plannedPath: string): Promise<Buffer> {
@@ -977,16 +923,7 @@ async function readRegularFile(file: string, plannedPath: string): Promise<Buffe
 }
 
 async function readRegularFileWithIdentity(file: string, plannedPath: string): Promise<{ content: Buffer; identity: FileIdentity }> {
-  const beforeRead = await lstatRegular(file, plannedPath, false);
-  const content = await readFile(file);
-  // Check again after the read so a link substituted during it is not silently accepted as a
-  // recovery or replacement source. Comparing the stable identity also rejects a replacement
-  // that happened while the bytes were being read.
-  const afterRead = await lstatRegular(file, plannedPath, false);
-  if (!sameIdentity(beforeRead, afterRead)) {
-    throw new Error(`planned destination changed while reading: ${plannedPath}`);
-  }
-  return { content, identity: afterRead };
+  return readStableRegularFile(file, `planned destination changed while reading: ${plannedPath}`);
 }
 
 async function readRegularFileMaybe(file: string, plannedPath: string): Promise<Buffer | undefined> {
@@ -1010,7 +947,7 @@ async function lstatMaybe(file: string): Promise<Awaited<ReturnType<typeof lstat
 }
 
 function sameIdentity(left: FileIdentity, right: FileIdentity | undefined): boolean {
-  return Boolean(right) && JSON.stringify(left) === JSON.stringify(right);
+  return sameFileIdentity(left, right);
 }
 
 function entryFor(inspection: DestinationInspection, absolutePath: string): DestinationEntry | undefined {
@@ -1022,11 +959,11 @@ function fingerprint(value: unknown): string {
 }
 
 function hashBuffer(value: Buffer): string {
-  return createHash('sha256').update(value).digest('hex');
+  return hashBytes(value);
 }
 
 function sha256(value: Buffer): string {
-  return `sha256:${hashBuffer(value)}`;
+  return publicationHash(value);
 }
 
 function stableJson(value: unknown): string {
@@ -1045,5 +982,5 @@ function displayPath(value: string): string {
 }
 
 function isNotFound(error: unknown): error is NodeJS.ErrnoException {
-  return typeof error === 'object' && error !== null && (error as NodeJS.ErrnoException).code === 'ENOENT';
+  return publicationNotFound(error);
 }
