@@ -39,6 +39,7 @@ import {
 } from './plan.js';
 import { validateSourceContent } from './content.js';
 import { bindAuthoringProposal, normalizeAuthoringProposal, validateProposalSourceContent } from './proposal.js';
+import { AuthorDiagnosticError, reportDiagnosticSource } from './diagnostics.js';
 import { compileRegisteredBlock } from '../authoring/generate.js';
 import { COMPONENT_FOUNDATION_WARNING, validateAuthoringPlan } from '../authoring/schema.js';
 import { authoringRulesFromStylesheet } from '../authoring/styles.js';
@@ -158,7 +159,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         block: name,
         status: 'warning' as const,
         reason: issue.reason,
-        details: { outcome: issue.status, field: issue.field },
+        ...environmentReportFields(issue.reason),
+        details: { outcome: issue.status, field: issue.field, ...environmentReportDetails(issue.reason) },
       }));
       if (compiled.css) {
         // In source mode this is the CSS that is scanned, scoped, and made available to the
@@ -251,7 +253,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       : asset);
     sharedFonts = prepareAuthoringFonts(styleInput, name, [...preparedAssets.values()], fontBindingAssets, scanStylesheet(styleInput));
   } catch (error) {
-    return authorFailure(error instanceof Error ? error.message : String(error), source);
+    return authorFailure(error, source);
   }
   styleInput = sharedFonts.css;
   if (editorStyleInput !== undefined) {
@@ -482,7 +484,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         selectorDependencies: selectorTransport.dependencies,
       });
     } catch (error) {
-      return authorFailure(error instanceof Error ? error.message : String(error), source, evidence);
+      return authorFailure(error, source, evidence);
     }
   }
   let compiled: ReturnType<typeof compileAnalyzedDesign> | undefined;
@@ -510,7 +512,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         throw new Error(`Supplied authoring plan target ${supplied.target.name} does not match requested block ${name}.`);
       }
       if (!supplied.coverage || stableJson(supplied.coverage) !== stableJson(expectedCoverage)) {
-        throw new Error('Supplied authoring plan does not retain the complete source declaration and asset coverage.');
+        throw coverageDifferenceError(supplied.coverage, expectedCoverage);
       }
       validateCoverageFulfillment(supplied, input, assetRoot);
       compiled = {
@@ -519,7 +521,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         editorStyleLedger: [],
       } as ReturnType<typeof compileAnalyzedDesign>;
     } catch (error) {
-      generationItems.push(authoringFailureItem(name, error));
+      generationItems.push(...authoringFailureItems(name, error));
       compiled = undefined;
     }
   } else if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && (conversion.ok || proposal)) {
@@ -560,7 +562,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         compiled = { ...compiled, plan, generated: compileRegisteredBlock(plan) };
       }
     } catch (error) {
-      generationItems.push(authoringFailureItem(name, error));
+      generationItems.push(...authoringFailureItems(name, error));
       // Compilation may have produced a tentative package before canonical coverage/content
       // fulfillment runs. Never return that tentative package after a fail-closed validation.
       compiled = undefined;
@@ -729,17 +731,18 @@ async function collectNativeSourceDeclarations(
 }
 
 function authorFailure(
-  reason: string,
+  failure: unknown,
   source?: BlockRunnerReport['source'],
   evidence?: AuthorSourceEvidence,
 ): BlockRunnerReport {
+  const items = authoringFailureItems('input', failure);
   return {
     ok: false,
     command: 'author',
     ...(source ? { source } : {}),
     ...(evidence ? { evidence } : {}),
-    summary: { blocks: 0, valid: 0, invalid: 0, warnings: 1 },
-    items: [{ block: 'input', status: 'warning', reason }],
+    summary: { blocks: 0, valid: 0, invalid: 0, warnings: items.length },
+    items,
   };
 }
 
@@ -1491,20 +1494,178 @@ function normalizeStyleOutcome(value: string): AuthoredStyleLedgerEntry['outcome
 }
 
 /** Preserve the native-mapping category for callers instead of flattening it into a warning. */
+function authoringFailureItems(block: string, error: unknown): ReportItem[] {
+  if (error instanceof AuthorDiagnosticError) {
+    return error.diagnostics.map((diagnostic) => ({ block, status: 'warning', ...diagnostic }));
+  }
+  return [authoringFailureItem(block, error)];
+}
+
 function authoringFailureItem(block: string, error: unknown): ReportItem {
   if (error instanceof UnresolvedNativeStyleMappingError) {
     const mapping = error.mapping;
     return {
       block, status: 'warning', code: error.code, reason: error.message,
       ...(mapping.htmlSource ? { source: { path: mapping.htmlSource.path, offset: mapping.htmlSource.offset, htmlLine: mapping.htmlSource.line, htmlColumn: mapping.htmlSource.column } } : {}),
-      details: mapping,
+      details: {
+        ...mapping,
+        classification: 'unsupported-native-style-mapping',
+        unsupportedReason: mapping.reason,
+      },
     };
   }
   const reason = error instanceof Error ? error.message : String(error);
   const mapping = reason.match(/^unresolved-native-style-mapping:\s*(.*)$/);
+  const environmentDetails = environmentReportDetails(error);
   return mapping
-    ? { block, status: 'warning', code: 'unresolved-native-style-mapping', reason, details: { mapping: mapping[1] } }
-    : { block, status: 'warning', reason };
+    ? { block, status: 'warning', code: 'unresolved-native-style-mapping', reason, details: { mapping: mapping[1], classification: 'unsupported-native-style-mapping', unsupportedReason: mapping[1] } }
+    : { block, status: 'warning', ...environmentReportFields(error), reason, ...(environmentDetails ? { details: environmentDetails } : {}) };
+}
+
+function environmentReportFields(error: unknown): Pick<ReportItem, 'code'> {
+  return hostError(error) ? { code: 'author-environment-input' } : {};
+}
+
+function environmentReportDetails(error: unknown): Record<string, unknown> | undefined {
+  const host = hostError(error);
+  return host ? {
+    classification: 'environment', hostCode: host.code, ...(host.path ? { path: host.path } : {}),
+    action: 'provide a readable local input dependency and rerun author(); do not rewrite the design',
+  } : undefined;
+}
+
+function hostError(error: unknown): { code: 'ENOENT' | 'EACCES' | 'EPERM'; path?: string } | undefined {
+  if (error && typeof error === 'object') {
+    const value = error as { code?: unknown; path?: unknown; message?: unknown };
+    if (value.code === 'ENOENT' || value.code === 'EACCES' || value.code === 'EPERM') {
+      return { code: value.code, ...(typeof value.path === 'string' ? { path: value.path } : {}) };
+    }
+    if (typeof value.message === 'string') return hostError(value.message);
+  }
+  if (typeof error !== 'string') return undefined;
+  const match = /\b(ENOENT|EACCES|EPERM):/.exec(error);
+  const path = /'([^']+)'/.exec(error)?.[1];
+  return match ? { code: match[1] as 'ENOENT' | 'EACCES' | 'EPERM', ...(path ? { path } : {}) } : undefined;
+}
+
+const COVERAGE_DIAGNOSTIC_CAP = 12;
+
+/**
+ * Coverage remains an exact equality gate. These bounded differences only make the rejected
+ * source decision addressable; callers never need to manufacture the compiler-owned ledger.
+ */
+function coverageDifferenceError(
+  supplied: import('../authoring/schema.js').AuthoringCoverage | undefined,
+  expected: import('../authoring/schema.js').AuthoringCoverage,
+): AuthorDiagnosticError {
+  const diagnostics: import('./diagnostics.js').AuthorDiagnostic[] = [];
+  const prefix = 'Supplied authoring plan does not retain the complete source declaration and asset coverage.';
+  const styles = (coverage: import('../authoring/schema.js').AuthoringCoverage | undefined) => coverage?.styles ?? [];
+  const assets = (coverage: import('../authoring/schema.js').AuthoringCoverage | undefined) => coverage?.assets ?? [];
+  const styleKey = (entry: import('../authoring/schema.js').AuthoringCoverageStyle) => entry.declarationId
+    ?? `${entry.ruleId ?? ''}\u0000${entry.source?.selector ?? ''}\u0000${entry.source?.offset ?? ''}\u0000${entry.property}`;
+  const assetKey = (entry: import('../authoring/schema.js').AuthoringCoverageAsset) => `${entry.kind}\u0000${entry.reference}\u0000${entry.source?.offset ?? ''}`;
+  const add = (
+    code: string, key: string, reason: string, expectedEntry: { source?: ReportItem['source'] } | undefined,
+    observedEntry: unknown,
+    classification: string,
+  ) => diagnostics.push({
+    code,
+    reason: `${prefix} ${reason}`,
+    ...(expectedEntry?.source ? { source: reportDiagnosticSource(expectedEntry.source) } : {}),
+    details: {
+      key, expected: expectedEntry, observed: observedEntry, classification,
+      action: 'refresh source analysis, then resubmit a semantic proposal through author(); Block Runner owns coverage records',
+    },
+  });
+  const compare = <T extends { source?: ReportItem['source'] }>(
+    expectedEntries: readonly T[], suppliedEntries: readonly T[], keyFor: (entry: T) => string, kind: 'declaration' | 'asset',
+  ) => {
+    const expectedByKey = new Map(expectedEntries.map((entry) => [keyFor(entry), entry]));
+    const suppliedByKey = new Map(suppliedEntries.map((entry) => [keyFor(entry), entry]));
+    for (const [key, entry] of expectedByKey) {
+      const observed = suppliedByKey.get(key);
+      if (!observed) add(`coverage-missing-${kind}`, key, `Missing ${describeCoverageEntry(entry, kind)}.`, entry, undefined, `missing-${kind}`);
+      else if (stableJson(entry) !== stableJson(observed)) {
+        const expectedOwnership = stableJson(coverageOwnership(entry));
+        const observedOwnership = stableJson(coverageOwnership(observed));
+        add(
+          expectedOwnership === observedOwnership ? `coverage-changed-${kind}` : `coverage-contradictory-${kind}-ownership`,
+          key,
+          expectedOwnership === observedOwnership ? `Changed ${describeCoverageEntry(entry, kind)} values or conditions.` : `Contradictory ownership for ${describeCoverageEntry(entry, kind)}.`,
+          entry, observed,
+          expectedOwnership === observedOwnership ? `changed-${kind}` : 'contradictory-ownership',
+        );
+      }
+    }
+    for (const [key, entry] of suppliedByKey) if (!expectedByKey.has(key)) {
+      add(`coverage-extra-${kind}`, key, `Extra ${describeCoverageEntry(entry, kind)}.`, entry, entry, `extra-${kind}`);
+    }
+  };
+  compare(styles(expected), styles(supplied), styleKey, 'declaration');
+  compare(assets(expected), assets(supplied), assetKey, 'asset');
+  const expectedContext = { ...expected, styles: undefined, assets: undefined };
+  const suppliedContext = supplied ? { ...supplied, styles: undefined, assets: undefined } : undefined;
+  if (stableJson(expectedContext) !== stableJson(suppliedContext)) {
+    add('coverage-changed-context', 'coverage-context', 'Changed source stylesheet or analysis context.', undefined, suppliedContext, 'changed-context');
+  }
+  if (!diagnostics.length) {
+    const difference = firstCoverageDifference(expected, supplied);
+    add(
+      'coverage-changed-context',
+      difference.key,
+      difference.reason,
+      difference.expected,
+      difference.observed,
+      'changed-context',
+    );
+  }
+  diagnostics.sort((left, right) => left.code.localeCompare(right.code) || String((left.details as { key?: string }).key ?? '').localeCompare(String((right.details as { key?: string }).key ?? '')));
+  const total = diagnostics.length;
+  const categories = [...new Set(diagnostics.map((diagnostic) => diagnostic.code))];
+  return new AuthorDiagnosticError(diagnostics.slice(0, COVERAGE_DIAGNOSTIC_CAP).map((diagnostic) => ({
+    ...diagnostic,
+    details: { ...(diagnostic.details as object), total, truncated: Math.max(0, total - COVERAGE_DIAGNOSTIC_CAP), categories },
+  })));
+}
+
+function describeCoverageEntry(entry: unknown, kind: 'declaration' | 'asset'): string {
+  if (!entry || typeof entry !== 'object') return kind;
+  const value = entry as Record<string, unknown>;
+  return kind === 'declaration'
+    ? `declaration ${String(value.property ?? '<unknown>')}: ${String(value.value ?? '<unknown>')}`
+    : `asset ${String(value.reference ?? '<unknown>')}`;
+}
+
+function firstCoverageDifference(
+  expected: import('../authoring/schema.js').AuthoringCoverage,
+  supplied: import('../authoring/schema.js').AuthoringCoverage | undefined,
+): { key: string; reason: string; expected?: { source?: ReportItem['source'] }; observed?: unknown } {
+  for (const [kind, expectedEntries, suppliedEntries] of [
+    ['declaration', expected.styles, supplied?.styles ?? []],
+    ['asset', expected.assets, supplied?.assets ?? []],
+  ] as const) {
+    const max = Math.max(expectedEntries.length, suppliedEntries.length);
+    for (let index = 0; index < max; index += 1) {
+      const expectedEntry = expectedEntries[index];
+      const observedEntry = suppliedEntries[index];
+      if (stableJson(expectedEntry) !== stableJson(observedEntry)) {
+        return {
+          key: `${kind}-order-${index}`,
+          reason: `${kind === 'declaration' ? 'Declaration' : 'Asset'} order or duplicate identity differs at entry ${index + 1}${expectedEntry ? ` (${describeCoverageEntry(expectedEntry, kind)})` : ''}.`,
+          expected: expectedEntry,
+          observed: observedEntry,
+        };
+      }
+    }
+  }
+  return { key: 'coverage-context', reason: 'Source stylesheet or analysis context changed.', observed: undefined };
+}
+
+function coverageOwnership(entry: unknown): unknown {
+  if (!entry || typeof entry !== 'object') return entry;
+  const { outcome, node, responsive, preset, nativeTargets, destination, sha256, rewritten, reason } = entry as Record<string, unknown>;
+  return { outcome, node, responsive, preset, nativeTargets, destination, sha256, rewritten, reason };
 }
 
 /** Carry compiler-owned adapter destinations across a fresh source scan only by full identity. */

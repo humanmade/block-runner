@@ -25,6 +25,7 @@ import { exactThemePresetTransport, styleContextFrom } from './style-context.js'
 import { mapExactWordPressResponsiveMedia, resolveWordPressViewportRanges } from './responsive.js';
 import { hasUnsafeResponsiveNativeCascade } from './cascade.js';
 import { sourceDeclarationKey } from '../styles/apply.js';
+import { authorDiagnostic } from './diagnostics.js';
 
 export class UnresolvedNativeStyleMappingError extends Error {
   readonly code = 'unresolved-native-style-mapping' as const;
@@ -930,7 +931,24 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
           ? sourceSelectorApplies(entry.source.selector, (sourceDom ??= new JSDOM(sourceHtml)).window.document)
           : true;
         if (!generatedMatch && sourceMatch) {
-          throw new Error(`${label} is marked scoped-css but its selector does not match the generated native template.`);
+          throw authorDiagnostic(
+            'coverage-unmatched-emitted-selector',
+            `${label} is marked scoped-css but its selector does not match the generated native template.`,
+            entry.source,
+            {
+              declarationId: entry.declarationId,
+              ruleId: entry.ruleId,
+              selector: entry.source?.selector,
+              transportSelector: entry.transportSelector,
+              property: entry.property,
+              value: entry.value,
+              scope: entry.scope,
+              node: entry.node,
+              nativeTargets: entry.nativeTargets,
+              classification: 'unmatched-emitted-selector',
+              action: 'map the source selector to an emitted native target or retain it on the bound node',
+            },
+          );
         }
         continue;
       }
@@ -969,7 +987,17 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
         const retainedByCss = [...plan.styles.rules ?? [], ...plan.styles.editorRules ?? []]
           .some((rule) => cssRuleUsesAsset(rule, entry.reference));
         if (!retainedByNode && !retainedByCss && !isReviewedWholeMediaOmission(plan, sourceHtml, entry.reference)) {
-          throw new Error(`${label} external URL is not retained byte-for-byte by the final package.`);
+          throw authorDiagnostic(
+            'coverage-missing-asset-use',
+            `${label} external URL is not retained byte-for-byte by the final package.`,
+            entry.source,
+            {
+              reference: entry.reference,
+              kind: entry.kind,
+              classification: 'missing-external-asset-use',
+              action: 'retain this external URL byte-for-byte in a supported native or structured CSS use',
+            },
+          );
         }
         continue;
       }
@@ -988,7 +1016,20 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
         // only when the final structured stylesheet still names the exact package destination.
         const cssUse = [...plan.styles.rules ?? [], ...plan.styles.editorRules ?? []]
           .some((rule) => cssRuleUsesAsset(rule, asset.destination!));
-        if (!cssUse) throw new Error(`${label} has no native or confirmed CSS output use.`);
+        if (!cssUse) {
+          throw authorDiagnostic(
+            'coverage-missing-asset-use',
+            `${label} has no native or confirmed CSS output use.`,
+            entry.source,
+            {
+              reference: entry.reference,
+              destination: asset.destination,
+              kind: entry.kind,
+              classification: 'missing-asset-use',
+              action: 'add a supported native or structured CSS use for this confirmed asset',
+            },
+          );
+        }
       }
     }
   } finally {

@@ -7,6 +7,7 @@ import { validateSourceContent } from './content.js';
 import { compileRegisteredBlock } from '../authoring/generate.js';
 import { retainSelectorDependencies } from '../convert/dom.js';
 import type { SourceSelectorDependency } from '../types.js';
+import { authorDiagnostic } from './diagnostics.js';
 
 export interface BoundAuthoringProposal extends AuthoringPlan {
   /** Internal only: ties a hash-bound source range to one emitted native node. */
@@ -55,7 +56,7 @@ export function bindAuthoringProposal(input: {
     const decisions = input.proposal.sourceDecisions ?? [];
     for (const decision of decisions) {
       if (!decision.sourceRef.startsWith(`${input.sourceHash}:`) || !index.has(decision.sourceRef)) {
-        throw new Error(`${referenceLocation(decision.sourceRef, input.sourceHash, input.sourceHtml, input.sourcePath)}: proposal decision sourceRef ${decision.sourceRef} is stale, missing, or belongs to another source`);
+        throw staleSourceRefDiagnostic('proposal decision sourceRef', decision.sourceRef, decision.node, input);
       }
     }
     const explicit = new Map<string, AuthoringProposalDecision>();
@@ -69,9 +70,9 @@ export function bindAuthoringProposal(input: {
       const attributes: Record<string, JsonValue> = { ...(node.attributes ?? {}) };
       let element: Element | undefined;
       if (node.sourceRef) {
-        if (!node.sourceRef.startsWith(`${input.sourceHash}:`)) throw new Error(`${referenceLocation(node.sourceRef, input.sourceHash, input.sourceHtml, input.sourcePath)}: proposal sourceRef ${node.sourceRef} is stale or belongs to another source`);
+        if (!node.sourceRef.startsWith(`${input.sourceHash}:`)) throw staleSourceRefDiagnostic('proposal sourceRef', node.sourceRef, node.id, input);
         element = index.get(node.sourceRef);
-        if (!element) throw new Error(`${referenceLocation(node.sourceRef, input.sourceHash, input.sourceHtml, input.sourcePath)}: proposal sourceRef ${node.sourceRef} is missing or ambiguous`);
+        if (!element) throw staleSourceRefDiagnostic('proposal sourceRef', node.sourceRef, node.id, input);
         if (isSourceUnit(element) && !isCompatibleSourceBinding(element, node.block)) {
           throw new Error(`${describeElement(element, dom, input.sourcePath)}: proposal sourceRef ${node.sourceRef} cannot bind ${element.tagName.toLowerCase()} content to ${node.block}`);
         }
@@ -208,6 +209,27 @@ function referenceLocation(ref: string, _hash: string, html: string, path?: stri
   if (start < 0 || start >= end || end > html.length) return `${path ?? '<inline>'}: invalid source range ${match[2]}-${match[3]}`;
   const before = html.slice(0, start);
   return `${path ?? '<inline>'}:${before.split('\n').length}:${start - before.lastIndexOf('\n')} (offset ${start})`;
+}
+
+/** A foreign hash is never treated as a current DOM binding or location. */
+function staleSourceRefDiagnostic(
+  label: string,
+  sourceRef: string,
+  node: string | undefined,
+  input: Parameters<typeof bindAuthoringProposal>[0],
+) {
+  return authorDiagnostic(
+    'stale-proposal-source-ref',
+    `${label} ${sourceRef} is stale, missing, or belongs to another source`,
+    input.sourcePath ? { path: input.sourcePath } : undefined,
+    {
+      sourceRef,
+      ...(node ? { node } : {}),
+      classification: 'stale-source-reference',
+      action: 'refresh-source-analysis',
+      referenceVerified: false,
+    },
+  );
 }
 
 /** Proposal callers must either preserve all source content or carry an explicit reviewed change. */

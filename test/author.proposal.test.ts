@@ -79,7 +79,10 @@ describe('author proposal boundary', () => {
     const reason = report.items.map((item) => item.reason).join('\n');
     expect(reason).toContain('proposal sourceRef');
     expect(reason).toMatch(/stale|another source/i);
-    expect(reason).toContain('/design/multiline.html:2:3 (offset 12)');
+    expect(reason).not.toContain('(offset 12)');
+    expect(report.items[0]).toMatchObject({ code: 'stale-proposal-source-ref', source: { path: '/design/multiline.html' }, details: { sourceRef: foreignRef, referenceVerified: false } });
+    expect(report.items[0]!.source).not.toHaveProperty('offset');
+    expect(report.items[0]!.source).not.toHaveProperty('htmlLine');
   });
 
   it('locates a source-decision stale reference from a foreign source hash', async () => {
@@ -95,7 +98,10 @@ describe('author proposal boundary', () => {
     const reason = report.items.map((item) => item.reason).join('\n');
     expect(reason).toContain('proposal decision sourceRef');
     expect(reason).toMatch(/stale|another source/i);
-    expect(reason).toContain('/design/multiline.html:2:3 (offset 12)');
+    expect(reason).not.toContain('(offset 12)');
+    expect(report.items[0]).toMatchObject({ code: 'stale-proposal-source-ref', source: { path: '/design/multiline.html' }, details: { sourceRef: foreignRef, referenceVerified: false } });
+    expect(report.items[0]!.source).not.toHaveProperty('offset');
+    expect(report.items[0]!.source).not.toHaveProperty('htmlLine');
   });
 
   it('carries proposal-owned editing decisions and fails a silent omitted source element', async () => {
