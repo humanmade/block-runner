@@ -1178,10 +1178,15 @@ function createRuntime(
     if (preparedNativeStyleMedia) return preparedNativeStyleMedia;
     const php = [
       `$png = base64_decode('${PROOF_IMAGE_BASE64}');`,
-      "$file = WP_CONTENT_DIR . '/uploads/block-runner-editor.png';",
-      "if (!wp_mkdir_p(dirname($file)) || file_put_contents($file, $png) === false) { throw new RuntimeException('Native style adapter proof image write failed.'); }",
+      "$uploadDirFilter = static function ($uploads) { $uploads['path'] = $uploads['basedir']; $uploads['url'] = $uploads['baseurl']; $uploads['subdir'] = ''; return $uploads; };",
+      "add_filter('upload_dir', $uploadDirFilter);",
+      "try { $upload = wp_upload_bits('block-runner-editor.png', null, $png); } finally { remove_filter('upload_dir', $uploadDirFilter); }",
+      "if (!empty($upload['error'])) { throw new RuntimeException('Native style adapter proof image upload failed: ' . $upload['error']); }",
+      "$file = $upload['file'];",
       "if (!is_readable($file) || hash_file('sha256', $file) !== hash('sha256', $png)) { throw new RuntimeException('Native style adapter proof image bytes were not retained correctly.'); }",
-      "echo json_encode(array('url' => content_url('/uploads/block-runner-editor.png')));",
+      "$expectedUrl = content_url('/uploads/block-runner-editor.png');",
+      "if ($upload['url'] !== $expectedUrl) { throw new RuntimeException('Native style adapter proof image upload URL did not match the authored source.'); }",
+      "echo json_encode(array('url' => $upload['url']));",
     ].join(' ');
     const { result, evidence } = await wp(php);
     if (result.exitCode !== 0) return undefined;
