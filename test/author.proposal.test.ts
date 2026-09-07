@@ -29,6 +29,7 @@ function refs(html: string) {
 function nodesById(nodes: readonly AuthoringStructureNode[]) {
   const result = new Map<string, AuthoringStructureNode>();
   const visit = (items: readonly AuthoringStructureNode[]) => items.forEach((node) => {
+    if (node.id === undefined) throw new Error('Author proposal fixture node must have an id');
     result.set(node.id, node);
     if (node.children) visit(node.children);
   });
