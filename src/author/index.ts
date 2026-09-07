@@ -467,6 +467,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       proposalBound = bindAuthoringProposal({
         proposal, sourceHtml: input, sourceHash: source.sha256, sourcePath: options.sourcePath,
         base: { structure: [], fields: [], assets: [], files: [], warnings: [] } as unknown as import('../authoring/schema.js').AuthoringPlan,
+        retainedCssClasses: referencedCssClasses(styleInput),
+        selectorDependencies: selectorTransport.dependencies,
       });
     } catch (error) {
       return authorFailure(error instanceof Error ? error.message : String(error), source, evidence);
@@ -519,6 +521,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         ...(proposalBound ? {
           structureOverride: proposalBound.structure,
           sourceDecisions: proposalBound.sourceDecisions,
+          sourceRefToNode: proposalBound.sourceRefToNode,
+          cascadeSensitiveDeclarations,
           proposalChoices: {
             fields: proposalBound.fields,
             locking: proposalBound.locking,
@@ -550,7 +554,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       compiled = undefined;
     }
   }
-  if (compiled && !proposal) {
+  if (compiled && !proposal && !options.plan) {
     try {
       validateSourceContent(input, compiled.generated.template);
     } catch (error) {

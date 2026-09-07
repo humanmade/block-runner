@@ -24,6 +24,7 @@ import { decodeCssEscapes, fontFaceRules, forEachCssRule, scanStylesheet, scopeL
 import { exactThemePresetTransport, styleContextFrom } from './style-context.js';
 import { mapExactWordPressResponsiveMedia, resolveWordPressViewportRanges } from './responsive.js';
 import { hasUnsafeResponsiveNativeCascade } from './cascade.js';
+import { sourceDeclarationKey } from '../styles/apply.js';
 
 export interface PreparedAuthoringFonts {
   /** CSS after removing global @font-face rules and namespacing their owned families. */
@@ -138,6 +139,10 @@ export function compileAnalyzedDesign(input: {
   blocks: WpBlock[];
   /** Proposal-bound structure, after source content has been resolved by the author adapter. */
   structureOverride?: AuthoringStructureNode[];
+  /** Internal proposal binding identity; never serialized into the canonical plan. */
+  sourceRefToNode?: ReadonlyMap<string, string>;
+  /** Source declarations whose existing cascade makes native ownership unsafe. */
+  cascadeSensitiveDeclarations?: ReadonlySet<string>;
   sourceDecisions?: AuthoringPlan['sourceDecisions'];
   /** Design-owned choices from a normalized proposal (never source bookkeeping). */
   proposalChoices?: Pick<AuthoringPlan, 'fields' | 'locking' | 'allowedBlocks' | 'pattern'>;
@@ -179,10 +184,16 @@ export function compileAnalyzedDesign(input: {
     return node;
   };
   const structure = input.structureOverride ?? input.blocks.map((block, index) => convert(block, `source.${index}`));
+  const reconciled = input.structureOverride && input.sourceRefToNode
+    ? reconcileProposalStyleOwnership(
+      structure, input.rules, input.styleLedger, input.source, input.sourceRefToNode,
+      input.stylesheetFacts?.rules ?? input.rules, input.cascadeSensitiveDeclarations ?? new Set(),
+    )
+    : { rules: input.rules, styleLedger: input.styleLedger };
   const responsive = liftExactResponsiveStyles({
     structure,
-    rules: input.rules,
-    styleLedger: input.styleLedger,
+    rules: reconciled.rules,
+    styleLedger: reconciled.styleLedger,
     definition,
     source: input.source,
     sourceRules: input.stylesheetFacts?.rules ?? input.rules,
@@ -281,6 +292,81 @@ export function compileAnalyzedDesign(input: {
     ],
   };
   return { plan, generated: compileRegisteredBlock(plan), editorStyleLedger };
+}
+
+/**
+ * A proposal replaces the converter tree, so source classes alone are not proof of native
+ * ownership. Promote exactly one mapped source declaration only when its final native attribute
+ * is already present; leave every other declaration in the scoped stylesheet.
+ */
+function reconcileProposalStyleOwnership(
+  structure: readonly AuthoringStructureNode[],
+  rules: readonly CssRule[],
+  ledger: readonly AuthoredStyleLedgerEntry[],
+  source: string,
+  bindings: ReadonlyMap<string, string>,
+  sourceRules: readonly CssRule[],
+  cascadeSensitiveDeclarations: ReadonlySet<string>,
+): { rules: readonly CssRule[]; styleLedger: readonly AuthoredStyleLedgerEntry[] } {
+  const dom = new JSDOM(source, { includeNodeLocations: true });
+  try {
+    const hash = sha256(source);
+    const sourceNode = new Map<string, Element>();
+    for (const element of [...dom.window.document.querySelectorAll('*')]) {
+      const loc = dom.nodeLocation(element);
+      if (loc) sourceNode.set(`${hash}:${loc.startOffset}-${loc.endOffset}`, element);
+    }
+    const promoted = new Set<string>();
+    const nextLedger = ledger.map((entry) => ({ ...entry, source: entry.source ? { ...entry.source } : undefined }));
+    for (const entry of nextLedger) {
+      if (entry.outcome !== 'scoped-css' || entry.atRules.length || !entry.source?.selector) continue;
+      const declarations = sourceDeclarations(sourceRules).filter((candidate) =>
+        candidate.selector.trim() === entry.source!.selector!.trim()
+        && candidate.declaration.property === entry.property
+        && candidate.declaration.value === entry.value,
+      );
+      // Do not synthesize native ownership for an important declaration or any declaration
+      // already protected by the same base-cascade analysis used by automatic conversion.
+      if (declarations.length !== 1 || declarations[0]!.declaration.important
+        || cascadeSensitiveDeclarations.has(sourceDeclarationKey(
+          declarations[0]!.selector, entry.property, entry.value, declarations[0]!.ruleId,
+        ))) continue;
+      const matching = [...bindings.entries()].filter(([ref]) => {
+        const element = sourceNode.get(ref);
+        if (!element) return false;
+        try { return element.matches(entry.source!.selector!); } catch { return false; }
+      });
+      if (matching.length !== 1) continue;
+      const node = matching[0]![1];
+      if (!hasNativeAttribute(structure, entry.property, entry.value, node)) continue;
+      entry.outcome = 'native';
+      entry.node = node;
+      entry.reason = 'exact mapped source declaration is emitted by the final native block attribute';
+      for (const selector of [entry.source.selector, entry.transportSelector]) {
+        if (selector) promoted.add(`${selector}\u0000${entry.property}\u0000${entry.value}\u0000${entry.atRules.join('\u0000')}`);
+      }
+    }
+    const removePromoted = (items: readonly CssRule[]): CssRule[] => items.reduce<CssRule[]>((output, rule) => {
+      if (rule.kind === 'conditional') {
+        const nested = removePromoted(rule.rules);
+        if (nested.length) output.push({ ...rule, rules: nested });
+        return output;
+      }
+      if (rule.kind !== 'style') { output.push(rule); return output; }
+      const declarations = rule.declarations.filter((declaration) => !promoted.has(`${rule.selector}\u0000${declaration.property}\u0000${declaration.value}\u0000`));
+      if (declarations.length) output.push({ ...rule, declarations });
+      return output;
+    }, []);
+    return { rules: removePromoted(rules), styleLedger: nextLedger };
+  } finally { dom.window.close(); }
+}
+
+function sourceDeclarations(rules: readonly CssRule[]): Array<{ selector: string; ruleId: string; declaration: import('./styles.js').CssDeclaration }> {
+  return rules.flatMap((rule) => {
+    if (rule.kind === 'conditional') return sourceDeclarations(rule.rules);
+    if (rule.kind !== 'style') return [];
+    return rule.declarations.map((declaration) => ({ selector: rule.selector, ruleId: rule.id, declaration }));
+  });
 }
 
 function cssRuleSelectors(rules: readonly CssRule[], output = new Map<string, string>()): Map<string, string> {
@@ -594,8 +680,20 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
 
     for (const [index, entry] of coverage.assets.entries()) {
       const label = `coverage.assets[${index}] ${entry.reference}`;
-      if (entry.outcome === 'unresolved' || entry.outcome === 'blocked' || entry.outcome === 'external') {
+      if (entry.outcome === 'unresolved' || entry.outcome === 'blocked') {
         throw new Error(`${label} is unresolved source evidence and cannot be claimed as transported.`);
+      }
+      if (entry.outcome === 'external') {
+        // External records intentionally have no package destination, hash, or native `uses`:
+        // the asset compiler forbids pretending it owns remote bytes.  Their only valid
+        // transport is byte-for-byte retention in the final image node or authored CSS.
+        const retainedByNode = flattenNodes(plan.structure).some((node) => node.block === 'core/image' && node.attributes?.url === entry.reference);
+        const retainedByCss = [...plan.styles.rules ?? [], ...plan.styles.editorRules ?? []]
+          .some((rule) => cssRuleUsesAsset(rule, entry.reference));
+        if (!retainedByNode && !retainedByCss && !isReviewedWholeMediaOmission(plan, sourceHtml, entry.reference)) {
+          throw new Error(`${label} external URL is not retained byte-for-byte by the final package.`);
+        }
+        continue;
       }
       const source = resolvedCoverageAssetSource(plan, entry.reference);
       const asset = source === undefined || entry.destination === undefined || entry.sha256 === undefined
@@ -619,6 +717,25 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
     generatedDom?.window.close();
     sourceDom?.window.close();
   }
+}
+
+/** A reviewed whole figure/image omission deliberately has no final media transport. */
+function isReviewedWholeMediaOmission(plan: AuthoringPlan, sourceHtml: string | undefined, reference: string): boolean {
+  if (sourceHtml === undefined) return false;
+  const hash = sha256(sourceHtml);
+  const omitted = new Set((plan.sourceDecisions ?? [])
+    .filter((decision) => decision.action === 'omit' && !decision.node && !decision.attribute)
+    .map((decision) => decision.sourceRef));
+  if (!omitted.size) return false;
+  const dom = new JSDOM(sourceHtml, { includeNodeLocations: true });
+  try {
+    return [...dom.window.document.querySelectorAll('figure,img')].some((element) => {
+      const image = element.matches('figure') ? element.querySelector('img') : element;
+      if (image?.getAttribute('src') !== reference) return false;
+      const loc = dom.nodeLocation(element);
+      return !!loc && omitted.has(`${hash}:${loc.startOffset}-${loc.endOffset}`);
+    });
+  } finally { dom.window.close(); }
 }
 
 function cssRuleUsesAsset(rule: import('../authoring/schema.js').AuthoringCssRule, destination: string): boolean {
@@ -790,7 +907,11 @@ export function coverageCssRuleSelectors(
     }
     if (conditions.length === atRules.length && conditions.every((condition, index) => condition === atRules[index])
       && (selector === undefined || rule.selector === selector)
-      && rule.declarations.some((declaration) => declaration.property === property && declaration.value === value)) output.push(rule.selector);
+      && rule.declarations.some((declaration) => declaration.property === property
+        // Older canonical plans encoded priority in the value while current plans use the
+        // structured `important` bit. Coverage identifies the source declaration value, not a
+        // weaker priority-stripped spelling, so accept either canonical representation.
+        && (declaration.value === value || declaration.value === `${value} !important`))) output.push(rule.selector);
   }
   return output;
 }

@@ -37,6 +37,13 @@ describe('HTML analysis uses the confirmed compiler', () => {
     expect(result.ok, JSON.stringify(result.items)).toBe(true);
     expect(result.package?.canonicalPlan?.structure[0]?.block).toBe('core/group');
 
+    // Complete legacy plans retain their historical ability to make reviewed content changes;
+    // proposal-only source consumption must not be applied after their existing validation path.
+    const changedLegacy = structuredClone(result.package!.canonicalPlan!);
+    changedLegacy.structure[0]!.children![0]!.attributes!.content = 'Reviewed replacement';
+    const changed = await author(markup, { author: { name: 'example/design' }, plan: changedLegacy });
+    expect(changed.ok, JSON.stringify(changed.items)).toBe(true);
+
     const erased = await author(markup, {
       author: { name: 'example/design' },
       plan: { ...result.package!.canonicalPlan!, coverage: { styles: [], assets: [] } },
