@@ -140,6 +140,25 @@ describe('native source-style adapters', () => {
     expect(item.details).toMatchObject({ htmlSource: { path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21 }, cssSource: { selector: 'div .move:hover' } });
   });
 
+  it('retains every matched unwrapped anchor for an unsupported relationship', async () => {
+    const html = '<div>                <a class="move" href="/go">Go</a>  <a class="move" href="/next">Next</a></div>';
+    const report = await author(html, {
+      sourcePath: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html',
+      author: { name: 'example/unwrapped-buttons', styles: { mode: 'css', css: 'div .move:hover { color: red; }' } },
+      proposal: { structure: [{ id: 'section', block: 'core/group', sourceRef: refs(html)('div') }, { id: 'button-a', block: 'core/button', sourceRef: refs(html)('a') }, { id: 'button-b', block: 'core/button', sourceRef: refs(html)('a', 1) }] },
+    });
+    const item = report.items.find((candidate) => candidate.code === 'unresolved-native-style-mapping')!;
+    expect(report.package).toBeUndefined();
+    expect(item.source).toBeUndefined();
+    expect(item.details).toMatchObject({ cssSource: { selector: 'div .move:hover' } });
+    const details = item.details as { htmlSources?: unknown };
+    expect(details.htmlSources).toEqual([
+      { sourceRef: refs(html)('a'), path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21, line: 1, column: 22 },
+      { sourceRef: refs(html)('a', 1), path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 56, line: 1, column: 57 },
+    ]);
+    expect(item.details).not.toHaveProperty('htmlSource');
+  });
+
   it('rejects adapter targets whose marker is absent from serialized native markup', async () => {
     const html = '<div><a class="move" href="/go">Go</a></div>';
     const report = await author(html, {

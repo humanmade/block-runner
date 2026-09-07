@@ -28,7 +28,7 @@ import { sourceDeclarationKey } from '../styles/apply.js';
 
 export class UnresolvedNativeStyleMappingError extends Error {
   readonly code = 'unresolved-native-style-mapping' as const;
-  constructor(readonly mapping: { selector: string; property?: string; node?: string; role?: string; reason: string; cssSource?: { path: string; offset: number; line: number; column: number; selector: string }; htmlSource?: { sourceRef: string; path: string; offset: number; line: number; column: number } }) {
+  constructor(readonly mapping: { selector: string; property?: string; node?: string; role?: string; reason: string; cssSource?: { path: string; offset: number; line: number; column: number; selector: string }; htmlSource?: { sourceRef: string; path: string; offset: number; line: number; column: number }; htmlSources?: readonly { sourceRef: string; path: string; offset: number; line: number; column: number }[] }) {
     super(`unresolved-native-style-mapping: ${mapping.reason}`);
     this.name = 'UnresolvedNativeStyleMappingError';
   }
@@ -36,7 +36,7 @@ export class UnresolvedNativeStyleMappingError extends Error {
 
 /** Internal transport for a selector binding that fails before a native target can be emitted. */
 class NativeTargetBindingError extends Error {
-  constructor(readonly sourceRef: string, readonly node: string, readonly role: 'button-link' | 'image' | 'caption' | 'grid-container', reason: string) {
+  constructor(readonly bindings: readonly { sourceRef: string; node: string; role: 'button-link' | 'image' | 'caption' | 'grid-container' }[], reason: string) {
     super(reason);
   }
 }
@@ -447,12 +447,12 @@ function adaptNativeSourceStyles(
         // selects without interpreting that relationship: use the existing token-aware dynamic
         // pseudo transport, then let JSDOM match the original selector structure.
         const matching = bound.filter((candidate) => {
+          if (!['core/button', 'core/image', 'core/group', 'core/columns'].includes(candidate.node.block)) return false;
           try { return candidate.element.matches(replaceDynamicPseudos(selector, '')); } catch { return false; }
-        });
-        if (matching.length === 1) {
-          const candidate = matching[0]!;
-          throw new NativeTargetBindingError(candidate.sourceRef, candidate.node.id!, nativeAdapterRole(candidate.node), `${selector} is not a supported single-subject native selector`);
-        }
+        }).filter((candidate, index, candidates) => candidates.findIndex(({ sourceRef }) => sourceRef === candidate.sourceRef) === index)
+          .sort((left, right) => (locationFor(left.sourceRef)?.startOffset ?? Number.MAX_SAFE_INTEGER) - (locationFor(right.sourceRef)?.startOffset ?? Number.MAX_SAFE_INTEGER)
+            || left.sourceRef.localeCompare(right.sourceRef));
+        if (matching.length) throw new NativeTargetBindingError(matching.map((candidate) => ({ sourceRef: candidate.sourceRef, node: candidate.node.id!, role: nativeAdapterRole(candidate.node) })), `${selector} is not a supported single-subject native selector`);
         throw new Error(`unresolved-native-style-mapping: ${selector} is not a supported single-subject native selector`);
       }
       return undefined;
@@ -482,7 +482,7 @@ function adaptNativeSourceStyles(
       } catch { return []; }
       const state = subject.state ? `:${subject.state}` : '';
       if (node.block === 'core/button') {
-        if (!findParent(structure, node.id!) || findParent(structure, node.id!)!.block !== 'core/buttons') throw new NativeTargetBindingError(ref, node.id!, 'button-link', `${selector} binds core/button without core/buttons wrapper`);
+        if (!findParent(structure, node.id!) || findParent(structure, node.id!)!.block !== 'core/buttons') throw new NativeTargetBindingError([{ sourceRef: ref, node: node.id!, role: 'button-link' }], `${selector} binds core/button without core/buttons wrapper`);
         const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         // core/button serializes className on its own div.wp-block-button, never core/buttons.
         node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
@@ -490,7 +490,7 @@ function adaptNativeSourceStyles(
       }
       if (node.block === 'core/image') {
         if (!subject.relation && !inferredRelation) return [];
-        if (subject.relation && !element.matches('figure')) throw new NativeTargetBindingError(ref, node.id!, 'image', `${selector} requires a figure-bound core/image source`);
+        if (subject.relation && !element.matches('figure')) throw new NativeTargetBindingError([{ sourceRef: ref, node: node.id!, role: 'image' }], `${selector} requires a figure-bound core/image source`);
         const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
         const imageRole = subject.relation ?? inferredRelation;
@@ -514,14 +514,20 @@ function adaptNativeSourceStyles(
     } catch (error) {
       if (error instanceof UnresolvedNativeStyleMappingError) throw error;
       const reason = error instanceof Error ? error.message.replace(/^unresolved-native-style-mapping:\s*/, '') : String(error);
-      const sourceRef = error instanceof NativeTargetBindingError ? error.sourceRef : undefined;
+      const binding = error instanceof NativeTargetBindingError && error.bindings.length === 1 ? error.bindings[0] : undefined;
+      const pluralBindings = error instanceof NativeTargetBindingError && error.bindings.length > 1 ? error.bindings : undefined;
+      const sourceRef = binding?.sourceRef;
       const location = sourceRef ? locationFor(sourceRef) : undefined;
       const declaration = rule.declarations[0];
       throw new UnresolvedNativeStyleMappingError({
         selector: rule.selector, property: declaration?.property,
-        ...(error instanceof NativeTargetBindingError ? { node: error.node, role: error.role } : {}), reason,
+        ...(binding ? { node: binding.node, role: binding.role } : {}), reason,
         ...(declaration ? { cssSource: { path: sourcePath ?? '<inline>', selector: rule.selector, offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
         ...(sourceRef && location ? { htmlSource: { sourceRef, path: sourcePath ?? '<inline>', offset: location.startOffset, line: location.startLine, column: location.startCol } } : {}),
+        ...(pluralBindings ? { htmlSources: pluralBindings.flatMap(({ sourceRef }) => {
+          const source = locationFor(sourceRef);
+          return source ? [{ sourceRef, path: sourcePath ?? '<inline>', offset: source.startOffset, line: source.startLine, column: source.startCol }] : [];
+        }) } : {}),
       });
     }
     if (!targets?.length) return [rule];
