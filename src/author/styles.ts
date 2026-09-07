@@ -509,6 +509,8 @@ export interface CssStyleRule {
   source: CssSourceRange;
   /** Present for CSS nesting. Nested selectors are parsed and ledgered, then conservatively blocked. */
   nestedIn?: string;
+  /** Internal provenance for rules inserted by the native markup adapter. */
+  generated?: 'native-adapter-target' | 'native-adapter-wrapper-reset';
 }
 
 export interface CssConditionalRule {
@@ -601,6 +603,41 @@ export function decodeCssEscapes(value: string): string {
     const codePoint = Number.parseInt(hex, 16);
     return codePoint === 0 || codePoint > 0x10ffff ? '\ufffd' : String.fromCodePoint(codePoint);
   });
+}
+
+/**
+ * Read complete class atoms from the existing selector scanner.  This is intentionally not a
+ * selector parser: native adaptation accepts only one compound subject and the four interaction
+ * states below.  Keeping the raw spelling lets emitted rules retain escaped utility selectors
+ * while matching uses the decoded atom (so `focus-visible:outline` never equals its suffix).
+ */
+export interface NativeSelectorSubject { raw: string; classes: Array<{ raw: string; decoded: string }>; state?: 'hover' | 'focus' | 'focus-visible' | 'active'; }
+export function nativeSelectorSubjects(selectorList: string): NativeSelectorSubject[] | undefined {
+  const subjects: NativeSelectorSubject[] = [];
+  for (const raw of splitTopLevel(selectorList, ',')) {
+    const selector = raw.trim();
+    if (!selector || /[\s>+~\[\]#*]/.test(selector) || /::|:(?:not|is|where|has)\s*\(/i.test(selector)) return undefined;
+    let index = 0;
+    const classes: Array<{ raw: string; decoded: string }> = [];
+    let state: NativeSelectorSubject['state'];
+    while (index < selector.length) {
+      if (selector[index] === '.') {
+        const atomStart = index;
+        const atom = readCssIdentifier(selector, index + 1);
+        if (!atom) return undefined;
+        classes.push({ raw: selector.slice(atomStart, atom.end), decoded: atom.value });
+        index = atom.end;
+      } else if (selector[index] === ':') {
+        const match = /^:(focus-visible|hover|focus|active)/i.exec(selector.slice(index));
+        if (!match || state) return undefined;
+        state = match[1]!.toLowerCase() as NativeSelectorSubject['state'];
+        index += match[0].length;
+      } else return undefined;
+    }
+    if (!classes.length) return undefined;
+    subjects.push({ raw: selector, classes, ...(state ? { state } : {}) });
+  }
+  return subjects;
 }
 
 export interface DeclarationDisposition {

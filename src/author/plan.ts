@@ -20,7 +20,7 @@ import { BACKGROUND_COLOR_TARGET, GRADIENT_TARGET, classifyBackground, lookupDec
 import { querySupports } from '../styles/capabilities.js';
 import type { AssetLedgerEntry, AuthoredStyleLedgerEntry, AuthorConfig, WpBlock } from '../types.js';
 import { scanCssUrlReferences, type FontAssetWarning, type FontLicenseDecision, type PreparedCssAsset } from './assets.js';
-import { decodeCssEscapes, fontFaceRules, forEachCssRule, scanStylesheet, scopeLocalSelectorList, scopeStylesheet, splitCssTopLevel, type CssDeclaration, type CssRule, type CssStylesheet } from './styles.js';
+import { decodeCssEscapes, fontFaceRules, forEachCssRule, nativeSelectorSubjects, scanStylesheet, scopeLocalSelectorList, scopeStylesheet, splitCssTopLevel, type CssDeclaration, type CssRule, type CssStylesheet } from './styles.js';
 import { exactThemePresetTransport, styleContextFrom } from './style-context.js';
 import { mapExactWordPressResponsiveMedia, resolveWordPressViewportRanges } from './responsive.js';
 import { hasUnsafeResponsiveNativeCascade } from './cascade.js';
@@ -300,7 +300,7 @@ export function compileAnalyzedDesign(input: {
  * is already present; leave every other declaration in the scoped stylesheet.
  */
 function reconcileProposalStyleOwnership(
-  structure: readonly AuthoringStructureNode[],
+  structure: AuthoringStructureNode[],
   rules: readonly CssRule[],
   ledger: readonly AuthoredStyleLedgerEntry[],
   source: string,
@@ -357,9 +357,102 @@ function reconcileProposalStyleOwnership(
       if (declarations.length) output.push({ ...rule, declarations });
       return output;
     }, []);
-    return { rules: removePromoted(rules), styleLedger: nextLedger };
+    const residual = removePromoted(rules);
+    return adaptNativeSourceStyles(structure, residual, nextLedger, sourceNode, bindings);
   } finally { dom.window.close(); }
 }
+
+const BUTTON_WRAPPER_RESET = new Map<string, string>([
+  ['padding', '0'], ['padding-top', '0'], ['padding-right', '0'], ['padding-bottom', '0'], ['padding-left', '0'], ['display', 'block'], ['background', 'transparent'], ['background-color', 'transparent'],
+  ['border', '0'], ['border-top', '0'], ['border-right', '0'], ['border-bottom', '0'], ['border-left', '0'], ['border-radius', '0'], ['border-top-left-radius', '0'], ['border-top-right-radius', '0'], ['border-bottom-left-radius', '0'], ['border-bottom-right-radius', '0'], ['box-shadow', 'none'], ['opacity', '1'], ['transform', 'none'],
+  ['translate', 'none'], ['rotate', 'none'], ['scale', 'none'], ['filter', 'none'], ['transition', 'none'],
+  ['transition-property', 'none'], ['transition-duration', '0s'], ['transition-delay', '0s'],
+]);
+const BUTTON_TARGET_PROPERTIES = new Set(`color background background-color background-image border border-color border-width border-style border-radius box-shadow
+  padding padding-top padding-right padding-bottom padding-left margin margin-top margin-right margin-bottom margin-left display width height min-width max-width min-height max-height
+  font font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform white-space opacity transform translate rotate scale filter
+  transition transition-property transition-duration transition-delay transition-timing-function outline outline-color outline-width outline-style outline-offset cursor`.split(/\s+/));
+
+/** Insert narrowly-qualified native rules beside their exact source rule, preserving nesting/order. */
+function adaptNativeSourceStyles(
+  structure: AuthoringStructureNode[], rules: readonly CssRule[], ledger: AuthoredStyleLedgerEntry[],
+  sourceNodes: ReadonlyMap<string, Element>, bindings: ReadonlyMap<string, string>,
+): { rules: CssRule[]; styleLedger: AuthoredStyleLedgerEntry[] } {
+  const nodes = flattenNodes(structure);
+  const targetFor = (selector: string): Array<{ node: string; target: string; reset?: string }> | undefined => {
+    const subjects = nativeSelectorSubjects(selector);
+    const staticSelector = selector.replace(/:(?:hover|focus-visible|focus|active)\b/gi, '');
+    const matched = [...bindings.entries()].filter(([ref]) => {
+      const element = sourceNodes.get(ref);
+      return !!element && (() => { try { return element.matches(staticSelector); } catch { return false; } })();
+    });
+    const bound = matched.map(([, id]) => nodes.find((candidate) => candidate.id === id)).filter((node): node is AuthoringStructureNode => !!node);
+    if (!subjects) {
+      if (bound.some((node) => ['core/button', 'core/image', 'core/group', 'core/columns'].includes(node.block))) {
+        throw new Error(`unresolved-native-style-mapping: ${selector} is not a supported single-subject native selector`);
+      }
+      return undefined;
+    }
+    const state = subjects[0]?.state ? `:${subjects[0].state}` : '';
+    return bound.flatMap((node) => {
+      if (node.block === 'core/button') {
+        if (!findParent(structure, node.id!) || findParent(structure, node.id!)!.block !== 'core/buttons') throw new Error(`unresolved-native-style-mapping: ${selector} binds core/button without core/buttons wrapper`);
+        const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        // core/button serializes className on its own div.wp-block-button, never core/buttons.
+        node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
+        return [{ node: node.id!, target: `.${marker} > .wp-block-button__link${state}`, reset: `.${marker}${state}` }];
+      }
+      if (node.block === 'core/image') return [{ node: node.id!, target: `figure.wp-block-image${selector} img` }];
+      if (node.block === 'core/group' || node.block === 'core/columns') return [{ node: node.id!, target: `${selector}.${node.block === 'core/group' ? 'wp-block-group' : 'wp-block-columns'}` }];
+      return [];
+    });
+  };
+  const visit = (items: readonly CssRule[], conditional = false): CssRule[] => items.flatMap((rule): CssRule[] => {
+    if (rule.kind === 'conditional') return [{ ...rule, rules: visit(rule.rules, true) }];
+    if (rule.kind !== 'style') return [rule];
+    const targets = targetFor(rule.selector);
+    if (!targets?.length) return [rule];
+    if (targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/columns')
+      && rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() === 'grid')) {
+      throw new Error(`unresolved-native-style-mapping: ${rule.selector} cannot use core/columns for an authored grid`);
+    }
+    if (targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/button')
+      && rule.declarations.some((declaration) => !BUTTON_TARGET_PROPERTIES.has(declaration.property))) {
+      throw new Error(`unresolved-native-style-mapping: ${rule.selector} contains a property outside the supported core/button adapter`);
+    }
+    if (!conditional && targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/group')
+      && rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() === 'grid')) {
+      const group = nodes.find((node) => node.id === targets[0]!.node)!;
+      const layout = group.attributes?.layout;
+      if (layout && (typeof layout !== 'object' || Array.isArray(layout) || (layout as Record<string, unknown>).type !== 'grid')) {
+        throw new Error(`unresolved-native-style-mapping: ${rule.selector} requires a compatible core/group grid layout`);
+      }
+      group.attributes = { ...(group.attributes ?? {}), layout: { ...(layout as Record<string, JsonValue> ?? {}), type: 'grid' } };
+    }
+    const extras: CssRule[] = targets.flatMap((target, targetIndex) => {
+      const targetRule: CssRule = { ...rule, id: `${rule.id}.native-target.${targetIndex}`, selector: target.target, generated: 'native-adapter-target' };
+      const resets = target.reset ? rule.declarations.filter((declaration) => BUTTON_WRAPPER_RESET.has(declaration.property)).map((declaration) => ({ ...declaration, id: `${declaration.id}.native-reset.${targetIndex}`, value: BUTTON_WRAPPER_RESET.get(declaration.property)! })) : [];
+      return resets.length ? [targetRule, { ...rule, id: `${rule.id}.native-reset.${targetIndex}`, selector: target.reset!, declarations: resets, generated: 'native-adapter-wrapper-reset' } as CssRule] : [targetRule];
+    });
+    for (const declaration of rule.declarations) {
+      const entry = ledger.find((candidate) => candidate.source?.selector === rule.selector && candidate.property === declaration.property && candidate.value === declaration.value);
+      if (entry) {
+        for (const target of targets) {
+          const role = target.reset ? 'button-link' : nodes.find((node) => node.id === target.node)?.block === 'core/image' ? 'image' : 'grid-container';
+          entry.nativeTargets = [...(entry.nativeTargets ?? []), { node: target.node, role, selector: target.target }];
+          if (target.reset && BUTTON_WRAPPER_RESET.has(declaration.property)) entry.nativeTargets.push({ node: target.node, role: 'button-wrapper-reset', selector: target.reset });
+        }
+      }
+    }
+    return [rule, ...extras];
+  });
+  return { rules: visit(rules), styleLedger: ledger };
+}
+
+function findParent(nodes: AuthoringStructureNode[], id: string): AuthoringStructureNode | undefined {
+  for (const node of nodes) { if (node.children?.some((child) => child.id === id)) return node; const nested = findParent(node.children ?? [], id); if (nested) return nested; } return undefined;
+}
+function joinClass(value: JsonValue | undefined, marker: string): string { return [...new Set([...(typeof value === 'string' ? value.split(/\s+/) : []), marker])].filter(Boolean).join(' '); }
 
 function sourceDeclarations(rules: readonly CssRule[]): Array<{ selector: string; ruleId: string; declaration: import('./styles.js').CssDeclaration }> {
   return rules.flatMap((rule) => {
@@ -637,6 +730,11 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
         const selectors = coverageCssRuleSelectors(rules, entry.property, entry.value, entry.atRules, entry.transportSelector ?? entry.source?.selector);
         if (selectors.length === 0) {
           throw new Error(`${label} is marked scoped-css but has no matching ${entry.scope} structured CSS rule.`);
+        }
+        for (const target of entry.nativeTargets ?? []) {
+          const expectedValue = target.role === 'button-wrapper-reset' ? BUTTON_WRAPPER_RESET.get(entry.property) : entry.value;
+          const emitted = expectedValue === undefined ? [] : coverageCssRuleSelectors(rules, entry.property, expectedValue, entry.atRules, target.selector);
+          if (!emitted.includes(target.selector)) throw new Error(`${label} is missing generated native target ${target.role} (${target.selector}).`);
         }
         // This is deliberately the compiler's final template, rather than plan.structure: field
         // defaults and confirmed asset uses can replace attributes before WordPress receives it.
@@ -1224,7 +1322,7 @@ function sha256(value: string): string {
 }
 
 function toCoverageStyle(
-  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'transportSelector' | 'node' | 'responsive'>, 'outcome'> & { outcome: string },
+  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'transportSelector' | 'node' | 'responsive' | 'nativeTargets'>, 'outcome'> & { outcome: string },
   scope: AuthoringCoverageStyle['scope'],
 ): AuthoringCoverageStyle {
   const outcome: AuthoringCoverageStyle['outcome'] = entry.outcome === 'native' || entry.outcome === 'preset'
@@ -1242,6 +1340,7 @@ function toCoverageStyle(
     ...(entry.transportSelector ? { transportSelector: entry.transportSelector } : {}),
     ...(entry.node ? { node: entry.node } : {}),
     ...(entry.responsive ? { responsive: entry.responsive } : {}),
+    ...(entry.nativeTargets?.length ? { nativeTargets: entry.nativeTargets } : {}),
   };
 }
 

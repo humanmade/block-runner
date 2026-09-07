@@ -35,7 +35,7 @@ export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v9' as const;
  * The declarative-style renderer is part of the owned template contract.  It never accepts a
  * stylesheet fragment from the plan: its inputs are validated outcomes and structured rules.
  */
-export const REGISTERED_BLOCK_STYLE_EMITTER_VERSION = '3' as const;
+export const REGISTERED_BLOCK_STYLE_EMITTER_VERSION = '4' as const;
 export const WORDPRESS_BLOCK_SCHEMA_VERSION = '7.1' as const;
 export const WORDPRESS_BLOCK_SCHEMA_URL = `https://schemas.wp.org/wp/${WORDPRESS_BLOCK_SCHEMA_VERSION}/block.json`;
 
@@ -586,6 +586,7 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   } catch (error) {
     rethrowCapabilityError(error, 'structure');
   }
+  validateNativeAdapterProvenance(plan);
   // Preview must refuse unsupported styles too, rather than promising an unwritable package.
   emitScss(plan.styles.outcomes, blockRootClass(plan.target.name));
   // Preview and writing reject the same unresolved editor decisions.
@@ -612,6 +613,32 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   // survive the confirmation hash and fail only when source files are materialized.
   renderFontStyles(plan, assets);
   return plan;
+}
+
+/** Generated adapter records are compiler-owned claims, not arbitrary extra CSS annotations. */
+function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
+  const nodes = new Map<string, AuthoringStructureNode>();
+  const visit = (items: readonly AuthoringStructureNode[]) => items.forEach((node) => { if (node.id) nodes.set(node.id, node); visit(node.children ?? []); });
+  visit(plan.structure);
+  const generated = new Map<string, 'native-adapter-target' | 'native-adapter-wrapper-reset'>();
+  const collect = (rules: NonNullable<AuthoringPlan['styles']['rules']>) => rules.forEach((rule) => {
+    if (rule.kind === 'conditional') collect(rule.rules); else if (rule.generated) generated.set(rule.selector, rule.generated);
+  });
+  collect(plan.styles.rules ?? []);
+  for (const entry of plan.coverage?.styles ?? []) for (const target of entry.nativeTargets ?? []) {
+    const node = nodes.get(target.node);
+    const expected = target.role === 'button-wrapper-reset' ? 'native-adapter-wrapper-reset' : 'native-adapter-target';
+    if (!node || !generated.get(target.selector) || generated.get(target.selector) !== expected) {
+      throw new AuthoringGenerationError('forged-native-adapter: generated selector/provenance is not present in the canonical rules', 'coverage.styles.nativeTargets');
+    }
+    if ((target.role === 'button-link' || target.role === 'button-wrapper-reset') && (node.block !== 'core/button' || !target.selector.includes('.wp-block-button__link') && target.role === 'button-link')) {
+      throw new AuthoringGenerationError('forged-native-adapter: button target does not match core/button markup', 'coverage.styles.nativeTargets');
+    }
+    if (target.role === 'image' && (node.block !== 'core/image' || !target.selector.includes('figure.wp-block-image'))) {
+      throw new AuthoringGenerationError('forged-native-adapter: image target does not match core/image markup', 'coverage.styles.nativeTargets');
+    }
+    if (target.role === 'grid-container' && node.block !== 'core/group') throw new AuthoringGenerationError('forged-native-adapter: grid target does not match core/group markup', 'coverage.styles.nativeTargets');
+  }
 }
 
 /**

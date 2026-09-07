@@ -207,7 +207,7 @@ describe('author proposal boundary', () => {
   ])('binds every editable hero unit from %s', async (relative) => {
     const { html, sourcePath } = await source(relative);
     const ref = refs(html);
-    const report = await author(html, { sourcePath, author: { name: 'example/hero' }, proposal: { structure: [{ id: 'hero', block: 'core/group', sourceRef: ref('section'), children: [
+    const report = await author(html, { sourcePath, author: { name: 'example/hero', ...(relative === 'utility/hero.html' ? { styles: { mode: 'css' as const, css: '.px-5 { padding: 1.25rem; transition: transform 150ms; } .hover\\:bg-cyan-200:hover { transform: translateY(-2px); } .focus-visible\\:outline:focus-visible { outline: 2px solid currentColor; }' } } : {}) }, proposal: { structure: [{ id: 'hero', block: 'core/group', sourceRef: ref('section'), children: [
       { id: 'content', block: 'core/group', sourceRef: ref('div', 1), children: [
         { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) },
         { id: 'title', block: 'core/heading', sourceRef: ref('h1') },
@@ -230,6 +230,12 @@ describe('author proposal boundary', () => {
     expect(nodes.get('image')!.attributes).toMatchObject({ url: '/wp-content/uploads/block-runner-editor.png', alt: 'A WordPress editor sidebar with editable block controls', caption: 'Native controls stay with the block, not in a screenshot.' });
     expect(plan.fields).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'title-content', mode: 'editable' })]));
     expect(plan.locking).toEqual({ mode: 'contentOnly' });
+    if (relative === 'utility/hero.html') {
+      const generated = plan.styles.rules?.filter((rule): rule is Extract<typeof rule, { kind: 'style' }> => rule.kind === 'style' && Boolean(rule.generated)) ?? [];
+      expect(generated.some((rule) => rule.generated === 'native-adapter-target' && rule.selector.includes('.wp-block-button__link'))).toBe(true);
+      expect(generated.some((rule) => rule.generated === 'native-adapter-wrapper-reset')).toBe(true);
+      expect(plan.coverage!.styles.some((entry) => entry.nativeTargets?.some((target) => target.role === 'button-link'))).toBe(true);
+    }
     validateSourceContent(html, compileRegisteredBlock(plan).template);
   });
 

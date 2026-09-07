@@ -1,7 +1,14 @@
 import { describe, expect, it } from 'vitest';
-import { scanStylesheet, scopeLocalSelectorList } from '../src/author/styles.js';
+import { nativeSelectorSubjects, scanStylesheet, scopeLocalSelectorList } from '../src/author/styles.js';
 
 describe('component CSS selector scoping', () => {
+  it('reads complete escaped utility atoms without accepting a longer suffix atom', () => {
+    const subjects = nativeSelectorSubjects('.focus-visible\\:outline:focus-visible, .focus-visible\\:outline-2:focus-visible');
+    expect(subjects?.map((subject) => subject.classes[0]!.decoded)).toEqual(['focus-visible:outline', 'focus-visible:outline-2']);
+    expect(subjects?.[0]?.classes[0]?.raw).toBe('.focus-visible\\:outline');
+    expect(nativeSelectorSubjects('.card > .cta')).toBeUndefined();
+  });
+
   it('uses a zero-specificity root boundary while retaining local selector states and lists', () => {
     const scoped = scopeLocalSelectorList(':where(.card), .card:hover::before', '.wp-block-acme-card');
 

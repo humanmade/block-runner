@@ -145,6 +145,8 @@ export interface AuthoredStyleLedgerEntry {
   /** Native-node evidence for a conservatively lifted WordPress responsive declaration. */
   node?: string;
   responsive?: 'mobile' | 'tablet';
+  /** Compiler-owned native adapter destinations for this original declaration. */
+  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string }>;
 }
 
 /** The terminal disposition of a source asset. */

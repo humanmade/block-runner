@@ -62,6 +62,8 @@ export interface AuthoringCoverageStyle {
   responsive?: 'mobile' | 'tablet';
   /** Exact target theme preset provenance for a preset outcome. */
   preset?: { category: 'color' | 'spacing' | 'font-size' | 'font-family'; slug: string };
+  /** Native destinations emitted in addition to, never instead of, the source declaration. */
+  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string }>;
 }
 
 export type AuthoringCoverageAssetOutcome = 'prepared' | 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
@@ -230,6 +232,8 @@ export type AuthoringCssRule = {
   kind: 'style';
   selector: string;
   declarations: AuthoringCssDeclaration[];
+  /** Compiler-owned supplemental transport; source rules deliberately omit this field. */
+  generated?: 'native-adapter-target' | 'native-adapter-wrapper-reset';
 } | {
   kind: 'conditional';
   name: 'media' | 'supports' | 'container';
@@ -581,7 +585,7 @@ function normalizeCoverageLocation(input: unknown, location: string): AuthoringC
 
 function normalizeCoverageStyle(input: unknown, location: string): AuthoringCoverageStyle {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset']);
+  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset', 'nativeTargets']);
   return withOptional({
     property: nonEmptyString(value.property, `${location}.property`),
     value: stringAt(value.value, `${location}.value`),
@@ -598,6 +602,12 @@ function normalizeCoverageStyle(input: unknown, location: string): AuthoringCove
       knownKeys(preset, `${location}.preset`, ['category', 'slug']);
       return { category: enumAt(preset.category, `${location}.preset.category`, ['color', 'spacing', 'font-size', 'font-family'] as const), slug: nonEmptyString(preset.slug, `${location}.preset.slug`) };
     })(),
+    nativeTargets: value.nativeTargets === undefined ? undefined : arrayAt(value.nativeTargets, `${location}.nativeTargets`).map((target, index) => {
+      const at = `${location}.nativeTargets[${index}]`;
+      const item = objectAt(target, at);
+      knownKeys(item, at, ['node', 'role', 'selector']);
+      return { node: nonEmptyString(item.node, `${at}.node`), role: enumAt(item.role, `${at}.role`, ['button-link', 'button-wrapper-reset', 'image', 'caption', 'grid-container'] as const), selector: nonEmptyString(item.selector, `${at}.selector`) };
+    }),
   });
 }
 
@@ -775,8 +785,9 @@ function normalizeCssRules(input: unknown, location: string, depth = 0): Authori
       return { kind, name: enumAt(rule.name, `${at}.name`, ['media', 'supports', 'container'] as const),
         prelude: nonEmptyString(rule.prelude, `${at}.prelude`), rules: normalizeCssRules(rule.rules, `${at}.rules`, depth + 1) };
     }
-    knownKeys(rule, at, ['kind', 'selector', 'declarations']);
-    return { kind, selector: nonEmptyString(rule.selector, `${at}.selector`),
+    knownKeys(rule, at, ['kind', 'selector', 'declarations', 'generated']);
+    return withOptional({ kind, selector: nonEmptyString(rule.selector, `${at}.selector`),
+      generated: rule.generated === undefined ? undefined : enumAt(rule.generated, `${at}.generated`, ['native-adapter-target', 'native-adapter-wrapper-reset'] as const),
       declarations: arrayAt(rule.declarations, `${at}.declarations`).map((inputDeclaration, declarationIndex) => {
         const declarationAt = `${at}.declarations[${declarationIndex}]`;
         const declaration = objectAt(inputDeclaration, declarationAt);
@@ -789,7 +800,7 @@ function normalizeCssRules(input: unknown, location: string, depth = 0): Authori
         return withOptional({ property, value,
           important: optionalBoolean(declaration.important, `${declarationAt}.important`) });
       }),
-    };
+    });
   });
 }
 
