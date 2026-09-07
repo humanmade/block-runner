@@ -162,14 +162,12 @@ An empty `files` list lets the compiler enumerate its complete
 source set in the preview; it does not mean no output. A native SVG adds an owned
 `asset-urls.mjs` source file, which is included in confirmation and the manifest.
 
-For existing HTML/CSS input, `author <html> --name <namespace/slug> --json` returns deterministic
-source evidence before any rules proposal: authored elements and locations, stylesheet/build
-dependencies, source hashes, and complete style/asset ledgers (including unresolved entries).
-Rules conversion is an advisory proposal source, not a prerequisite for inspecting messy or
-unknown-safe markup. It does not write source. A caller may supply an independently designed
-native plan through the API, but it must carry the exact source hash and complete evidence
-coverage; changing the proposed tree cannot erase an unresolved declaration or asset obligation.
-The same registered-block compiler, preview, confirmation, and write gate apply to either plan.
+For existing HTML/CSS input, first analyse the exact input to obtain deterministic `sourceRef`s.
+Then submit `AuthorOptions.proposal` with ordered native structure, source references, fields,
+locks, and explicit add/replace/omit decisions. Block Runner owns source hashes, content transport,
+assets, CSS coverage, and mandatory warnings, then returns the usual canonical plan for preview,
+confirmation, and writing. Complete `AuthorOptions.plan` remains supported for existing callers,
+but do not make a model copy ledgers, asset hashes, destinations, CSS rules, or warnings.
 
 Tailwind detection is advisory. Supplied compiled CSS can be handled as ordinary CSS; Tailwind
 source/runtime output needs an explicit, pinned build graph (including custom variants, plugins,

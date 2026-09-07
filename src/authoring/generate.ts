@@ -274,7 +274,7 @@ export function registeredBlockFontFamilyPrefix(blockName: string): string {
 }
 
 function stylesheetSuffix(rules: AuthoringPlan['styles']['rules'], root: string, plan: AuthoringPlan, at?: string): string {
-  const { css } = renderConfirmedStyleRules(rules ?? [], root, plan.assets, at);
+  const { css } = renderConfirmedStyleRules(rules ?? [], root, plan.assets, at, plan.styles.foundation);
   return css ? `${css}\n` : '';
 }
 
@@ -657,7 +657,10 @@ function assertNoExecutableBehaviour(plan: AuthoringPlan): void {
       visit(item, childPath);
     }
   };
-  visit(plan, '$');
+  // Source decisions are audit records, not block attributes or executable plan input.  In
+  // particular their required `action` vocabulary must not be confused with an HTML form action.
+  const { sourceDecisions: _sourceDecisions, ...staticPlan } = plan;
+  visit(staticPlan, '$');
 }
 
 function assertSafePlanData(plan: AuthoringPlan): void {
@@ -729,7 +732,9 @@ function assertSafeRichMarkup(markup: string, path: string): void {
     }
     for (const attribute of element.attributes) {
       const name = attribute.name.toLowerCase();
-      if (name.startsWith('on') || !allowedAttributes.has(name)) {
+      const safeAriaHidden = tag === 'span' && name === 'aria-hidden'
+        && (attribute.value === 'true' || attribute.value === 'false');
+      if (name.startsWith('on') || (!allowedAttributes.has(name) && !safeAriaHidden)) {
         throw new AuthoringGenerationError(`unsafe-inner-content: unsafe ${attribute.name} attribute`, path);
       }
       if (name === 'href' || name === 'cite') assertSafeUrl(attribute.value, path);

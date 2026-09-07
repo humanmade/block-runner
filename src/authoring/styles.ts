@@ -221,7 +221,7 @@ export function authoringRulesFromStylesheet(rules: readonly CssRule[]): Authori
 
 /** The same checked rendering is used before preview, before asset reads, and during compilation. */
 export function renderConfirmedStyleRules(
-  rules: readonly AuthoringCssRule[], root: string, assets: readonly AuthoringAsset[], location = 'styles.rules',
+  rules: readonly AuthoringCssRule[], root: string, assets: readonly AuthoringAsset[], location = 'styles.rules', foundation?: 'component',
 ): { css: string; assetIds: Set<string> } {
   if (!/^\.wp-block-[a-z0-9][a-z0-9-]*-[a-z0-9][a-z0-9-]*$/.test(root)) fail('invalid owned block root', location);
   const assetIds = new Set<string>();
@@ -247,7 +247,7 @@ export function renderConfirmedStyleRules(
       }
       assertFragment(rule.selector, `${ruleAt}.selector`, true, true);
       if (rule.selector.includes(root)) fail('selectors must be component-local; the compiler owns the root prefix', `${ruleAt}.selector`);
-      const scoped = scopeLocalSelectorList(rule.selector, root);
+      const scoped = scopeLocalSelectorList(rule.selector, root, { foundation });
       if (!scoped.ok) fail(scoped.reason, `${ruleAt}.selector`);
       if (!rule.declarations.length) fail('empty style rule', ruleAt);
       const declarations = rule.declarations.map((declaration, declarationIndex) => {
@@ -256,8 +256,12 @@ export function renderConfirmedStyleRules(
           || /^(?:behavior|-moz-binding)$/i.test(declaration.property)) {
           fail('unsupported or unsafe CSS property', `${declarationAt}.property`);
         }
-        assertFragment(declaration.value, `${declarationAt}.value`);
-        assertCssFunctions(declaration.value, `${declarationAt}.value`);
+        // An empty custom property is a valid Tailwind foundation placeholder. All ordinary
+        // declarations still require a non-empty safe fragment.
+        if (declaration.value || !declaration.property.startsWith('--')) {
+          assertFragment(declaration.value, `${declarationAt}.value`);
+          assertCssFunctions(declaration.value, `${declarationAt}.value`);
+        }
         if (/expression\s*\(|!\s*important/i.test(declaration.value)) fail('value must not contain executable CSS or an embedded priority', `${declarationAt}.value`);
         for (const reference of scanCssUrlReferences(`x{${declaration.property}:${declaration.value}}`)) {
           // URL ownership is explicit. A local URL cannot silently resolve against the host page.
@@ -275,7 +279,12 @@ export function renderConfirmedStyleRules(
       if (parsed.length !== 1 || parsedRule?.type !== 'rule' || parsedRule.selector !== scoped.selector
         || parsedRule.nodes.length !== rule.declarations.length
         || parsedRule.nodes.some((node, i) => node.type !== 'decl'
-          || node.prop !== rule.declarations[i]!.property || node.value !== rule.declarations[i]!.value
+          || node.prop !== rule.declarations[i]!.property
+          // PostCSS retains the formatting space between `--token:` and `;` as the value. It is
+          // still the same valid empty custom-property placeholder emitted by Tailwind.
+          || (node.value !== rule.declarations[i]!.value
+            && !(rule.declarations[i]!.property.startsWith('--')
+              && rule.declarations[i]!.value === '' && node.value.trim() === ''))
           || Boolean(node.important) !== Boolean(rule.declarations[i]!.important))) {
         fail('declaration changed during parsing', ruleAt);
       }
@@ -287,8 +296,8 @@ export function renderConfirmedStyleRules(
 
 export function confirmedStylesheetAssets(styles: AuthoringStyles, name: string, assets: readonly AuthoringAsset[]): Set<string> {
   const root = `.wp-block-${name.replace('/', '-')}`;
-  const shared = renderConfirmedStyleRules(styles.rules ?? [], root, assets);
-  const editor = renderConfirmedStyleRules(styles.editorRules ?? [], root, assets, 'styles.editorRules');
+  const shared = renderConfirmedStyleRules(styles.rules ?? [], root, assets, 'styles.rules', styles.foundation);
+  const editor = renderConfirmedStyleRules(styles.editorRules ?? [], root, assets, 'styles.editorRules', styles.foundation);
   return new Set([...shared.assetIds, ...editor.assetIds]);
 }
 

@@ -16,6 +16,7 @@ export function validateSourceContent(sourceHtml: string, compiledTemplate: read
     assertEqual('visible text sequence', sourceContent.text, generatedContent.text);
     assertEqual('links', sourceContent.links, generatedContent.links);
     assertEqual('image alt text', sourceContent.imageAlts, generatedContent.imageAlts);
+    assertEqual('image captions', sourceContent.imageCaptions, generatedContent.imageCaptions);
   } finally {
     source.window.close();
     generated?.window.close();
@@ -33,15 +34,18 @@ function serializeCompiledTemplate(template: readonly unknown[]): string {
   return withMutedWordPressConsole(() => wp.serialize(template.map(toBlock)));
 }
 
-function contentFacts(document: Document): { text: string; links: string[]; imageAlts: string[] } {
+function contentFacts(document: Document): { text: string; links: string[]; imageAlts: string[]; imageCaptions: string[] } {
   const text = normalizeVisibleText(document.body);
   const links = [...document.querySelectorAll('a')]
     .filter((element) => !element.closest('script,style,template,head'))
-    .map((element) => `${normalizeVisibleText(element)} → ${element.getAttribute('href') ?? ''}`);
+    .map((element) => `${normalizeVisibleText(element)} → ${element.getAttribute('href') ?? ''} | target=${element.getAttribute('target') ?? ''} | rel=${element.getAttribute('rel') ?? ''}`);
   const imageAlts = [...document.querySelectorAll('img')]
     .filter((element) => !element.closest('script,style,template,head'))
     .map((element) => element.getAttribute('alt') ?? '');
-  return { text, links, imageAlts };
+  const imageCaptions = [...document.querySelectorAll('figure')]
+    .filter((element) => element.querySelector('img') && element.querySelector('figcaption'))
+    .map((element) => normalizeVisibleText(element.querySelector('figcaption')!));
+  return { text, links, imageAlts, imageCaptions };
 }
 
 function normalizeVisibleText(root: Node): string {

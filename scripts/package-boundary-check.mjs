@@ -98,6 +98,14 @@ async function verifyBasicConsumer({ consumer, packageRoot, cli, require }) {
   run(process.execPath, [cli, 'fix', 'basic.blocks.html'], { cwd: consumer });
   const authoring = JSON.parse(run(process.execPath, [cli, 'author', 'basic.html', '--name', 'acme/packed-basic', '--json'], { cwd: consumer }).stdout);
   if (!authoring.ok) throw new Error('Packed deterministic authoring failed.');
+  const paragraph = library.collectSourceEvidence('<p>Packed proposal smoke.</p>').structure.find((item) => item.tag === 'p');
+  const proposed = await library.author('<p>Packed proposal smoke.</p>', {
+    author: { name: 'acme/packed-proposal' },
+    proposal: { structure: [{ id: 'copy', block: 'core/paragraph', sourceRef: paragraph?.sourceRef }] },
+  });
+  if (!proposed.ok || proposed.package?.canonicalPlan?.structure[0]?.attributes?.content !== 'Packed proposal smoke.') {
+    throw new Error('Packed proposal authoring failed.');
+  }
 
   const blocked = run(process.execPath, [
     cli, 'proof', 'proof-plugin.zip', '--profile', 'runtime', '--fixture', 'proof-fixture.json',

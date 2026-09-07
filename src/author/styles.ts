@@ -618,6 +618,8 @@ export interface ScopeStylesheetOptions {
   disposition?: (declaration: CssDeclaration, rule: CssStyleRule, context: { conditional: boolean }) => DeclarationDisposition | undefined;
   /** Rewrite source selector atoms before the root prefix is applied. */
   selectorTransform?: (selector: string, rule: CssStyleRule) => string;
+  /** Explicitly contain safe foundation selectors within the generated component. */
+  foundation?: 'component';
 }
 
 export interface ScopedStylesheet {
@@ -698,12 +700,11 @@ export function scopeStylesheet(stylesheet: CssStylesheet, options: ScopeStylesh
       blockRule(rule, errorMessage(error));
       return undefined;
     }
-    const scoped = scopeLocalSelectorList(transformedSelector, options.root);
+    const scoped = scopeLocalSelectorList(transformedSelector, options.root, { foundation: options.foundation });
     if (!scoped.ok) {
       blockRule(rule, scoped.reason);
       return undefined;
     }
-
     const declarations: CssDeclaration[] = [];
     for (const declaration of rule.declarations) {
       const entry = ledgerByDeclaration.get(declaration.id);
@@ -767,7 +768,8 @@ export function renderResidualCss(stylesheet: Pick<ScopedStylesheet, 'rules'>): 
 export function scopeLocalSelectorList(
   selectorList: string,
   root: string,
-): { ok: true; selector: string } | { ok: false; reason: string } {
+  options: { foundation?: 'component' } = {},
+): { ok: true; selector: string; foundation?: 'component' | 'document-base' } | { ok: false; reason: string } {
   const rootProblem = validateScopeRoot(root);
   if (rootProblem) {
     return { ok: false, reason: rootProblem };
@@ -778,15 +780,60 @@ export function scopeLocalSelectorList(
     return { ok: false, reason: 'empty selector cannot be scoped' };
   }
 
-  for (const selector of selectors) {
-    const problem = unsafeSelectorReason(selector);
-    if (problem) {
-      return { ok: false, reason: problem };
-    }
-  }
-
   const scope = `:where(${root.trim()})`;
-  return { ok: true, selector: selectors.map((selector) => `${scope} ${selector}`).join(', ') };
+  const scoped: string[] = [];
+  let foundation: 'component' | 'document-base' | undefined;
+  for (const selector of selectors) {
+    const local = scopeComponentSelector(selector, scope, options.foundation);
+    if (!local.ok) return local;
+    scoped.push(...local.selectors);
+    if (local.foundation === 'document-base') foundation = 'document-base';
+    else if (local.foundation) foundation ??= 'component';
+  }
+  return { ok: true, selector: [...new Set(scoped)].join(', '), ...(foundation ? { foundation } : {}) };
+}
+
+function scopeComponentSelector(
+  selector: string,
+  scope: string,
+  foundation: 'component' | undefined,
+): { ok: true; selectors: string[]; foundation?: 'component' | 'document-base' } | { ok: false; reason: string } {
+  const problem = unsafeSelectorReason(selector);
+  if (!problem) return { ok: true, selectors: [`${scope} ${selector}`] };
+  if (foundation !== 'component') return { ok: false, reason: problem };
+
+  const normalized = unescapeCss(selector).trim().toLowerCase();
+  if (isExactComponentRootSelector(normalized)) {
+    return { ok: true, selectors: [scope], foundation: 'document-base' };
+  }
+  if (hasComponentEscape(normalized)) return { ok: false, reason: problem };
+  // Any document anchor in a compound selector would depend on ancestry outside the component.
+  if (hasDocumentAnchor(normalized)) return { ok: false, reason: problem };
+  if (!isFoundationSelector(normalized)) return { ok: false, reason: problem };
+
+  // Universal and pseudo-only selectors can match the generated root itself as well as its
+  // descendants. Preserve both matches; ordinary bare elements cannot match the wrapper div.
+  if (/^(?:\*|:)/.test(normalized)) {
+    const rootMatch = normalized.startsWith('*') ? `${scope}${selector.slice(1)}` : `${scope}${selector}`;
+    return { ok: true, selectors: [rootMatch, `${scope} ${selector}`], foundation: 'component' };
+  }
+  return { ok: true, selectors: [`${scope} ${selector}`], foundation: 'component' };
+}
+
+function isExactComponentRootSelector(selector: string): boolean {
+  return selector === 'html' || selector === 'body' || selector === ':root' || selector === ':host';
+}
+
+function hasDocumentAnchor(selector: string): boolean {
+  return /(?:^|[\s>+~,(])(?:html|body)(?=$|[\s>+~.#[:])|:root\b/.test(selector);
+}
+
+function hasComponentEscape(selector: string): boolean {
+  return /^[>+~]|[&]|\/deep\/|>>>|:global\s*\(|:host(?:-context)?\b|::(?:part|slotted)\b|:scope\b/.test(selector);
+}
+
+function isFoundationSelector(selector: string): boolean {
+  return !/[.#\[]/.test(selector);
 }
 
 export interface SelectorDependencyTransport {
@@ -853,6 +900,11 @@ export function createSelectorDependencyTransport(): SelectorDependencyTransport
           quote = char;
           output += char;
           index += 1;
+          continue;
+        }
+        if (char === '\\') {
+          output += char + (selector[index + 1] ?? '');
+          index += 2;
           continue;
         }
         if (char === '#') {
@@ -1392,13 +1444,16 @@ class StylesheetScanner {
     }
     const property = raw.slice(0, colon).trim();
     const rawValue = raw.slice(colon + 1).trim();
-    if (!property || !rawValue) {
+    // Empty custom-property values are valid CSS and are emitted by Tailwind's reset layer as
+    // intentional placeholders. They participate in later var() fallbacks, so warning or
+    // dropping them would make a component-contained Preflight ledger incomplete.
+    if (!property || (!rawValue && !property.startsWith('--'))) {
       this.recordMalformedDeclaration(raw, start, end, ruleId, atRules, 'CSS declaration needs both a property and a value');
       return undefined;
     }
     const importantMatch = /^(.*?)\s*!\s*important\s*$/is.exec(rawValue);
     const value = (importantMatch?.[1] ?? rawValue).trim();
-    if (!value) {
+    if (!value && !property.startsWith('--')) {
       return undefined;
     }
     const declaration: CssDeclaration = {

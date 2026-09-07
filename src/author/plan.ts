@@ -14,6 +14,7 @@ import type {
   AuthoringStructureNode,
   JsonValue,
 } from '../authoring/schema.js';
+import { COMPONENT_FOUNDATION_WARNING } from '../authoring/schema.js';
 import { authoringRulesFromStylesheet } from '../authoring/styles.js';
 import { BACKGROUND_COLOR_TARGET, GRADIENT_TARGET, classifyBackground, lookupDeclaration } from '../styles/declarations.js';
 import { querySupports } from '../styles/capabilities.js';
@@ -135,6 +136,11 @@ export function compileAnalyzedDesign(input: {
   source: string;
   sourcePath?: string;
   blocks: WpBlock[];
+  /** Proposal-bound structure, after source content has been resolved by the author adapter. */
+  structureOverride?: AuthoringStructureNode[];
+  sourceDecisions?: AuthoringPlan['sourceDecisions'];
+  /** Design-owned choices from a normalized proposal (never source bookkeeping). */
+  proposalChoices?: Pick<AuthoringPlan, 'fields' | 'locking' | 'allowedBlocks' | 'pattern'>;
   rules: readonly CssRule[];
   preparedAssets: readonly PreparedCssAsset[];
   assets: readonly AssetLedgerEntry[];
@@ -172,7 +178,7 @@ export function compileAnalyzedDesign(input: {
     nodes.push(node);
     return node;
   };
-  const structure = input.blocks.map((block, index) => convert(block, `source.${index}`));
+  const structure = input.structureOverride ?? input.blocks.map((block, index) => convert(block, `source.${index}`));
   const responsive = liftExactResponsiveStyles({
     structure,
     rules: input.rules,
@@ -182,6 +188,18 @@ export function compileAnalyzedDesign(input: {
     sourceRules: input.stylesheetFacts?.rules ?? input.rules,
   });
   const sourceEntry = input.sourcePath ?? '<inline>';
+  // Proposal binding reads exact source attributes.  The asset adapter, rather than the model,
+  // owns the package-relative rewrite used by the final native image node.
+  const rewrittenAssets = new Map(input.assets
+    .filter((asset) => asset.rewritten && (asset.outcome === 'prepared' || asset.outcome === 'copied'))
+    .map((asset) => [asset.reference, asset.rewritten!]));
+  for (const node of flattenNodes(structure)) {
+    if (node.block === 'core/image' && typeof node.attributes?.url === 'string') {
+      const rewritten = rewrittenAssets.get(node.attributes.url);
+      if (rewritten) node.attributes.url = rewritten;
+    }
+  }
+  const finalNodes = flattenNodes(structure);
   const assets: AuthoringPlan['assets'] = input.preparedAssets.map((asset, index) => {
     const destination = `assets/${path.basename(asset.destination)}`;
     const license = asset.kind === 'font'
@@ -196,14 +214,17 @@ export function compileAnalyzedDesign(input: {
           ...(license.notice === undefined ? {} : { notice: license.notice }),
         },
       } : {}),
-      uses: nodes.filter((node) => node.block === 'core/image' && node.attributes?.url === `./${destination}`)
+      uses: finalNodes.filter((node) => node.block === 'core/image' && node.attributes?.url === `./${destination}`)
         .map((node) => ({ node: node.id!, attribute: 'url' as const })) };
   });
   for (const reference of new Set(input.assets.filter((asset) => asset.outcome === 'external' && /^https?:\/\//.test(asset.reference)).map((asset) => asset.reference))) {
     assets.push({ id: `external.${createHash('sha256').update(reference).digest('hex').slice(0, 16)}`, source: reference, status: 'external' });
   }
   const editorCss = input.editorStylesheet ?? definition.styles?.editorCss;
-  const editor = scopeStylesheet(scanStylesheet(editorCss ?? ''), { root: `.wp-block-${name.replace('/', '-')}` });
+  const editor = scopeStylesheet(scanStylesheet(editorCss ?? ''), {
+    root: `.wp-block-${name.replace('/', '-')}`,
+    foundation: definition.styles?.foundation,
+  });
   const editorSelectors = cssRuleSelectors(editor.localRules);
   if (editor.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned') || editor.ruleRecords.some((rule) => rule.outcome === 'blocked')) {
     throw new Error('Editor-only CSS must use supported component-local rules; global or unsupported rules cannot be emitted.');
@@ -242,16 +263,22 @@ export function compileAnalyzedDesign(input: {
       category: definition.category ?? 'widgets', wordpress: '7.1' },
     source: { entry: sourceEntry, sha256: sha256(input.source), format: 'html' },
     coverage,
-    structure, fields: nodes.flatMap((node) => supportedPatternOverrideAttributes(node.block).map((attribute) => ({
+    structure, ...(input.sourceDecisions?.length ? { sourceDecisions: input.sourceDecisions } : {}),
+    fields: input.proposalChoices?.fields ?? (input.structureOverride ? flattenNodes(structure) : nodes).flatMap((node) => supportedPatternOverrideAttributes(node.block).map((attribute) => ({
       id: `${node.id}.${attribute}`, label: `${node.block} ${attribute}`, mode: 'editable' as const, node: node.id, attribute,
     }))),
     // Analysis proposes the legacy unrestricted policy; the returned plan exposes it for review.
-    locking: definition.locking ?? { mode: 'none' },
+    locking: input.proposalChoices?.locking ?? definition.locking ?? { mode: 'none' },
     styles: { strategy: responsive.rules.length ? 'mixed' : 'native', outcomes: [],
+      ...(definition.styles?.foundation ? { foundation: definition.styles.foundation } : {}),
       rules: authoringRulesFromStylesheet(responsive.rules), editorRules: authoringRulesFromStylesheet(editor.localRules),
       ...(input.fonts?.length ? { fonts: [...input.fonts] } : {}) },
-    pattern: { ready: false, overrides: [] }, assets, files: [],
-    warnings: (input.fontWarnings ?? []).map(({ warning }) => warning.reason),
+    ...(input.proposalChoices?.allowedBlocks === undefined ? {} : { allowedBlocks: input.proposalChoices.allowedBlocks }),
+    pattern: input.proposalChoices?.pattern ?? { ready: false, overrides: [] }, assets, files: [],
+    warnings: [
+      ...(definition.styles?.foundation === 'component' ? [COMPONENT_FOUNDATION_WARNING] : []),
+      ...(input.fontWarnings ?? []).map(({ warning }) => warning.reason),
+    ],
   };
   return { plan, generated: compileRegisteredBlock(plan), editorStyleLedger };
 }
@@ -448,6 +475,7 @@ export function createAnalyzedDesignCoverage(input: {
     ...(input.editorStylesheet === undefined ? {} : {
       editorStylesheet: { entry: '<author.styles.editorCss>', sha256: sha256(input.editorStylesheet) },
     }),
+    ...(input.definition.styles?.foundation ? { foundation: input.definition.styles.foundation } : {}),
     styleContext: coverageStyleContext(input.definition, `${input.stylesheet ?? ''}\n${input.editorStylesheet ?? ''}`),
     styles: [
       ...input.styleLedger.map((entry) => toCoverageStyle(entry, 'shared')),
@@ -478,7 +506,9 @@ function coverageStyleContext(definition: AuthorConfig, css: string): AuthoringS
   if (!theme?.settings) limitations.push('No target theme settings snapshot was supplied; native/theme-preset fidelity is not asserted.');
   if (!viewports) limitations.push('No configured WordPress viewport ranges were supplied; responsive source conditions remain exact scoped CSS.');
   if (unresolvedVariables.length) limitations.push('Custom CSS variables are unresolved outside this block stylesheet; their provider and cascade remain a destination assumption.');
-  limitations.push('Global foundation/reset CSS is not injected; source rules requiring it are blocked instead of being approximated.');
+  limitations.push(definition.styles?.foundation === 'component'
+    ? 'Foundation CSS is contained within the generated component; document-wide equivalence is intentionally not claimed.'
+    : 'Global foundation/reset CSS is not injected; source rules requiring it are blocked instead of being approximated.');
   limitations.push(...facts.limitations);
   return {
     ...(theme ? { theme: {
@@ -503,11 +533,12 @@ function stableJson(value: unknown): string {
  * declarative package it asks the compiler to emit.  Ledger equality alone is provenance, not
  * delivery: CSS and prepared assets must also have a concrete plan transport.
  */
-export function validateCoverageFulfillment(plan: AuthoringPlan): void {
+export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: string): void {
   const coverage = plan.coverage;
   if (!coverage) throw new Error('Supplied authoring plan is missing its source coverage.');
   let serializedTemplate: string | undefined;
   let generatedDom: JSDOM | undefined;
+  let sourceDom: JSDOM | undefined;
 
   try {
     for (const [index, entry] of coverage.styles.entries()) {
@@ -517,7 +548,7 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
       }
       if (entry.outcome === 'scoped-css') {
         const rules = entry.scope === 'editor' ? plan.styles.editorRules ?? [] : plan.styles.rules ?? [];
-        const selectors = coverageCssRuleSelectors(rules, entry.property, entry.value, entry.atRules, entry.source?.selector);
+        const selectors = coverageCssRuleSelectors(rules, entry.property, entry.value, entry.atRules, entry.transportSelector ?? entry.source?.selector);
         if (selectors.length === 0) {
           throw new Error(`${label} is marked scoped-css but has no matching ${entry.scope} structured CSS rule.`);
         }
@@ -525,7 +556,16 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
         // defaults and confirmed asset uses can replace attributes before WordPress receives it.
         serializedTemplate ??= serializeCompiledTemplate(compileRegisteredBlock(plan).template);
         generatedDom ??= generatedTemplateDom(plan.target.name, serializedTemplate);
-        if (!selectors.some((selector) => selectorAppliesToGeneratedTemplate(selector, plan.target.name, generatedDom!.window.document))) {
+        const generatedMatch = selectors.some((selector) =>
+          selectorAppliesToGeneratedTemplate(selector, plan.target.name, generatedDom!.window.document, plan.styles.foundation),
+        );
+        // A complete stylesheet may carry foundation rules for elements not present in this one
+        // design. Retain those exact rules, but require an emitted match when the original source
+        // actually used the selector. Without source HTML, preserve the former conservative gate.
+        const sourceMatch = sourceHtml !== undefined && entry.source?.selector !== undefined
+          ? sourceSelectorApplies(entry.source.selector, (sourceDom ??= new JSDOM(sourceHtml)).window.document)
+          : true;
+        if (!generatedMatch && sourceMatch) {
           throw new Error(`${label} is marked scoped-css but its selector does not match the generated native template.`);
         }
         continue;
@@ -557,20 +597,45 @@ export function validateCoverageFulfillment(plan: AuthoringPlan): void {
       if (entry.outcome === 'unresolved' || entry.outcome === 'blocked' || entry.outcome === 'external') {
         throw new Error(`${label} is unresolved source evidence and cannot be claimed as transported.`);
       }
-      const asset = plan.assets.find((candidate) => (candidate.source === entry.reference || path.basename(candidate.source) === entry.reference)
-        && candidate.destination === entry.destination && candidate.sha256 === entry.sha256);
+      const source = resolvedCoverageAssetSource(plan, entry.reference);
+      const asset = source === undefined || entry.destination === undefined || entry.sha256 === undefined
+        ? undefined
+        : plan.assets.find((candidate) => path.resolve(candidate.source) === source
+          && candidate.destination === entry.destination && candidate.sha256 === entry.sha256);
       if (!asset) throw new Error(`${label} has no matching confirmed plan asset record.`);
       if (entry.kind === 'font') {
         if (!plan.styles.fonts?.some((face) => face.assetId === asset.id)) {
           throw new Error(`${label} has no generated font-face transport.`);
         }
       } else if (!asset.uses?.length) {
-        throw new Error(`${label} has no native output use.`);
+        // Background/other CSS-only images have no native image attribute. They are fulfilled
+        // only when the final structured stylesheet still names the exact package destination.
+        const cssUse = [...plan.styles.rules ?? [], ...plan.styles.editorRules ?? []]
+          .some((rule) => cssRuleUsesAsset(rule, asset.destination!));
+        if (!cssUse) throw new Error(`${label} has no native or confirmed CSS output use.`);
       }
     }
   } finally {
     generatedDom?.window.close();
+    sourceDom?.window.close();
   }
+}
+
+function cssRuleUsesAsset(rule: import('../authoring/schema.js').AuthoringCssRule, destination: string): boolean {
+  if (rule.kind === 'conditional') return rule.rules.some((child) => cssRuleUsesAsset(child, destination));
+  return rule.declarations.some((declaration) => declaration.value.includes(destination) || declaration.value.includes(`./${destination}`));
+}
+
+/** Resolve a source asset only from a relative reference beneath the hash-bound HTML entry. */
+function resolvedCoverageAssetSource(plan: AuthoringPlan, reference: string): string | undefined {
+  if (!plan.source || plan.source.entry === '<inline>' || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(reference)) return undefined;
+  const pathname = reference.split(/[?#]/, 1)[0];
+  if (!pathname) return undefined;
+  const sourceDirectory = path.dirname(path.resolve(plan.source.entry));
+  const resolved = path.resolve(sourceDirectory, pathname);
+  const relative = path.relative(sourceDirectory, resolved);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
+  return resolved;
 }
 
 function hasCompiledPresetAttribute(plan: AuthoringPlan, entry: AuthoringCoverageStyle): boolean {
@@ -685,6 +750,18 @@ function hasNativeAttribute(
   return nodes.some((node) => matches(node) || hasNativeAttribute(node.children ?? [], property, value, nodeId, responsive));
 }
 
+/**
+ * Prove that the generated structure still carries a declaration through a native WordPress
+ * attribute. The source-coverage comparison uses this before accepting exact CSS transport for
+ * a declaration which static capability analysis had otherwise classified as native.
+ */
+export function hasNativeCoverageTransport(
+  plan: Pick<AuthoringPlan, 'structure'>,
+  entry: Pick<AuthoringCoverageStyle, 'property' | 'value' | 'node' | 'responsive'>,
+): boolean {
+  return hasNativeAttribute(plan.structure, entry.property, entry.value, entry.node, entry.responsive);
+}
+
 /** Use the same finite declaration registry as conversion. This proves transport only through
  * actual WordPress style-engine paths, never arbitrary matching metadata. */
 function nativeStyleTarget(property: string, value: string): readonly string[] | undefined {
@@ -697,7 +774,7 @@ function nativeStyleTarget(property: string, value: string): readonly string[] |
   return undefined;
 }
 
-function coverageCssRuleSelectors(
+export function coverageCssRuleSelectors(
   rules: readonly import('../authoring/schema.js').AuthoringCssRule[],
   property: string,
   value: string,
@@ -729,9 +806,9 @@ function generatedTemplateDom(targetName: string, serializedTemplate: string): J
   return new JSDOM(`<div class="${root}">${serializedTemplate}</div>`);
 }
 
-function selectorAppliesToGeneratedTemplate(selector: string, targetName: string, document: Document): boolean {
+function selectorAppliesToGeneratedTemplate(selector: string, targetName: string, document: Document, foundation?: 'component'): boolean {
   const root = `.wp-block-${targetName.replace('/', '-')}`;
-  const scoped = scopeLocalSelectorList(selector, root);
+  const scoped = scopeLocalSelectorList(selector, root, { foundation });
   if (!scoped.ok) return false;
   try {
     return document.querySelector(staticSelector(scoped.selector)) !== null;
@@ -740,6 +817,19 @@ function selectorAppliesToGeneratedTemplate(selector: string, targetName: string
     // applicable must not be used as coverage evidence.
     return false;
   }
+}
+
+function sourceSelectorApplies(selectorList: string, document: Document): boolean {
+  for (const selector of splitCssTopLevel(selectorList, ',')) {
+    try {
+      if (document.querySelector(staticSelector(selector.trim())) !== null) return true;
+    } catch {
+      // The source selector was retained by the checked stylesheet gate but is not statically
+      // decidable by JSDOM. Treat it as used so it cannot become an unused-selector bypass.
+      return true;
+    }
+  }
+  return false;
 }
 
 /** Serialize exactly the compiler-produced template through the pinned WordPress save path. */
@@ -821,7 +911,10 @@ function replaceSimpleDynamicNegations(selector: string): string {
   return output;
 }
 
-const DYNAMIC_PSEUDOS = new Set(['active', 'focus', 'focus-visible', 'focus-within', 'hover', 'target', 'visited']);
+// Firefox's focus-ring and invalid-input selectors are active interaction states. They remain
+// literal in emitted CSS; static applicability treats only these named vendor states like the
+// standard interaction states because JSDOM cannot query them.
+const DYNAMIC_PSEUDOS = new Set(['active', 'focus', 'focus-visible', 'focus-within', 'hover', 'target', 'visited', '-moz-focusring', '-moz-ui-invalid']);
 
 /** CSS-token-aware state replacement: never mistake an escaped class or attribute string for a pseudo. */
 function replaceDynamicPseudos(selector: string, replacement: string): string {
@@ -872,7 +965,13 @@ function hasDynamicPseudo(selector: string): boolean {
   return replaceDynamicPseudos(selector, '') !== selector;
 }
 
-const PSEUDO_ELEMENTS = new Set(['after', 'before', 'first-letter', 'first-line', 'marker', 'placeholder', 'selection']);
+// This is the fixed vendor pseudo-element set emitted by the pinned Tailwind Preflight. They are
+// stripped only for static source/generated applicability; the authored selector remains intact.
+const PSEUDO_ELEMENTS = new Set([
+  'after', 'before', 'first-letter', 'first-line', 'marker', 'placeholder', 'selection',
+  '-moz-placeholder', '-webkit-file-upload-button', '-webkit-inner-spin-button',
+  '-webkit-outer-spin-button', '-webkit-search-decoration',
+]);
 
 function stripPseudoElements(selector: string): string {
   let output = '';
@@ -1003,7 +1102,7 @@ function sha256(value: string): string {
 }
 
 function toCoverageStyle(
-  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'node' | 'responsive'>, 'outcome'> & { outcome: string },
+  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'transportSelector' | 'node' | 'responsive'>, 'outcome'> & { outcome: string },
   scope: AuthoringCoverageStyle['scope'],
 ): AuthoringCoverageStyle {
   const outcome: AuthoringCoverageStyle['outcome'] = entry.outcome === 'native' || entry.outcome === 'preset'
@@ -1018,6 +1117,7 @@ function toCoverageStyle(
     ...(entry.reason ? { reason: entry.reason } : {}),
     atRules: [...entry.atRules],
     ...(entry.source ? { source: entry.source } : {}),
+    ...(entry.transportSelector ? { transportSelector: entry.transportSelector } : {}),
     ...(entry.node ? { node: entry.node } : {}),
     ...(entry.responsive ? { responsive: entry.responsive } : {}),
   };
