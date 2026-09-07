@@ -1496,7 +1496,7 @@ function authoringFailureItem(block: string, error: unknown): ReportItem {
     const mapping = error.mapping;
     return {
       block, status: 'warning', code: error.code, reason: error.message,
-      ...(mapping.css ? { source: { selector: mapping.selector, offset: mapping.css.offset, htmlLine: mapping.css.line, htmlColumn: mapping.css.column } } : {}),
+      ...(mapping.htmlSource ? { source: { path: mapping.htmlSource.path, offset: mapping.htmlSource.offset, htmlLine: mapping.htmlSource.line, htmlColumn: mapping.htmlSource.column } } : {}),
       details: mapping,
     };
   }

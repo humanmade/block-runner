@@ -4,6 +4,8 @@ import { parse as parseJavaScript } from '@babel/parser';
 import Ajv from 'ajv';
 import { JSDOM } from 'jsdom';
 import postcss from 'postcss';
+import { bootHeadlessWordPressSync, withMutedWordPressConsole } from '../headless/env.js';
+import type { WpBlock } from '../types.js';
 import {
   canonicalizeAuthoringPlan,
   hashAuthoringPlan,
@@ -637,7 +639,8 @@ function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
     const expected = target.role === 'button-wrapper-reset' ? 'native-adapter-wrapper-reset' : 'native-adapter-target';
     const expectedValue = target.role === 'button-wrapper-reset' ? NATIVE_BUTTON_RESET_VALUES.get(entry.property) : entry.value;
     const matchIndex = generated.findIndex((item, index) => !claimed.has(index) && item.selector === target.selector && item.kind === expected
-      && item.property === entry.property && item.value === expectedValue && item.atRules.join('\u0000') === entry.atRules.join('\u0000'));
+      && item.property === entry.property && item.value === expectedValue && item.important === target.important
+      && item.atRules.join('\u0000') === entry.atRules.join('\u0000'));
     if (!node || matchIndex < 0) {
       throw new AuthoringGenerationError('forged-native-adapter: generated selector/provenance is not present in the canonical rules', 'coverage.styles.nativeTargets');
     }
@@ -661,6 +664,38 @@ function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
     if (!claimed.has(index)) {
       throw new AuthoringGenerationError('forged-native-adapter: generated declaration has no matching source nativeTarget', 'styles.rules');
     }
+  }
+  // Selector spelling is not enough: core blocks are serialized by the pinned WordPress runtime,
+  // and that output is the markup the generated stylesheet will actually see.
+  const wp = bootHeadlessWordPressSync();
+  const blocks = compileConfirmedTemplate(plan).map(function makeBlock([name, attributes, children]): WpBlock {
+    return wp.createBlock(name, attributes as Record<string, unknown>, children?.map(makeBlock) ?? []);
+  });
+  const serialized = withMutedWordPressConsole(() => wp.serialize(blocks));
+  const dom = new JSDOM(serialized);
+  try {
+    for (const entry of plan.coverage?.styles ?? []) for (const target of entry.nativeTargets ?? []) {
+      const selector = target.selector.replace(/:(?:focus-visible|hover|focus|active)\b/g, '');
+      try {
+        const element = dom.window.document.querySelector(selector);
+        if (!element) {
+          throw new AuthoringGenerationError(`forged-native-adapter: native target ${target.selector} does not apply to pinned WordPress serialized markup`, 'coverage.styles.nativeTargets');
+        }
+        // Intrinsic image dimensions are allowed to survive as attributes, but WordPress inline
+        // sizing would outrank the exact authored child CSS declaration.
+        if (target.role === 'image' && (entry.property === 'width' || entry.property === 'height')) {
+          const intrinsic = nodes.get(target.node)?.attributes?.[entry.property];
+          if (intrinsic !== undefined && (element.getAttribute(entry.property) !== String(intrinsic) || (element as HTMLElement).style[entry.property] !== '')) {
+            throw new AuthoringGenerationError('unresolved-native-style-mapping: serialized core/image sizing overrides authored CSS', 'coverage.styles.nativeTargets');
+          }
+        }
+      } catch (error) {
+        if (error instanceof AuthoringGenerationError) throw error;
+        throw new AuthoringGenerationError('forged-native-adapter: native target selector cannot be applied to pinned WordPress serialized markup', 'coverage.styles.nativeTargets');
+      }
+    }
+  } finally {
+    dom.window.close();
   }
 }
 

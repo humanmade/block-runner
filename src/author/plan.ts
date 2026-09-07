@@ -28,7 +28,7 @@ import { sourceDeclarationKey } from '../styles/apply.js';
 
 export class UnresolvedNativeStyleMappingError extends Error {
   readonly code = 'unresolved-native-style-mapping' as const;
-  constructor(readonly mapping: { selector: string; property?: string; node?: string; role?: string; reason: string; css?: { offset: number; line: number; column: number } }) {
+  constructor(readonly mapping: { selector: string; property?: string; node?: string; role?: string; reason: string; cssSource?: { path: string; offset: number; line: number; column: number; selector: string }; htmlSource?: { sourceRef: string; path: string; offset: number; line: number; column: number } }) {
     super(`unresolved-native-style-mapping: ${mapping.reason}`);
     this.name = 'UnresolvedNativeStyleMappingError';
   }
@@ -195,7 +195,7 @@ export function compileAnalyzedDesign(input: {
   const reconciled = input.structureOverride && input.sourceRefToNode
     ? reconcileProposalStyleOwnership(
       structure, input.rules, input.styleLedger, input.source, input.sourceRefToNode,
-      input.stylesheetFacts?.rules ?? input.rules, input.cascadeSensitiveDeclarations ?? new Set(),
+      input.stylesheetFacts?.rules ?? input.rules, input.cascadeSensitiveDeclarations ?? new Set(), input.sourcePath,
     )
     : { rules: input.rules, styleLedger: input.styleLedger };
   const responsive = liftExactResponsiveStyles({
@@ -317,6 +317,7 @@ function reconcileProposalStyleOwnership(
   bindings: ReadonlyMap<string, string>,
   sourceRules: readonly CssRule[],
   cascadeSensitiveDeclarations: ReadonlySet<string>,
+  sourcePath?: string,
 ): { rules: readonly CssRule[]; styleLedger: readonly AuthoredStyleLedgerEntry[] } {
   const dom = new JSDOM(source, { includeNodeLocations: true });
   try {
@@ -368,7 +369,7 @@ function reconcileProposalStyleOwnership(
       return output;
     }, []);
     const residual = removePromoted(rules);
-    return adaptNativeSourceStyles(structure, residual, nextLedger, sourceNode, bindings);
+    return adaptNativeSourceStyles(structure, residual, nextLedger, sourceNode, bindings, sourcePath, (ref) => dom.nodeLocation(sourceNode.get(ref)!) ?? undefined);
   } finally { dom.window.close(); }
 }
 
@@ -387,7 +388,8 @@ const BUTTON_TARGET_PROPERTIES = new Set(`color background background-color back
 /** Insert narrowly-qualified native rules beside their exact source rule, preserving nesting/order. */
 function adaptNativeSourceStyles(
   structure: AuthoringStructureNode[], rules: readonly CssRule[], ledger: AuthoredStyleLedgerEntry[],
-  sourceNodes: ReadonlyMap<string, Element>, bindings: ReadonlyMap<string, string>,
+  sourceNodes: ReadonlyMap<string, Element>, bindings: ReadonlyMap<string, string>, sourcePath: string | undefined,
+  locationFor: (ref: string) => { startOffset: number; startLine: number; startCol: number } | undefined,
 ): { rules: CssRule[]; styleLedger: AuthoredStyleLedgerEntry[] } {
   const nodes = flattenNodes(structure);
   // Conversion retains source classes for residual CSS. For a directly-bound img, however,
@@ -403,7 +405,8 @@ function adaptNativeSourceStyles(
       if (!retained) delete node.attributes.className;
     }
   }
-  const gridProperties = new Set(['display', 'grid-template', 'grid-template-columns', 'grid-template-rows', 'gap', 'row-gap', 'column-gap']);
+  const gridProperties = new Set(['display', 'grid-template-columns', 'grid-template-rows', 'gap', 'row-gap', 'column-gap']);
+  const isGridSpecific = (property: string) => property === 'grid' || property === 'grid-template' || property.startsWith('grid-');
   const ownedGrids = new Set<string>();
   const discoverUnconditionalGrids = (items: readonly CssRule[]): void => {
     for (const rule of items) {
@@ -436,13 +439,19 @@ function adaptNativeSourceStyles(
       if (!node) return [];
       let inferredRelation: 'image' | 'caption' | undefined;
       try {
+        if (subject.relation) {
+          if (node.block !== 'core/image' || !element.matches('figure') || !element.matches(subject.staticSelector)) return [];
+          const tag = subject.relation === 'image' ? 'img' : 'figcaption';
+          if (![...element.querySelectorAll(tag)].some((child) => child.parentElement === element && child.matches(subject.terminalSelector ?? tag))) return [];
+          inferredRelation = subject.relation;
+        }
         if (node.block === 'core/image' && element.matches('img')) inferredRelation = 'image';
-        if (!element.matches(subject.staticSelector)) {
+        if (!subject.relation && !element.matches(subject.staticSelector)) {
           // A figure is the source-bound unit for core/image, while authored utilities often
           // live on its direct img/caption.  This is the one bounded descendant bridge.
           if (node.block !== 'core/image' || !element.matches('figure')) return [];
-          if ([...element.querySelectorAll('img')].some((child) => child.parentElement === element && child.matches(subject.staticSelector))) inferredRelation = 'image';
-          else if ([...element.querySelectorAll('figcaption')].some((child) => child.parentElement === element && child.matches(subject.staticSelector))) inferredRelation = 'caption';
+          if ([...element.querySelectorAll('img')].some((child) => child.parentElement === element && child.matches(subject.terminalSelector ?? subject.staticSelector))) inferredRelation = 'image';
+          else if ([...element.querySelectorAll('figcaption')].some((child) => child.parentElement === element && child.matches(subject.terminalSelector ?? subject.staticSelector))) inferredRelation = 'caption';
           else return [];
         }
       } catch { return []; }
@@ -474,13 +483,36 @@ function adaptNativeSourceStyles(
   const visit = (items: readonly CssRule[], conditional = false): CssRule[] => items.flatMap((rule): CssRule[] => {
     if (rule.kind === 'conditional') return [{ ...rule, rules: visit(rule.rules, true) }];
     if (rule.kind !== 'style') return [rule];
-    const targets = targetFor(rule.selector);
+    let targets: NativeTarget[] | undefined;
+    try {
+      targets = targetFor(rule.selector);
+    } catch (error) {
+      const reason = error instanceof Error ? error.message.replace(/^unresolved-native-style-mapping:\s*/, '') : String(error);
+      const sourceRef = [...bindings.keys()][0];
+      const location = sourceRef ? locationFor(sourceRef) : undefined;
+      const declaration = rule.declarations[0];
+      throw new UnresolvedNativeStyleMappingError({
+        selector: rule.selector, property: declaration?.property, reason,
+        ...(declaration ? { cssSource: { path: sourcePath ?? '<inline>', selector: rule.selector, offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
+        ...(sourceRef && location ? { htmlSource: { sourceRef, path: sourcePath ?? '<inline>', offset: location.startOffset, line: location.startLine, column: location.startCol } } : {}),
+      });
+    }
     if (!targets?.length) return [rule];
     const gridDeclarations = rule.declarations.filter((declaration) => gridProperties.has(declaration.property));
-    const unresolved = (reason: string, target = targets[0], declaration = rule.declarations[0]) => new UnresolvedNativeStyleMappingError({
+    const unresolved = (reason: string, target = targets[0], declaration = rule.declarations[0]) => {
+      const sourceRef = target && [...bindings.entries()].find(([, id]) => id === target.node)?.[0];
+      const location = sourceRef ? locationFor(sourceRef) : undefined;
+      return new UnresolvedNativeStyleMappingError({
       selector: rule.selector, property: declaration?.property, node: target?.node, role: target?.role, reason,
-      ...(declaration ? { css: { offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
-    });
+      ...(declaration ? { cssSource: { path: sourcePath ?? '<inline>', selector: rule.selector, offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
+      ...(sourceRef && location ? { htmlSource: { sourceRef, path: sourcePath ?? '<inline>', offset: location.startOffset, line: location.startLine, column: location.startCol } } : {}),
+      });
+    };
+    const unsupportedGrid = rule.declarations.find((declaration) => isGridSpecific(declaration.property) && !gridProperties.has(declaration.property))
+      ?? rule.declarations.find((declaration) => declaration.property === 'display' && declaration.value.trim() !== 'grid' && /grid/i.test(declaration.value));
+    if (targets.some((target) => target.role === 'grid-container') && unsupportedGrid) {
+      throw unresolved(`unsupported authored grid declaration ${unsupportedGrid.property}`, targets[0], unsupportedGrid);
+    }
     if (targets.every((target) => target.role === 'grid-container') && gridDeclarations.length === 0) return [rule];
     if (targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/columns') && gridDeclarations.length) {
       throw unresolved('core/columns cannot own an authored grid');
@@ -491,9 +523,12 @@ function adaptNativeSourceStyles(
     }
     for (const target of targets.filter((candidate) => candidate.role === 'image')) {
       const image = nodes.find((node) => node.id === target.node);
-      if (rule.declarations.some((declaration) => (declaration.property === 'width' && image?.attributes?.width !== undefined)
-        || (declaration.property === 'height' && image?.attributes?.height !== undefined))) {
-        throw unresolved('source sizing conflicts with serialized core/image dimensions', target);
+      const controlledAxis = rule.declarations.find((declaration) => (declaration.property === 'width' || declaration.property === 'height')
+        && image?.attributes?.[declaration.property] !== undefined);
+      if (controlledAxis) {
+        // Core Image 7.1 serializes its dimension attributes as inline styles.  Do not claim
+        // source CSS survives when that native serialization would override it.
+        throw unresolved('pinned core/image serialization maps intrinsic dimensions to inline sizing on an authored CSS axis', target, controlledAxis);
       }
     }
     if (targets.some((target) => target.role === 'grid-container') && gridDeclarations.length
@@ -505,14 +540,14 @@ function adaptNativeSourceStyles(
     }
     if (conditional && targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/group')
       && gridDeclarations.length && targets.some((target) => !ownedGrids.has(target.node))) {
-      throw new Error(`unresolved-native-style-mapping: ${rule.selector} has conditional grid declarations without unconditional display:grid ownership`);
+      throw unresolved('conditional grid declarations lack unconditional display:grid ownership');
     }
     if (!conditional && targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/group')
       && rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() === 'grid')) {
       const group = nodes.find((node) => node.id === targets[0]!.node)!;
       const layout = group.attributes?.layout;
       if (layout && (typeof layout !== 'object' || Array.isArray(layout) || (layout as Record<string, unknown>).type !== 'grid')) {
-        throw new Error(`unresolved-native-style-mapping: ${rule.selector} requires a compatible core/group grid layout`);
+        throw unresolved('core/group requires a compatible native grid layout');
       }
       group.attributes = { ...(group.attributes ?? {}), layout: { ...(layout as Record<string, JsonValue> ?? {}), type: 'grid' } };
     }
@@ -528,8 +563,8 @@ function adaptNativeSourceStyles(
         for (const target of targets) {
           if (target.role === 'grid-container' && !gridProperties.has(declaration.property)) continue;
           const role = target.role;
-          entry.nativeTargets = [...(entry.nativeTargets ?? []), { node: target.node, role, selector: target.target }];
-          if (target.reset && BUTTON_WRAPPER_RESET.has(declaration.property)) entry.nativeTargets.push({ node: target.node, role: 'button-wrapper-reset', selector: target.reset });
+          entry.nativeTargets = [...(entry.nativeTargets ?? []), { node: target.node, role, selector: target.target, ...(declaration.important ? { important: true } : {}) }];
+          if (target.reset && BUTTON_WRAPPER_RESET.has(declaration.property)) entry.nativeTargets.push({ node: target.node, role: 'button-wrapper-reset', selector: target.reset, ...(declaration.important ? { important: true } : {}) });
         }
         if (targets.every((target) => target.role === 'image' || target.role === 'caption')) {
           // Direct-image classes cannot remain on a native figure. Their exact source evidence

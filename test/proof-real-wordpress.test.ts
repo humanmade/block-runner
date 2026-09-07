@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
-import { buildPatternOverridesFixture, buildResponsiveStyleProofFixture } from '../scripts/build-pattern-overrides-fixture.js';
+import { buildNativeStyleAdapterProofFixture, buildPatternOverridesFixture, buildResponsiveStyleProofFixture } from '../scripts/build-pattern-overrides-fixture.js';
 import {
   PROOF_PROFILES,
   canonicalJson,
@@ -32,6 +32,13 @@ type ResponsiveStyleMatrixEvidence = {
     expected?: { target?: string; sibling?: string };
     viewport?: { surface?: { width?: number } };
   }>;
+};
+
+type NativeStyleAdapterMatrixEvidence = {
+  scope?: string;
+  button?: { wrapperNeutral?: boolean; paddingMatches?: boolean; aligned?: boolean; hoverMatches?: boolean; focusMatches?: boolean };
+  image?: { observed?: { width?: string | null; height?: string | null; alt?: string | null; inlineWidth?: string; inlineHeight?: string }; caption?: string; matches?: boolean };
+  grid?: { matches?: boolean; samples?: Array<{ label?: string; columns?: number; expected?: number }> };
 };
 
 /**
@@ -212,6 +219,46 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
         expect.objectContaining({ label: 'above-mobile', target: '32px', sibling: 'rgb(1, 2, 3)', expected: { target: '32px', sibling: 'rgb(1, 2, 3)' }, viewport: expect.objectContaining({ surface: expect.objectContaining({ width: 481 }) }) }),
       ]));
     }
+  }, 480_000);
+
+  it('proves the public utility-hero native style adapters after save/reopen and on the published frontend', async () => {
+    await requireDocker();
+    const outputDir = await proofOutputDirectory('native-style-adapter');
+    const built = await buildNativeStyleAdapterProofFixture(outputDir);
+    const result = await runProof({
+      profile: 'fidelity-checked',
+      pluginZip: built.pluginZip,
+      inputPath: built.inputPath,
+      markup: built.nativeContainerMarkup,
+      fixture: built.fixture,
+      artifact: built.artifact,
+      outputDir,
+    });
+    const editor = result.receipt.gates.find((gate) => gate.gate === 'editor_reopen');
+    const frontend = result.receipt.gates.find((gate) => gate.gate === 'frontend_assets');
+    const editorMatrix = (editor?.details as { nativeStyleAdapterMatrix?: NativeStyleAdapterMatrixEvidence } | undefined)?.nativeStyleAdapterMatrix;
+    const frontendMatrix = (frontend?.details as { nativeStyleAdapterMatrix?: NativeStyleAdapterMatrixEvidence } | undefined)?.nativeStyleAdapterMatrix;
+    expect(editor?.status, editor?.reason).toBe('pass');
+    expect(frontend?.status, frontend?.reason).toBe('pass');
+    for (const matrix of [editorMatrix, frontendMatrix]) {
+      expect(matrix).toMatchObject({
+        scope: expect.stringMatching(/editor-canvas|frontend/),
+        button: { wrapperNeutral: true, paddingMatches: true, aligned: true, hoverMatches: true, focusMatches: true },
+        image: { observed: { width: '1280', height: '820', alt: 'A WordPress editor sidebar with editable block controls', inlineWidth: '', inlineHeight: '' }, caption: 'Native controls stay with the block, not in a screenshot.', matches: true },
+        grid: { matches: true, samples: expect.arrayContaining([
+          expect.objectContaining({ label: 'one-column', columns: 1, expected: 1 }),
+          expect.objectContaining({ label: 'two-column', columns: 2, expected: 2 }),
+        ]) },
+      });
+    }
+    expect(retainedMediaTypes(editor)).toEqual(expect.arrayContaining(['application/json', 'image/png']));
+    expect(retainedMediaTypes(frontend)).toEqual(expect.arrayContaining(['application/json', 'image/png']));
+    await expect(readFile(path.join(outputDir, 'native-style-adapter.original.html'), 'utf8')).resolves.toContain('Build a WordPress block');
+    await expect(readFile(path.join(outputDir, 'native-style-adapter.supplied.css'), 'utf8')).resolves.toContain('.hover\\:bg-cyan-200:hover');
+    await expect(readFile(path.join(outputDir, 'native-style-adapter.proposal.json'), 'utf8')).resolves.toContain('core/button');
+    await expect(readFile(path.join(outputDir, 'native-style-adapter.canonical-plan.json'), 'utf8')).resolves.toContain('native-adapter-target');
+    await expect(readFile(path.join(outputDir, 'native-style-adapter.native.blocks.html'), 'utf8')).resolves.toContain('wp-block-button__link');
+    await expect(readFile(path.join(outputDir, 'native-style-adapter.plugin-identity.json'), 'utf8')).resolves.toContain(built.artifact.sha256);
   }, 480_000);
 
   it.each(['editor-verified', 'fidelity-checked', 'pattern-verified'] as const)('executes %s through the real runner and browser', async (profile) => {

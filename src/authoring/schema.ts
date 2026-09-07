@@ -65,7 +65,7 @@ export interface AuthoringCoverageStyle {
   /** Exact target theme preset provenance for a preset outcome. */
   preset?: { category: 'color' | 'spacing' | 'font-size' | 'font-family'; slug: string };
   /** Native destinations emitted in addition to, never instead of, the source declaration. */
-  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string }>;
+  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string; important?: boolean }>;
 }
 
 export type AuthoringCoverageAssetOutcome = 'prepared' | 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
@@ -609,8 +609,8 @@ function normalizeCoverageStyle(input: unknown, location: string): AuthoringCove
     nativeTargets: value.nativeTargets === undefined ? undefined : arrayAt(value.nativeTargets, `${location}.nativeTargets`).map((target, index) => {
       const at = `${location}.nativeTargets[${index}]`;
       const item = objectAt(target, at);
-      knownKeys(item, at, ['node', 'role', 'selector']);
-      return { node: nonEmptyString(item.node, `${at}.node`), role: enumAt(item.role, `${at}.role`, ['button-link', 'button-wrapper-reset', 'image', 'caption', 'grid-container'] as const), selector: nonEmptyString(item.selector, `${at}.selector`) };
+      knownKeys(item, at, ['node', 'role', 'selector', 'important']);
+      return { node: nonEmptyString(item.node, `${at}.node`), role: enumAt(item.role, `${at}.role`, ['button-link', 'button-wrapper-reset', 'image', 'caption', 'grid-container'] as const), selector: nonEmptyString(item.selector, `${at}.selector`), ...(item.important === undefined ? {} : { important: booleanAt(item.important, `${at}.important`) }) };
     }),
   });
 }

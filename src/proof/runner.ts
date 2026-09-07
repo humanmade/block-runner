@@ -156,6 +156,37 @@ export interface ProofResponsiveStyleMatrix {
   }[];
 }
 
+/**
+ * Focused evidence for source styles adapted to Core Button, Image, and Group
+ * markup.  It deliberately names only the browser-observable relationships
+ * owned by the native adapter; it is not a general layout assertion surface.
+ */
+export interface NativeStyleAdapterMatrix {
+  button: {
+    /** Selector relative to the generated root for the Core Button wrapper. */
+    wrapperSelector: string;
+    /** Selector relative to the generated root for its interactive anchor. */
+    linkSelector: string;
+    /** Computed source padding which must belong to the anchor, never its wrapper. */
+    linkPadding: { top: string; right: string; bottom: string; left: string };
+    /** The authored hover transform and colour, each observed exactly on the anchor. */
+    hover: { transform: string; backgroundColor: string };
+    /** The authored keyboard focus outline on the anchor. */
+    focusOutline: { style: string; width: string };
+  };
+  image: {
+    selector: string;
+    width: string;
+    height: string;
+    alt: string;
+    caption: string;
+  };
+  grid: {
+    selector: string;
+    samples: readonly { label: string; viewport: { width: number; height: number }; surfaceViewport?: { width: number; height?: number }; columns: number }[];
+  };
+}
+
 /** The exact per-instance map WordPress stores at core/block.attributes.content. */
 export type PatternOverrideContent = Record<string, Record<string, unknown>>;
 
@@ -201,6 +232,8 @@ export interface ProofFixture {
    * it does not require the historical heading/image layout reproduction.
    */
   responsiveStyleMatrix?: ProofResponsiveStyleMatrix;
+  /** Public author()-to-WordPress proof for the bounded native style adapters. */
+  nativeStyleAdapterMatrix?: NativeStyleAdapterMatrix;
   patternOverrides?: {
     /** Exact pattern title inserted through the visible inserter. */
     title: string;
