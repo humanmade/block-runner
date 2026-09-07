@@ -19,6 +19,7 @@ import WORDPRESS_BLOCK_SCHEMA_7_1 from './vendor/wordpress-block.schema.7.1.json
 import { patternOverrideName, supportedPatternOverrideAttributes } from './overrides.js';
 import { authoringRegistryIdentity, validateEditableField, validateNativeComposition, type AuthoringRegistryIdentity } from './capabilities.js';
 import { collectConfirmedAssets, fontOwnershipDecision, type GeneratedAssetFile } from './assets.js';
+import { nativeSelectorSubjects } from '../author/styles.js';
 import {
   renderConfirmedStyleRules,
   renderFontLicenseNotice,
@@ -645,6 +646,12 @@ function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
       throw new AuthoringGenerationError('forged-native-adapter: generated selector/provenance is not present in the canonical rules', 'coverage.styles.nativeTargets');
     }
     claimed.add(matchIndex);
+    const sourceSubjects = entry.source?.selector ? nativeSelectorSubjects(entry.source.selector) : undefined;
+    const sourceStates = sourceSubjects && new Set(sourceSubjects.map((subject) => subject.state ?? ''));
+    const targetState = (/:(focus-visible|hover|focus|active)$/.exec(target.selector)?.[1] ?? '') as '' | 'hover' | 'focus' | 'focus-visible' | 'active';
+    if (!sourceStates?.has(targetState)) {
+      throw new AuthoringGenerationError('forged-native-adapter: native target interaction state is not present in its source selector', 'coverage.styles.nativeTargets');
+    }
     const marker = `block-runner-native-${target.node.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
     const state = '(?::(?:hover|focus|focus-visible|active))?';
     if ((target.role === 'button-link' || target.role === 'button-wrapper-reset') && (node.block !== 'core/button'

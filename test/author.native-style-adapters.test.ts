@@ -3,6 +3,7 @@ import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { author, collectSourceEvidence } from '../src/index.js';
 import { compileRegisteredBlock } from '../src/authoring/generate.js';
+import type { AuthoringCssRule } from '../src/authoring/schema.js';
 import { nativeSelectorSubjects } from '../src/author/styles.js';
 
 function refs(html: string) {
@@ -72,6 +73,49 @@ describe('native source-style adapters', () => {
     expect(plan.structure[0]!.attributes?.layout).toMatchObject({ type: 'grid' });
   });
 
+  it('keeps component-contained foundation resets and transports button custom properties', async () => {
+    const html = '<section class="shared"><div><a class="action shared" href="/go">Go</a></div></section>';
+    const report = await author(html, {
+      author: { name: 'example/component-foundation', styles: { mode: 'css', foundation: 'component', css: [
+        '*,::before,::after { --tw-border-spacing-x: 0; box-sizing: border-box; }',
+        '.shared { color: red; }',
+        '.action { --tw-bg-opacity: 1; background-color: rgb(34 211 238 / var(--tw-bg-opacity)); display: inline-flex; justify-content: center; }',
+      ].join('\n') } },
+      proposal: { structure: [{ id: 'root', block: 'core/group', sourceRef: refs(html)('section'), children: [{ id: 'buttons', block: 'core/buttons', sourceRef: refs(html)('div'), children: [{ id: 'action', block: 'core/button', sourceRef: refs(html)('a') }] }] }] },
+    });
+    expect(report.ok, JSON.stringify(report.items)).toBe(true);
+    const plan = report.package!.canonicalPlan!;
+    expect(plan.styles.rules).toEqual(expect.arrayContaining([expect.objectContaining({ selector: '*,::before,::after' })]));
+    expect(plan.coverage!.styles).toEqual(expect.arrayContaining([expect.objectContaining({ property: '--tw-bg-opacity', nativeTargets: [expect.objectContaining({ role: 'button-link' })] })]));
+    expect(plan.coverage!.styles).toEqual(expect.arrayContaining([expect.objectContaining({ property: 'justify-content', value: 'center', nativeTargets: [expect.objectContaining({ role: 'button-link' })] })]));
+  });
+
+  it('rejects submitted native adapter interaction-state tampering while retaining source states', async () => {
+    const html = '<figure><img class="photo" src="https://example.test/photo.jpg" alt="Photo" width="320" height="180"></figure>';
+    const proposal = { structure: [{ id: 'image', block: 'core/image', sourceRef: refs(html)('figure') }] };
+    const options = { author: { name: 'example/state-provenance', styles: { mode: 'css' as const, css: '.photo { width: 100%; } .photo:hover { opacity: .8; }' } }, proposal };
+    const baseline = await author(html, options);
+    expect(baseline.ok, JSON.stringify(baseline.items)).toBe(true);
+    const plan = baseline.package!.canonicalPlan!;
+    const submit = async (from: string, to: string) => {
+      const forged = structuredClone(plan);
+      for (const entry of forged.coverage!.styles) {
+        if (entry.transportSelector === from) entry.transportSelector = to;
+        for (const target of entry.nativeTargets ?? []) if (target.selector === from) target.selector = to;
+      }
+      const rewrite = (rules: AuthoringCssRule[]): AuthoringCssRule[] => rules.map((rule) => rule.kind === 'conditional'
+        ? { ...rule, rules: rewrite(rule.rules) }
+        : rule.selector === from ? { ...rule, selector: to } : rule);
+      forged.styles.rules = rewrite(forged.styles.rules ?? []);
+      return author(html, { author: options.author, plan: forged });
+    };
+    const baselineTarget = plan.coverage!.styles.flatMap((entry) => entry.nativeTargets ?? []).find((target) => !/:(?:hover|focus|focus-visible|active)$/.test(target.selector))!;
+    const hoverTarget = plan.coverage!.styles.flatMap((entry) => entry.nativeTargets ?? []).find((target) => target.selector.endsWith(':hover'))!;
+    await expect(submit(baselineTarget.selector, `${baselineTarget.selector}:hover`)).resolves.toMatchObject({ ok: false });
+    await expect(submit(hoverTarget.selector, hoverTarget.selector.replace(/:hover$/, ':focus'))).resolves.toMatchObject({ ok: false });
+    await expect(author(html, { author: options.author, plan })).resolves.toMatchObject({ ok: true });
+  });
+
   it('rejects grid declarations without unconditional source display:grid', async () => {
     const html = '<section class="grid"><p>Grid</p></section>';
     const report = await author(html, {
@@ -83,6 +127,10 @@ describe('native source-style adapters', () => {
   });
 
   it('reads complete image class atoms and bounded figure child compounds', () => {
+    expect(nativeSelectorSubjects('.min-h-\\[680px\\]')).toMatchObject([{ classes: [{ decoded: 'min-h-[680px]' }] }]);
+    expect(nativeSelectorSubjects('.tracking-\\[0\\.18em\\]')).toMatchObject([{ classes: [{ decoded: 'tracking-[0.18em]' }] }]);
+    expect(nativeSelectorSubjects('.card[data-active]')).toBeUndefined();
+    expect(nativeSelectorSubjects('.card > a')).toBeUndefined();
     expect(nativeSelectorSubjects('.media-img')).toMatchObject([{ staticSelector: '.media-img', classes: [{ decoded: 'media-img' }] }]);
     expect(nativeSelectorSubjects('figure.frame > img.media-img:hover')).toMatchObject([{
       staticSelector: 'figure.frame', relation: 'image', terminalSelector: 'img.media-img', state: 'hover',

@@ -245,6 +245,59 @@ describe('author proposal boundary', () => {
     validateSourceContent(html, compileRegisteredBlock(plan).template);
   });
 
+  it('binds the complete self-contained utility hero handoff through proposal and canonical-plan routes', async () => {
+    const { html, sourcePath } = await source('utility/hero-handoff.html');
+    const css = await readFile(path.join(benchmarkRoot, 'utility', 'hero.css'), 'utf8');
+    const ref = refs(html);
+    const proposal = { structure: [{ id: 'hero', block: 'core/group', sourceRef: ref('section'), children: [
+      { id: 'hero-grid', block: 'core/group', sourceRef: ref('div', 0), children: [
+        { id: 'copy', block: 'core/group', sourceRef: ref('div', 1), children: [
+          { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) },
+          { id: 'title', block: 'core/heading', sourceRef: ref('h1') },
+          { id: 'lede', block: 'core/paragraph', sourceRef: ref('p', 1) },
+          { id: 'buttons', block: 'core/buttons', sourceRef: ref('div', 2), children: [
+            { id: 'download', block: 'core/button', sourceRef: ref('a', 0) },
+            { id: 'guide', block: 'core/button', sourceRef: ref('a', 1) },
+          ] },
+        ] },
+        { id: 'image', block: 'core/image', sourceRef: ref('figure') },
+      ] },
+    ] }], fields: [{ id: 'title-content', label: 'Title', mode: 'editable' as const, node: 'title', attribute: 'content' }], locking: { mode: 'contentOnly' as const } };
+    const options = {
+      sourcePath,
+      assetRoot: path.dirname(sourcePath),
+      author: { name: 'block-runner/hero', styles: { mode: 'css' as const, css, foundation: 'component' as const } },
+      proposal,
+    };
+    const first = await author(html, options);
+    expect(first.ok, JSON.stringify(first.items)).toBe(true);
+    const plan = first.package!.canonicalPlan!;
+    const second = await author(html, options);
+    expect(second.ok, JSON.stringify(second.items)).toBe(true);
+    expect(plan).toEqual(second.package!.canonicalPlan);
+    const nodes = nodesById(plan.structure);
+    expect(nodes.get('eyebrow')!.attributes).toMatchObject({ content: 'Block Runner 0.9' });
+    expect(nodes.get('title')!.attributes).toMatchObject({ content: 'Build a WordPress block your team can keep editing.' });
+    expect(nodes.get('lede')!.attributes).toMatchObject({ content: 'Turn a finished interface into a registered block with clear controls, native markup, and a source trail reviewers can inspect.' });
+    expect(nodes.get('download')!.attributes).toMatchObject({ text: 'Download the testing release', url: '/download' });
+    expect(nodes.get('guide')!.attributes).toMatchObject({ text: 'Read the authoring guide', url: '/docs/authoring' });
+    expect(nodes.get('image')!.attributes).toMatchObject({ alt: 'Aurora dashboard with color tokens, release receipts, and a completed activation check', caption: 'Native controls stay with the block, not in a screenshot.' });
+    expect(plan.sourceDecisions).toBeUndefined();
+    const roundtrip = await author(html, {
+      sourcePath,
+      assetRoot: path.dirname(sourcePath),
+      author: options.author,
+      plan,
+    });
+    expect(roundtrip.ok, JSON.stringify(roundtrip.items)).toBe(true);
+    expect(roundtrip.package!.canonicalPlan).toEqual(plan);
+    const tampered = structuredClone(plan);
+    tampered.coverage!.styles.find((entry) => entry.transportSelector && entry.nativeTargets?.length)!.transportSelector = '.unrelated-target';
+    const rejected = await author(html, { sourcePath, assetRoot: path.dirname(sourcePath), author: options.author, plan: tampered });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.package).toBeUndefined();
+  });
+
   it('binds the semantic cards hierarchy without dropping content', async () => {
     const { html, sourcePath } = await source('semantic/cards.html');
     const ref = refs(html);

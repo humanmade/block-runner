@@ -153,9 +153,19 @@
       "producer": "utility-generator",
       "sourceStyle": "utility-tailwind",
       "source": {
-        "path": "sources/utility/hero.html",
-        "sha256": "e2498a57e8306a15f5409d1245ca016aa4aa20399486bf14a1705419054fb9a4"
+        "path": "sources/utility/hero-handoff.html",
+        "sha256": "f2f5e7794f73fa4684bc5e897769f8ed8eab98e81730a0a8dde3a5e50ae8961d"
       },
+      "sourceDependencies": [
+        {
+          "path": "sources/utility/hero.css",
+          "sha256": "b748973dec35c2b80d7d432eb7b41049999481165084e78c17b98161ecad778e"
+        },
+        {
+          "path": "sources/utility/assets/aurora-dashboard.svg",
+          "sha256": "18ab15d443086fa3fc379734c0f0e86b891535ea222f6499e0b37170067e6cf9"
+        }
+      ],
       "prompt": "fixtures/hero-utility/prompt.md",
       "plan": "fixtures/hero-utility/expected-plan.json",
       "requiredDimensions": [

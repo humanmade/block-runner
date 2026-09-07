@@ -6,6 +6,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import Ajv2020 from 'ajv/dist/2020.js';
+import { author } from '../src/author/index.js';
 import { executeFixture } from '../scripts/authoring-runner.js';
 import {
   AUTHORING_DIMENSIONS, AUTHORING_RUNTIME_ARTIFACTS, authoringHashes, hashFile,
@@ -14,7 +15,7 @@ import {
 } from '../scripts/authoring/score.js';
 
 const suiteDirectory = path.resolve('benchmarks/authoring');
-const plan = () => ({
+const unboundPlan = () => ({
   version: 1, generatorVersion: '0.9.0', target: { name: 'acme/receipt-unit-test', title: 'Receipt unit test' },
   structure: [{ id: 'copy', block: 'core/paragraph', attributes: { content: 'Candidate' } }],
   fields: [], locking: { mode: 'none' }, styles: { strategy: 'native', outcomes: [] },
@@ -27,9 +28,32 @@ async function setup(negative = false) {
   const run = path.join(root, 'run');
   await mkdir(plans);
   const suite = loadAuthoringSuite(suiteDirectory);
-  const fixture = suite.fixtures.find((candidate) => negative ? candidate.expectedStatus === 'unsupported' : candidate.expectedStatus === 'scored')!;
+  const fixture = suite.fixtures.find((candidate) => negative
+    ? candidate.expectedStatus === 'unsupported'
+    : candidate.id === 'cards-semantic')!;
   const hashes = authoringHashes(suite);
-  const candidate = plan();
+  const sourceReference = fixture.source?.path;
+  if (!sourceReference) throw new Error(`fixture ${fixture.id} has no source path`);
+  const sourcePath = path.resolve(suiteDirectory, sourceReference);
+  const source = await readFile(sourcePath, 'utf8');
+  const sourceDependencies = Array.isArray(fixture.sourceDependencies)
+    ? fixture.sourceDependencies.filter((dependency): dependency is { path: string } => typeof dependency === 'object'
+      && dependency !== null && !Array.isArray(dependency) && typeof (dependency as { path?: unknown }).path === 'string')
+    : [];
+  const stylesheet = await Promise.all(sourceDependencies
+    .filter((dependency) => dependency.path.endsWith('.css'))
+    .map((dependency) => readFile(path.resolve(suiteDirectory, dependency.path), 'utf8')));
+  const analysis = negative
+    ? undefined
+    : await author(source, {
+      sourcePath,
+      author: {
+        name: 'acme/receipt-unit-test',
+        ...(stylesheet.length ? { styles: { mode: 'css' as const, css: stylesheet.join('') } } : {}),
+      },
+    });
+  if (!negative) expect(analysis?.ok, JSON.stringify(analysis?.items)).toBe(true);
+  const candidate = analysis?.package!.canonicalPlan ?? unboundPlan();
   const input = path.join(plans, `${fixture.id}.json`);
   await writeFile(input, JSON.stringify(candidate));
   const execute = (worker?: string, timeout?: number) => executeFixture(fixture, suiteDirectory, run, worker, hashes, plans, timeout);
@@ -69,7 +93,7 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
 
   it('records an absent runtime as blocked with no invented observations', async () => {
     const f = await setup();
-    const receipt = f.execute();
+    const receipt = await f.execute();
     expect(receipt.status).toBe('blocked');
     expect(receipt.environment).toEqual({ wordpress: null, theme: null, browser: null });
     for (const key of Object.keys(AUTHORING_RUNTIME_ARTIFACTS)) expect(receipt.provenance?.[key]).toBeNull();
@@ -80,10 +104,10 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
   it('gives the worker candidate-local source and plan snapshots', async () => {
     const f = await setup();
     const worker = await f.worker("fs.writeFileSync('worker-observation.json', JSON.stringify({ source: fs.readFileSync(arg('--source'), 'utf8'), plan: fs.readFileSync(arg('--candidate-plan'), 'utf8'), dependencyArgs: args.filter((value) => value === '--source-dependency').length })); fs.writeFileSync(arg('--result'), JSON.stringify({status:'blocked',artifacts:{observation:{path:'worker-observation.json'}}}));");
-    const receipt = f.execute(worker);
+    const receipt = await f.execute(worker);
     expect(receipt.status).toBe('blocked');
     const observation = JSON.parse(await readFile(path.join(f.run, 'receipts', receipt.artifacts!.observation!.path), 'utf8'));
-    expect(observation.source).toContain('hero');
+    expect(observation.source).toContain('plans-heading');
     expect(JSON.parse(observation.plan)).toEqual(f.candidate);
     expect(observation.dependencyArgs).toBe(0);
   });
@@ -91,7 +115,7 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
   it('retains malformed plan input as an engine error without generating source', async () => {
     const f = await setup();
     await writeFile(f.input, '{"broken":');
-    const receipt = f.execute();
+    const receipt = await f.execute();
     expect(receipt).toMatchObject({ status: 'engine_error', error: { kind: 'engine' } });
     expect(existsSync(path.join(f.run, 'candidates', f.fixture.id))).toBe(false);
     expect(await readFile(path.join(f.run, 'receipts', receipt.artifacts!.candidateInput!.path), 'utf8')).toBe('{"broken":');
@@ -100,9 +124,11 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
 
   it('counts only a real compiler refusal as the unsupported interaction outcome', async () => {
     const f = await setup(true);
-    Object.assign(f.candidate.structure[0]!.attributes, { onClick: 'requesting executable behavior' });
+    const attributes = f.candidate.structure[0]?.attributes;
+    if (!attributes) throw new Error('unsupported fixture root attributes are missing');
+    Object.assign(attributes, { onClick: 'requesting executable behavior' });
     await writeFile(f.input, JSON.stringify(f.candidate));
-    const receipt = f.execute();
+    const receipt = await f.execute();
     expect(receipt).toMatchObject({ status: 'unsupported', failClosed: { warningCode: 'BR_UNSUPPORTED_INTERACTION', noInteractiveRuntime: true } });
     expect(existsSync(path.join(f.run, 'candidates', f.fixture.id))).toBe(false);
     expect(validateAuthoringReceipt(f.fixture, receipt, suiteDirectory, path.join(f.run, 'receipts'))).toEqual([]);
@@ -121,7 +147,7 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
         'reserved-artifact': "fs.writeFileSync('evidence.txt','test'); fs.writeFileSync(arg('--result'),JSON.stringify({status:'blocked',artifacts:{generatedSourceManifest:{path:'evidence.txt'}}}));",
         'changed-source': "fs.appendFileSync('edit.js','\\n// changed source'); fs.writeFileSync(arg('--result'),JSON.stringify({status:'blocked'}));",
       }[kind]!;
-      const receipt = f.execute(await f.worker(body), kind === 'timeout' ? 100 : 10000);
+      const receipt = await f.execute(await f.worker(body), kind === 'timeout' ? 100 : 10000);
       expect(receipt).toMatchObject({ status: 'engine_error', error: { kind: 'engine' } });
       expect(receipt.artifacts).toHaveProperty('workerStdout');
       expect(receipt.artifacts).toHaveProperty('workerStderr');
@@ -136,7 +162,7 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
 
   it('does not manufacture a runtime from a worker that merely echoes requested settings', async () => {
     const f = await setup();
-    const receipt = f.execute(await f.worker("fs.writeFileSync('style-ledger.json',JSON.stringify({version:1,entries:[]})); fs.writeFileSync(arg('--result'), JSON.stringify({status:'scored', environment:{wordpress:'7.1',browser:'chromium'}}));"));
+    const receipt = await f.execute(await f.worker("fs.writeFileSync('style-ledger.json',JSON.stringify({version:1,entries:[]})); fs.writeFileSync(arg('--result'), JSON.stringify({status:'scored', environment:{wordpress:'7.1',browser:'chromium'}}));"));
     const failures = validateAuthoringReceipt(f.fixture, receipt, suiteDirectory, path.join(f.run, 'receipts'));
     expect(receipt.environment).toEqual({ wordpress: null, theme: null, browser: null });
     expect(failures).toContain('runtime observation requires artifact wordpressInventory');
@@ -145,7 +171,7 @@ describe('authoring execution receipt boundaries (no model or WordPress calls)',
 
   it('validates inventory shape and hashes independently from worker pass claims', async () => {
     const f = await setup();
-    const receipt: AuthoringReceipt = f.execute();
+    const receipt: AuthoringReceipt = await f.execute();
     const receiptDirectory = path.join(f.run, 'receipts');
     const add = async (name: string, value: unknown) => {
       const file = path.join(receiptDirectory, `${name}.json`);

@@ -630,7 +630,8 @@ export function nativeSelectorSubjects(selectorList: string): NativeSelectorSubj
     const owner = relationship?.owner ?? selector;
     const relation = relationship?.relation;
     const terminal = relationship?.terminal;
-    if (!owner || /[\s>+~\[\]#*]/.test(owner) || /::|:(?:not|is|where|has)\s*\(/i.test(owner)) return undefined;
+    // The token scanner distinguishes escaped class characters from selector syntax.
+    if (!owner) return undefined;
     let index = 0;
     const classes: Array<{ raw: string; decoded: string }> = [];
     let state: NativeSelectorSubject['state'];

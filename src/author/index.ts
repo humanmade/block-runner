@@ -1680,7 +1680,12 @@ function reconcileVerifiedNativeTargets(
       && candidate.property === entry.property && candidate.value === entry.value
       && candidate.atRules.join('\u0000') === entry.atRules.join('\u0000')
       && candidate.source?.selector === entry.source?.selector && candidate.source?.offset === entry.source?.offset);
-    if (matching.length === 1 && matching[0]!.nativeTargets?.length) entry.nativeTargets = matching[0]!.nativeTargets!.map((target) => ({ ...target }));
+    if (matching.length === 1 && matching[0]!.nativeTargets?.length) {
+      entry.nativeTargets = matching[0]!.nativeTargets!.map((target) => ({ ...target }));
+      if (entry.nativeTargets.every((target) => target.role === 'image' || target.role === 'caption')) {
+        entry.transportSelector = entry.nativeTargets[0]!.selector;
+      }
+    }
   }
 }
 
