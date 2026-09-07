@@ -3,6 +3,7 @@ import path from 'node:path';
 
 /** The only AuthoringPlan wire format accepted by this preview release. */
 export const AUTHORING_PLAN_VERSION = 1 as const;
+export const COMPONENT_FOUNDATION_WARNING = 'Component foundation CSS is intentionally scoped to the generated block; document-wide equivalence is not claimed.';
 
 export type JsonPrimitive = string | number | boolean | null;
 export type JsonValue = JsonPrimitive | JsonValue[] | { [key: string]: JsonValue };
@@ -49,6 +50,8 @@ export interface AuthoringCoverageStyle {
   reason?: string;
   atRules: string[];
   source?: AuthoringCoverageLocation;
+  /** Hash-bound component-local selector used by the generated stylesheet, when rewritten. */
+  transportSelector?: string;
   /**
    * Required when a source declaration is carried by a particular native block rather than
    * residual CSS. This prevents another node with the same property/value from satisfying
@@ -84,6 +87,8 @@ export interface AuthoringCoverage {
   editorStylesheet?: { entry: string; sha256: string };
   /** Destination style inputs actually consulted while deciding ownership. */
   styleContext?: AuthoringStyleContext;
+  /** Explicit source-bound decision to contain foundation rules inside this component. */
+  foundation?: 'component';
   /** One entry per source declaration observed by the authoring pass. */
   styles: AuthoringCoverageStyle[];
   /** One entry per concrete asset reference observed by the authoring pass. */
@@ -137,6 +142,18 @@ export interface AuthoringStructureNode {
   children?: AuthoringStructureNode[];
 }
 
+/** A reviewed source-content change made while binding an authoring proposal. */
+export interface AuthoringSourceDecision {
+  action: 'add' | 'replace' | 'omit';
+  sourceRef: string;
+  node?: string;
+  attribute?: string;
+  original?: JsonValue;
+  value?: JsonValue;
+  reason: string;
+  source?: AuthoringCoverageLocation;
+}
+
 /** A value an editor can, cannot, or may override in a pattern. */
 export interface AuthoringField {
   id: string;
@@ -169,6 +186,8 @@ export interface AuthoringStyleOutcome {
 export interface AuthoringStyles {
   strategy: AuthoringStyleStrategy;
   outcomes: AuthoringStyleOutcome[];
+  /** Explicit compiler policy for component-contained foundation selectors. */
+  foundation?: 'component';
   /** Component-local selectors before the compiler adds its owned block root. */
   rules?: AuthoringCssRule[];
   /** Supplemental editor affordances, subject to the same scoping and asset checks. */
@@ -274,6 +293,8 @@ export interface AuthoringPlan {
   /** Complete, hash-bound dispositions from the HTML analysis pass. */
   coverage?: AuthoringCoverage;
   structure: AuthoringStructureNode[];
+  /** Present only for proposal-derived plans; legacy plan serialization is unchanged. */
+  sourceDecisions?: AuthoringSourceDecision[];
   /** Explicit direct-child insertion policy; defaults to the initial template's direct children. */
   allowedBlocks?: string[];
   fields: AuthoringField[];
@@ -372,6 +393,7 @@ function normalizePlan(input: unknown): AuthoringPlan {
       'source',
       'coverage',
       'structure',
+      'sourceDecisions',
       'allowedBlocks',
       'fields',
       'locking',
@@ -396,6 +418,7 @@ function normalizePlan(input: unknown): AuthoringPlan {
   const structure = arrayAt(value.structure ?? [], '$.structure').map((node, index) =>
     normalizeNode(node, `$.structure[${index}]`),
   );
+  const sourceDecisions = value.sourceDecisions === undefined ? undefined : arrayAt(value.sourceDecisions, '$.sourceDecisions').map((decision, index) => normalizeSourceDecision(decision, `$.sourceDecisions[${index}]`));
   const fields = arrayAt(value.fields ?? [], '$.fields').map((field, index) =>
     normalizeField(field, `$.fields[${index}]`),
   );
@@ -408,6 +431,17 @@ function normalizePlan(input: unknown): AuthoringPlan {
   const coverage = value.coverage === undefined ? undefined : normalizeCoverage(value.coverage, '$.coverage');
   if (coverage !== undefined && source === undefined) {
     throw invalid('$.coverage', 'requires a hash-bound $.source');
+  }
+  if (styles.foundation === 'component') {
+    if (coverage?.foundation !== 'component') {
+      throw invalid('$.styles.foundation', 'requires matching hash-bound $.coverage.foundation');
+    }
+    if (!arrayAt(value.warnings ?? [], '$.warnings').includes(COMPONENT_FOUNDATION_WARNING)) {
+      throw invalid('$.warnings', 'must record the component foundation containment decision');
+    }
+  }
+  if (coverage?.foundation === 'component' && styles.foundation !== 'component') {
+    throw invalid('$.coverage.foundation', 'requires matching $.styles.foundation');
   }
 
   unique(structureNodeIds(structure), '$.structure', 'node id');
@@ -424,6 +458,7 @@ function normalizePlan(input: unknown): AuthoringPlan {
     ...(source === undefined ? {} : { source }),
     ...(coverage === undefined ? {} : { coverage }),
     structure,
+    ...(sourceDecisions === undefined ? {} : { sourceDecisions }),
     ...(value.allowedBlocks === undefined ? {} : { allowedBlocks: arrayAt(value.allowedBlocks, '$.allowedBlocks').map((name, index) => {
       const block = nonEmptyString(name, `$.allowedBlocks[${index}]`);
       if (!/^[a-z0-9][a-z0-9-]*\/[a-z0-9][a-z0-9-]*$/.test(block)) throw invalid(`$.allowedBlocks[${index}]`, 'must be a WordPress block name');
@@ -439,6 +474,21 @@ function normalizePlan(input: unknown): AuthoringPlan {
       nonEmptyString(warning, `$.warnings[${index}]`),
     ),
   };
+}
+
+function normalizeSourceDecision(input: unknown, location: string): AuthoringSourceDecision {
+  const value = objectAt(input, location);
+  knownKeys(value, location, ['action', 'sourceRef', 'node', 'attribute', 'original', 'value', 'reason', 'source']);
+  return withOptional({
+    action: enumAt(value.action, `${location}.action`, ['add', 'replace', 'omit'] as const),
+    sourceRef: nonEmptyString(value.sourceRef, `${location}.sourceRef`),
+    node: optionalString(value.node, `${location}.node`),
+    attribute: optionalString(value.attribute, `${location}.attribute`),
+    original: value.original === undefined ? undefined : jsonAt(value.original, `${location}.original`),
+    value: value.value === undefined ? undefined : jsonAt(value.value, `${location}.value`),
+    reason: nonEmptyString(value.reason, `${location}.reason`),
+    source: value.source === undefined ? undefined : normalizeCoverageLocation(value.source, `${location}.source`),
+  });
 }
 
 function normalizeSource(input: unknown, location: string): AuthoringSource {
@@ -457,7 +507,7 @@ function normalizeSource(input: unknown, location: string): AuthoringSource {
 
 function normalizeCoverage(input: unknown, location: string): AuthoringCoverage {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['stylesheet', 'editorStylesheet', 'styleContext', 'styles', 'assets']);
+  knownKeys(value, location, ['stylesheet', 'editorStylesheet', 'styleContext', 'foundation', 'styles', 'assets']);
   const styles = arrayAt(value.styles ?? [], `${location}.styles`).map((entry, index) =>
     normalizeCoverageStyle(entry, `${location}.styles[${index}]`),
   );
@@ -470,6 +520,7 @@ function normalizeCoverage(input: unknown, location: string): AuthoringCoverage 
       ? {}
       : { editorStylesheet: normalizeStylesheetFingerprint(value.editorStylesheet, `${location}.editorStylesheet`) }),
     ...(value.styleContext === undefined ? {} : { styleContext: normalizeStyleContext(value.styleContext, `${location}.styleContext`) }),
+    ...(value.foundation === undefined ? {} : { foundation: enumAt(value.foundation, `${location}.foundation`, ['component'] as const) }),
     styles,
     assets,
   };
@@ -530,7 +581,7 @@ function normalizeCoverageLocation(input: unknown, location: string): AuthoringC
 
 function normalizeCoverageStyle(input: unknown, location: string): AuthoringCoverageStyle {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'node', 'responsive', 'preset']);
+  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset']);
   return withOptional({
     property: nonEmptyString(value.property, `${location}.property`),
     value: stringAt(value.value, `${location}.value`),
@@ -539,6 +590,7 @@ function normalizeCoverageStyle(input: unknown, location: string): AuthoringCove
     reason: optionalString(value.reason, `${location}.reason`),
     atRules: arrayAt(value.atRules ?? [], `${location}.atRules`).map((rule, index) => nonEmptyString(rule, `${location}.atRules[${index}]`)),
     source: value.source === undefined ? undefined : normalizeCoverageLocation(value.source, `${location}.source`),
+    transportSelector: optionalString(value.transportSelector, `${location}.transportSelector`),
     node: optionalString(value.node, `${location}.node`),
     responsive: value.responsive === undefined ? undefined : enumAt(value.responsive, `${location}.responsive`, ['mobile', 'tablet'] as const),
     preset: value.preset === undefined ? undefined : (() => {
@@ -661,7 +713,7 @@ function normalizeLocking(input: unknown, location: string): AuthoringLocking {
 
 function normalizeStyles(input: unknown, location: string): AuthoringStyles {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['strategy', 'outcomes', 'rules', 'editorRules', 'fonts']);
+  knownKeys(value, location, ['strategy', 'outcomes', 'foundation', 'rules', 'editorRules', 'fonts']);
   return {
     strategy: value.strategy === undefined
       ? 'native'
@@ -669,6 +721,7 @@ function normalizeStyles(input: unknown, location: string): AuthoringStyles {
     outcomes: arrayAt(value.outcomes ?? [], `${location}.outcomes`).map((outcome, index) =>
       normalizeStyleOutcome(outcome, `${location}.outcomes[${index}]`),
     ),
+    ...(value.foundation === undefined ? {} : { foundation: enumAt(value.foundation, `${location}.foundation`, ['component'] as const) }),
     ...(value.rules === undefined ? {} : { rules: normalizeCssRules(value.rules, `${location}.rules`) }),
     ...(value.editorRules === undefined ? {} : { editorRules: normalizeCssRules(value.editorRules, `${location}.editorRules`) }),
     ...(value.fonts === undefined ? {} : {
@@ -728,8 +781,12 @@ function normalizeCssRules(input: unknown, location: string, depth = 0): Authori
         const declarationAt = `${at}.declarations[${declarationIndex}]`;
         const declaration = objectAt(inputDeclaration, declarationAt);
         knownKeys(declaration, declarationAt, ['property', 'value', 'important']);
-        return withOptional({ property: nonEmptyString(declaration.property, `${declarationAt}.property`),
-          value: nonEmptyString(declaration.value, `${declarationAt}.value`),
+        const property = nonEmptyString(declaration.property, `${declarationAt}.property`);
+        const value = stringAt(declaration.value, `${declarationAt}.value`);
+        if (value.trim().length === 0 && !(value === '' && /^--[a-zA-Z_][a-zA-Z0-9_-]*$/.test(property))) {
+          throw invalid(`${declarationAt}.value`, 'must not be empty unless its property is a valid custom property');
+        }
+        return withOptional({ property, value,
           important: optionalBoolean(declaration.important, `${declarationAt}.important`) });
       }),
     };

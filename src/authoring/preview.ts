@@ -112,6 +112,15 @@ export function renderAuthoringPreview(plan: AuthoringPlan, options: AuthoringPr
     fields.forEach((field, index) => bullet(lines, describeField(field, index), width));
   }
 
+  const sourceDecisions = asArray(value.sourceDecisions);
+  if (sourceDecisions.length > 0) {
+    section(lines, 'Source decisions', width);
+    sourceDecisions.forEach((decision) => {
+      const item = asRecord(decision);
+      bullet(lines, `${readString(item, ['action']) ?? 'decision'} ${readString(item, ['sourceRef']) ?? ''}: ${readString(item, ['reason']) ?? ''}`, width);
+    });
+  }
+
   section(lines, 'Style outcomes', width);
   const styles = asRecord(value.styles);
   const strategy = readString(styles, ['strategy']);

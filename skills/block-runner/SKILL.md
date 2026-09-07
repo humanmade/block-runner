@@ -26,6 +26,9 @@ Four paths. Pick by the requested artifact:
   preview`, show the literal tree and every warning, ask for a clear confirmation, then run
   `author write` using that exact confirmation. Follow it through plugin packaging and a full
   proof. The deterministic generator, not the model, writes the executable source.
+  For authored HTML, make two calls: analyse exact HTML/CSS for `sourceRef`s, then submit an
+  `AuthorOptions.proposal` containing only structure, source references, editability, locks, and
+  explicit content decisions. Block Runner derives ledgers, assets, CSS ownership, and warnings.
 
 - **You are inventing the structure** → do not write HTML. Emit an intent tree (JSON
   describing which blocks and how they nest) and pipe it to

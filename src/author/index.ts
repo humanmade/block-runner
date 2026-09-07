@@ -1,4 +1,5 @@
 import { createHash } from 'node:crypto';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { JSDOM } from 'jsdom';
 import { loadConfig } from '../config/load.js';
@@ -26,9 +27,20 @@ import {
   type PreparedCssAsset,
 } from './assets.js';
 import { writeGeneratedRegisteredBlock } from '../authoring/destination.js';
-import { compileAnalyzedDesign, createAnalyzedDesignCoverage, namespaceAuthoringFontReferences, prepareAuthoringFonts, validateCoverageFulfillment } from './plan.js';
+import {
+  compileAnalyzedDesign,
+  coverageCssRuleSelectors,
+  createAnalyzedDesignCoverage,
+  hasNativeCoverageTransport,
+  namespaceAuthoringFontReferences,
+  prepareAuthoringFonts,
+  validateCoverageFulfillment,
+} from './plan.js';
+import { validateSourceContent } from './content.js';
+import { bindAuthoringProposal, normalizeAuthoringProposal, validateProposalSourceContent } from './proposal.js';
 import { compileRegisteredBlock } from '../authoring/generate.js';
-import { validateAuthoringPlan } from '../authoring/schema.js';
+import { COMPONENT_FOUNDATION_WARNING, validateAuthoringPlan } from '../authoring/schema.js';
+import { authoringRulesFromStylesheet } from '../authoring/styles.js';
 import {
   compileTailwindBuildGraph,
   createSelectorDependencyTransport,
@@ -78,6 +90,16 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     : config;
   const source = { entry: options.sourcePath ?? '<inline>', sha256: createHash('sha256').update(input, 'utf8').digest('hex'), format: 'html' as const };
   const evidence = collectSourceEvidence(input, source, options.sourcePath);
+  if (options.assetRoot !== undefined && (typeof options.assetRoot !== 'string' || !options.assetRoot.trim())) {
+    return authorFailure('author.assetRoot must be a non-empty path when supplied', source, evidence);
+  }
+  const assetRoot = options.assetRoot === undefined ? undefined : path.resolve(options.assetRoot);
+  if (options.plan && options.proposal) return authorFailure('author.plan and author.proposal cannot be supplied together', source, evidence);
+  let proposal: ReturnType<typeof normalizeAuthoringProposal> | undefined;
+  if (options.proposal) {
+    try { proposal = normalizeAuthoringProposal(options.proposal); }
+    catch (error) { return authorFailure(error instanceof Error ? error.message : String(error), source, evidence); }
+  }
   const name = definition.name;
   if (!name || !isBlockName(name)) {
     return authorFailure('author.name must be a registered block name such as "acme/hero"', source, evidence);
@@ -94,7 +116,8 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   }
 
   const rootSelector = `.wp-block-${name.replace('/', '-')}`;
-  let styleInput = definition.styles?.css ?? stylesFromHtml(input);
+  const configuredStylesheet = definition.styles?.css;
+  let styleInput = configuredStylesheet ?? stylesFromHtml(input);
   const styleMode = definition.styles?.mode;
   if (styleInput.trim() && styleMode !== 'css' && styleMode !== 'tailwind') {
     return authorFailure(
@@ -187,6 +210,11 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const processedSource = await rewriteCssAssets({
     sourceCss: styleInput,
     sourcePath: options.sourcePath,
+    // This is extracted from markup only when no separately configured shared stylesheet
+    // supersedes it. Markup-owned <style> nodes have the same explicit asset authorization as
+    // markup attributes; configured shared/editor CSS retains its established source-directory
+    // boundary.
+    assetRoot: configuredStylesheet === undefined ? assetRoot : undefined,
     destinationAssetDir,
     assetUrlPrefix: './assets/',
     prepareAsset,
@@ -243,10 +271,13 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const selectorTransport = createSelectorDependencyTransport();
   const safetyScopedStyles = scopeStylesheet(stylesheet, {
     root: rootSelector,
+    foundation: definition.styles?.foundation,
     disposition: (declaration) => unsafeResidualDeclaration(declaration.property, declaration.value),
     selectorTransform: selectorTransport.rewrite,
   });
-  const safetyLedger = safetyScopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(safetyScopedStyles.localRules)));
+  const safetyLedger = safetyScopedStyles.ledger.map(toAuthoredStyleLedgerEntry(
+    options.sourcePath, selectorsByRule(stylesheet.rules), selectorsByRule(safetyScopedStyles.localRules),
+  ));
   const hardSafetyStyleFailure = safetyScopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || safetyScopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
   const fontItems: ReportItem[] = fontWarnings.map(({ warning, scope }) => ({
@@ -309,9 +340,11 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   // proposal. Gather them before either optional analysis can stop package generation.
   const rewrittenMarkup = await rewriteMarkupAssets(input, {
     sourcePath: options.sourcePath,
+    assetRoot,
     destinationAssetDir,
     prepareAsset,
     fontLicenses,
+    configuredStylesheet,
     stylesheetAssetsAlreadyAccounted: definition.styles?.css === undefined,
   });
   assets = [...assets, ...rewrittenMarkup.assets];
@@ -356,7 +389,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const preflightInlineFailure = nativeSource.inlineLedger.some(
     (entry) => entry.outcome === 'blocked' || entry.outcome === 'warned',
   );
-  if ((!nativeSource.conversion.ok && !options.plan) || preflightInlineFailure) {
+  if (preflightInlineFailure) {
     return {
       ...nativeSource.conversion,
       ok: false,
@@ -374,12 +407,13 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   }
   const scopedStyles = scopeStylesheet(stylesheet, {
     root: rootSelector,
+    foundation: definition.styles?.foundation,
     selectorTransform: selectorTransport.rewrite,
     disposition: (declaration, rule) =>
       unsafeResidualDeclaration(declaration.property, declaration.value)
       // Native block attributes cannot encode priority. Retain !important source CSS exactly;
       // silently strengthening or weakening its cascade would be a fidelity regression.
-      ?? (!declaration.important && !cascadeSensitiveDeclarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id)) && nativeSource.declarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id))
+      ?? (!proposal && !declaration.important && !cascadeSensitiveDeclarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id)) && nativeSource.declarations.has(sourceDeclarationKey(rule.selector, declaration.property, declaration.value, rule.id))
         ? {
             outcome: 'native' as const,
             reason: 'mapped through the destination block support; omitted from residual CSS',
@@ -388,7 +422,9 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   });
   // Retain source selectors even when native promotion emptied their residual CSS rule; coverage
   // provenance must identify the original element, not fall back to any matching output node.
-  const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(stylesheet.rules)));
+  const stylesheetLedger = scopedStyles.ledger.map(toAuthoredStyleLedgerEntry(
+    options.sourcePath, selectorsByRule(stylesheet.rules), selectorsByRule(scopedStyles.localRules),
+  ));
   const hardStyleFailure = scopedStyles.ledger.some((entry) => entry.outcome === 'blocked' || entry.outcome === 'warned')
     || scopedStyles.ruleRecords.some((record) => record.outcome === 'blocked');
 
@@ -435,6 +471,19 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       details: { outcome: asset.outcome, rewritten: asset.rewritten },
     }));
   const hardAssetFailure = assets.some((asset) => asset.outcome === 'unresolved' || asset.outcome === 'blocked');
+  let proposalBound: ReturnType<typeof bindAuthoringProposal> | undefined;
+  if (proposal && !hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure) {
+    try {
+      proposalBound = bindAuthoringProposal({
+        proposal, sourceHtml: input, sourceHash: source.sha256, sourcePath: options.sourcePath,
+        base: { structure: [], fields: [], assets: [], files: [], warnings: [] } as unknown as import('../authoring/schema.js').AuthoringPlan,
+        retainedCssClasses: referencedCssClasses(styleInput),
+        selectorDependencies: selectorTransport.dependencies,
+      });
+    } catch (error) {
+      return authorFailure(error instanceof Error ? error.message : String(error), source, evidence);
+    }
+  }
   let compiled: ReturnType<typeof compileAnalyzedDesign> | undefined;
   const generationItems: ReportItem[] = [];
   if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && options.plan) {
@@ -450,6 +499,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       // before equality, rather than accepting a caller's altered ledger.
       classifyConfirmedPresetCoverage(expectedCoverageInput, supplied, definition.styles?.context?.theme?.settings);
       classifyConfirmedResponsiveCoverage(expectedCoverageInput, supplied);
+      classifyConfirmedStructuredCssCoverage(expectedCoverageInput, supplied);
       const expectedCoverage = validateAuthoringPlan({ ...supplied, coverage: expectedCoverageInput }).coverage!;
       if (supplied.source?.entry !== source.entry || supplied.source.sha256 !== source.sha256 || supplied.source.format !== 'html') {
         throw new Error('Supplied authoring plan is not bound to this exact HTML source hash.');
@@ -460,7 +510,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       if (!supplied.coverage || stableJson(supplied.coverage) !== stableJson(expectedCoverage)) {
         throw new Error('Supplied authoring plan does not retain the complete source declaration and asset coverage.');
       }
-      validateCoverageFulfillment(supplied);
+      validateCoverageFulfillment(supplied, input, assetRoot);
       compiled = {
         plan: supplied,
         generated: compileRegisteredBlock(supplied),
@@ -468,8 +518,9 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       } as ReturnType<typeof compileAnalyzedDesign>;
     } catch (error) {
       generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+      compiled = undefined;
     }
-  } else if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && conversion.ok) {
+  } else if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && (conversion.ok || proposal)) {
     try {
       compiled = compileAnalyzedDesign({
         definition,
@@ -477,6 +528,18 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         source: input,
         sourcePath: options.sourcePath,
         blocks,
+        ...(proposalBound ? {
+          structureOverride: proposalBound.structure,
+          sourceDecisions: proposalBound.sourceDecisions,
+          sourceRefToNode: proposalBound.sourceRefToNode,
+          cascadeSensitiveDeclarations,
+          proposalChoices: {
+            fields: proposalBound.fields,
+            locking: proposalBound.locking,
+            ...(proposalBound.allowedBlocks === undefined ? {} : { allowedBlocks: proposalBound.allowedBlocks }),
+            pattern: proposalBound.pattern,
+          },
+        } : {}),
         rules: scopedStyles.localRules,
         preparedAssets: [...preparedAssets.values()],
         assets,
@@ -488,8 +551,25 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         fontWarnings,
         fontLicenses,
       });
+      if (proposal && compiled) {
+        const plan = validateAuthoringPlan(compiled.plan);
+        validateCoverageFulfillment(plan, input, assetRoot);
+        validateProposalSourceContent(input, proposalBound!, plan);
+        compiled = { ...compiled, plan, generated: compileRegisteredBlock(plan) };
+      }
     } catch (error) {
       generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+      // Compilation may have produced a tentative package before canonical coverage/content
+      // fulfillment runs. Never return that tentative package after a fail-closed validation.
+      compiled = undefined;
+    }
+  }
+  if (compiled && !proposal && !options.plan) {
+    try {
+      validateSourceContent(input, compiled.generated.template);
+    } catch (error) {
+      generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+      compiled = undefined;
     }
   }
   const packageSource: GeneratedBlockPackage | undefined = compiled ? {
@@ -522,7 +602,38 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     assets: assets.length > 0 ? assets : undefined,
     styleLedger: compiled ? [...styleLedger, ...compiled.editorStyleLedger] : styleLedger,
     package: packageSource,
-    evidence: { ...evidence, coverage: sourceCoverage(styleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
+    evidence: {
+      ...evidence,
+      coverage: sourceCoverage(styleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings),
+      transport: {
+        styles: {
+          strategy: scopedStyles.localRules.length ? 'mixed' : 'native',
+          outcomes: [],
+          ...(definition.styles?.foundation ? { foundation: definition.styles.foundation } : {}),
+          // The transport view preserves every safely scoped source declaration, including the
+          // ones automatic compilation promotes to native attributes. A plan author can therefore
+          // choose CSS ownership without reconstructing source CSS; compilation still uses only
+          // `scopedStyles` and never emits duplicate native declarations by itself.
+          rules: authoringRulesFromStylesheet(safetyScopedStyles.localRules),
+          editorRules: authoringRulesFromStylesheet(scopeStylesheet(scanStylesheet(editorStyleInput ?? ''), {
+            root: rootSelector, foundation: definition.styles?.foundation,
+          }).localRules),
+          ...(sharedFonts.fonts.length ? { fonts: [...sharedFonts.fonts] } : {}),
+        },
+        assets: [...preparedAssets.values()].map((asset, index) => {
+          const license = fontLicenses.find((item) => path.resolve(item.source) === path.resolve(asset.source) && item.sha256 === asset.sha256);
+          return {
+            id: `asset.${index}`, source: asset.source, kind: asset.kind === 'font' ? 'font' : 'image',
+            destination: `assets/${path.basename(asset.destination)}`, status: 'ready', sha256: asset.sha256,
+            ...(license ? { fontLicense: { ownership: license.ownership, license: license.license, ...(license.notice === undefined ? {} : { notice: license.notice }) } } : {}),
+          };
+        }),
+        warnings: [
+          ...(definition.styles?.foundation === 'component' ? [COMPONENT_FOUNDATION_WARNING] : []),
+          ...fontWarnings.map(({ warning }) => warning.reason),
+        ],
+      },
+    },
   };
 }
 
@@ -653,6 +764,9 @@ export function collectSourceEvidence(
         htmlColumn: location?.startCol,
         offset: location?.startOffset,
       },
+      ...(location?.startOffset !== undefined && location.endOffset !== undefined
+        ? { sourceRef: `${source.sha256}:${location.startOffset}-${location.endOffset}` }
+        : {}),
     };
   });
   const dependencies = [...dom.window.document.querySelectorAll('link[rel~="stylesheet"]')].map((element) => ({
@@ -689,7 +803,10 @@ function sourceCoverage(
   options: AuthorOptions,
   fontWarnings: ReadonlyArray<{ warning: FontAssetWarning; scope: 'shared' | 'editor' }>,
 ) {
-  const editor = scopeStylesheet(scanStylesheet(editorStylesheet ?? ''), { root: `.wp-block-${definition.name?.replace('/', '-') ?? 'unknown'}` });
+  const editor = scopeStylesheet(scanStylesheet(editorStylesheet ?? ''), {
+    root: `.wp-block-${definition.name?.replace('/', '-') ?? 'unknown'}`,
+    foundation: definition.styles?.foundation,
+  });
   const editorStyleLedger = editor.ledger.map(toAuthoredStyleLedgerEntry(options.sourcePath, selectorsByRule(editor.localRules)));
   return createAnalyzedDesignCoverage({
     definition,
@@ -746,6 +863,29 @@ function classifyConfirmedResponsiveCoverage(
     entry.reason = confirmed.reason;
     entry.node = confirmed.node;
     entry.responsive = confirmed.responsive;
+  }
+}
+
+/**
+ * Static capability analysis may recognize a declaration as WordPress-native even though the
+ * reviewed plan deliberately retains its exact CSS rule and carries no native block attribute.
+ * Reclassify only that fully evidenced case. This preserves the source ledger while requiring the
+ * plan's structured rule and final structure to agree before coverage equality can succeed.
+ */
+function classifyConfirmedStructuredCssCoverage(
+  coverage: NonNullable<AuthorSourceEvidence['coverage']>,
+  plan: import('../authoring/schema.js').AuthoringPlan,
+): void {
+  for (const entry of coverage.styles) {
+    if (entry.outcome !== 'native' || hasNativeCoverageTransport(plan, entry)) continue;
+    const rules = entry.scope === 'editor' ? plan.styles.editorRules ?? [] : plan.styles.rules ?? [];
+    const selector = entry.transportSelector ?? entry.source?.selector;
+    if (coverageCssRuleSelectors(rules, entry.property, entry.value, entry.atRules, selector).length === 0) continue;
+    entry.outcome = 'scoped-css';
+    delete entry.reason;
+    delete entry.node;
+    delete entry.responsive;
+    delete entry.preset;
   }
 }
 
@@ -844,9 +984,13 @@ function mergeAssetLedgers(
 
 interface RewriteMarkupAssetsOptions {
   sourcePath?: string;
+  /** Markup may reference a sibling asset directory beneath the authored source root. */
+  assetRoot?: string;
   destinationAssetDir: string;
   prepareAsset: (asset: PreparedCssAsset) => void;
   fontLicenses: readonly FontLicenseDecision[];
+  /** Exact compiled CSS supplied through author.styles.css, when present. */
+  configuredStylesheet?: string;
   /** True when styleInput already supplied ledger entries for every inline <style> URL. */
   stylesheetAssetsAlreadyAccounted: boolean;
 }
@@ -869,6 +1013,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   const dom = new JSDOM(input, { contentType: 'text/html' });
   const assets: AssetLedgerEntry[] = [];
   const document = dom.window.document;
+  const assetRoot = options.assetRoot;
 
   const processReference = async (
     reference: string,
@@ -882,6 +1027,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
         ? `@font-face{src:url(${JSON.stringify(reference)})}`
         : `x{background-image:url(${JSON.stringify(reference)})}`,
       sourcePath: options.sourcePath,
+      assetRoot,
       destinationAssetDir: options.destinationAssetDir,
       assetUrlPrefix: './assets/',
       prepareAsset: options.prepareAsset,
@@ -909,6 +1055,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     const processed = await rewriteCssAssets({
       sourceCss: value,
       sourcePath: options.sourcePath,
+      assetRoot,
       destinationAssetDir: options.destinationAssetDir,
       assetUrlPrefix: './assets/',
       prepareAsset: options.prepareAsset,
@@ -932,6 +1079,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       const processed = await rewriteCssAssets({
         sourceCss,
         sourcePath: options.sourcePath,
+        assetRoot,
         destinationAssetDir: options.destinationAssetDir,
         assetUrlPrefix: './assets/',
         prepareAsset: options.prepareAsset,
@@ -952,6 +1100,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       const processed = await rewriteCssAssets({
         sourceCss: style,
         sourcePath: options.sourcePath,
+        assetRoot,
         destinationAssetDir: options.destinationAssetDir,
         assetUrlPrefix: './assets/',
         prepareAsset: options.prepareAsset,
@@ -987,6 +1136,13 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     for (const { name: attribute, kind } of assetAttributes) {
       const value = element.getAttribute(attribute);
       if (value === null) continue;
+      // A linked stylesheet remains source evidence in collectSourceEvidence. When the caller
+      // supplied its exact local compiled bytes through author.styles.css, it is already the
+      // stylesheet the package will scope and emit; copying that CSS as an image-like package
+      // asset would both duplicate the source of truth and violate the static asset contract.
+      // Do not generalize this to every stylesheet link: unmatched, remote, escaped, unreadable,
+      // or symlinked links keep their existing explicit asset outcome.
+      if (kind === 'stylesheet' && await matchesConfiguredStylesheet(value, options)) continue;
       const rewritten = await processReference(value, kind);
       if (rewritten) {
         element.setAttribute(attribute, rewritten);
@@ -1027,6 +1183,48 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   // leading stylesheet into `<head>`; returning body.innerHTML would make the final conversion
   // forget declarations the preflight proved native, recreating the very ledger mismatch here.
   return { input: dom.serialize(), assets };
+}
+
+/**
+ * A configured stylesheet can replace a linked source sheet only when it proves it is that exact
+ * local file. The link itself stays in source evidence, while all other links continue through the
+ * regular asset ledger rather than disappearing from the authoring contract.
+ */
+async function matchesConfiguredStylesheet(reference: string, options: RewriteMarkupAssetsOptions): Promise<boolean> {
+  if (options.configuredStylesheet === undefined || !options.sourcePath) return false;
+  if (/^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(reference)) return false;
+  const pathname = reference.split(/[?#]/, 1)[0];
+  if (!pathname) return false;
+  const sourceDirectory = path.dirname(path.resolve(options.sourcePath));
+  const candidate = path.resolve(sourceDirectory, pathname);
+  const relative = path.relative(sourceDirectory, candidate);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return false;
+  try {
+    if (await hasSymlinkedAncestor(sourceDirectory, candidate)) return false;
+    const [info, realRoot, realCandidate] = await Promise.all([
+      lstat(candidate), realpath(sourceDirectory), realpath(candidate),
+    ]);
+    if (!info.isFile() || info.isSymbolicLink() || !isWithinPath(realRoot, realCandidate)) return false;
+    return await readFile(candidate, 'utf8') === options.configuredStylesheet;
+  } catch {
+    return false;
+  }
+}
+
+/** Check descendants only: the source directory itself may be a platform-owned /tmp alias. */
+async function hasSymlinkedAncestor(root: string, target: string): Promise<boolean> {
+  const relative = path.relative(root, target);
+  if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return true;
+  let current = root;
+  for (const segment of relative.split(path.sep)) {
+    current = path.join(current, segment);
+    if ((await lstat(current)).isSymbolicLink()) return true;
+  }
+  return false;
+}
+
+function isWithinPath(root: string, candidate: string): boolean {
+  return candidate === root || candidate.startsWith(`${root}${path.sep}`);
 }
 
 interface AssetAttribute {
@@ -1241,7 +1439,8 @@ function toAssetLedgerEntry(asset: {
 
 function toAuthoredStyleLedgerEntry(
   sourcePath: string | undefined,
-  selectors: ReadonlyMap<string, string> = new Map(),
+  sourceSelectors: ReadonlyMap<string, string> = new Map(),
+  transportSelectors: ReadonlyMap<string, string> = sourceSelectors,
 ): (entry: {
   ruleId: string;
   property: string;
@@ -1251,7 +1450,10 @@ function toAuthoredStyleLedgerEntry(
   atRules: string[];
   source: { start: { offset: number; line: number; column: number } };
 }) => AuthoredStyleLedgerEntry {
-  return (entry) => ({
+  return (entry) => {
+    const selector = sourceSelectors.get(entry.ruleId);
+    const transportSelector = transportSelectors.get(entry.ruleId);
+    return {
     property: entry.property,
     value: entry.value,
     outcome: normalizeStyleOutcome(entry.outcome),
@@ -1259,12 +1461,14 @@ function toAuthoredStyleLedgerEntry(
     atRules: entry.atRules,
     source: {
       path: sourcePath,
-      selector: selectors.get(entry.ruleId),
+      selector,
       offset: entry.source.start.offset,
       htmlLine: entry.source.start.line,
       htmlColumn: entry.source.start.column,
     },
-  });
+    ...(selector && transportSelector && selector !== transportSelector ? { transportSelector } : {}),
+  };
+  };
 }
 
 function selectorsByRule(rules: readonly import('./styles.js').CssRule[], output = new Map<string, string>()): Map<string, string> {

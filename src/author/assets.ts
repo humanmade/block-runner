@@ -709,6 +709,10 @@ const SAFE_FONT_FAMILIES = new Set([
   'ui-monospace', 'ui-rounded', 'math', 'emoji', 'fangsong', '-apple-system', 'BlinkMacSystemFont',
   'Arial', 'Helvetica', 'Segoe UI', 'Times New Roman', 'Times', 'Georgia', 'Cambria', 'Garamond',
   'Courier New', 'Courier', 'Verdana', 'Tahoma', 'Trebuchet MS',
+  // These are the fixed platform fallback faces in Tailwind Preflight's system stacks. They do
+  // not name a source file and are never bundled, so they need no redistribution decision.
+  'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol', 'Noto Color Emoji',
+  'SFMono-Regular', 'SF Mono', 'Menlo', 'Monaco', 'Consolas', 'Liberation Mono',
 ].map(normalizeFamilyName));
 
 const SAFE_FONT_SHORTHANDS = new Set(['caption', 'icon', 'menu', 'message-box', 'small-caption', 'status-bar', 'inherit', 'initial', 'unset', 'revert', 'revert-layer']);

@@ -79,6 +79,36 @@ export interface AuthorSourceElement {
   tag: string;
   attributes: Record<string, string>;
   source?: SourceLocation;
+  /** Stable only for this exact source SHA-256 and parser range. */
+  sourceRef?: string;
+}
+
+export interface AuthoringProposalNode {
+  id: string;
+  block: string;
+  sourceRef?: string;
+  attributes?: Record<string, import('./authoring/schema.js').JsonValue>;
+  lock?: import('./authoring/schema.js').AuthoringNodeLock;
+  children?: AuthoringProposalNode[];
+}
+
+export interface AuthoringProposalDecision {
+  action: 'add' | 'replace' | 'omit';
+  sourceRef: string;
+  node?: string;
+  attribute?: string;
+  value?: import('./authoring/schema.js').JsonValue;
+  reason: string;
+}
+
+/** Model-facing design choices. Source/asset/style bookkeeping is deliberately absent. */
+export interface AuthoringProposal {
+  structure: AuthoringProposalNode[];
+  fields?: import('./authoring/schema.js').AuthoringField[];
+  locking?: import('./authoring/schema.js').AuthoringLocking;
+  allowedBlocks?: string[];
+  pattern?: import('./authoring/schema.js').AuthoringPattern;
+  sourceDecisions?: AuthoringProposalDecision[];
 }
 
 /**
@@ -93,6 +123,12 @@ export interface AuthorSourceEvidence {
   diagnostics: ReportItem[];
   /** Present once CSS/assets have been scanned, including unresolved dispositions. */
   coverage?: import('./authoring/schema.js').AuthoringCoverage;
+  /** Deterministic plan inputs, available even when the advisory native structure needs work. */
+  transport?: {
+    styles: import('./authoring/schema.js').AuthoringStyles;
+    assets: import('./authoring/schema.js').AuthoringAsset[];
+    warnings: string[];
+  };
 }
 
 export type AuthoredStyleOutcome = 'native' | 'preset' | 'literal' | 'scoped-css' | 'warned' | 'blocked';
@@ -104,6 +140,8 @@ export interface AuthoredStyleLedgerEntry {
   reason?: string;
   atRules: string[];
   source?: SourceLocation;
+  /** Component-local selector emitted after source selector dependency transport. */
+  transportSelector?: string;
   /** Native-node evidence for a conservatively lifted WordPress responsive declaration. */
   node?: string;
   responsive?: 'mobile' | 'tablet';
@@ -183,6 +221,11 @@ export interface AuthorStyleConfig {
   fontLicenses?: readonly FontLicenseDecision[];
   /** Optional destination-approved fallback stack for fonts which cannot be redistributed. */
   fallbackStack?: string;
+  /**
+   * Opt in to containing otherwise-global foundation rules inside the generated block. This does
+   * not claim document-wide equivalence; unscoped authoring continues to reject them by default.
+   */
+  foundation?: 'component';
   /** Target facts used for ownership decisions; copied into the hash-bound plan coverage. */
   context?: { theme?: { slug?: string; version?: string; settings?: Record<string, unknown> }; viewports?: Partial<Record<'mobile' | 'tablet', { min?: string; max?: string }>> };
 }
@@ -340,6 +383,12 @@ export interface ConvertOptions extends CommonOptions {
 export interface AuthorOptions extends ConvertOptions {
   /** Directory to write the generated package. Omit to inspect `report.package` without writing. */
   outDir?: string;
+  /**
+   * Explicit boundary for local assets referenced by authored markup. Defaults to the directory
+   * containing `sourcePath`; supply a non-empty root only to authorize its descendants outside
+   * that directory.
+   */
+  assetRoot?: string;
   /** Per-run author settings, which override `config.author`. */
   author?: AuthorConfig;
   /**
@@ -347,6 +396,8 @@ export interface AuthorOptions extends ConvertOptions {
    * rules proposal and must retain the exact source/coverage evidence observed in this run.
    */
   plan?: import('./authoring/schema.js').AuthoringPlan;
+  /** Declarative design proposal; Block Runner derives the canonical ledgers and warnings. */
+  proposal?: AuthoringProposal;
 }
 
 export interface AssembleOptions extends CommonOptions {
