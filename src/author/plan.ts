@@ -619,7 +619,7 @@ function stableJson(value: unknown): string {
  * declarative package it asks the compiler to emit.  Ledger equality alone is provenance, not
  * delivery: CSS and prepared assets must also have a concrete plan transport.
  */
-export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: string): void {
+export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: string, assetRoot?: string): void {
   const coverage = plan.coverage;
   if (!coverage) throw new Error('Supplied authoring plan is missing its source coverage.');
   let serializedTemplate: string | undefined;
@@ -695,7 +695,7 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
         }
         continue;
       }
-      const source = resolvedCoverageAssetSource(plan, entry.reference);
+      const source = resolvedCoverageAssetSource(plan, entry.reference, assetRoot);
       const asset = source === undefined || entry.destination === undefined || entry.sha256 === undefined
         ? undefined
         : plan.assets.find((candidate) => path.resolve(candidate.source) === source
@@ -744,14 +744,14 @@ function cssRuleUsesAsset(rule: import('../authoring/schema.js').AuthoringCssRul
 }
 
 /** Resolve a source asset only from a relative reference beneath the hash-bound HTML source root. */
-function resolvedCoverageAssetSource(plan: AuthoringPlan, reference: string): string | undefined {
+function resolvedCoverageAssetSource(plan: AuthoringPlan, reference: string, assetRoot?: string): string | undefined {
   if (!plan.source || plan.source.entry === '<inline>' || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(reference)) return undefined;
   const pathname = reference.split(/[?#]/, 1)[0];
   if (!pathname) return undefined;
   const sourceDirectory = path.dirname(path.resolve(plan.source.entry));
-  const assetRoot = path.dirname(sourceDirectory);
+  const allowedRoot = path.resolve(assetRoot ?? sourceDirectory);
   const resolved = path.resolve(sourceDirectory, pathname);
-  const relative = path.relative(assetRoot, resolved);
+  const relative = path.relative(allowedRoot, resolved);
   if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
   return resolved;
 }

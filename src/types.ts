@@ -383,6 +383,12 @@ export interface ConvertOptions extends CommonOptions {
 export interface AuthorOptions extends ConvertOptions {
   /** Directory to write the generated package. Omit to inspect `report.package` without writing. */
   outDir?: string;
+  /**
+   * Explicit boundary for local assets referenced by authored markup. Defaults to the directory
+   * containing `sourcePath`; supply a non-empty root only to authorize its descendants outside
+   * that directory.
+   */
+  assetRoot?: string;
   /** Per-run author settings, which override `config.author`. */
   author?: AuthorConfig;
   /**

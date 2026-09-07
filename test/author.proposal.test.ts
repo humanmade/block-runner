@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -280,7 +280,7 @@ describe('author proposal boundary', () => {
         { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) }, { id: 'title', block: 'core/heading', sourceRef: ref('h2') }, { id: 'body', block: 'core/paragraph', sourceRef: ref('p', 1) }, { id: 'buttons', block: 'core/buttons', children: [{ id: 'cta', block: 'core/button', sourceRef: ref('a') }] },
       ] }, { id: 'image', block: 'core/image', sourceRef: ref('figure') },
     ] }] };
-    const options = { sourcePath, author: { name: 'example/local-assets' }, proposal };
+    const options = { sourcePath, assetRoot: benchmarkRoot, author: { name: 'example/local-assets' }, proposal };
     const [first, second] = await Promise.all([author(html, options), author(html, options)]);
     expect(first.ok, JSON.stringify(first.items)).toBe(true);
     expect(second.ok).toBe(true);
@@ -291,6 +291,8 @@ describe('author proposal boundary', () => {
     expect(asset).toMatchObject({ source: assetSource, sha256: createHash('sha256').update(assetBytes).digest('hex'), destination: expect.stringMatching(/^assets\/aurora-dashboard-/), uses: [{ node: 'image', attribute: 'url' }] });
     expect(plan.structure[0]!.children![1]!.attributes).toMatchObject({ url: `./${asset.destination}`, alt: 'Aurora dashboard with color tokens, release receipts, and a completed activation check', caption: 'Local SVG fixture: no network asset may substitute for this file.' });
     expect(first.package!.assets).toEqual(expect.arrayContaining([expect.objectContaining({ path: asset.destination, sha256: asset.sha256 })]));
+    const resubmitted = await author(html, { sourcePath, assetRoot: benchmarkRoot, author: { name: 'example/local-assets' }, plan });
+    expect(resubmitted.ok, JSON.stringify(resubmitted.items)).toBe(true);
     const output = planRegisteredBlockOutput(plan);
     const parent = await mkdtemp(path.join(tmpdir(), 'block-runner-proposal-'));
     const destination = path.join(parent, 'not-yet-created');
@@ -320,6 +322,46 @@ describe('author proposal boundary', () => {
       expect(hashAuthoringConfirmation(rebuilt.package!.canonicalPlan!, await inspectAuthoringDestination(changedDestination, planRegisteredBlockOutput(rebuilt.package!.canonicalPlan!))))
         .not.toBe(hashAuthoringConfirmation(plan, await inspectAuthoringDestination(changedDestination, output)));
     } finally { await rm(changedDestination, { recursive: true, force: true }); }
+  });
+
+  it('requires an explicit markup asset root for sibling assets and keeps that root contained', async () => {
+    const assetBytes = await readFile(path.join(benchmarkRoot, 'assets', 'aurora-dashboard.svg'));
+    const parent = await mkdtemp(path.join(tmpdir(), 'block-runner-asset-root-'));
+    try {
+      const sourceDirectory = path.join(parent, 'source');
+      await mkdir(sourceDirectory);
+      await writeFile(path.join(parent, 'private.svg'), assetBytes);
+      const html = '<figure><img src="../private.svg" alt="Private"></figure>';
+      const proposal = { structure: [{ id: 'image', block: 'core/image', sourceRef: refs(html)('figure') }] };
+      const defaultBoundary = await author(html, {
+        sourcePath: path.join(sourceDirectory, 'design.html'), author: { name: 'example/asset-root' }, proposal,
+      });
+      expect(defaultBoundary.ok).toBe(false);
+      expect(defaultBoundary.package).toBeUndefined();
+      expect(defaultBoundary.assets).toEqual(expect.arrayContaining([expect.objectContaining({ reference: '../private.svg', outcome: 'blocked' })]));
+
+      const embeddedStyle = '<style>.hero { background-image: url("../private.svg"); }</style><section class="hero">Styled</section>';
+      const embeddedStyleReport = await author(embeddedStyle, {
+        sourcePath: path.join(sourceDirectory, 'design.html'), assetRoot: parent,
+        author: { name: 'example/asset-root', styles: { mode: 'css' } },
+        proposal: { structure: [{ id: 'hero', block: 'core/group', sourceRef: refs(embeddedStyle)('section') }] },
+      });
+      expect(embeddedStyleReport.ok, JSON.stringify(embeddedStyleReport.items)).toBe(true);
+      expect(embeddedStyleReport.package!.canonicalPlan!.assets).toEqual(expect.arrayContaining([
+        expect.objectContaining({ source: path.join(parent, 'private.svg') }),
+      ]));
+
+      const authorizedRoot = path.join(parent, 'authorized');
+      const nestedSource = path.join(authorizedRoot, 'source');
+      await mkdir(nestedSource, { recursive: true });
+      const escaped = await author('<figure><img src="../../private.svg" alt="Private"></figure>', {
+        sourcePath: path.join(nestedSource, 'design.html'), assetRoot: authorizedRoot,
+        author: { name: 'example/asset-root' }, proposal: { structure: [{ id: 'image', block: 'core/image', sourceRef: refs('<figure><img src="../../private.svg" alt="Private"></figure>')('figure') }] },
+      });
+      expect(escaped.ok).toBe(false);
+      expect(escaped.package).toBeUndefined();
+      expect(escaped.assets).toEqual(expect.arrayContaining([expect.objectContaining({ reference: '../../private.svg', outcome: 'blocked' })]));
+    } finally { await rm(parent, { recursive: true, force: true }); }
   });
 
   it('fails closed for executable markup and unsafe source-owned replacements', async () => {

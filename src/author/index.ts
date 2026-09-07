@@ -90,6 +90,10 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
     : config;
   const source = { entry: options.sourcePath ?? '<inline>', sha256: createHash('sha256').update(input, 'utf8').digest('hex'), format: 'html' as const };
   const evidence = collectSourceEvidence(input, source, options.sourcePath);
+  if (options.assetRoot !== undefined && (typeof options.assetRoot !== 'string' || !options.assetRoot.trim())) {
+    return authorFailure('author.assetRoot must be a non-empty path when supplied', source, evidence);
+  }
+  const assetRoot = options.assetRoot === undefined ? undefined : path.resolve(options.assetRoot);
   if (options.plan && options.proposal) return authorFailure('author.plan and author.proposal cannot be supplied together', source, evidence);
   let proposal: ReturnType<typeof normalizeAuthoringProposal> | undefined;
   if (options.proposal) {
@@ -206,6 +210,11 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   const processedSource = await rewriteCssAssets({
     sourceCss: styleInput,
     sourcePath: options.sourcePath,
+    // This is extracted from markup only when no separately configured shared stylesheet
+    // supersedes it. Markup-owned <style> nodes have the same explicit asset authorization as
+    // markup attributes; configured shared/editor CSS retains its established source-directory
+    // boundary.
+    assetRoot: configuredStylesheet === undefined ? assetRoot : undefined,
     destinationAssetDir,
     assetUrlPrefix: './assets/',
     prepareAsset,
@@ -331,6 +340,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
   // proposal. Gather them before either optional analysis can stop package generation.
   const rewrittenMarkup = await rewriteMarkupAssets(input, {
     sourcePath: options.sourcePath,
+    assetRoot,
     destinationAssetDir,
     prepareAsset,
     fontLicenses,
@@ -500,7 +510,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       if (!supplied.coverage || stableJson(supplied.coverage) !== stableJson(expectedCoverage)) {
         throw new Error('Supplied authoring plan does not retain the complete source declaration and asset coverage.');
       }
-      validateCoverageFulfillment(supplied, input);
+      validateCoverageFulfillment(supplied, input, assetRoot);
       compiled = {
         plan: supplied,
         generated: compileRegisteredBlock(supplied),
@@ -543,7 +553,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       });
       if (proposal && compiled) {
         const plan = validateAuthoringPlan(compiled.plan);
-        validateCoverageFulfillment(plan, input);
+        validateCoverageFulfillment(plan, input, assetRoot);
         validateProposalSourceContent(input, proposalBound!, plan);
         compiled = { ...compiled, plan, generated: compileRegisteredBlock(plan) };
       }
@@ -1003,10 +1013,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   const dom = new JSDOM(input, { contentType: 'text/html' });
   const assets: AssetLedgerEntry[] = [];
   const document = dom.window.document;
-  // HTML is the source document, not a stylesheet: its local media commonly lives in a sibling
-  // `assets/` directory (for example `semantic/page.html` → `../assets/image.svg`). Keep that
-  // bounded to the source root, while standalone stylesheet URLs retain their stricter default.
-  const assetRoot = options.assetRoot ?? markupAssetRoot(options.sourcePath);
+  const assetRoot = options.assetRoot;
 
   const processReference = async (
     reference: string,
@@ -1176,11 +1183,6 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   // leading stylesheet into `<head>`; returning body.innerHTML would make the final conversion
   // forget declarations the preflight proved native, recreating the very ledger mismatch here.
   return { input: dom.serialize(), assets };
-}
-
-function markupAssetRoot(sourcePath?: string): string | undefined {
-  if (!sourcePath) return undefined;
-  return path.dirname(path.dirname(path.resolve(sourcePath)));
 }
 
 /**
