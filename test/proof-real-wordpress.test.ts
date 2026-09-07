@@ -250,8 +250,8 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
         button: { wrapperNeutral: true, paddingMatches: true, aligned: true, hoverMatches: true, focusMatches: true },
         image: {
           sourceDimensions: { width: '1280', height: '820', aspectRatio: '1280 / 820' },
-          observed: { width: null, height: null, alt: 'A WordPress editor sidebar with editable block controls', inlineWidth: '', inlineHeight: '', loaded: true },
-          caption: 'Native controls stay with the block, not in a screenshot.', ratioMatches: true, matches: true,
+          observed: { alt: 'A WordPress editor sidebar with editable block controls', inlineWidth: '', loaded: true },
+          caption: 'Native controls stay with the block, not in a screenshot.', ratioMatches: true, renderedRatioMatches: true, sizingMatches: true, matches: true,
         },
         grid: { matches: true, samples: expect.arrayContaining([
           expect.objectContaining({ label: 'one-column', columns: 1, expected: 1 }),
@@ -259,6 +259,11 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
         ]) },
       });
     }
+    expect(frontendMatrix?.image?.observed).toMatchObject({ width: null, height: null, inlineWidth: '', inlineHeight: '' });
+    const savedContent = (editor?.details as { saved?: { content?: string } } | undefined)?.saved?.content;
+    expect(savedContent).toContain('wp:image');
+    expect(savedContent).not.toMatch(/<img[^>]+\s(?:width|height)=/);
+    expect(savedContent).not.toMatch(/<img[^>]+style="[^"]*(?:width|height)\s*:/);
     expect(retainedMediaTypes(editor)).toEqual(expect.arrayContaining(['application/json', 'image/png']));
     expect(retainedMediaTypes(frontend)).toEqual(expect.arrayContaining(['application/json', 'image/png']));
     await expect(readFile(path.join(outputDir, 'native-style-adapter.original.html'), 'utf8')).resolves.toContain('Build a WordPress block');

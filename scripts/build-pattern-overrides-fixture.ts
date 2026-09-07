@@ -195,7 +195,10 @@ export async function buildNativeStyleAdapterProofFixture(outputDir: string): Pr
     blockName: plan.target.name,
     pluginSlug: nativeStyleAdapterPluginSlug,
     blockTitle: plan.target.title,
-    editableFields: [{ path: 'title-content', surface: 'richText', value: 'Native style adapter proof saved title' }],
+    // The utility hero has several native rich-text blocks. Target its source
+    // heading explicitly so the proof cannot edit a paragraph or button by
+    // accident, then verify that exact edited value after reopening.
+    editableFields: [{ path: 'title-content', surface: 'richText', selector: 'h1.wp-block-heading[contenteditable="true"]', value: 'Native style adapter proof saved title' }],
     nativeStyleAdapterMatrix: {
       button: {
         wrapperSelector: '.block-runner-native-download',

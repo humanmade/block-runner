@@ -1180,7 +1180,7 @@ function createRuntime(
       `$png = base64_decode('${PROOF_IMAGE_BASE64}');`,
       "$uploadDirFilter = static function ($uploads) { $uploads['path'] = $uploads['basedir']; $uploads['url'] = $uploads['baseurl']; $uploads['subdir'] = ''; return $uploads; };",
       "add_filter('upload_dir', $uploadDirFilter);",
-      "try { $upload = wp_upload_bits('block-runner-editor.png', null, $png); } finally { remove_filter('upload_dir', $uploadDirFilter); }",
+      "try { $directory = wp_upload_dir(); $existing = $directory['basedir'] . '/block-runner-editor.png'; $upload = is_file($existing) ? array('file' => $existing, 'url' => $directory['baseurl'] . '/block-runner-editor.png') : wp_upload_bits('block-runner-editor.png', null, $png); } finally { remove_filter('upload_dir', $uploadDirFilter); }",
       "if (!empty($upload['error'])) { throw new RuntimeException('Native style adapter proof image upload failed: ' . $upload['error']); }",
       "$file = $upload['file'];",
       "if (!is_readable($file) || hash_file('sha256', $file) !== hash('sha256', $png)) { throw new RuntimeException('Native style adapter proof image bytes were not retained correctly.'); }",

@@ -11,6 +11,11 @@ describe('native style adapter proof fixture', () => {
     const built = await buildNativeStyleAdapterProofFixture(outputDir);
     expect(existsSync(built.pluginZip)).toBe(true);
     expect(built.fixture.nativeStyleAdapterMatrix).toBeDefined();
+    expect(built.fixture.editableFields).toContainEqual(expect.objectContaining({
+      path: 'title-content',
+      surface: 'richText',
+      selector: 'h1.wp-block-heading[contenteditable="true"]',
+    }));
     expect(existsSync(path.join(outputDir, 'native-style-adapter.original.html'))).toBe(true);
     await expect(readFile(path.join(outputDir, 'native-style-adapter.original.html'), 'utf8')).resolves.toContain('Build a WordPress block');
     await expect(readFile(path.join(outputDir, 'native-style-adapter.supplied.css'), 'utf8')).resolves.toContain('.focus-visible\\:outline:focus-visible');
