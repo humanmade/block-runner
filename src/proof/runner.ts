@@ -176,8 +176,8 @@ export interface NativeStyleAdapterMatrix {
   };
   image: {
     selector: string;
-    width: string;
-    height: string;
+    /** Preserved intrinsic evidence represented by the native image target. */
+    sourceDimensions: { width: string; height: string; aspectRatio: string };
     alt: string;
     caption: string;
   };
@@ -870,6 +870,7 @@ function createRuntime(
   let environmentStarted = false;
   let staticPluginDeactivated = false;
   let deactivationEvidence: EvidenceReference | undefined;
+  let preparedNativeStyleMedia: { url: string; evidence: EvidenceReference } | undefined;
   let browserResults: Partial<Record<ProofGateId, ProofGateResult>> | undefined;
   let deactivatedBrowserResults: Partial<Record<ProofGateId, ProofGateResult>> | undefined;
   let stagedPluginZip: { host: string; container: string } | undefined;
@@ -984,6 +985,16 @@ function createRuntime(
           return browserResults;
         }
       }
+      if (mode === 'active' && options.fixture.nativeStyleAdapterMatrix) {
+        preparedNativeStyleMedia = await prepareNativeStyleAdapterMedia();
+        if (!preparedNativeStyleMedia) {
+          browserResults = Object.fromEntries(browserGateIds.map((gate) => [gate, {
+            status: 'blocked',
+            reason: 'Could not prepare the native style adapter proof image at its authored upload URL.',
+          }])) as Partial<Record<ProofGateId, ProofGateResult>>;
+          return browserResults;
+        }
+      }
       const fixture = preparedPattern
         ? {
             ...options.fixture,
@@ -1005,7 +1016,10 @@ function createRuntime(
               : undefined,
           }
         : options.fixture;
-      await writeFile(config, JSON.stringify({ fixture, profile: options.profile, requiredGates, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
+      const browserFixture = preparedNativeStyleMedia && fixture.frontend
+        ? { ...fixture, frontend: { ...fixture.frontend, expectedMedia: [preparedNativeStyleMedia.url] } }
+        : fixture;
+      await writeFile(config, JSON.stringify({ fixture: browserFixture, profile: options.profile, requiredGates, baseUrl: 'http://localhost:8888', mode, publication }), 'utf8');
       const result = await command(process.execPath, [playwrightHelper, '--config', config, '--out', report], {
         cwd: projectRoot,
         timeoutMs: PROOF_COMMAND_TIMEOUTS.browser,
@@ -1042,7 +1056,7 @@ function createRuntime(
           }));
           return [[gate, {
             ...value,
-            evidence: [...(value.evidence ?? []), ...artifacts, logs, ...(phaseEvidence ? [phaseEvidence] : [])],
+            evidence: [...(value.evidence ?? []), ...artifacts, logs, ...(preparedNativeStyleMedia ? [preparedNativeStyleMedia.evidence] : []), ...(phaseEvidence ? [phaseEvidence] : [])],
           }]];
         }))).flat(),
       ) as Partial<Record<ProofGateId, ProofGateResult>>;
@@ -1150,6 +1164,32 @@ function createRuntime(
       if (!Array.isArray(media) || media.length !== instances.length) return undefined;
       const normalized = media.map((item) => ({ id: Number(item.id), url: typeof item.url === 'string' ? item.url : '' }));
       return normalized.every((item) => Number.isInteger(item.id) && item.id > 0 && item.url) ? normalized : undefined;
+    } catch {
+      return undefined;
+    }
+  };
+
+  /**
+   * The utility hero's authored image is a site-relative upload URL, not a
+   * media-control replacement. Materialize those exact bytes at that URL so
+   * frontend_media proves the emitted source can load in WordPress.
+   */
+  const prepareNativeStyleAdapterMedia = async (): Promise<{ url: string; evidence: EvidenceReference } | undefined> => {
+    if (preparedNativeStyleMedia) return preparedNativeStyleMedia;
+    const php = [
+      `$png = base64_decode('${PROOF_IMAGE_BASE64}');`,
+      "$file = WP_CONTENT_DIR . '/uploads/block-runner-editor.png';",
+      "if (!wp_mkdir_p(dirname($file)) || file_put_contents($file, $png) === false) { throw new RuntimeException('Native style adapter proof image write failed.'); }",
+      "if (!is_readable($file) || hash_file('sha256', $file) !== hash('sha256', $png)) { throw new RuntimeException('Native style adapter proof image bytes were not retained correctly.'); }",
+      "echo json_encode(array('url' => content_url('/uploads/block-runner-editor.png')));",
+    ].join(' ');
+    const { result, evidence } = await wp(php);
+    if (result.exitCode !== 0) return undefined;
+    try {
+      const observed = JSON.parse(result.stdout.trim()) as { url?: unknown };
+      if (typeof observed.url !== 'string' || !observed.url) return undefined;
+      preparedNativeStyleMedia = { url: observed.url, evidence };
+      return preparedNativeStyleMedia;
     } catch {
       return undefined;
     }

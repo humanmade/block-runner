@@ -674,6 +674,26 @@ function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
   const serialized = withMutedWordPressConsole(() => wp.serialize(blocks));
   const dom = new JSDOM(serialized);
   try {
+    // This boundary is driven by emitted CSS, not optional caller-retained metadata. A generated
+    // image width/height target always requires the native ratio representation and must never
+    // coexist with WordPress's width/height inline serialization.
+    for (const [nodeId, image] of nodes) {
+      if (image.block !== 'core/image') continue;
+      const marker = `block-runner-native-${nodeId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      const sizing = generated.some((item) => item.kind === 'native-adapter-target'
+        && (item.property === 'width' || item.property === 'height')
+        && new RegExp(`^figure\\.wp-block-image\\.${marker} > img(?::(?:hover|focus|focus-visible|active))?$`).test(item.selector));
+      if (!sizing) continue;
+      const element = dom.window.document.querySelector(`figure.wp-block-image.${marker} > img`);
+      const ratio = image.attributes?.aspectRatio;
+      if (!element || typeof ratio !== 'string' || !/^\d+ \/ \d+$/.test(ratio)
+        || image.attributes?.width !== undefined || image.attributes?.height !== undefined
+        || element.getAttribute('width') !== null || element.getAttribute('height') !== null
+        || (element as HTMLElement).style.width !== '' || (element as HTMLElement).style.height !== ''
+        || (element as HTMLElement).style.aspectRatio !== ratio) {
+        throw new AuthoringGenerationError('unresolved-native-style-mapping: serialized core/image sizing does not retain the native ratio without overriding generated image CSS', 'styles.rules');
+      }
+    }
     for (const entry of plan.coverage?.styles ?? []) for (const target of entry.nativeTargets ?? []) {
       const selector = target.selector.replace(/:(?:focus-visible|hover|focus|active)\b/g, '');
       try {
@@ -681,12 +701,17 @@ function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
         if (!element) {
           throw new AuthoringGenerationError(`forged-native-adapter: native target ${target.selector} does not apply to pinned WordPress serialized markup`, 'coverage.styles.nativeTargets');
         }
-        // Intrinsic image dimensions are allowed to survive as attributes, but WordPress inline
-        // sizing would outrank the exact authored child CSS declaration.
-        if (target.role === 'image' && (entry.property === 'width' || entry.property === 'height')) {
-          const intrinsic = nodes.get(target.node)?.attributes?.[entry.property];
-          if (intrinsic !== undefined && (element.getAttribute(entry.property) !== String(intrinsic) || (element as HTMLElement).style[entry.property] !== '')) {
-            throw new AuthoringGenerationError('unresolved-native-style-mapping: serialized core/image sizing overrides authored CSS', 'coverage.styles.nativeTargets');
+        // Core Image serializes width/height as inline styles. A source CSS-owned axis instead
+        // keeps both source dimensions in provenance and emits the same intrinsic ratio through
+        // the supported core/image aspectRatio attribute.
+        if (target.role === 'image' && target.intrinsic) {
+          const image = nodes.get(target.node);
+          if (image?.attributes?.aspectRatio !== target.intrinsic.aspectRatio
+            || image.attributes?.width !== undefined || image.attributes?.height !== undefined
+            || element.getAttribute('width') !== null || element.getAttribute('height') !== null
+            || (element as HTMLElement).style.width !== '' || (element as HTMLElement).style.height !== ''
+            || (element as HTMLElement).style.aspectRatio !== target.intrinsic.aspectRatio) {
+            throw new AuthoringGenerationError('unresolved-native-style-mapping: serialized core/image sizing does not retain the recorded intrinsic ratio without overriding authored CSS', 'coverage.styles.nativeTargets');
           }
         }
       } catch (error) {

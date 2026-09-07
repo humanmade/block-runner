@@ -34,6 +34,13 @@ export class UnresolvedNativeStyleMappingError extends Error {
   }
 }
 
+/** Internal transport for a selector binding that fails before a native target can be emitted. */
+class NativeTargetBindingError extends Error {
+  constructor(readonly sourceRef: string, readonly node: string, readonly role: 'button-link' | 'image' | 'caption' | 'grid-container', reason: string) {
+    super(reason);
+  }
+}
+
 export interface PreparedAuthoringFonts {
   /** CSS after removing global @font-face rules and namespacing their owned families. */
   css: string;
@@ -422,12 +429,30 @@ function adaptNativeSourceStyles(
     }
   };
   discoverUnconditionalGrids(rules);
-  type NativeTarget = { node: string; target: string; reset?: string; role: 'button-link' | 'image' | 'caption' | 'grid-container' };
+  type NativeTarget = { sourceRef: string; node: string; target: string; reset?: string; role: 'button-link' | 'image' | 'caption' | 'grid-container'; intrinsic?: { width: string; height: string; aspectRatio: string } };
+  const intrinsicImages = new Map(nodes.flatMap((node) => {
+    const width = node.block === 'core/image' && typeof node.attributes?.width === 'string' ? node.attributes.width : undefined;
+    const height = node.block === 'core/image' && typeof node.attributes?.height === 'string' ? node.attributes.height : undefined;
+    return width && height && /^[1-9]\d*$/.test(width) && /^[1-9]\d*$/.test(height)
+      ? [[node.id!, { width, height, aspectRatio: `${width} / ${height}` }] as const] : [];
+  }));
   const targetFor = (selector: string): NativeTarget[] | undefined => {
     const subjects = nativeSelectorSubjects(selector);
     if (!subjects) {
-      const bound = [...bindings.entries()].map(([, id]) => nodes.find((candidate) => candidate.id === id)).filter((node): node is AuthoringStructureNode => !!node);
-      if (bound.some((node) => ['core/button', 'core/image', 'core/group', 'core/columns'].includes(node.block))) {
+      const bound = [...bindings.entries()].map(([sourceRef, id]) => ({ sourceRef, node: nodes.find((candidate) => candidate.id === id), element: sourceNodes.get(sourceRef) }))
+        .filter((candidate): candidate is { sourceRef: string; node: AuthoringStructureNode; element: Element } => !!candidate.node && !!candidate.element);
+      if (bound.some((candidate) => ['core/button', 'core/image', 'core/group', 'core/columns'].includes(candidate.node.block))) {
+        // `nativeSelectorSubjects` intentionally rejects relationships outside the bounded
+        // adapter.  It is still possible to identify the exact source unit the supplied CSS
+        // selects without interpreting that relationship: use the existing token-aware dynamic
+        // pseudo transport, then let JSDOM match the original selector structure.
+        const matching = bound.filter((candidate) => {
+          try { return candidate.element.matches(replaceDynamicPseudos(selector, '')); } catch { return false; }
+        });
+        if (matching.length === 1) {
+          const candidate = matching[0]!;
+          throw new NativeTargetBindingError(candidate.sourceRef, candidate.node.id!, nativeAdapterRole(candidate.node), `${selector} is not a supported single-subject native selector`);
+        }
         throw new Error(`unresolved-native-style-mapping: ${selector} is not a supported single-subject native selector`);
       }
       return undefined;
@@ -457,25 +482,25 @@ function adaptNativeSourceStyles(
       } catch { return []; }
       const state = subject.state ? `:${subject.state}` : '';
       if (node.block === 'core/button') {
-        if (!findParent(structure, node.id!) || findParent(structure, node.id!)!.block !== 'core/buttons') throw new Error(`unresolved-native-style-mapping: ${selector} binds core/button without core/buttons wrapper`);
+        if (!findParent(structure, node.id!) || findParent(structure, node.id!)!.block !== 'core/buttons') throw new NativeTargetBindingError(ref, node.id!, 'button-link', `${selector} binds core/button without core/buttons wrapper`);
         const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         // core/button serializes className on its own div.wp-block-button, never core/buttons.
         node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
-        return [{ node: node.id!, target: `.${marker} > .wp-block-button__link${state}`, reset: `.${marker}${state}`, role: 'button-link' as const }];
+        return [{ sourceRef: ref, node: node.id!, target: `.${marker} > .wp-block-button__link${state}`, reset: `.${marker}${state}`, role: 'button-link' as const }];
       }
       if (node.block === 'core/image') {
         if (!subject.relation && !inferredRelation) return [];
-        if (subject.relation && !element.matches('figure')) throw new Error(`unresolved-native-style-mapping: ${selector} requires a figure-bound core/image source`);
+        if (subject.relation && !element.matches('figure')) throw new NativeTargetBindingError(ref, node.id!, 'image', `${selector} requires a figure-bound core/image source`);
         const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
         const imageRole = subject.relation ?? inferredRelation;
         const relation = imageRole === 'caption' ? 'figcaption.wp-element-caption' : 'img';
-        return [{ node: node.id!, target: `figure.wp-block-image.${marker} > ${relation}${state}`, role: imageRole === 'caption' ? 'caption' as const : 'image' as const }];
+        return [{ sourceRef: ref, node: node.id!, target: `figure.wp-block-image.${marker} > ${relation}${state}`, role: imageRole === 'caption' ? 'caption' as const : 'image' as const }];
       }
       if (node.block === 'core/group' || node.block === 'core/columns') {
         const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
         node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
-        return [{ node: node.id!, target: `.${marker}.${node.block === 'core/group' ? 'wp-block-group' : 'wp-block-columns'}${state}`, role: 'grid-container' as const }];
+        return [{ sourceRef: ref, node: node.id!, target: `.${marker}.${node.block === 'core/group' ? 'wp-block-group' : 'wp-block-columns'}${state}`, role: 'grid-container' as const }];
       }
       return [];
     }));
@@ -487,12 +512,14 @@ function adaptNativeSourceStyles(
     try {
       targets = targetFor(rule.selector);
     } catch (error) {
+      if (error instanceof UnresolvedNativeStyleMappingError) throw error;
       const reason = error instanceof Error ? error.message.replace(/^unresolved-native-style-mapping:\s*/, '') : String(error);
-      const sourceRef = [...bindings.keys()][0];
+      const sourceRef = error instanceof NativeTargetBindingError ? error.sourceRef : undefined;
       const location = sourceRef ? locationFor(sourceRef) : undefined;
       const declaration = rule.declarations[0];
       throw new UnresolvedNativeStyleMappingError({
-        selector: rule.selector, property: declaration?.property, reason,
+        selector: rule.selector, property: declaration?.property,
+        ...(error instanceof NativeTargetBindingError ? { node: error.node, role: error.role } : {}), reason,
         ...(declaration ? { cssSource: { path: sourcePath ?? '<inline>', selector: rule.selector, offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
         ...(sourceRef && location ? { htmlSource: { sourceRef, path: sourcePath ?? '<inline>', offset: location.startOffset, line: location.startLine, column: location.startCol } } : {}),
       });
@@ -500,7 +527,7 @@ function adaptNativeSourceStyles(
     if (!targets?.length) return [rule];
     const gridDeclarations = rule.declarations.filter((declaration) => gridProperties.has(declaration.property));
     const unresolved = (reason: string, target = targets[0], declaration = rule.declarations[0]) => {
-      const sourceRef = target && [...bindings.entries()].find(([, id]) => id === target.node)?.[0];
+      const sourceRef = target?.sourceRef;
       const location = sourceRef ? locationFor(sourceRef) : undefined;
       return new UnresolvedNativeStyleMappingError({
       selector: rule.selector, property: declaration?.property, node: target?.node, role: target?.role, reason,
@@ -522,14 +549,19 @@ function adaptNativeSourceStyles(
       throw unresolved('property is outside the supported core/button adapter');
     }
     for (const target of targets.filter((candidate) => candidate.role === 'image')) {
-      const image = nodes.find((node) => node.id === target.node);
-      const controlledAxis = rule.declarations.find((declaration) => (declaration.property === 'width' || declaration.property === 'height')
-        && image?.attributes?.[declaration.property] !== undefined);
-      if (controlledAxis) {
-        // Core Image 7.1 serializes its dimension attributes as inline styles.  Do not claim
-        // source CSS survives when that native serialization would override it.
-        throw unresolved('pinned core/image serialization maps intrinsic dimensions to inline sizing on an authored CSS axis', target, controlledAxis);
+      const controlledAxis = rule.declarations.find((declaration) => declaration.property === 'width' || declaration.property === 'height');
+      if (!controlledAxis) continue;
+      const intrinsic = intrinsicImages.get(target.node);
+      if (!intrinsic) throw unresolved('authored image sizing requires complete valid intrinsic dimensions', target, controlledAxis);
+      const image = nodes.find((node) => node.id === target.node)!;
+      const existingRatio = image.attributes?.aspectRatio;
+      if (existingRatio !== undefined && !sameAspectRatio(existingRatio, intrinsic)) {
+        throw unresolved('source intrinsic dimensions conflict with an existing native image aspect ratio', target, controlledAxis);
       }
+      image.attributes = { ...(image.attributes ?? {}), aspectRatio: intrinsic.aspectRatio };
+      delete image.attributes.width;
+      delete image.attributes.height;
+      target.intrinsic = intrinsic;
     }
     if (targets.some((target) => target.role === 'grid-container') && gridDeclarations.length
       && targets.some((target) => !ownedGrids.has(target.node))) {
@@ -563,7 +595,7 @@ function adaptNativeSourceStyles(
         for (const target of targets) {
           if (target.role === 'grid-container' && !gridProperties.has(declaration.property)) continue;
           const role = target.role;
-          entry.nativeTargets = [...(entry.nativeTargets ?? []), { node: target.node, role, selector: target.target, ...(declaration.important ? { important: true } : {}) }];
+          entry.nativeTargets = [...(entry.nativeTargets ?? []), { node: target.node, role, selector: target.target, ...(target.intrinsic ? { intrinsic: target.intrinsic } : {}), ...(declaration.important ? { important: true } : {}) }];
           if (target.reset && BUTTON_WRAPPER_RESET.has(declaration.property)) entry.nativeTargets.push({ node: target.node, role: 'button-wrapper-reset', selector: target.reset, ...(declaration.important ? { important: true } : {}) });
         }
         if (targets.every((target) => target.role === 'image' || target.role === 'caption')) {
@@ -582,6 +614,16 @@ function findParent(nodes: AuthoringStructureNode[], id: string): AuthoringStruc
   for (const node of nodes) { if (node.children?.some((child) => child.id === id)) return node; const nested = findParent(node.children ?? [], id); if (nested) return nested; } return undefined;
 }
 function joinClass(value: JsonValue | undefined, marker: string): string { return [...new Set([...(typeof value === 'string' ? value.split(/\s+/) : []), marker])].filter(Boolean).join(' '); }
+function nativeAdapterRole(node: AuthoringStructureNode): 'button-link' | 'image' | 'caption' | 'grid-container' {
+  if (node.block === 'core/button') return 'button-link';
+  if (node.block === 'core/image') return 'image';
+  return 'grid-container';
+}
+function sameAspectRatio(value: JsonValue, intrinsic: { width: string; height: string }): boolean {
+  if (typeof value !== 'string') return false;
+  const match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(value);
+  return !!match && BigInt(match[1]!) * BigInt(intrinsic.height) === BigInt(match[2]!) * BigInt(intrinsic.width);
+}
 
 function sourceDeclarations(rules: readonly CssRule[]): Array<{ selector: string; ruleId: string; declaration: import('./styles.js').CssDeclaration }> {
   return rules.flatMap((rule) => {

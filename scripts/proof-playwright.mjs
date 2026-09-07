@@ -908,7 +908,15 @@ async function proveNativeStyleAdapterMatrix(page, surface, fixture, rootClientI
       return { active: document.activeElement === element, focusVisible: element.matches(':focus-visible'), outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
     });
     const media = await Promise.all([
-      image.evaluate((element) => ({ width: element.getAttribute('width'), height: element.getAttribute('height'), alt: element.getAttribute('alt'), inlineWidth: element.style.width, inlineHeight: element.style.height })),
+      image.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          width: element.getAttribute('width'), height: element.getAttribute('height'), alt: element.getAttribute('alt'),
+          inlineWidth: element.style.width, inlineHeight: element.style.height,
+          aspectRatio: style.aspectRatio,
+          loaded: element.complete && element.naturalWidth > 0,
+        };
+      }),
       caption.textContent(),
     ]);
     const grids = [];
@@ -928,11 +936,19 @@ async function proveNativeStyleAdapterMatrix(page, surface, fixture, rootClientI
       && hovered[0].transform === 'none'
       && hovered[0].transitionDuration.split(',').every((value) => value.trim() === '0s');
     const focusMatches = focus.active && focus.focusVisible && focus.outlineStyle === matrix.button.focusOutline.style && focus.outlineWidth === matrix.button.focusOutline.width;
-    const mediaMatches = media[0].width === matrix.image.width && media[0].height === matrix.image.height
-      && media[0].alt === matrix.image.alt && media[0].inlineWidth === '' && media[0].inlineHeight === ''
+    const sourceRatio = Number(matrix.image.sourceDimensions.width) / Number(matrix.image.sourceDimensions.height);
+    const ratioParts = media[0].aspectRatio.match(/([0-9.]+)\s*\/\s*([0-9.]+)/g);
+    const renderedRatio = ratioParts?.length
+      ? ratioParts[ratioParts.length - 1].split('/').map((part) => Number(part.trim()))
+      : undefined;
+    const ratioMatches = renderedRatio !== undefined && Number.isFinite(sourceRatio)
+      && Math.abs((renderedRatio[0] / renderedRatio[1]) - sourceRatio) < 0.00001;
+    const mediaMatches = media[0].width === null && media[0].height === null
+      && media[0].alt === matrix.image.alt && media[0].inlineWidth === '' && media[0].inlineHeight === '' && media[0].loaded
+      && ratioMatches
       && media[1]?.replace(/\s+/g, ' ').trim() === matrix.image.caption;
     const gridsMatch = grids.every((sample) => sample.display === 'grid' && sample.columns === sample.expected);
-    const details = { scope, button: { wrapper: before[0], link: before[1], hovered: { wrapper: hovered[0], link: hovered[1] }, focus, wrapperNeutral, paddingMatches, aligned, hoverMatches, focusMatches }, image: { observed: media[0], caption: media[1], matches: mediaMatches }, grid: { samples: grids, matches: gridsMatch } };
+    const details = { scope, button: { wrapper: before[0], link: before[1], hovered: { wrapper: hovered[0], link: hovered[1] }, focus, wrapperNeutral, paddingMatches, aligned, hoverMatches, focusMatches }, image: { sourceDimensions: matrix.image.sourceDimensions, observed: media[0], caption: media[1], ratioMatches, matches: mediaMatches }, grid: { samples: grids, matches: gridsMatch } };
     const imagePath = path.join(artifactDir, `native-style-adapter-${scope}.png`);
     const jsonPath = path.join(artifactDir, `native-style-adapter-${scope}.json`);
     await root.screenshot({ path: imagePath, animations: 'disabled' });

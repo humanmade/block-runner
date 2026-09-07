@@ -244,12 +244,23 @@ export function validateProposalSourceContent(sourceHtml: string, bound: Authori
         const retainedLocalImage = attribute === 'url' && node.block === 'core/image'
           && plan.coverage?.assets.some((asset) => asset.reference === original && (asset.outcome === 'prepared' || asset.outcome === 'copied'))
           && plan.assets.some((asset) => asset.uses?.some((use) => use.node === nodeId && use.attribute === 'url'));
-        if (!retainedLocalImage && JSON.stringify(node.attributes?.[attribute]) !== JSON.stringify(expected)) {
+        const retainedIntrinsicRatio = (attribute === 'width' || attribute === 'height') && node.block === 'core/image'
+          && imageDimensionIsRecorded(plan, nodeId, attribute, expected);
+        if (!retainedLocalImage && !retainedIntrinsicRatio && JSON.stringify(node.attributes?.[attribute]) !== JSON.stringify(expected)) {
           throw new Error(`Source content fulfillment failed: ${ref} ${attribute} was not preserved by its exact bound node.`);
         }
       }
     }
   } finally { dom.window.close(); }
+}
+
+/** A CSS-owned image axis retains its source dimensions as adapter provenance, not WP inline sizing. */
+function imageDimensionIsRecorded(plan: AuthoringPlan, node: string, attribute: 'width' | 'height', expected: JsonValue | undefined): boolean {
+  return plan.coverage?.styles.some((entry) => entry.nativeTargets?.some((target) => {
+    const intrinsic = target.intrinsic;
+    return target.node === node && target.role === 'image' && intrinsic?.[attribute] === expected
+      && intrinsic?.aspectRatio === `${intrinsic?.width} / ${intrinsic?.height}`;
+  })) ?? false;
 }
 
 function flattenStructure(nodes: readonly AuthoringStructureNode[]): AuthoringStructureNode[] {

@@ -151,7 +151,7 @@ export interface AuthoredStyleLedgerEntry {
   node?: string;
   responsive?: 'mobile' | 'tablet';
   /** Compiler-owned native adapter destinations for this original declaration. */
-  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string }>;
+  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string; intrinsic?: { width: string; height: string; aspectRatio: string } }>;
 }
 
 /** The terminal disposition of a source asset. */

@@ -102,6 +102,7 @@ export interface BuiltResponsiveStyleFixture {
 
 /** The retained public-author() package for the utility-hero adapter proof. */
 export interface BuiltNativeStyleAdapterFixture {
+  /** Hash manifest pinning every retained source and generated proof input. */
   inputPath: string;
   pluginDirectory: string;
   pluginZip: string;
@@ -136,7 +137,10 @@ export async function buildNativeStyleAdapterProofFixture(outputDir: string): Pr
     '.transition { transition: transform 150ms, background-color 150ms; }',
     '.hover\\:bg-cyan-200:hover { transform: translateY(-2px); background-color: rgb(165, 243, 252); }',
     '.focus-visible\\:outline:focus-visible { outline: 2px solid rgb(103, 232, 249); }',
-    'figure.relative > img.relative { border: 1px solid rgb(255, 255, 255); }',
+    // Width is intentionally authored CSS. The compiler must preserve the
+    // source intrinsic ratio without allowing native image attributes to take
+    // ownership of this axis through WordPress inline sizing.
+    'figure.relative > img.relative { width: 100%; border: 1px solid rgb(255, 255, 255); }',
     'figure.relative > figcaption.mt-3 { color: rgb(148, 163, 184); }',
   ].join('\n');
   const entries = collectSourceEvidence(source, { entry: inputPath, sha256: createHash('sha256').update(source, 'utf8').digest('hex'), format: 'html' }).structure;
@@ -201,7 +205,8 @@ export async function buildNativeStyleAdapterProofFixture(outputDir: string): Pr
         focusOutline: { style: 'solid', width: '2px' },
       },
       image: {
-        selector: 'figure.wp-block-image.block-runner-native-image > img', width: '1280', height: '820',
+        selector: 'figure.wp-block-image.block-runner-native-image > img',
+        sourceDimensions: { width: '1280', height: '820', aspectRatio: '1280 / 820' },
         alt: 'A WordPress editor sidebar with editable block controls',
         caption: 'Native controls stay with the block, not in a screenshot.',
       },
@@ -213,16 +218,29 @@ export async function buildNativeStyleAdapterProofFixture(outputDir: string): Pr
         ],
       },
     },
+    // The runner prepares the source URL as a real local upload and replaces
+    // this placeholder with WordPress's observed URL before browser proof.
     frontend: { url: 'http://localhost:8888/', subtreeSelector: '.wp-block-post-content', expectedLinks: [], expectedMedia: [] },
   };
   const identity = { blockName: plan.target.name, pluginSlug: nativeStyleAdapterPluginSlug, pluginZip: path.basename(pluginZip), sha256: artifact.sha256 };
+  const manifestPath = path.join(root, 'native-style-adapter.hashes.json');
+  const retained = [inputPath, cssPath, proposalPath, planPath, blocksPath, identityPath];
   await Promise.all([
     writeFixed(planPath, `${JSON.stringify(plan, null, 2)}\n`),
     writeFixed(blocksPath, `${nativeContainerMarkup}\n`),
     writeFixed(identityPath, `${JSON.stringify(identity, null, 2)}\n`),
     writeFixed(path.join(root, 'native-style-adapter.fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`),
   ]);
-  return { inputPath, pluginDirectory, pluginZip, nativeContainerMarkup, artifact, fixture };
+  const hashes = Object.fromEntries(await Promise.all([...retained, pluginZip].map(async (file) => [
+    path.basename(file),
+    `sha256:${createHash('sha256').update(await readFile(file)).digest('hex')}`,
+  ])));
+  await writeFixed(manifestPath, `${JSON.stringify({
+    schemaVersion: 1,
+    inputs: hashes,
+    pluginIdentity: path.basename(identityPath),
+  }, null, 2)}\n`);
+  return { inputPath: manifestPath, pluginDirectory, pluginZip, nativeContainerMarkup, artifact, fixture };
 }
 
 /**

@@ -37,7 +37,11 @@ type ResponsiveStyleMatrixEvidence = {
 type NativeStyleAdapterMatrixEvidence = {
   scope?: string;
   button?: { wrapperNeutral?: boolean; paddingMatches?: boolean; aligned?: boolean; hoverMatches?: boolean; focusMatches?: boolean };
-  image?: { observed?: { width?: string | null; height?: string | null; alt?: string | null; inlineWidth?: string; inlineHeight?: string }; caption?: string; matches?: boolean };
+  image?: {
+    sourceDimensions?: { width?: string; height?: string; aspectRatio?: string };
+    observed?: { width?: string | null; height?: string | null; alt?: string | null; inlineWidth?: string; inlineHeight?: string; loaded?: boolean };
+    caption?: string; ratioMatches?: boolean; matches?: boolean;
+  };
   grid?: { matches?: boolean; samples?: Array<{ label?: string; columns?: number; expected?: number }> };
 };
 
@@ -244,7 +248,11 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       expect(matrix).toMatchObject({
         scope: expect.stringMatching(/editor-canvas|frontend/),
         button: { wrapperNeutral: true, paddingMatches: true, aligned: true, hoverMatches: true, focusMatches: true },
-        image: { observed: { width: '1280', height: '820', alt: 'A WordPress editor sidebar with editable block controls', inlineWidth: '', inlineHeight: '' }, caption: 'Native controls stay with the block, not in a screenshot.', matches: true },
+        image: {
+          sourceDimensions: { width: '1280', height: '820', aspectRatio: '1280 / 820' },
+          observed: { width: null, height: null, alt: 'A WordPress editor sidebar with editable block controls', inlineWidth: '', inlineHeight: '', loaded: true },
+          caption: 'Native controls stay with the block, not in a screenshot.', ratioMatches: true, matches: true,
+        },
         grid: { matches: true, samples: expect.arrayContaining([
           expect.objectContaining({ label: 'one-column', columns: 1, expected: 1 }),
           expect.objectContaining({ label: 'two-column', columns: 2, expected: 2 }),
@@ -259,6 +267,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     await expect(readFile(path.join(outputDir, 'native-style-adapter.canonical-plan.json'), 'utf8')).resolves.toContain('native-adapter-target');
     await expect(readFile(path.join(outputDir, 'native-style-adapter.native.blocks.html'), 'utf8')).resolves.toContain('wp-block-button__link');
     await expect(readFile(path.join(outputDir, 'native-style-adapter.plugin-identity.json'), 'utf8')).resolves.toContain(built.artifact.sha256);
+    await expect(readFile(built.inputPath, 'utf8')).resolves.toContain('native-style-adapter.native.blocks.html');
   }, 480_000);
 
   it.each(['editor-verified', 'fidelity-checked', 'pattern-verified'] as const)('executes %s through the real runner and browser', async (profile) => {
