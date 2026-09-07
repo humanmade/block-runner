@@ -4,6 +4,8 @@ import { parse as parseJavaScript } from '@babel/parser';
 import Ajv from 'ajv';
 import { JSDOM } from 'jsdom';
 import postcss from 'postcss';
+import { bootHeadlessWordPressSync, withMutedWordPressConsole } from '../headless/env.js';
+import type { WpBlock } from '../types.js';
 import {
   canonicalizeAuthoringPlan,
   hashAuthoringPlan,
@@ -35,7 +37,7 @@ export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v9' as const;
  * The declarative-style renderer is part of the owned template contract.  It never accepts a
  * stylesheet fragment from the plan: its inputs are validated outcomes and structured rules.
  */
-export const REGISTERED_BLOCK_STYLE_EMITTER_VERSION = '3' as const;
+export const REGISTERED_BLOCK_STYLE_EMITTER_VERSION = '4' as const;
 export const WORDPRESS_BLOCK_SCHEMA_VERSION = '7.1' as const;
 export const WORDPRESS_BLOCK_SCHEMA_URL = `https://schemas.wp.org/wp/${WORDPRESS_BLOCK_SCHEMA_VERSION}/block.json`;
 
@@ -586,6 +588,7 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   } catch (error) {
     rethrowCapabilityError(error, 'structure');
   }
+  validateNativeAdapterProvenance(plan);
   // Preview must refuse unsupported styles too, rather than promising an unwritable package.
   emitScss(plan.styles.outcomes, blockRootClass(plan.target.name));
   // Preview and writing reject the same unresolved editor decisions.
@@ -612,6 +615,113 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
   // survive the confirmation hash and fail only when source files are materialized.
   renderFontStyles(plan, assets);
   return plan;
+}
+
+/** Generated adapter records are compiler-owned claims, not arbitrary extra CSS annotations. */
+const NATIVE_BUTTON_RESET_VALUES = new Map<string, string>([
+  ['margin', '0'], ['margin-top', '0'], ['margin-right', '0'], ['margin-bottom', '0'], ['margin-left', '0'],
+  ['padding', '0'], ['padding-top', '0'], ['padding-right', '0'], ['padding-bottom', '0'], ['padding-left', '0'], ['display', 'block'], ['background', 'transparent'], ['background-color', 'transparent'],
+  ['border', '0'], ['border-top', '0'], ['border-right', '0'], ['border-bottom', '0'], ['border-left', '0'], ['border-radius', '0'], ['box-shadow', 'none'], ['opacity', '1'], ['transform', 'none'], ['translate', 'none'], ['rotate', 'none'], ['scale', 'none'], ['filter', 'none'], ['transition', 'none'], ['transition-property', 'none'], ['transition-duration', '0s'], ['transition-delay', '0s'],
+]);
+function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
+  const nodes = new Map<string, AuthoringStructureNode>();
+  const visit = (items: readonly AuthoringStructureNode[]) => items.forEach((node) => { if (node.id) nodes.set(node.id, node); visit(node.children ?? []); });
+  visit(plan.structure);
+  const generated: Array<{ selector: string; kind: 'native-adapter-target' | 'native-adapter-wrapper-reset'; property: string; value: string; important?: boolean; atRules: string[] }> = [];
+  const collect = (rules: NonNullable<AuthoringPlan['styles']['rules']>, atRules: string[] = []) => rules.forEach((rule) => {
+    if (rule.kind === 'conditional') collect(rule.rules, [...atRules, `@${rule.name} ${rule.prelude}`]);
+    else if (rule.generated) for (const declaration of rule.declarations) generated.push({ selector: rule.selector, kind: rule.generated, property: declaration.property, value: declaration.value, ...(declaration.important ? { important: true } : {}), atRules });
+  });
+  collect(plan.styles.rules ?? []);
+  const claimed = new Set<number>();
+  for (const entry of plan.coverage?.styles ?? []) for (const target of entry.nativeTargets ?? []) {
+    const node = nodes.get(target.node);
+    const expected = target.role === 'button-wrapper-reset' ? 'native-adapter-wrapper-reset' : 'native-adapter-target';
+    const expectedValue = target.role === 'button-wrapper-reset' ? NATIVE_BUTTON_RESET_VALUES.get(entry.property) : entry.value;
+    const matchIndex = generated.findIndex((item, index) => !claimed.has(index) && item.selector === target.selector && item.kind === expected
+      && item.property === entry.property && item.value === expectedValue && item.important === target.important
+      && item.atRules.join('\u0000') === entry.atRules.join('\u0000'));
+    if (!node || matchIndex < 0) {
+      throw new AuthoringGenerationError('forged-native-adapter: generated selector/provenance is not present in the canonical rules', 'coverage.styles.nativeTargets');
+    }
+    claimed.add(matchIndex);
+    const marker = `block-runner-native-${target.node.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const state = '(?::(?:hover|focus|focus-visible|active))?';
+    if ((target.role === 'button-link' || target.role === 'button-wrapper-reset') && (node.block !== 'core/button'
+      || (target.role === 'button-link' && !new RegExp(`^\\.${marker} > \\.wp-block-button__link${state}$`).test(target.selector))
+      || (target.role === 'button-wrapper-reset' && !new RegExp(`^\\.${marker}${state}$`).test(target.selector)))) {
+      throw new AuthoringGenerationError('forged-native-adapter: button target does not match core/button markup', 'coverage.styles.nativeTargets');
+    }
+    if ((target.role === 'image' || target.role === 'caption') && (node.block !== 'core/image'
+      || !new RegExp(`^figure\\.wp-block-image\\.${marker} > ${target.role === 'caption' ? 'figcaption\\.wp-element-caption' : 'img'}${state}$`).test(target.selector))) {
+      throw new AuthoringGenerationError('forged-native-adapter: image target does not match core/image markup', 'coverage.styles.nativeTargets');
+    }
+    if (target.role === 'grid-container' && (node.block !== 'core/group' || !new RegExp(`^\\.${marker}\\.wp-block-group${state}$`).test(target.selector))) throw new AuthoringGenerationError('forged-native-adapter: grid target does not match core/group markup', 'coverage.styles.nativeTargets');
+  }
+  // Provenance is bidirectional: generated adapter CSS is not allowed to outlive the source
+  // declaration that caused it, even if a caller removes every nativeTargets record.
+  for (const [index] of generated.entries()) {
+    if (!claimed.has(index)) {
+      throw new AuthoringGenerationError('forged-native-adapter: generated declaration has no matching source nativeTarget', 'styles.rules');
+    }
+  }
+  // Selector spelling is not enough: core blocks are serialized by the pinned WordPress runtime,
+  // and that output is the markup the generated stylesheet will actually see.
+  const wp = bootHeadlessWordPressSync();
+  const blocks = compileConfirmedTemplate(plan).map(function makeBlock([name, attributes, children]): WpBlock {
+    return wp.createBlock(name, attributes as Record<string, unknown>, children?.map(makeBlock) ?? []);
+  });
+  const serialized = withMutedWordPressConsole(() => wp.serialize(blocks));
+  const dom = new JSDOM(serialized);
+  try {
+    // This boundary is driven by emitted CSS, not optional caller-retained metadata. A generated
+    // image width/height target always requires the native ratio representation and must never
+    // coexist with WordPress's width/height inline serialization.
+    for (const [nodeId, image] of nodes) {
+      if (image.block !== 'core/image') continue;
+      const marker = `block-runner-native-${nodeId.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+      const sizing = generated.some((item) => item.kind === 'native-adapter-target'
+        && (item.property === 'width' || item.property === 'height')
+        && new RegExp(`^figure\\.wp-block-image\\.${marker} > img(?::(?:hover|focus|focus-visible|active))?$`).test(item.selector));
+      if (!sizing) continue;
+      const element = dom.window.document.querySelector(`figure.wp-block-image.${marker} > img`);
+      const ratio = image.attributes?.aspectRatio;
+      if (!element || typeof ratio !== 'string' || !/^\d+ \/ \d+$/.test(ratio)
+        || image.attributes?.width !== undefined || image.attributes?.height !== undefined
+        || element.getAttribute('width') !== null || element.getAttribute('height') !== null
+        || (element as HTMLElement).style.width !== '' || (element as HTMLElement).style.height !== ''
+        || (element as HTMLElement).style.aspectRatio !== ratio) {
+        throw new AuthoringGenerationError('unresolved-native-style-mapping: serialized core/image sizing does not retain the native ratio without overriding generated image CSS', 'styles.rules');
+      }
+    }
+    for (const entry of plan.coverage?.styles ?? []) for (const target of entry.nativeTargets ?? []) {
+      const selector = target.selector.replace(/:(?:focus-visible|hover|focus|active)\b/g, '');
+      try {
+        const element = dom.window.document.querySelector(selector);
+        if (!element) {
+          throw new AuthoringGenerationError(`forged-native-adapter: native target ${target.selector} does not apply to pinned WordPress serialized markup`, 'coverage.styles.nativeTargets');
+        }
+        // Core Image serializes width/height as inline styles. A source CSS-owned axis instead
+        // keeps both source dimensions in provenance and emits the same intrinsic ratio through
+        // the supported core/image aspectRatio attribute.
+        if (target.role === 'image' && target.intrinsic) {
+          const image = nodes.get(target.node);
+          if (image?.attributes?.aspectRatio !== target.intrinsic.aspectRatio
+            || image.attributes?.width !== undefined || image.attributes?.height !== undefined
+            || element.getAttribute('width') !== null || element.getAttribute('height') !== null
+            || (element as HTMLElement).style.width !== '' || (element as HTMLElement).style.height !== ''
+            || (element as HTMLElement).style.aspectRatio !== target.intrinsic.aspectRatio) {
+            throw new AuthoringGenerationError('unresolved-native-style-mapping: serialized core/image sizing does not retain the recorded intrinsic ratio without overriding authored CSS', 'coverage.styles.nativeTargets');
+          }
+        }
+      } catch (error) {
+        if (error instanceof AuthoringGenerationError) throw error;
+        throw new AuthoringGenerationError('forged-native-adapter: native target selector cannot be applied to pinned WordPress serialized markup', 'coverage.styles.nativeTargets');
+      }
+    }
+  } finally {
+    dom.window.close();
+  }
 }
 
 /**

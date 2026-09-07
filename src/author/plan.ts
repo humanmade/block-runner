@@ -20,11 +20,26 @@ import { BACKGROUND_COLOR_TARGET, GRADIENT_TARGET, classifyBackground, lookupDec
 import { querySupports } from '../styles/capabilities.js';
 import type { AssetLedgerEntry, AuthoredStyleLedgerEntry, AuthorConfig, WpBlock } from '../types.js';
 import { scanCssUrlReferences, type FontAssetWarning, type FontLicenseDecision, type PreparedCssAsset } from './assets.js';
-import { decodeCssEscapes, fontFaceRules, forEachCssRule, scanStylesheet, scopeLocalSelectorList, scopeStylesheet, splitCssTopLevel, type CssDeclaration, type CssRule, type CssStylesheet } from './styles.js';
+import { decodeCssEscapes, fontFaceRules, forEachCssRule, nativeSelectorSubjects, scanStylesheet, scopeLocalSelectorList, scopeStylesheet, splitCssTopLevel, type CssDeclaration, type CssRule, type CssStylesheet } from './styles.js';
 import { exactThemePresetTransport, styleContextFrom } from './style-context.js';
 import { mapExactWordPressResponsiveMedia, resolveWordPressViewportRanges } from './responsive.js';
 import { hasUnsafeResponsiveNativeCascade } from './cascade.js';
 import { sourceDeclarationKey } from '../styles/apply.js';
+
+export class UnresolvedNativeStyleMappingError extends Error {
+  readonly code = 'unresolved-native-style-mapping' as const;
+  constructor(readonly mapping: { selector: string; property?: string; node?: string; role?: string; reason: string; cssSource?: { path: string; offset: number; line: number; column: number; selector: string }; htmlSource?: { sourceRef: string; path: string; offset: number; line: number; column: number }; htmlSources?: readonly { sourceRef: string; path: string; offset: number; line: number; column: number }[] }) {
+    super(`unresolved-native-style-mapping: ${mapping.reason}`);
+    this.name = 'UnresolvedNativeStyleMappingError';
+  }
+}
+
+/** Internal transport for a selector binding that fails before a native target can be emitted. */
+class NativeTargetBindingError extends Error {
+  constructor(readonly bindings: readonly { sourceRef: string; node: string; role: 'button-link' | 'image' | 'caption' | 'grid-container' }[], reason: string) {
+    super(reason);
+  }
+}
 
 export interface PreparedAuthoringFonts {
   /** CSS after removing global @font-face rules and namespacing their owned families. */
@@ -187,7 +202,7 @@ export function compileAnalyzedDesign(input: {
   const reconciled = input.structureOverride && input.sourceRefToNode
     ? reconcileProposalStyleOwnership(
       structure, input.rules, input.styleLedger, input.source, input.sourceRefToNode,
-      input.stylesheetFacts?.rules ?? input.rules, input.cascadeSensitiveDeclarations ?? new Set(),
+      input.stylesheetFacts?.rules ?? input.rules, input.cascadeSensitiveDeclarations ?? new Set(), input.sourcePath,
     )
     : { rules: input.rules, styleLedger: input.styleLedger };
   const responsive = liftExactResponsiveStyles({
@@ -241,6 +256,8 @@ export function compileAnalyzedDesign(input: {
     throw new Error('Editor-only CSS must use supported component-local rules; global or unsupported rules cannot be emitted.');
   }
   const editorStyleLedger: AuthoredStyleLedgerEntry[] = editor.ledger.map((entry) => ({
+    declarationId: entry.declarationId,
+    ruleId: entry.ruleId,
     property: entry.property,
     value: entry.value,
     outcome: entry.outcome === 'native' || entry.outcome === 'preset' || entry.outcome === 'literal'
@@ -300,13 +317,14 @@ export function compileAnalyzedDesign(input: {
  * is already present; leave every other declaration in the scoped stylesheet.
  */
 function reconcileProposalStyleOwnership(
-  structure: readonly AuthoringStructureNode[],
+  structure: AuthoringStructureNode[],
   rules: readonly CssRule[],
   ledger: readonly AuthoredStyleLedgerEntry[],
   source: string,
   bindings: ReadonlyMap<string, string>,
   sourceRules: readonly CssRule[],
   cascadeSensitiveDeclarations: ReadonlySet<string>,
+  sourcePath?: string,
 ): { rules: readonly CssRule[]; styleLedger: readonly AuthoredStyleLedgerEntry[] } {
   const dom = new JSDOM(source, { includeNodeLocations: true });
   try {
@@ -357,8 +375,260 @@ function reconcileProposalStyleOwnership(
       if (declarations.length) output.push({ ...rule, declarations });
       return output;
     }, []);
-    return { rules: removePromoted(rules), styleLedger: nextLedger };
+    const residual = removePromoted(rules);
+    return adaptNativeSourceStyles(structure, residual, nextLedger, sourceNode, bindings, sourcePath, (ref) => dom.nodeLocation(sourceNode.get(ref)!) ?? undefined);
   } finally { dom.window.close(); }
+}
+
+const BUTTON_WRAPPER_RESET = new Map<string, string>([
+  ['margin', '0'], ['margin-top', '0'], ['margin-right', '0'], ['margin-bottom', '0'], ['margin-left', '0'],
+  ['padding', '0'], ['padding-top', '0'], ['padding-right', '0'], ['padding-bottom', '0'], ['padding-left', '0'], ['display', 'block'], ['background', 'transparent'], ['background-color', 'transparent'],
+  ['border', '0'], ['border-top', '0'], ['border-right', '0'], ['border-bottom', '0'], ['border-left', '0'], ['border-radius', '0'], ['border-top-left-radius', '0'], ['border-top-right-radius', '0'], ['border-bottom-left-radius', '0'], ['border-bottom-right-radius', '0'], ['box-shadow', 'none'], ['opacity', '1'], ['transform', 'none'],
+  ['translate', 'none'], ['rotate', 'none'], ['scale', 'none'], ['filter', 'none'], ['transition', 'none'],
+  ['transition-property', 'none'], ['transition-duration', '0s'], ['transition-delay', '0s'],
+]);
+const BUTTON_TARGET_PROPERTIES = new Set(`color background background-color background-image border border-color border-width border-style border-radius box-shadow
+  padding padding-top padding-right padding-bottom padding-left margin margin-top margin-right margin-bottom margin-left display width height min-width max-width min-height max-height
+  font font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform white-space opacity transform translate rotate scale filter
+  transition transition-property transition-duration transition-delay transition-timing-function outline outline-color outline-width outline-style outline-offset cursor`.split(/\s+/));
+
+/** Insert narrowly-qualified native rules beside their exact source rule, preserving nesting/order. */
+function adaptNativeSourceStyles(
+  structure: AuthoringStructureNode[], rules: readonly CssRule[], ledger: AuthoredStyleLedgerEntry[],
+  sourceNodes: ReadonlyMap<string, Element>, bindings: ReadonlyMap<string, string>, sourcePath: string | undefined,
+  locationFor: (ref: string) => { startOffset: number; startLine: number; startCol: number } | undefined,
+): { rules: CssRule[]; styleLedger: AuthoredStyleLedgerEntry[] } {
+  const nodes = flattenNodes(structure);
+  // Conversion retains source classes for residual CSS. For a directly-bound img, however,
+  // core/image serializes className on its figure; keeping the img utility there would apply it
+  // to the wrong native element. The adapter owns any supported img/caption transport instead.
+  for (const [ref, id] of bindings) {
+    const element = sourceNodes.get(ref);
+    const node = nodes.find((candidate) => candidate.id === id);
+    if (element?.matches('img') && node?.block === 'core/image' && typeof node.attributes?.className === 'string') {
+      const sourceClasses = new Set([...element.classList]);
+      const retained = node.attributes.className.split(/\s+/).filter((value) => value && !sourceClasses.has(value)).join(' ');
+      node.attributes = { ...node.attributes, ...(retained ? { className: retained } : {}) };
+      if (!retained) delete node.attributes.className;
+    }
+  }
+  const gridProperties = new Set(['display', 'grid-template-columns', 'grid-template-rows', 'gap', 'row-gap', 'column-gap']);
+  const isGridSpecific = (property: string) => property === 'grid' || property === 'grid-template' || property.startsWith('grid-');
+  const ownedGrids = new Set<string>();
+  const discoverUnconditionalGrids = (items: readonly CssRule[]): void => {
+    for (const rule of items) {
+      if (rule.kind === 'conditional') continue;
+      if (rule.kind !== 'style' || !rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() === 'grid')) continue;
+      const subjects = nativeSelectorSubjects(rule.selector);
+      if (!subjects) continue;
+      for (const subject of subjects) for (const [ref, id] of bindings) {
+        const element = sourceNodes.get(ref);
+        const node = nodes.find((candidate) => candidate.id === id);
+        try { if (node?.block === 'core/group' && element?.matches(subject.staticSelector)) ownedGrids.add(id); } catch { /* unsupported selector is handled below */ }
+      }
+    }
+  };
+  discoverUnconditionalGrids(rules);
+  type NativeTarget = { sourceRef: string; node: string; target: string; reset?: string; role: 'button-link' | 'image' | 'caption' | 'grid-container'; intrinsic?: { width: string; height: string; aspectRatio: string } };
+  const intrinsicImages = new Map(nodes.flatMap((node) => {
+    const width = node.block === 'core/image' && typeof node.attributes?.width === 'string' ? node.attributes.width : undefined;
+    const height = node.block === 'core/image' && typeof node.attributes?.height === 'string' ? node.attributes.height : undefined;
+    return width && height && /^[1-9]\d*$/.test(width) && /^[1-9]\d*$/.test(height)
+      ? [[node.id!, { width, height, aspectRatio: `${width} / ${height}` }] as const] : [];
+  }));
+  const targetFor = (selector: string): NativeTarget[] | undefined => {
+    const subjects = nativeSelectorSubjects(selector);
+    if (!subjects) {
+      const bound = [...bindings.entries()].map(([sourceRef, id]) => ({ sourceRef, node: nodes.find((candidate) => candidate.id === id), element: sourceNodes.get(sourceRef) }))
+        .filter((candidate): candidate is { sourceRef: string; node: AuthoringStructureNode; element: Element } => !!candidate.node && !!candidate.element);
+      if (bound.some((candidate) => ['core/button', 'core/image', 'core/group', 'core/columns'].includes(candidate.node.block))) {
+        // `nativeSelectorSubjects` intentionally rejects relationships outside the bounded
+        // adapter.  It is still possible to identify the exact source unit the supplied CSS
+        // selects without interpreting that relationship: use the existing token-aware dynamic
+        // pseudo transport, then let JSDOM match the original selector structure.
+        const matching = bound.filter((candidate) => {
+          if (!['core/button', 'core/image', 'core/group', 'core/columns'].includes(candidate.node.block)) return false;
+          try { return candidate.element.matches(replaceDynamicPseudos(selector, '')); } catch { return false; }
+        }).filter((candidate, index, candidates) => candidates.findIndex(({ sourceRef }) => sourceRef === candidate.sourceRef) === index)
+          .sort((left, right) => (locationFor(left.sourceRef)?.startOffset ?? Number.MAX_SAFE_INTEGER) - (locationFor(right.sourceRef)?.startOffset ?? Number.MAX_SAFE_INTEGER)
+            || left.sourceRef.localeCompare(right.sourceRef));
+        if (matching.length) throw new NativeTargetBindingError(matching.map((candidate) => ({ sourceRef: candidate.sourceRef, node: candidate.node.id!, role: nativeAdapterRole(candidate.node) })), `${selector} is not a supported single-subject native selector`);
+        throw new Error(`unresolved-native-style-mapping: ${selector} is not a supported single-subject native selector`);
+      }
+      return undefined;
+    }
+    return subjects.flatMap<NativeTarget>((subject) => [...bindings.entries()].flatMap<NativeTarget>(([ref, id]) => {
+      const element = sourceNodes.get(ref);
+      if (!element) return [];
+      const node = nodes.find((candidate) => candidate.id === id);
+      if (!node) return [];
+      let inferredRelation: 'image' | 'caption' | undefined;
+      try {
+        if (subject.relation) {
+          if (node.block !== 'core/image' || !element.matches('figure') || !element.matches(subject.staticSelector)) return [];
+          const tag = subject.relation === 'image' ? 'img' : 'figcaption';
+          if (![...element.querySelectorAll(tag)].some((child) => child.parentElement === element && child.matches(subject.terminalSelector ?? tag))) return [];
+          inferredRelation = subject.relation;
+        }
+        if (node.block === 'core/image' && element.matches('img')) inferredRelation = 'image';
+        if (!subject.relation && !element.matches(subject.staticSelector)) {
+          // A figure is the source-bound unit for core/image, while authored utilities often
+          // live on its direct img/caption.  This is the one bounded descendant bridge.
+          if (node.block !== 'core/image' || !element.matches('figure')) return [];
+          if ([...element.querySelectorAll('img')].some((child) => child.parentElement === element && child.matches(subject.terminalSelector ?? subject.staticSelector))) inferredRelation = 'image';
+          else if ([...element.querySelectorAll('figcaption')].some((child) => child.parentElement === element && child.matches(subject.terminalSelector ?? subject.staticSelector))) inferredRelation = 'caption';
+          else return [];
+        }
+      } catch { return []; }
+      const state = subject.state ? `:${subject.state}` : '';
+      if (node.block === 'core/button') {
+        if (!findParent(structure, node.id!) || findParent(structure, node.id!)!.block !== 'core/buttons') throw new NativeTargetBindingError([{ sourceRef: ref, node: node.id!, role: 'button-link' }], `${selector} binds core/button without core/buttons wrapper`);
+        const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        // core/button serializes className on its own div.wp-block-button, never core/buttons.
+        node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
+        return [{ sourceRef: ref, node: node.id!, target: `.${marker} > .wp-block-button__link${state}`, reset: `.${marker}${state}`, role: 'button-link' as const }];
+      }
+      if (node.block === 'core/image') {
+        if (!subject.relation && !inferredRelation) return [];
+        if (subject.relation && !element.matches('figure')) throw new NativeTargetBindingError([{ sourceRef: ref, node: node.id!, role: 'image' }], `${selector} requires a figure-bound core/image source`);
+        const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
+        const imageRole = subject.relation ?? inferredRelation;
+        const relation = imageRole === 'caption' ? 'figcaption.wp-element-caption' : 'img';
+        return [{ sourceRef: ref, node: node.id!, target: `figure.wp-block-image.${marker} > ${relation}${state}`, role: imageRole === 'caption' ? 'caption' as const : 'image' as const }];
+      }
+      if (node.block === 'core/group' || node.block === 'core/columns') {
+        const marker = `block-runner-native-${node.id!.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+        node.attributes = { ...(node.attributes ?? {}), className: joinClass(node.attributes?.className, marker) };
+        return [{ sourceRef: ref, node: node.id!, target: `.${marker}.${node.block === 'core/group' ? 'wp-block-group' : 'wp-block-columns'}${state}`, role: 'grid-container' as const }];
+      }
+      return [];
+    }));
+  };
+  const visit = (items: readonly CssRule[], conditional = false): CssRule[] => items.flatMap((rule): CssRule[] => {
+    if (rule.kind === 'conditional') return [{ ...rule, rules: visit(rule.rules, true) }];
+    if (rule.kind !== 'style') return [rule];
+    let targets: NativeTarget[] | undefined;
+    try {
+      targets = targetFor(rule.selector);
+    } catch (error) {
+      if (error instanceof UnresolvedNativeStyleMappingError) throw error;
+      const reason = error instanceof Error ? error.message.replace(/^unresolved-native-style-mapping:\s*/, '') : String(error);
+      const binding = error instanceof NativeTargetBindingError && error.bindings.length === 1 ? error.bindings[0] : undefined;
+      const pluralBindings = error instanceof NativeTargetBindingError && error.bindings.length > 1 ? error.bindings : undefined;
+      const sourceRef = binding?.sourceRef;
+      const location = sourceRef ? locationFor(sourceRef) : undefined;
+      const declaration = rule.declarations[0];
+      throw new UnresolvedNativeStyleMappingError({
+        selector: rule.selector, property: declaration?.property,
+        ...(binding ? { node: binding.node, role: binding.role } : {}), reason,
+        ...(declaration ? { cssSource: { path: sourcePath ?? '<inline>', selector: rule.selector, offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
+        ...(sourceRef && location ? { htmlSource: { sourceRef, path: sourcePath ?? '<inline>', offset: location.startOffset, line: location.startLine, column: location.startCol } } : {}),
+        ...(pluralBindings ? { htmlSources: pluralBindings.flatMap(({ sourceRef }) => {
+          const source = locationFor(sourceRef);
+          return source ? [{ sourceRef, path: sourcePath ?? '<inline>', offset: source.startOffset, line: source.startLine, column: source.startCol }] : [];
+        }) } : {}),
+      });
+    }
+    if (!targets?.length) return [rule];
+    const gridDeclarations = rule.declarations.filter((declaration) => gridProperties.has(declaration.property));
+    const unresolved = (reason: string, target = targets[0], declaration = rule.declarations[0]) => {
+      const sourceRef = target?.sourceRef;
+      const location = sourceRef ? locationFor(sourceRef) : undefined;
+      return new UnresolvedNativeStyleMappingError({
+      selector: rule.selector, property: declaration?.property, node: target?.node, role: target?.role, reason,
+      ...(declaration ? { cssSource: { path: sourcePath ?? '<inline>', selector: rule.selector, offset: declaration.source.start.offset, line: declaration.source.start.line, column: declaration.source.start.column } } : {}),
+      ...(sourceRef && location ? { htmlSource: { sourceRef, path: sourcePath ?? '<inline>', offset: location.startOffset, line: location.startLine, column: location.startCol } } : {}),
+      });
+    };
+    const unsupportedGrid = rule.declarations.find((declaration) => isGridSpecific(declaration.property) && !gridProperties.has(declaration.property))
+      ?? rule.declarations.find((declaration) => declaration.property === 'display' && declaration.value.trim() !== 'grid' && /grid/i.test(declaration.value));
+    if (targets.some((target) => target.role === 'grid-container') && unsupportedGrid) {
+      throw unresolved(`unsupported authored grid declaration ${unsupportedGrid.property}`, targets[0], unsupportedGrid);
+    }
+    if (targets.every((target) => target.role === 'grid-container') && gridDeclarations.length === 0) return [rule];
+    if (targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/columns') && gridDeclarations.length) {
+      throw unresolved('core/columns cannot own an authored grid');
+    }
+    if (targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/button')
+      && rule.declarations.some((declaration) => !BUTTON_TARGET_PROPERTIES.has(declaration.property))) {
+      throw unresolved('property is outside the supported core/button adapter');
+    }
+    for (const target of targets.filter((candidate) => candidate.role === 'image')) {
+      const controlledAxis = rule.declarations.find((declaration) => declaration.property === 'width' || declaration.property === 'height');
+      if (!controlledAxis) continue;
+      const intrinsic = intrinsicImages.get(target.node);
+      if (!intrinsic) throw unresolved('authored image sizing requires complete valid intrinsic dimensions', target, controlledAxis);
+      const image = nodes.find((node) => node.id === target.node)!;
+      const existingRatio = image.attributes?.aspectRatio;
+      if (existingRatio !== undefined && !sameAspectRatio(existingRatio, intrinsic)) {
+        throw unresolved('source intrinsic dimensions conflict with an existing native image aspect ratio', target, controlledAxis);
+      }
+      image.attributes = { ...(image.attributes ?? {}), aspectRatio: intrinsic.aspectRatio };
+      delete image.attributes.width;
+      delete image.attributes.height;
+      target.intrinsic = intrinsic;
+    }
+    if (targets.some((target) => target.role === 'grid-container') && gridDeclarations.length
+      && targets.some((target) => !ownedGrids.has(target.node))) {
+      // A caller predeclaring layout.type is not evidence of source ownership.
+      if (conditional || !rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() === 'grid')) {
+        throw unresolved('grid declarations lack unconditional source display:grid ownership');
+      }
+    }
+    if (conditional && targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/group')
+      && gridDeclarations.length && targets.some((target) => !ownedGrids.has(target.node))) {
+      throw unresolved('conditional grid declarations lack unconditional display:grid ownership');
+    }
+    if (!conditional && targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/group')
+      && rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() === 'grid')) {
+      const group = nodes.find((node) => node.id === targets[0]!.node)!;
+      const layout = group.attributes?.layout;
+      if (layout && (typeof layout !== 'object' || Array.isArray(layout) || (layout as Record<string, unknown>).type !== 'grid')) {
+        throw unresolved('core/group requires a compatible native grid layout');
+      }
+      group.attributes = { ...(group.attributes ?? {}), layout: { ...(layout as Record<string, JsonValue> ?? {}), type: 'grid' } };
+    }
+    const extras: CssRule[] = targets.flatMap((target, targetIndex) => {
+      const targetDeclarations = target.role === 'grid-container' ? rule.declarations.filter((declaration) => gridProperties.has(declaration.property)) : rule.declarations;
+      const targetRule: CssRule = { ...rule, id: `${rule.id}.native-target.${targetIndex}`, selector: target.target, declarations: targetDeclarations, generated: 'native-adapter-target' };
+      const resets = target.reset ? rule.declarations.filter((declaration) => BUTTON_WRAPPER_RESET.has(declaration.property)).map((declaration) => ({ ...declaration, id: `${declaration.id}.native-reset.${targetIndex}`, value: BUTTON_WRAPPER_RESET.get(declaration.property)! })) : [];
+      return resets.length ? [targetRule, { ...rule, id: `${rule.id}.native-reset.${targetIndex}`, selector: target.reset!, declarations: resets, generated: 'native-adapter-wrapper-reset' } as CssRule] : [targetRule];
+    });
+    for (const declaration of rule.declarations) {
+      const entry = ledger.find((candidate) => candidate.declarationId === declaration.id);
+      if (entry) {
+        for (const target of targets) {
+          if (target.role === 'grid-container' && !gridProperties.has(declaration.property)) continue;
+          const role = target.role;
+          entry.nativeTargets = [...(entry.nativeTargets ?? []), { node: target.node, role, selector: target.target, ...(target.intrinsic ? { intrinsic: target.intrinsic } : {}), ...(declaration.important ? { important: true } : {}) }];
+          if (target.reset && BUTTON_WRAPPER_RESET.has(declaration.property)) entry.nativeTargets.push({ node: target.node, role: 'button-wrapper-reset', selector: target.reset, ...(declaration.important ? { important: true } : {}) });
+        }
+        if (targets.every((target) => target.role === 'image' || target.role === 'caption')) {
+          // Direct-image classes cannot remain on a native figure. Their exact source evidence
+          // is retained in coverage while the generated child selector becomes its transport.
+          entry.transportSelector = targets[0]!.target;
+        }
+      }
+    }
+    return targets.every((target) => target.role === 'image' || target.role === 'caption') ? extras : [rule, ...extras];
+  });
+  return { rules: visit(rules), styleLedger: ledger };
+}
+
+function findParent(nodes: AuthoringStructureNode[], id: string): AuthoringStructureNode | undefined {
+  for (const node of nodes) { if (node.children?.some((child) => child.id === id)) return node; const nested = findParent(node.children ?? [], id); if (nested) return nested; } return undefined;
+}
+function joinClass(value: JsonValue | undefined, marker: string): string { return [...new Set([...(typeof value === 'string' ? value.split(/\s+/) : []), marker])].filter(Boolean).join(' '); }
+function nativeAdapterRole(node: AuthoringStructureNode): 'button-link' | 'image' | 'caption' | 'grid-container' {
+  if (node.block === 'core/button') return 'button-link';
+  if (node.block === 'core/image') return 'image';
+  return 'grid-container';
+}
+function sameAspectRatio(value: JsonValue, intrinsic: { width: string; height: string }): boolean {
+  if (typeof value !== 'string') return false;
+  const match = /^\s*(\d+)\s*\/\s*(\d+)\s*$/.exec(value);
+  return !!match && BigInt(match[1]!) * BigInt(intrinsic.height) === BigInt(match[2]!) * BigInt(intrinsic.width);
 }
 
 function sourceDeclarations(rules: readonly CssRule[]): Array<{ selector: string; ruleId: string; declaration: import('./styles.js').CssDeclaration }> {
@@ -638,6 +908,14 @@ export function validateCoverageFulfillment(plan: AuthoringPlan, sourceHtml?: st
         if (selectors.length === 0) {
           throw new Error(`${label} is marked scoped-css but has no matching ${entry.scope} structured CSS rule.`);
         }
+        for (const target of entry.nativeTargets ?? []) {
+          const expectedValue = target.role === 'button-wrapper-reset' ? BUTTON_WRAPPER_RESET.get(entry.property) : entry.value;
+          const emitted = expectedValue === undefined ? [] : coverageCssRuleSelectors(rules, entry.property, expectedValue, entry.atRules, target.selector);
+          if (!emitted.includes(target.selector)) throw new Error(`${label} is missing generated native target ${target.role} (${target.selector}).`);
+        }
+        // An img-bound source class is intentionally removed from core/image's figure wrapper.
+        // Its supplemental child target is therefore the complete, verified transport.
+        if (entry.nativeTargets?.length) continue;
         // This is deliberately the compiler's final template, rather than plan.structure: field
         // defaults and confirmed asset uses can replace attributes before WordPress receives it.
         serializedTemplate ??= serializeCompiledTemplate(compileRegisteredBlock(plan).template);
@@ -1224,7 +1502,7 @@ function sha256(value: string): string {
 }
 
 function toCoverageStyle(
-  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'transportSelector' | 'node' | 'responsive'>, 'outcome'> & { outcome: string },
+  entry: Omit<Pick<AuthoredStyleLedgerEntry, 'declarationId' | 'ruleId' | 'property' | 'value' | 'outcome' | 'reason' | 'atRules' | 'source' | 'transportSelector' | 'node' | 'responsive' | 'nativeTargets'>, 'outcome'> & { outcome: string },
   scope: AuthoringCoverageStyle['scope'],
 ): AuthoringCoverageStyle {
   const outcome: AuthoringCoverageStyle['outcome'] = entry.outcome === 'native' || entry.outcome === 'preset'
@@ -1232,6 +1510,8 @@ function toCoverageStyle(
     ? entry.outcome
     : 'warned';
   return {
+    ...(entry.declarationId ? { declarationId: entry.declarationId } : {}),
+    ...(entry.ruleId ? { ruleId: entry.ruleId } : {}),
     property: entry.property,
     value: entry.value,
     outcome,
@@ -1242,6 +1522,7 @@ function toCoverageStyle(
     ...(entry.transportSelector ? { transportSelector: entry.transportSelector } : {}),
     ...(entry.node ? { node: entry.node } : {}),
     ...(entry.responsive ? { responsive: entry.responsive } : {}),
+    ...(entry.nativeTargets?.length ? { nativeTargets: entry.nativeTargets } : {}),
   };
 }
 

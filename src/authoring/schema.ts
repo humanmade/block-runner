@@ -42,6 +42,8 @@ export type AuthoringCoverageStyleOutcome = 'native' | 'preset' | 'literal' | 's
 
 /** One source declaration and its final destination disposition. */
 export interface AuthoringCoverageStyle {
+  declarationId?: string;
+  ruleId?: string;
   property: string;
   value: string;
   outcome: AuthoringCoverageStyleOutcome;
@@ -62,6 +64,8 @@ export interface AuthoringCoverageStyle {
   responsive?: 'mobile' | 'tablet';
   /** Exact target theme preset provenance for a preset outcome. */
   preset?: { category: 'color' | 'spacing' | 'font-size' | 'font-family'; slug: string };
+  /** Native destinations emitted in addition to, never instead of, the source declaration. */
+  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string; important?: boolean; intrinsic?: { width: string; height: string; aspectRatio: string } }>;
 }
 
 export type AuthoringCoverageAssetOutcome = 'prepared' | 'copied' | 'uploaded' | 'reused' | 'external' | 'unresolved' | 'blocked';
@@ -230,6 +234,8 @@ export type AuthoringCssRule = {
   kind: 'style';
   selector: string;
   declarations: AuthoringCssDeclaration[];
+  /** Compiler-owned supplemental transport; source rules deliberately omit this field. */
+  generated?: 'native-adapter-target' | 'native-adapter-wrapper-reset';
 } | {
   kind: 'conditional';
   name: 'media' | 'supports' | 'container';
@@ -581,8 +587,10 @@ function normalizeCoverageLocation(input: unknown, location: string): AuthoringC
 
 function normalizeCoverageStyle(input: unknown, location: string): AuthoringCoverageStyle {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset']);
+  knownKeys(value, location, ['declarationId', 'ruleId', 'property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset', 'nativeTargets']);
   return withOptional({
+    declarationId: optionalString(value.declarationId, `${location}.declarationId`),
+    ruleId: optionalString(value.ruleId, `${location}.ruleId`),
     property: nonEmptyString(value.property, `${location}.property`),
     value: stringAt(value.value, `${location}.value`),
     outcome: enumAt(value.outcome, `${location}.outcome`, ['native', 'preset', 'literal', 'scoped-css', 'warned', 'blocked'] as const),
@@ -598,6 +606,20 @@ function normalizeCoverageStyle(input: unknown, location: string): AuthoringCove
       knownKeys(preset, `${location}.preset`, ['category', 'slug']);
       return { category: enumAt(preset.category, `${location}.preset.category`, ['color', 'spacing', 'font-size', 'font-family'] as const), slug: nonEmptyString(preset.slug, `${location}.preset.slug`) };
     })(),
+    nativeTargets: value.nativeTargets === undefined ? undefined : arrayAt(value.nativeTargets, `${location}.nativeTargets`).map((target, index) => {
+      const at = `${location}.nativeTargets[${index}]`;
+      const item = objectAt(target, at);
+      knownKeys(item, at, ['node', 'role', 'selector', 'important', 'intrinsic']);
+      const intrinsic = item.intrinsic === undefined ? undefined : objectAt(item.intrinsic, `${at}.intrinsic`);
+      if (intrinsic) knownKeys(intrinsic, `${at}.intrinsic`, ['width', 'height', 'aspectRatio']);
+      const role = enumAt(item.role, `${at}.role`, ['button-link', 'button-wrapper-reset', 'image', 'caption', 'grid-container'] as const);
+      if (intrinsic && role !== 'image') throw invalid(`${at}.intrinsic`, 'is only valid for an image native target');
+      const dimensions = intrinsic ? { width: nonEmptyString(intrinsic.width, `${at}.intrinsic.width`), height: nonEmptyString(intrinsic.height, `${at}.intrinsic.height`), aspectRatio: nonEmptyString(intrinsic.aspectRatio, `${at}.intrinsic.aspectRatio`) } : undefined;
+      if (dimensions && (!/^[1-9]\d*$/.test(dimensions.width) || !/^[1-9]\d*$/.test(dimensions.height) || dimensions.aspectRatio !== `${dimensions.width} / ${dimensions.height}`)) {
+        throw invalid(`${at}.intrinsic`, 'must retain positive source dimensions and their exact aspect ratio');
+      }
+      return { node: nonEmptyString(item.node, `${at}.node`), role, selector: nonEmptyString(item.selector, `${at}.selector`), ...(item.important === undefined ? {} : { important: booleanAt(item.important, `${at}.important`) }), ...(dimensions ? { intrinsic: dimensions } : {}) };
+    }),
   });
 }
 
@@ -775,8 +797,9 @@ function normalizeCssRules(input: unknown, location: string, depth = 0): Authori
       return { kind, name: enumAt(rule.name, `${at}.name`, ['media', 'supports', 'container'] as const),
         prelude: nonEmptyString(rule.prelude, `${at}.prelude`), rules: normalizeCssRules(rule.rules, `${at}.rules`, depth + 1) };
     }
-    knownKeys(rule, at, ['kind', 'selector', 'declarations']);
-    return { kind, selector: nonEmptyString(rule.selector, `${at}.selector`),
+    knownKeys(rule, at, ['kind', 'selector', 'declarations', 'generated']);
+    return withOptional({ kind, selector: nonEmptyString(rule.selector, `${at}.selector`),
+      generated: rule.generated === undefined ? undefined : enumAt(rule.generated, `${at}.generated`, ['native-adapter-target', 'native-adapter-wrapper-reset'] as const),
       declarations: arrayAt(rule.declarations, `${at}.declarations`).map((inputDeclaration, declarationIndex) => {
         const declarationAt = `${at}.declarations[${declarationIndex}]`;
         const declaration = objectAt(inputDeclaration, declarationAt);
@@ -789,7 +812,7 @@ function normalizeCssRules(input: unknown, location: string, depth = 0): Authori
         return withOptional({ property, value,
           important: optionalBoolean(declaration.important, `${declarationAt}.important`) });
       }),
-    };
+    });
   });
 }
 

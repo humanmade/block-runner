@@ -151,7 +151,8 @@ try {
 
   const saved = await phase('editor-save', () => savePost(page, editor));
   const savedState = await editorState(page);
-  const editPersistence = editedValuesPersisted(preEdit, savedState, fixture.editableFields ?? [], fixture.blockName);
+  const savedSelectorTargets = await resolveScopedSelectorTargets(page, savedState, fixture.editableFields ?? [], fixture.blockName);
+  const editPersistence = editedValuesPersisted(preEdit, savedState, fixture.editableFields ?? [], fixture.blockName, savedSelectorTargets);
   const savePassed = fieldResult.status === 'pass' && saved && editPersistence.ok && savedState.invalidBlocks.length === 0;
   set('editor_save', savePassed ? 'pass' : 'fail', savePassed ? undefined : 'Editor save did not persist the edited block values.', {
     preEdit,
@@ -159,14 +160,30 @@ try {
     editPersistence,
   });
 
-  const reopened = await phase('editor-reopen', () => reopenPost(page));
+  const reopened = await phase('editor-reopen', () => reopenPost(page, fixture));
   const reopenedState = await editorState(page);
-  const reopenPersistence = editedValuesPersisted(preEdit, reopenedState, fixture.editableFields ?? [], fixture.blockName);
-  const persisted = savePassed && reopened && reopenedState.invalidBlocks.length === 0 && savedState.contentHash === reopenedState.contentHash && savedState.treeHash === reopenedState.treeHash && reopenPersistence.ok;
-  set('editor_reopen', persisted ? 'pass' : 'fail', persisted ? undefined : 'Saved editor tree/content changed after reopening.', {
+  const reopenedSelectorTargets = await resolveScopedSelectorTargets(page, reopenedState, fixture.editableFields ?? [], fixture.blockName);
+  const reopenPersistence = editedValuesPersisted(preEdit, reopenedState, fixture.editableFields ?? [], fixture.blockName, reopenedSelectorTargets);
+  const savedStateMatchesReopened = savedState.contentHash === reopenedState.contentHash && savedState.treeHash === reopenedState.treeHash;
+  const persisted = savePassed && reopened && reopenedState.invalidBlocks.length === 0 && savedStateMatchesReopened && reopenPersistence.ok;
+  const reopenReason = !savePassed
+    ? 'Editor save did not persist the edited block values.'
+    : !reopened
+      ? 'Could not reopen the saved post in the editor.'
+      : reopenedState.invalidBlocks.length > 0
+        ? 'The reopened editor contains invalid blocks.'
+        : !savedStateMatchesReopened
+          ? 'Saved editor tree/content changed after reopening.'
+          : !reopenPersistence.ok
+            ? 'The declared edited field did not survive reopening.'
+            : undefined;
+  set('editor_reopen', persisted ? 'pass' : 'fail', reopenReason, {
     preEdit,
     saved: savedState,
+    savedSelectorTargets,
     reopened: reopenedState,
+    reopenedSelectorTargets,
+    savedStateMatchesReopened,
     reopenPersistence,
   });
 
@@ -198,6 +215,21 @@ try {
       ...(prior?.details ?? {}),
       responsiveStyleMatrix: matrix.details,
     }, prior?.artifacts);
+  }
+
+  if (fixture.nativeStyleAdapterMatrix) {
+    const frame = page.frames().find((candidate) => candidate.name() === 'editor-canvas');
+    const rootClientId = reopenedState.tree.filter((block) => block.name === fixture.blockName).map((block) => block.clientId);
+    const matrix = frame && rootClientId.length === 1
+      ? await phase('editor-native-style-adapter-matrix', () => proveNativeStyleAdapterMatrix(page, frame, fixture, rootClientId[0], fixture.nativeStyleAdapterMatrix, 'editor-canvas', artifactDir))
+      : { ok: false, details: { error: frame ? 'Expected exactly one reopened generated root for native style adapter proof.' : 'WordPress editor-canvas iframe was not present.' }, artifacts: [] };
+    const prior = gates.editor_reopen;
+    const passed = prior?.status === 'pass' && matrix.ok;
+    set('editor_reopen', passed ? 'pass' : 'fail', passed ? undefined
+      : prior?.reason ?? 'The native style adapter matrix did not complete.', {
+      ...(prior?.details ?? {}),
+      nativeStyleAdapterMatrix: matrix.details,
+    }, [...(prior?.artifacts ?? []), ...matrix.artifacts]);
   }
 
   if (needsPattern) patternLifecycle = await phase('pattern-overrides', () => provePatternOverride(page, fixture));
@@ -438,6 +470,46 @@ function scopedLocator(page, scope, selector) {
     editorCanvas.locator(`[data-block=${JSON.stringify(clientId)}]`).locator(selector)));
 }
 
+async function resolveScopedSelectorTargets(page, state, fields, blockName) {
+  const roots = state.tree.filter((block) => block.name === blockName);
+  return Promise.all(fields.map(async (field) => {
+    if (!field.selector) return undefined;
+    if (roots.length !== 1) {
+      return { path: field.path, selector: field.selector, rootMatches: roots.length, reason: 'Expected exactly one inserted root before resolving the selector.' };
+    }
+    try {
+      const rootClientId = roots[0].clientId;
+      const control = scopedLocator(page, { rootClientIds: [rootClientId] }, field.selector);
+      const controlMatches = await control.count();
+      if (controlMatches !== 1) {
+        return { path: field.path, selector: field.selector, rootClientId, controlMatches, reason: 'The scoped selector did not resolve to exactly one control inside the inserted root.' };
+      }
+      const ownership = await control.evaluate((element, expectedRootClientId) => {
+        const owner = element.closest('[data-block]');
+        const ancestors = [];
+        for (let current = owner; current; current = current.parentElement?.closest('[data-block]')) {
+          const clientId = current.getAttribute('data-block');
+          if (clientId) ancestors.push(clientId);
+          if (clientId === expectedRootClientId) break;
+        }
+        return { clientId: owner?.getAttribute('data-block') ?? undefined, ancestors, belongsToRoot: ancestors.includes(expectedRootClientId) };
+      }, rootClientId);
+      if (!ownership.clientId || !ownership.belongsToRoot) {
+        return { path: field.path, selector: field.selector, rootClientId, controlMatches, ownership, reason: 'The selected control has no native owning block inside the unique inserted root.' };
+      }
+      const native = await page.evaluate((clientId) => {
+        const block = globalThis.wp?.data?.select('core/block-editor')?.getBlock?.(clientId);
+        return block ? { clientId: block.clientId, name: block.name, attributes: JSON.parse(JSON.stringify(block.attributes ?? {})) } : undefined;
+      }, ownership.clientId);
+      return native
+        ? { path: field.path, selector: field.selector, rootClientId, controlMatches, ownership, clientId: native.clientId, native }
+        : { path: field.path, selector: field.selector, rootClientId, controlMatches, ownership, clientId: ownership.clientId, reason: 'The selected control owner was not available from the native block store.' };
+    } catch (error) {
+      return { path: field.path, selector: field.selector, rootClientId: roots[0].clientId, reason: `Could not re-resolve the scoped selector: ${error instanceof Error ? error.message : String(error)}` };
+    }
+  }));
+}
+
 
 function combineLocators(locators) {
   const [first, ...rest] = locators;
@@ -484,7 +556,7 @@ async function publishPost(page, editor) {
   }
 }
 
-async function reopenPost(page) {
+async function reopenPost(page, fixture) {
   try {
     // Editor heartbeat requests can keep networkidle open after the editor is
     // ready. The writing flow is the lifecycle condition that matters here.
@@ -492,6 +564,18 @@ async function reopenPost(page) {
     if (!Number.isInteger(Number(id)) || Number(id) <= 0) return false;
     await page.goto(`${baseUrl}/wp-admin/post.php?post=${Number(id)}&action=edit`, { waitUntil: 'domcontentloaded' });
     await waitForEditorReady(page, { requireCurrentBlocks: true });
+    // The native-style fixture's source image becomes a real local upload
+    // immediately before insertion.  On reopen Core can expose the block
+    // store before that image has mounted in the fresh canvas; capture the
+    // persistence state only after the supported native image is present.
+    if (fixture?.nativeStyleAdapterMatrix) {
+      await page.waitForFunction((selector) => {
+        const iframe = document.querySelector('iframe[name="editor-canvas"]');
+        const root = iframe?.contentDocument ?? document;
+        const image = root.querySelector(selector);
+        return image?.tagName === 'IMG' && image.complete && image.naturalWidth > 0;
+      }, fixture.nativeStyleAdapterMatrix.image.selector, { timeout: 20_000 });
+    }
     return true;
   } catch {
     return false;
@@ -833,6 +917,137 @@ async function proveResponsiveStyles(page, surface, fixture, rootClientId, respo
   }
 }
 
+/**
+ * Observe only the three supported source-to-Core relationships.  Every value
+ * is taken from the installed plugin in the editor canvas or published page;
+ * this intentionally has no fixture-coordinate fallback.
+ */
+async function proveNativeStyleAdapterMatrix(page, surface, fixture, rootClientId, matrix, scope, artifactDir) {
+  const root = scope === 'editor-canvas'
+    ? surface.locator(`[data-block=${JSON.stringify(rootClientId)}]`)
+    : surface.locator(`.wp-block-${fixture.blockName.replace('/', '-')}`).first();
+  const artifacts = [];
+  const originalViewport = page.viewportSize();
+  try {
+    await root.waitFor({ state: 'visible' });
+    const wrapper = root.locator(matrix.button.wrapperSelector);
+    const link = root.locator(matrix.button.linkSelector);
+    const image = root.locator(matrix.image.selector);
+    const caption = root.locator(`${matrix.image.selector.replace(/\s*>\s*img$/, '')} > figcaption.wp-element-caption`);
+    const grid = root.locator(matrix.grid.selector);
+    if (await wrapper.count() !== 1 || await link.count() !== 1 || await image.count() !== 1 || await caption.count() !== 1 || await grid.count() !== 1) {
+      throw new Error('Native style adapter matrix selectors must each match exactly one emitted Core element.');
+    }
+    const before = await Promise.all([
+      wrapper.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return {
+          rect: { x: rect.x, y: rect.y }, padding: { top: style.paddingTop, right: style.paddingRight, bottom: style.paddingBottom, left: style.paddingLeft },
+          transform: style.transform, transitionDuration: style.transitionDuration,
+        };
+      }),
+      link.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return { rect: { x: rect.x, y: rect.y }, padding: { top: style.paddingTop, right: style.paddingRight, bottom: style.paddingBottom, left: style.paddingLeft }, transform: style.transform, backgroundColor: style.backgroundColor };
+      }),
+    ]);
+    await link.hover();
+    await link.evaluate(async (element) => {
+      // Read after the authored transition completes, not its first frame.
+      const transitions = element.getAnimations().filter((animation) =>
+        Number.isFinite(animation.effect?.getComputedTiming().endTime));
+      await Promise.all(transitions.map((animation) => animation.finished.catch(() => undefined)));
+    });
+    const hovered = await Promise.all([
+      wrapper.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return { rect: { x: rect.x, y: rect.y }, transform: style.transform, transitionDuration: style.transitionDuration };
+      }),
+      link.evaluate((element) => {
+        const style = getComputedStyle(element);
+        const rect = element.getBoundingClientRect();
+        return { rect: { x: rect.x, y: rect.y }, transform: style.transform, backgroundColor: style.backgroundColor };
+      }),
+    ]);
+    // A real Tab interaction keeps this a keyboard-focus assertion rather than
+    // a selector-only simulation.  Focusing first makes the target deterministic
+    // across editor and frontend tab order.
+    await link.focus();
+    await page.keyboard.press('Shift+Tab');
+    await page.keyboard.press('Tab');
+    const focus = await link.evaluate((element) => {
+      const style = getComputedStyle(element);
+      return { active: document.activeElement === element, focusVisible: element.matches(':focus-visible'), outlineStyle: style.outlineStyle, outlineWidth: style.outlineWidth };
+    });
+    const media = await Promise.all([
+      image.evaluate((element) => {
+        const style = getComputedStyle(element);
+        return {
+          width: element.getAttribute('width'), height: element.getAttribute('height'), alt: element.getAttribute('alt'),
+          inlineWidth: element.style.width, inlineHeight: element.style.height,
+          aspectRatio: style.aspectRatio,
+          renderedWidth: element.getBoundingClientRect().width,
+          renderedHeight: element.getBoundingClientRect().height,
+          containerWidth: element.parentElement.clientWidth,
+          loaded: element.complete && element.naturalWidth > 0,
+        };
+      }),
+      caption.textContent(),
+    ]);
+    const grids = [];
+    for (const sample of matrix.grid.samples) {
+      const surfaceViewport = await setResponsiveSurfaceViewport(page, surface, sample);
+      const observed = await grid.evaluate((element) => ({ template: getComputedStyle(element).gridTemplateColumns, display: getComputedStyle(element).display }));
+      const columns = observed.template === 'none' ? 0 : observed.template.trim().split(/\s+/).filter(Boolean).length;
+      grids.push({ label: sample.label, viewport: { requested: sample.viewport, surface: surfaceViewport }, columns, expected: sample.columns, ...observed });
+    }
+    const wrapperNeutral = Object.values(before[0].padding).every((value) => value === '0px')
+      && before[0].transform === 'none' && before[0].transitionDuration.split(',').every((value) => value.trim() === '0s');
+    const paddingMatches = Object.entries(matrix.button.linkPadding).every(([side, value]) => before[1].padding[side] === value);
+    const aligned = Math.abs(before[1].rect.x - before[0].rect.x) <= 1;
+    const hoverMatches = hovered[1].transform === matrix.button.hover.transform
+      && hovered[1].backgroundColor === matrix.button.hover.backgroundColor
+      && Math.abs((hovered[1].rect.y - before[1].rect.y) + 2) <= 0.25
+      && hovered[0].transform === 'none'
+      && hovered[0].transitionDuration.split(',').every((value) => value.trim() === '0s');
+    const focusMatches = focus.active && focus.focusVisible && focus.outlineStyle === matrix.button.focusOutline.style && focus.outlineWidth === matrix.button.focusOutline.width;
+    const sourceRatio = Number(matrix.image.sourceDimensions.width) / Number(matrix.image.sourceDimensions.height);
+    const ratioParts = media[0].aspectRatio.match(/([0-9.]+)\s*\/\s*([0-9.]+)/g);
+    const renderedRatio = ratioParts?.length
+      ? ratioParts[ratioParts.length - 1].split('/').map((part) => Number(part.trim()))
+      : undefined;
+    const ratioMatches = renderedRatio !== undefined && Number.isFinite(sourceRatio)
+      && Math.abs((renderedRatio[0] / renderedRatio[1]) - sourceRatio) < 0.00001;
+    const renderedRatioMatches = media[0].renderedWidth > 0
+      && Math.abs(media[0].renderedHeight - media[0].renderedWidth / sourceRatio) <= 1;
+    // Core adds natural attachment dimensions to the editor DOM. They must not
+    // override the authored CSS width or ratio, or leak into saved/frontend HTML.
+    const sizingMatches = media[0].inlineWidth === ''
+      && Math.abs(media[0].renderedWidth - media[0].containerWidth) <= 1
+      && (scope === 'editor-canvas'
+        ? ['', 'auto'].includes(media[0].inlineHeight)
+        : media[0].width === null && media[0].height === null && media[0].inlineHeight === '');
+    const mediaMatches = media[0].alt === matrix.image.alt && media[0].loaded
+      && ratioMatches && renderedRatioMatches && sizingMatches
+      && media[1]?.replace(/\s+/g, ' ').trim() === matrix.image.caption;
+    const gridsMatch = grids.every((sample) => sample.display === 'grid' && sample.columns === sample.expected);
+    const details = { scope, button: { wrapper: before[0], link: before[1], hovered: { wrapper: hovered[0], link: hovered[1] }, focus, wrapperNeutral, paddingMatches, aligned, hoverMatches, focusMatches }, image: { sourceDimensions: matrix.image.sourceDimensions, observed: media[0], caption: media[1], ratioMatches, renderedRatioMatches, sizingMatches, matches: mediaMatches }, grid: { samples: grids, matches: gridsMatch } };
+    const imagePath = path.join(artifactDir, `native-style-adapter-${scope}.png`);
+    const jsonPath = path.join(artifactDir, `native-style-adapter-${scope}.json`);
+    await root.screenshot({ path: imagePath, animations: 'disabled' });
+    await writeFile(jsonPath, JSON.stringify(details, null, 2), 'utf8');
+    artifacts.push({ path: `artifacts/${path.basename(imagePath)}`, mediaType: 'image/png' }, { path: `artifacts/${path.basename(jsonPath)}`, mediaType: 'application/json' });
+    return { ok: wrapperNeutral && paddingMatches && aligned && hoverMatches && focusMatches && mediaMatches && gridsMatch, details, artifacts };
+  } catch (error) {
+    return { ok: false, details: { scope, error: error instanceof Error ? error.message : String(error) }, artifacts };
+  } finally {
+    if (originalViewport) await page.setViewportSize(originalViewport).catch(() => undefined);
+  }
+}
+
 async function setResponsiveSurfaceViewport(page, surface, sample) {
   await page.setViewportSize(sample.viewport);
   let observed = await surface.evaluate(() => ({ width: window.innerWidth, height: window.innerHeight }));
@@ -887,24 +1102,32 @@ async function readPublication(page, savedContent) {
     : undefined;
 }
 
-function editedValuesPersisted(before, after, fields, blockName) {
+function editedValuesPersisted(before, after, fields, blockName, selectorTargets = []) {
   const changed = before.contentHash !== after.contentHash || before.treeHash !== after.treeHash;
   const roots = after.tree.filter((block) => block.name === blockName);
   const visit = (nodes) => nodes.flatMap((node) => [node, ...visit(node.innerBlocks ?? [])]);
   const nodes = roots.length === 1 ? visit(roots) : [];
-  const checks = fields.map((field) => {
+  const checks = fields.map((field, index) => {
     const names = field.surface === 'richText' ? ['core/heading', 'core/paragraph', 'core/list-item', 'core/button']
       : field.surface === 'link' ? ['core/button'] : ['core/image'];
     const candidates = nodes.filter((node) => names.includes(node.name)
       && (!field.metadataName || node.attributes?.metadata?.name === field.metadataName));
-    const target = candidates.length === 1 ? candidates[0] : undefined;
+    const selectorTarget = field.selector ? selectorTargets[index] : undefined;
+    // Selector fields are bound to the native owner of the freshly resolved
+    // DOM control. Do not let an equivalent value in another compatible block
+    // stand in for that exact target. Non-selector and metadata fields retain
+    // their existing unique-compatible-block contract.
+    const target = field.selector
+      ? candidates.find((node) => node.clientId === selectorTarget?.clientId)
+      : candidates.length === 1 ? candidates[0] : undefined;
+    const value = field.value ?? `Proof edit ${field.path}`;
     const attribute = field.surface === 'richText' ? (target?.name === 'core/button' ? 'text' : 'content')
       : field.surface === 'altText' ? 'alt' : 'url';
-    const value = field.value ?? `Proof edit ${field.path}`;
     const expected = field.surface === 'media' ? field.media : { [attribute]: value };
     const actual = target?.attributes ?? {};
-    const ok = Boolean(target && expected && Object.entries(expected).every(([key, expectedValue]) => actual[key] === expectedValue));
-    return { path: field.path, metadataName: field.metadataName, matches: candidates.length, expected, actual, ok };
+    const ok = Boolean(target && expected && (!field.selector || selectorTarget?.ownership?.belongsToRoot)
+      && Object.entries(expected).every(([key, expectedValue]) => actual[key] === expectedValue));
+    return { path: field.path, metadataName: field.metadataName, selector: field.selector, matches: candidates.length, selectorTarget, expected, actual, ok };
   });
   // Values elsewhere in the post (including its title or another block) cannot
   // satisfy this claim. Reopen also compares the exact saved serialization.
@@ -1863,13 +2086,18 @@ async function proveFrontend(page, fixture, baseUrl, activePublication, artifact
   const responsiveStyleMatrix = fixture.responsiveStyleMatrix
     ? await proveResponsiveStyles(page, page, fixture, undefined, fixture.responsiveStyleMatrix, 'frontend')
     : undefined;
-  const assetsPass = ownedStyles.length > 0 && healthyAssets && (sharedMatrix?.ok ?? true) && (responsiveStyleMatrix?.ok ?? true);
+  const nativeStyleAdapterMatrix = fixture.nativeStyleAdapterMatrix
+    ? await proveNativeStyleAdapterMatrix(page, page, fixture, undefined, fixture.nativeStyleAdapterMatrix, 'frontend', artifactDir)
+    : undefined;
+  const assetsPass = ownedStyles.length > 0 && healthyAssets && (sharedMatrix?.ok ?? true) && (responsiveStyleMatrix?.ok ?? true) && (nativeStyleAdapterMatrix?.ok ?? true);
   set('frontend_assets', assetsPass ? 'pass' : 'fail', assetsPass ? undefined
     : sharedMatrix && !sharedMatrix.ok
       ? 'The generated shared stylesheet/font did not load on the published frontend root.'
       : responsiveStyleMatrix && !responsiveStyleMatrix.ok
         ? 'The author-produced responsive style matrix did not match on the published frontend.'
-      : 'No successful plugin-owned stylesheet was observed on the published post, or a plugin asset failed.', {
+        : nativeStyleAdapterMatrix && !nativeStyleAdapterMatrix.ok
+          ? 'The native style adapter matrix did not match on the published frontend.'
+        : 'No successful plugin-owned stylesheet was observed on the published post, or a plugin asset failed.', {
     postId: activePublication.id,
     permalink: activePublication.permalink,
     assets,
@@ -1877,7 +2105,8 @@ async function proveFrontend(page, fixture, baseUrl, activePublication, artifact
     ownedStyles,
     ...(sharedMatrix ? { browserMatrix: sharedMatrix.details } : {}),
     ...(responsiveStyleMatrix ? { responsiveStyleMatrix: responsiveStyleMatrix.details } : {}),
-  }, [...(sharedMatrix?.artifacts ?? [])]);
+    ...(nativeStyleAdapterMatrix ? { nativeStyleAdapterMatrix: nativeStyleAdapterMatrix.details } : {}),
+  }, [...(sharedMatrix?.artifacts ?? []), ...(nativeStyleAdapterMatrix?.artifacts ?? [])]);
   activePublication.frontendAssets = ownedAssets;
   const scopedErrors = { consoleErrors: consoleErrors.slice(consoleStart), pageErrors: pageErrors.slice(pageErrorStart) };
   const runtimePass = scopedErrors.consoleErrors.length === 0 && scopedErrors.pageErrors.length === 0;

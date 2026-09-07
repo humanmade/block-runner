@@ -142,6 +142,12 @@ function sourceAttributes(element: Element, block?: string): Map<string, JsonVal
     if (image?.getAttribute('src')) values.set('url', image.getAttribute('src')!);
     values.set('alt', image?.getAttribute('alt') ?? '');
     if (image?.getAttribute('title')) values.set('title', image.getAttribute('title')!);
+    // These are native core/image attributes, not presentation guesses.  Keeping only valid
+    // positive integer dimensions also avoids serializing browser-invalid values into WP markup.
+    for (const attribute of ['width', 'height'] as const) {
+      const value = image?.getAttribute(attribute);
+      if (value && /^[1-9]\d*$/.test(value)) values.set(attribute, value);
+    }
     const caption = element.matches('figure') ? element.querySelector('figcaption') : undefined;
     if (caption) values.set('caption', safeHtml(caption));
   } else if (block === 'core/button') {
@@ -238,12 +244,23 @@ export function validateProposalSourceContent(sourceHtml: string, bound: Authori
         const retainedLocalImage = attribute === 'url' && node.block === 'core/image'
           && plan.coverage?.assets.some((asset) => asset.reference === original && (asset.outcome === 'prepared' || asset.outcome === 'copied'))
           && plan.assets.some((asset) => asset.uses?.some((use) => use.node === nodeId && use.attribute === 'url'));
-        if (!retainedLocalImage && JSON.stringify(node.attributes?.[attribute]) !== JSON.stringify(expected)) {
+        const retainedIntrinsicRatio = (attribute === 'width' || attribute === 'height') && node.block === 'core/image'
+          && imageDimensionIsRecorded(plan, nodeId, attribute, expected);
+        if (!retainedLocalImage && !retainedIntrinsicRatio && JSON.stringify(node.attributes?.[attribute]) !== JSON.stringify(expected)) {
           throw new Error(`Source content fulfillment failed: ${ref} ${attribute} was not preserved by its exact bound node.`);
         }
       }
     }
   } finally { dom.window.close(); }
+}
+
+/** A CSS-owned image axis retains its source dimensions as adapter provenance, not WP inline sizing. */
+function imageDimensionIsRecorded(plan: AuthoringPlan, node: string, attribute: 'width' | 'height', expected: JsonValue | undefined): boolean {
+  return plan.coverage?.styles.some((entry) => entry.nativeTargets?.some((target) => {
+    const intrinsic = target.intrinsic;
+    return target.node === node && target.role === 'image' && intrinsic?.[attribute] === expected
+      && intrinsic?.aspectRatio === `${intrinsic?.width} / ${intrinsic?.height}`;
+  })) ?? false;
 }
 
 function flattenStructure(nodes: readonly AuthoringStructureNode[]): AuthoringStructureNode[] {

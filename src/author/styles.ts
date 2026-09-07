@@ -509,6 +509,8 @@ export interface CssStyleRule {
   source: CssSourceRange;
   /** Present for CSS nesting. Nested selectors are parsed and ledgered, then conservatively blocked. */
   nestedIn?: string;
+  /** Internal provenance for rules inserted by the native markup adapter. */
+  generated?: 'native-adapter-target' | 'native-adapter-wrapper-reset';
 }
 
 export interface CssConditionalRule {
@@ -601,6 +603,117 @@ export function decodeCssEscapes(value: string): string {
     const codePoint = Number.parseInt(hex, 16);
     return codePoint === 0 || codePoint > 0x10ffff ? '\ufffd' : String.fromCodePoint(codePoint);
   });
+}
+
+/**
+ * Read complete class atoms from the existing selector scanner.  This is intentionally not a
+ * selector parser: native adaptation accepts only one compound subject and the four interaction
+ * states below.  Keeping the raw spelling lets emitted rules retain escaped utility selectors
+ * while matching uses the decoded atom (so `focus-visible:outline` never equals its suffix).
+ */
+export interface NativeSelectorSubject {
+  raw: string;
+  /** The source compound which is bound to a native node. */
+  staticSelector: string;
+  classes: Array<{ raw: string; decoded: string }>;
+  state?: 'hover' | 'focus' | 'focus-visible' | 'active';
+  /** The only descendant relationship the native image block can faithfully retain. */
+  relation?: 'image' | 'caption';
+  /** Exact terminal compound for the bounded figure child bridge. */
+  terminalSelector?: string;
+}
+export function nativeSelectorSubjects(selectorList: string): NativeSelectorSubject[] | undefined {
+  const subjects: NativeSelectorSubject[] = [];
+  for (const raw of splitTopLevel(selectorList, ',')) {
+    const selector = raw.trim();
+    const relationship = splitNativeImageRelationship(selector);
+    const owner = relationship?.owner ?? selector;
+    const relation = relationship?.relation;
+    const terminal = relationship?.terminal;
+    if (!owner || /[\s>+~\[\]#*]/.test(owner) || /::|:(?:not|is|where|has)\s*\(/i.test(owner)) return undefined;
+    let index = 0;
+    const classes: Array<{ raw: string; decoded: string }> = [];
+    let state: NativeSelectorSubject['state'];
+    while (index < owner.length) {
+      if (owner[index] === '.') {
+        const atomStart = index;
+        const atom = readCssIdentifier(owner, index + 1);
+        if (!atom) return undefined;
+        classes.push({ raw: owner.slice(atomStart, atom.end), decoded: atom.value });
+        index = atom.end;
+      } else if (owner[index] === ':') {
+        const match = /^:(focus-visible|hover|focus|active)/i.exec(owner.slice(index));
+        if (!match || state) return undefined;
+        state = match[1]!.toLowerCase() as NativeSelectorSubject['state'];
+        index += match[0].length;
+      } else if (/^[a-z]/i.test(owner[index]!)) {
+        const match = /^[a-z][\w-]*/i.exec(owner.slice(index));
+        if (!match || index !== 0) return undefined;
+        index += match[0].length;
+      } else return undefined;
+    }
+    // The sole supported relationship is a figure owner and one direct image/caption child.
+    // Parse the terminal compound with this same scanner rather than searching for "img":
+    // `.media-img` is one class atom, not a figure/image relationship.
+    if (terminal) {
+      if (!/^figure(?:\.|:|$)/i.test(owner) || state) return undefined;
+      const parsedTerminal = parseNativeTerminal(terminal, relation!);
+      if (!parsedTerminal) return undefined;
+      state = parsedTerminal.state;
+      subjects.push({ raw: selector, staticSelector: owner.replace(/:(?:focus-visible|hover|focus|active)\b/gi, ''), classes, ...(state ? { state } : {}), relation, terminalSelector: parsedTerminal.staticSelector });
+      continue;
+    }
+    if (!classes.length) return undefined;
+    subjects.push({ raw: selector, staticSelector: owner.replace(/:(?:focus-visible|hover|focus|active)\b/gi, ''), classes, ...(state ? { state } : {}), ...(relation ? { relation } : {}) });
+  }
+  return subjects;
+}
+
+function parseNativeTerminal(value: string, relation: 'image' | 'caption'): { state?: NativeSelectorSubject['state']; staticSelector: string } | undefined {
+  const expected = relation === 'image' ? 'img' : 'figcaption';
+  if (!value.toLowerCase().startsWith(expected)) return undefined;
+  let index = expected.length;
+  let state: NativeSelectorSubject['state'];
+  while (index < value.length) {
+    if (value[index] === '.') {
+      const atom = readCssIdentifier(value, index + 1);
+      if (!atom) return undefined;
+      index = atom.end;
+    } else if (value[index] === ':') {
+      const match = /^:(focus-visible|hover|focus|active)/i.exec(value.slice(index));
+      if (!match || state) return undefined;
+      state = match[1]!.toLowerCase() as NativeSelectorSubject['state'];
+      index += match[0].length;
+    } else return undefined;
+  }
+  return { staticSelector: value.replace(/:(?:focus-visible|hover|focus|active)\b/gi, ''), ...(state ? { state } : {}) };
+}
+
+/** Split exactly one unescaped direct-child combinator, if this is the supported figure bridge. */
+function splitNativeImageRelationship(selector: string): { owner: string; terminal: string; relation: 'image' | 'caption' } | undefined {
+  let escaped = false;
+  let brackets = 0;
+  let parentheses = 0;
+  let divider = -1;
+  for (let index = 0; index < selector.length; index += 1) {
+    const char = selector[index]!;
+    if (escaped) { escaped = false; continue; }
+    if (char === '\\') { escaped = true; continue; }
+    if (char === '[') brackets += 1;
+    else if (char === ']') brackets -= 1;
+    else if (char === '(') parentheses += 1;
+    else if (char === ')') parentheses -= 1;
+    else if (char === '>' && brackets === 0 && parentheses === 0) {
+      if (divider >= 0) return undefined;
+      divider = index;
+    }
+  }
+  if (divider < 0) return undefined;
+  const owner = selector.slice(0, divider).trim();
+  const terminal = selector.slice(divider + 1).trim();
+  const relation = /^img(?:\.|:|$)/i.test(terminal) ? 'image'
+    : /^figcaption(?:\.|:|$)/i.test(terminal) ? 'caption' : undefined;
+  return owner && terminal && relation ? { owner, terminal, relation } : undefined;
 }
 
 export interface DeclarationDisposition {

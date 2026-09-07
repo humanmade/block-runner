@@ -32,6 +32,8 @@ export interface ReportItem {
   source?: SourceLocation;
   rule?: string;
   details?: unknown;
+  /** Stable machine-readable failure category when authoring cannot map native markup. */
+  code?: string;
 }
 
 export interface ReportSummary {
@@ -134,6 +136,9 @@ export interface AuthorSourceEvidence {
 export type AuthoredStyleOutcome = 'native' | 'preset' | 'literal' | 'scoped-css' | 'warned' | 'blocked';
 
 export interface AuthoredStyleLedgerEntry {
+  /** Scanner identity; unlike property/value this cannot collide with a repeated declaration. */
+  declarationId?: string;
+  ruleId?: string;
   property: string;
   value: string;
   outcome: AuthoredStyleOutcome;
@@ -145,6 +150,8 @@ export interface AuthoredStyleLedgerEntry {
   /** Native-node evidence for a conservatively lifted WordPress responsive declaration. */
   node?: string;
   responsive?: 'mobile' | 'tablet';
+  /** Compiler-owned native adapter destinations for this original declaration. */
+  nativeTargets?: Array<{ node: string; role: 'button-link' | 'button-wrapper-reset' | 'image' | 'caption' | 'grid-container'; selector: string; intrinsic?: { width: string; height: string; aspectRatio: string } }>;
 }
 
 /** The terminal disposition of a source asset. */

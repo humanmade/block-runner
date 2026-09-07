@@ -33,6 +33,7 @@ import {
   createAnalyzedDesignCoverage,
   hasNativeCoverageTransport,
   namespaceAuthoringFontReferences,
+  UnresolvedNativeStyleMappingError,
   prepareAuthoringFonts,
   validateCoverageFulfillment,
 } from './plan.js';
@@ -500,6 +501,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       classifyConfirmedPresetCoverage(expectedCoverageInput, supplied, definition.styles?.context?.theme?.settings);
       classifyConfirmedResponsiveCoverage(expectedCoverageInput, supplied);
       classifyConfirmedStructuredCssCoverage(expectedCoverageInput, supplied);
+      reconcileVerifiedNativeTargets(expectedCoverageInput, supplied.coverage);
       const expectedCoverage = validateAuthoringPlan({ ...supplied, coverage: expectedCoverageInput }).coverage!;
       if (supplied.source?.entry !== source.entry || supplied.source.sha256 !== source.sha256 || supplied.source.format !== 'html') {
         throw new Error('Supplied authoring plan is not bound to this exact HTML source hash.');
@@ -517,7 +519,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         editorStyleLedger: [],
       } as ReturnType<typeof compileAnalyzedDesign>;
     } catch (error) {
-      generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+      generationItems.push(authoringFailureItem(name, error));
       compiled = undefined;
     }
   } else if (!hardAssetFailure && !hardStyleFailure && !hardInlineStyleFailure && (conversion.ok || proposal)) {
@@ -558,7 +560,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         compiled = { ...compiled, plan, generated: compileRegisteredBlock(plan) };
       }
     } catch (error) {
-      generationItems.push({ block: name, status: 'warning', reason: error instanceof Error ? error.message : String(error) });
+      generationItems.push(authoringFailureItem(name, error));
       // Compilation may have produced a tentative package before canonical coverage/content
       // fulfillment runs. Never return that tentative package after a fail-closed validation.
       compiled = undefined;
@@ -1442,6 +1444,7 @@ function toAuthoredStyleLedgerEntry(
   sourceSelectors: ReadonlyMap<string, string> = new Map(),
   transportSelectors: ReadonlyMap<string, string> = sourceSelectors,
 ): (entry: {
+  declarationId: string;
   ruleId: string;
   property: string;
   value: string;
@@ -1454,6 +1457,8 @@ function toAuthoredStyleLedgerEntry(
     const selector = sourceSelectors.get(entry.ruleId);
     const transportSelector = transportSelectors.get(entry.ruleId);
     return {
+    declarationId: entry.declarationId,
+    ruleId: entry.ruleId,
     property: entry.property,
     value: entry.value,
     outcome: normalizeStyleOutcome(entry.outcome),
@@ -1483,6 +1488,39 @@ function normalizeStyleOutcome(value: string): AuthoredStyleLedgerEntry['outcome
   return value === 'native' || value === 'preset' || value === 'literal' || value === 'scoped-css' || value === 'blocked'
     ? value
     : 'warned';
+}
+
+/** Preserve the native-mapping category for callers instead of flattening it into a warning. */
+function authoringFailureItem(block: string, error: unknown): ReportItem {
+  if (error instanceof UnresolvedNativeStyleMappingError) {
+    const mapping = error.mapping;
+    return {
+      block, status: 'warning', code: error.code, reason: error.message,
+      ...(mapping.htmlSource ? { source: { path: mapping.htmlSource.path, offset: mapping.htmlSource.offset, htmlLine: mapping.htmlSource.line, htmlColumn: mapping.htmlSource.column } } : {}),
+      details: mapping,
+    };
+  }
+  const reason = error instanceof Error ? error.message : String(error);
+  const mapping = reason.match(/^unresolved-native-style-mapping:\s*(.*)$/);
+  return mapping
+    ? { block, status: 'warning', code: 'unresolved-native-style-mapping', reason, details: { mapping: mapping[1] } }
+    : { block, status: 'warning', reason };
+}
+
+/** Carry compiler-owned adapter destinations across a fresh source scan only by full identity. */
+function reconcileVerifiedNativeTargets(
+  scanned: import('../authoring/schema.js').AuthoringCoverage,
+  submitted: import('../authoring/schema.js').AuthoringCoverage | undefined,
+): void {
+  if (!submitted) return;
+  for (const entry of scanned.styles) {
+    const matching = submitted.styles.filter((candidate) => candidate.declarationId === entry.declarationId
+      && candidate.ruleId === entry.ruleId && candidate.scope === entry.scope
+      && candidate.property === entry.property && candidate.value === entry.value
+      && candidate.atRules.join('\u0000') === entry.atRules.join('\u0000')
+      && candidate.source?.selector === entry.source?.selector && candidate.source?.offset === entry.source?.offset);
+    if (matching.length === 1 && matching[0]!.nativeTargets?.length) entry.nativeTargets = matching[0]!.nativeTargets!.map((target) => ({ ...target }));
+  }
 }
 
 function toInlineStyleLedgerEntry(entry: StyleLedgerEntry, source: AuthoredStyleLedgerEntry['source']): AuthoredStyleLedgerEntry {

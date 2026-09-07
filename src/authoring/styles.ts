@@ -215,7 +215,7 @@ export function authoringRulesFromStylesheet(rules: readonly CssRule[]): Authori
     if (rule.kind === 'conditional') return { kind: 'conditional', name: rule.name, prelude: rule.prelude,
       rules: authoringRulesFromStylesheet(rule.rules) };
     return { kind: 'style', selector: rule.selector, declarations: rule.declarations.map(({ property, value, important }) =>
-      ({ property, value, ...(important ? { important } : {}) })) };
+      ({ property, value, ...(important ? { important } : {}) })), ...(rule.generated ? { generated: rule.generated } : {}) };
   });
 }
 
@@ -273,10 +273,11 @@ export function renderConfirmedStyleRules(
         }
         return `${declaration.property}: ${declaration.value}${declaration.important ? ' !important' : ''};`;
       });
-      const css = `${indent}${scoped.selector} { ${declarations.join(' ')} }`;
+      const provenance = rule.generated ? `${indent}/* generated ${rule.generated} */\n` : '';
+      const css = `${provenance}${indent}${scoped.selector} { ${declarations.join(' ')} }`;
       const parsed = postcss.parse(css).nodes;
-      const parsedRule = parsed[0];
-      if (parsed.length !== 1 || parsedRule?.type !== 'rule' || parsedRule.selector !== scoped.selector
+      const parsedRule = parsed.find((node) => node.type === 'rule');
+      if (parsed.length !== (rule.generated ? 2 : 1) || parsedRule?.type !== 'rule' || parsedRule.selector !== scoped.selector
         || parsedRule.nodes.length !== rule.declarations.length
         || parsedRule.nodes.some((node, i) => node.type !== 'decl'
           || node.prop !== rule.declarations[i]!.property

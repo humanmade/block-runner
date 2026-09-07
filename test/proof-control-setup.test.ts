@@ -7,15 +7,24 @@ import { runProof } from '../src/proof/runner.js';
 import { startWithPreparedStageMount } from '../scripts/proof-control-startup.mjs';
 
 describe('WordPress control startup and retained failures', () => {
-  it('keeps the wp-env mount schema and media byte contract outside WordPress uploads', () => {
+  it('keeps the wp-env mount schema and native adapter media byte contract outside WordPress uploads', () => {
     const config = JSON.parse(readFileSync(new URL('../proof/wp-env.json', import.meta.url), 'utf8'));
     expect(config.mappings).toEqual({ 'wp-content/block-runner-proof': '.block-runner-proof-stage' });
     const runner = readFileSync(new URL('../src/proof/runner.ts', import.meta.url), 'utf8');
+    const helper = runner.match(/const prepareNativeStyleAdapterMedia[\s\S]*?\n  };/)?.[0];
+    expect(helper).toBeDefined();
     // These checks intentionally guard WordPress upload failures and retained-byte
     // corruption, which a successful runtime install cannot deterministically inject.
-    expect(runner).toContain('wp_upload_bits($filename, null, $png)');
-    expect(runner).toContain("if (!empty($upload['error']))");
-    expect(runner).toContain("hash_file('sha256', $file) !== hash('sha256', $png)");
+    expect(helper).toContain("wp_upload_bits('block-runner-editor.png', null, $png)");
+    expect(helper).toContain("if (!empty($upload['error']))");
+    expect(helper).toContain("hash_file('sha256', $file) !== hash('sha256', $png)");
+    expect(helper).toContain("add_filter('upload_dir', $uploadDirFilter)");
+    expect(helper).toContain("remove_filter('upload_dir', $uploadDirFilter)");
+    expect(helper).toContain("$uploads['path'] = $uploads['basedir']");
+    expect(helper).toContain("$uploads['url'] = $uploads['baseurl']");
+    expect(helper).toContain("$uploads['subdir'] = ''");
+    expect(helper).toContain("content_url('/uploads/block-runner-editor.png')");
+    expect(helper).toContain("$upload['url'] !== $expectedUrl");
     expect(runner).not.toContain('file_put_contents($file, $png)');
   });
 

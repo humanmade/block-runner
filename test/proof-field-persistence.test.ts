@@ -69,6 +69,20 @@ describe('native field persistence scope', () => {
     expect(check(before, state([heading('wanted', 'Updated plus unexpected text')]), [field], 'acme/hero').ok).toBe(false);
   });
 
+  it('rejects matching text on the wrong selector block and accepts the resolved selector owner', () => {
+    const selectorField = { path: 'title', surface: 'richText', selector: 'h1.wp-block-heading[contenteditable="true"]', value: 'Updated' };
+    const after = {
+      contentHash: 'after', treeHash: 'after', content: 'Updated appears somewhere',
+      tree: [{ name: 'acme/hero', clientId: 'root', innerBlocks: [
+        { name: 'core/heading', clientId: 'wrong', attributes: { content: 'Updated' } },
+        { name: 'core/heading', clientId: 'target', attributes: { content: 'Unchanged' } },
+      ] }],
+    };
+    expect(check(before, after, [selectorField], 'acme/hero', [{ clientId: 'target', ownership: { belongsToRoot: true } }]).ok).toBe(false);
+    after.tree[0].innerBlocks[1].attributes.content = 'Updated';
+    expect(check(before, after, [selectorField], 'acme/hero', [{ clientId: 'target', ownership: { belongsToRoot: true } }]).ok).toBe(true);
+  });
+
   it('requires all prepared media properties instead of skipping media persistence', () => {
     const media = { id: 7, url: 'https://example.test/image.png', alt: 'Description' };
     const input = { path: 'image', surface: 'media', media };

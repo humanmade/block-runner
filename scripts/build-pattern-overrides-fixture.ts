@@ -18,7 +18,7 @@ import {
   planStandalonePluginOutput,
   writePluginOutput,
 } from '../src/plugin/profile.js';
-import { author } from '../src/author/index.js';
+import { author, collectSourceEvidence } from '../src/author/index.js';
 import type { AuthoringPlan } from '../src/authoring/schema.js';
 import { validatePatternOverrideContract } from '../src/authoring/pattern-overrides.js';
 import { getWp } from '../src/headless/wp.js';
@@ -33,6 +33,7 @@ const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'patter
 const visualGoldenPath = fixtureVisualGoldenPath();
 const pluginSlug = 'block-runner-pattern-overrides-fixture';
 const responsivePluginSlug = 'block-runner-responsive-style-fixture';
+const nativeStyleAdapterPluginSlug = 'block-runner-native-style-adapter-proof';
 const fixedTimestamp = new Date('2026-09-03T00:00:00.000Z');
 const fixedZipMode = 0o644;
 
@@ -97,6 +98,152 @@ export interface BuiltResponsiveStyleFixture {
   nativeContainerMarkup: string;
   artifact: ProofArtifactContract;
   fixture: ProofFixture;
+}
+
+/** The retained public-author() package for the utility-hero adapter proof. */
+export interface BuiltNativeStyleAdapterFixture {
+  /** Hash manifest pinning every retained source and generated proof input. */
+  inputPath: string;
+  pluginDirectory: string;
+  pluginZip: string;
+  nativeContainerMarkup: string;
+  artifact: ProofArtifactContract;
+  fixture: ProofFixture;
+}
+
+/**
+ * Build the exact checked-in utility hero through public author(), with the
+ * small supplied stylesheet that exercises the bounded Button/Image/Group
+ * mappings.  The proposal intentionally contains no WordPress selector or
+ * wrapper-reset knowledge: those are compiler-owned adapter outputs.
+ */
+export async function buildNativeStyleAdapterProofFixture(outputDir: string): Promise<BuiltNativeStyleAdapterFixture> {
+  const root = path.resolve(outputDir);
+  const sourcePath = path.join(projectRoot, 'benchmarks', 'authoring', 'sources', 'utility', 'hero.html');
+  const source = await readFile(sourcePath, 'utf8');
+  const inputPath = path.join(root, 'native-style-adapter.original.html');
+  const cssPath = path.join(root, 'native-style-adapter.supplied.css');
+  const proposalPath = path.join(root, 'native-style-adapter.proposal.json');
+  const planPath = path.join(root, 'native-style-adapter.canonical-plan.json');
+  const blocksPath = path.join(root, 'native-style-adapter.native.blocks.html');
+  const identityPath = path.join(root, 'native-style-adapter.plugin-identity.json');
+  const pluginDirectory = path.join(root, nativeStyleAdapterPluginSlug);
+  const pluginZip = path.join(pluginDirectory, `${nativeStyleAdapterPluginSlug}.zip`);
+  const css = [
+    '.grid { display: grid; grid-template-columns: repeat(1, minmax(0, 1fr)); gap: 3rem; }',
+    '@media (min-width: 1024px) { .lg\\:grid-cols-2 { grid-template-columns: repeat(2, minmax(0, 1fr)); } }',
+    '.px-5 { padding-left: 1.25rem; padding-right: 1.25rem; }',
+    '.py-3 { padding-top: 0.75rem; padding-bottom: 0.75rem; }',
+    '.transition { transition: transform 150ms, background-color 150ms; }',
+    '.hover\\:bg-cyan-200:hover { transform: translateY(-2px); background-color: rgb(165, 243, 252); }',
+    '.focus-visible\\:outline:focus-visible { outline: 2px solid rgb(103, 232, 249); }',
+    // Width is intentionally authored CSS. The compiler must preserve the
+    // source intrinsic ratio without allowing native image attributes to take
+    // ownership of this axis through WordPress inline sizing.
+    'figure.relative > img.relative { width: 100%; border: 1px solid rgb(255, 255, 255); }',
+    'figure.relative > figcaption.mt-3 { color: rgb(148, 163, 184); }',
+  ].join('\n');
+  const entries = collectSourceEvidence(source, { entry: inputPath, sha256: createHash('sha256').update(source, 'utf8').digest('hex'), format: 'html' }).structure;
+  const ref = (tag: string, index = 0): string => entries.filter((entry) => entry.tag === tag)[index]?.sourceRef
+    ?? (() => { throw new Error(`Utility hero proof fixture could not bind ${tag}[${index}].`); })();
+  const proposal = {
+    structure: [{ id: 'hero', block: 'core/group', sourceRef: ref('section'), children: [
+      { id: 'hero-grid', block: 'core/group', sourceRef: ref('div', 0), children: [
+        { id: 'copy', block: 'core/group', sourceRef: ref('div', 1), children: [
+          { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) },
+          { id: 'title', block: 'core/heading', sourceRef: ref('h1') },
+          { id: 'lede', block: 'core/paragraph', sourceRef: ref('p', 1) },
+          { id: 'buttons', block: 'core/buttons', sourceRef: ref('div', 2), children: [
+            { id: 'download', block: 'core/button', sourceRef: ref('a', 0) },
+            { id: 'guide', block: 'core/button', sourceRef: ref('a', 1) },
+          ] },
+        ] },
+        { id: 'image', block: 'core/image', sourceRef: ref('figure') },
+      ] },
+    ] }],
+    fields: [{ id: 'title-content', label: 'Title', mode: 'editable' as const, node: 'title', attribute: 'content' }],
+    locking: { mode: 'contentOnly' as const },
+  };
+  await Promise.all([writeFixed(inputPath, source), writeFixed(cssPath, `${css}\n`), writeFixed(proposalPath, `${JSON.stringify(proposal, null, 2)}\n`)]);
+  const result = await author(source, {
+    sourcePath: inputPath,
+    author: { name: 'block-runner/native-style-adapter-proof', styles: { mode: 'css', css } },
+    proposal,
+  });
+  if (!result.package?.canonicalPlan) {
+    throw new Error(`Public author() did not produce the native style adapter proof package: ${result.items.map((item) => item.reason).join('; ')}`);
+  }
+  const plan = result.package.canonicalPlan;
+  const generated = compileRegisteredBlock(plan);
+  const nativeContainerMarkup = await serializeNativeTemplate(generated.template);
+  await mkdir(pluginDirectory, { recursive: true });
+  const packagePlan = await planStandalonePluginOutput(pluginDirectory, { name: plan.target.name, files: result.package.files });
+  await writePluginOutput(packagePlan);
+  const npmEnvironment = await npmEnvironmentForGeneratedPlugin(pluginDirectory);
+  await execFileAsync('npm', ['ci', '--include=dev', '--ignore-scripts', '--no-audit', '--no-fund'], {
+    cwd: pluginDirectory, timeout: 180_000, env: npmEnvironment,
+  });
+  await buildDeterministicPluginZip(pluginDirectory, npmEnvironment);
+  await execFileAsync('npm', ['run', 'test:zip', '--', pluginZip], {
+    cwd: pluginDirectory, timeout: 30_000, env: { ...npmEnvironment, TZ: 'UTC' },
+  });
+  const artifact: ProofArtifactContract = {
+    sha256: `sha256:${createHash('sha256').update(await readFile(pluginZip)).digest('hex')}`,
+    capabilities: { patternOverrides: false },
+  };
+  const fixture: ProofFixture = {
+    blockName: plan.target.name,
+    pluginSlug: nativeStyleAdapterPluginSlug,
+    blockTitle: plan.target.title,
+    // The utility hero has several native rich-text blocks. Target its source
+    // heading explicitly so the proof cannot edit a paragraph or button by
+    // accident, then verify that exact edited value after reopening.
+    editableFields: [{ path: 'title-content', surface: 'richText', selector: 'h1.wp-block-heading[contenteditable="true"]', value: 'Native style adapter proof saved title' }],
+    nativeStyleAdapterMatrix: {
+      button: {
+        wrapperSelector: '.block-runner-native-download',
+        linkSelector: '.block-runner-native-download > .wp-block-button__link',
+        linkPadding: { top: '12px', right: '20px', bottom: '12px', left: '20px' },
+        hover: { transform: 'matrix(1, 0, 0, 1, 0, -2)', backgroundColor: 'rgb(165, 243, 252)' },
+        focusOutline: { style: 'solid', width: '2px' },
+      },
+      image: {
+        selector: 'figure.wp-block-image.block-runner-native-image > img',
+        sourceDimensions: { width: '1280', height: '820', aspectRatio: '1280 / 820' },
+        alt: 'A WordPress editor sidebar with editable block controls',
+        caption: 'Native controls stay with the block, not in a screenshot.',
+      },
+      grid: {
+        selector: '.block-runner-native-hero-grid.wp-block-group',
+        samples: [
+          { label: 'one-column', viewport: { width: 640, height: 844 }, surfaceViewport: { width: 640 }, columns: 1 },
+          { label: 'two-column', viewport: { width: 1280, height: 900 }, surfaceViewport: { width: 1280 }, columns: 2 },
+        ],
+      },
+    },
+    // The runner prepares the source URL as a real local upload and replaces
+    // this placeholder with WordPress's observed URL before browser proof.
+    frontend: { url: 'http://localhost:8888/', subtreeSelector: '.wp-block-post-content', expectedLinks: [], expectedMedia: [] },
+  };
+  const identity = { blockName: plan.target.name, pluginSlug: nativeStyleAdapterPluginSlug, pluginZip: path.basename(pluginZip), sha256: artifact.sha256 };
+  const manifestPath = path.join(root, 'native-style-adapter.hashes.json');
+  const retained = [inputPath, cssPath, proposalPath, planPath, blocksPath, identityPath];
+  await Promise.all([
+    writeFixed(planPath, `${JSON.stringify(plan, null, 2)}\n`),
+    writeFixed(blocksPath, `${nativeContainerMarkup}\n`),
+    writeFixed(identityPath, `${JSON.stringify(identity, null, 2)}\n`),
+    writeFixed(path.join(root, 'native-style-adapter.fixture.json'), `${JSON.stringify(fixture, null, 2)}\n`),
+  ]);
+  const hashes = Object.fromEntries(await Promise.all([...retained, pluginZip].map(async (file) => [
+    path.basename(file),
+    `sha256:${createHash('sha256').update(await readFile(file)).digest('hex')}`,
+  ])));
+  await writeFixed(manifestPath, `${JSON.stringify({
+    schemaVersion: 1,
+    inputs: hashes,
+    pluginIdentity: path.basename(identityPath),
+  }, null, 2)}\n`);
+  return { inputPath: manifestPath, pluginDirectory, pluginZip, nativeContainerMarkup, artifact, fixture };
 }
 
 /**
