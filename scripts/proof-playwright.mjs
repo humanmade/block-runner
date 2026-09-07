@@ -516,7 +516,7 @@ async function reopenPost(page, fixture) {
         const iframe = document.querySelector('iframe[name="editor-canvas"]');
         const root = iframe?.contentDocument ?? document;
         const image = root.querySelector(selector);
-        return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
+        return image?.tagName === 'IMG' && image.complete && image.naturalWidth > 0;
       }, fixture.nativeStyleAdapterMatrix.image.selector, { timeout: 20_000 });
     }
     return true;
