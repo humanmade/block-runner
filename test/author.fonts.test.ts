@@ -20,7 +20,7 @@ import {
   renderLicensedFontFace,
 } from '../src/authoring/styles.js';
 import { prepareAuthoringFonts } from '../src/author/plan.js';
-import { author, collectSourceEvidence } from '../src/index.js';
+import { author, collectSourceEvidence, compileRegisteredBlock } from '../src/index.js';
 import type { AuthoringPlan } from '../src/authoring/schema.js';
 
 const scratch: string[] = [];
@@ -276,13 +276,19 @@ describe('registered-block font transport', () => {
   });
 
   it('carries proposal-bound content through the same licensed font boundary', async () => {
-    const { sourcePath, source, hash } = await fixture();
+    const { sourcePath, source, bytes, hash } = await fixture();
     const html = '<style>@font-face{font-family:Inter;src:url("Inter.woff2")}.copy{font-family:Inter,Arial,sans-serif}</style><p class="copy">Proposal font</p>';
     const sourceRef = collectSourceEvidence(html).structure.find((item) => item.tag === 'p')!.sourceRef!;
     const proposal = { structure: [{ id: 'copy', block: 'core/paragraph', sourceRef }] };
-    const rejected = await author(html, { sourcePath, author: { name: 'acme/proposal-font', styles: { mode: 'css' } }, proposal });
-    expect(rejected.package?.canonicalPlan?.styles.fonts).toBeUndefined();
-    expect(rejected.package?.assets ?? []).toEqual([]);
+    const rejected = await author(html, {
+      sourcePath,
+      author: { name: 'acme/proposal-font', styles: { mode: 'css', fontLicenses: [decision('Inter.woff2', source, '0'.repeat(hash.length))] } },
+      proposal,
+    });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.package).toBeUndefined();
+    expect(rejected.assets?.some((asset) => asset.outcome === 'prepared')).not.toBe(true);
+    expect(rejected.items.map((item) => item.reason).join('\n')).toMatch(/hash|authoriz|prepared local font asset/i);
 
     const accepted = await author(html, {
       sourcePath,
@@ -290,9 +296,11 @@ describe('registered-block font transport', () => {
       proposal,
     });
     expect(accepted.ok, JSON.stringify(accepted.items)).toBe(true);
-    expect(accepted.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ content: 'Proposal font' });
-    expect(accepted.package!.canonicalPlan!.styles.fonts).toEqual([expect.objectContaining({ assetId: 'asset.0' })]);
-    expect(accepted.package!.assets).toEqual([expect.objectContaining({ path: expect.stringMatching(/^assets\/Inter-/), sha256: hash })]);
+    const plan = accepted.package!.canonicalPlan!;
+    expect(plan.structure[0]!.attributes).toMatchObject({ content: 'Proposal font' });
+    expect(plan.styles.fonts).toEqual([expect.objectContaining({ assetId: 'asset.0' })]);
+    expect(plan.assets).toEqual([expect.objectContaining({ destination: expect.stringMatching(/^assets\/Inter-/), sha256: hash, fontLicense: expect.objectContaining({ notice: 'Keep the proposal font notice.' }) })]);
+    expect(compileRegisteredBlock(plan).assets).toContainEqual(expect.objectContaining({ content: bytes }));
     expect(accepted.package!.files['style.scss']).toContain('Keep the proposal font notice.');
   });
 

@@ -974,6 +974,8 @@ function mergeAssetLedgers(
 
 interface RewriteMarkupAssetsOptions {
   sourcePath?: string;
+  /** Markup may reference a sibling asset directory beneath the authored source root. */
+  assetRoot?: string;
   destinationAssetDir: string;
   prepareAsset: (asset: PreparedCssAsset) => void;
   fontLicenses: readonly FontLicenseDecision[];
@@ -1001,6 +1003,10 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   const dom = new JSDOM(input, { contentType: 'text/html' });
   const assets: AssetLedgerEntry[] = [];
   const document = dom.window.document;
+  // HTML is the source document, not a stylesheet: its local media commonly lives in a sibling
+  // `assets/` directory (for example `semantic/page.html` → `../assets/image.svg`). Keep that
+  // bounded to the source root, while standalone stylesheet URLs retain their stricter default.
+  const assetRoot = options.assetRoot ?? markupAssetRoot(options.sourcePath);
 
   const processReference = async (
     reference: string,
@@ -1014,6 +1020,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
         ? `@font-face{src:url(${JSON.stringify(reference)})}`
         : `x{background-image:url(${JSON.stringify(reference)})}`,
       sourcePath: options.sourcePath,
+      assetRoot,
       destinationAssetDir: options.destinationAssetDir,
       assetUrlPrefix: './assets/',
       prepareAsset: options.prepareAsset,
@@ -1041,6 +1048,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
     const processed = await rewriteCssAssets({
       sourceCss: value,
       sourcePath: options.sourcePath,
+      assetRoot,
       destinationAssetDir: options.destinationAssetDir,
       assetUrlPrefix: './assets/',
       prepareAsset: options.prepareAsset,
@@ -1064,6 +1072,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       const processed = await rewriteCssAssets({
         sourceCss,
         sourcePath: options.sourcePath,
+        assetRoot,
         destinationAssetDir: options.destinationAssetDir,
         assetUrlPrefix: './assets/',
         prepareAsset: options.prepareAsset,
@@ -1084,6 +1093,7 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
       const processed = await rewriteCssAssets({
         sourceCss: style,
         sourcePath: options.sourcePath,
+        assetRoot,
         destinationAssetDir: options.destinationAssetDir,
         assetUrlPrefix: './assets/',
         prepareAsset: options.prepareAsset,
@@ -1166,6 +1176,11 @@ async function rewriteMarkupAssets(input: string, options: RewriteMarkupAssetsOp
   // leading stylesheet into `<head>`; returning body.innerHTML would make the final conversion
   // forget declarations the preflight proved native, recreating the very ledger mismatch here.
   return { input: dom.serialize(), assets };
+}
+
+function markupAssetRoot(sourcePath?: string): string | undefined {
+  if (!sourcePath) return undefined;
+  return path.dirname(path.dirname(path.resolve(sourcePath)));
 }
 
 /**

@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
-import { mkdtemp, readFile, rm } from 'node:fs/promises';
+import { access, mkdtemp, readFile, rm } from 'node:fs/promises';
+import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import {
@@ -13,6 +14,8 @@ import {
   renderAuthoringPreview,
   writeGeneratedRegisteredBlock,
 } from '../src/index.js';
+import { validateSourceContent } from '../src/author/content.js';
+import type { AuthoringStructureNode } from '../src/authoring/schema.js';
 
 const benchmarkRoot = path.resolve('benchmarks/authoring/sources');
 async function source(relative: string): Promise<{ html: string; sourcePath: string }> {
@@ -22,6 +25,15 @@ async function source(relative: string): Promise<{ html: string; sourcePath: str
 function refs(html: string) {
   const evidence = collectSourceEvidence(html).structure;
   return (tag: string, occurrence = 0) => evidence.filter((item) => item.tag === tag)[occurrence]!.sourceRef!;
+}
+function nodesById(nodes: readonly AuthoringStructureNode[]) {
+  const result = new Map<string, AuthoringStructureNode>();
+  const visit = (items: readonly AuthoringStructureNode[]) => items.forEach((node) => {
+    result.set(node.id, node);
+    if (node.children) visit(node.children);
+  });
+  visit(nodes);
+  return result;
 }
 
 describe('author proposal boundary', () => {
@@ -53,18 +65,34 @@ describe('author proposal boundary', () => {
     expect(both.items.map((item) => item.reason).join('\n')).toMatch(/cannot be supplied together/i);
   });
 
-  it('locates structurally valid stale references from a foreign source hash', async () => {
+  it('locates a proposal-node stale reference from a foreign source hash', async () => {
     const html = '<section>\n  <p>Hello</p>\n</section>';
     const evidence = collectSourceEvidence(html);
     const paragraph = evidence.structure.find((item) => item.tag === 'p')!;
     const foreignRef = `${'f'.repeat(64)}:${paragraph.sourceRef!.split(':')[1]}`;
     const report = await author(html, { sourcePath: '/design/multiline.html', author: { name: 'example/proposal' }, proposal: {
       structure: [{ id: 'copy', block: 'core/paragraph', sourceRef: foreignRef }],
+    } });
+    expect(report.ok).toBe(false);
+    expect(report.package).toBeUndefined();
+    const reason = report.items.map((item) => item.reason).join('\n');
+    expect(reason).toContain('proposal sourceRef');
+    expect(reason).toMatch(/stale|another source/i);
+    expect(reason).toContain('/design/multiline.html:2:3 (offset 12)');
+  });
+
+  it('locates a source-decision stale reference from a foreign source hash', async () => {
+    const html = '<section>\n  <p>Hello</p>\n</section>';
+    const paragraph = collectSourceEvidence(html).structure.find((item) => item.tag === 'p')!;
+    const foreignRef = `${'f'.repeat(64)}:${paragraph.sourceRef!.split(':')[1]}`;
+    const report = await author(html, { sourcePath: '/design/multiline.html', author: { name: 'example/proposal' }, proposal: {
+      structure: [{ id: 'copy', block: 'core/paragraph', sourceRef: paragraph.sourceRef }],
       sourceDecisions: [{ action: 'omit', sourceRef: foreignRef, reason: 'Must remain stale.' }],
     } });
     expect(report.ok).toBe(false);
     expect(report.package).toBeUndefined();
     const reason = report.items.map((item) => item.reason).join('\n');
+    expect(reason).toContain('proposal decision sourceRef');
     expect(reason).toMatch(/stale|another source/i);
     expect(reason).toContain('/design/multiline.html:2:3 (offset 12)');
   });
@@ -192,11 +220,16 @@ describe('author proposal boundary', () => {
     ] }], fields: [{ id: 'title-content', label: 'Title', mode: 'editable', node: 'title', attribute: 'content' }], locking: { mode: 'contentOnly' } } });
     expect(report.ok, JSON.stringify(report.items)).toBe(true);
     const plan = report.package!.canonicalPlan!;
-    expect(plan.structure[0]!.children![0]!.children![1]!.attributes).toMatchObject({ content: 'Build a WordPress block your team can keep editing.', level: 1 });
-    expect(plan.structure[0]!.children![0]!.children![3]!.children![0]!.attributes).toMatchObject({ text: 'Download the testing release', url: '/download' });
-    expect(plan.structure[0]!.children![1]!.attributes).toMatchObject({ url: '/wp-content/uploads/block-runner-editor.png', alt: 'A WordPress editor sidebar with editable block controls', caption: 'Native controls stay with the block, not in a screenshot.' });
+    const nodes = nodesById(plan.structure);
+    expect(nodes.get('eyebrow')!.attributes).toMatchObject({ content: 'Block Runner 0.9' });
+    expect(nodes.get('title')!.attributes).toMatchObject({ content: 'Build a WordPress block your team can keep editing.', level: 1 });
+    expect(nodes.get('lede')!.attributes).toMatchObject({ content: 'Turn a finished interface into a registered block with clear controls, native markup, and a source trail reviewers can inspect.' });
+    expect(nodes.get('download')!.attributes).toMatchObject({ text: 'Download the testing release', url: '/download' });
+    expect(nodes.get('guide')!.attributes).toMatchObject({ text: 'Read the authoring guide', url: '/docs/authoring' });
+    expect(nodes.get('image')!.attributes).toMatchObject({ url: '/wp-content/uploads/block-runner-editor.png', alt: 'A WordPress editor sidebar with editable block controls', caption: 'Native controls stay with the block, not in a screenshot.' });
     expect(plan.fields).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'title-content', mode: 'editable' })]));
     expect(plan.locking).toEqual({ mode: 'contentOnly' });
+    validateSourceContent(html, compileRegisteredBlock(plan).template);
   });
 
   it('binds the semantic cards hierarchy without dropping content', async () => {
@@ -217,41 +250,62 @@ describe('author proposal boundary', () => {
     ] }] } });
     expect(report.ok, JSON.stringify(report.items)).toBe(true);
     const plan = report.package!.canonicalPlan!;
-    expect(plan.structure[0]!.children![1]!.children).toHaveLength(3);
-    expect(plan.structure[0]!.children![1]!.children![1]!.children![1]!.attributes).toMatchObject({ content: 'Team', level: 3 });
-    expect(plan.structure[0]!.children![1]!.children![2]!.children![3]!.children![0]!.attributes).toMatchObject({ text: 'Contact us', url: '/studio' });
+    const nodes = nodesById(plan.structure);
+    expect(nodes.get('eyebrow')!.attributes).toMatchObject({ content: 'Testing release' });
+    expect(nodes.get('title')!.attributes).toMatchObject({ content: 'Choose the review depth you need.', level: 2 });
+    expect(nodes.get('intro')!.attributes).toMatchObject({ content: 'Every plan includes the generated source, the benchmark receipt, and editor verification.' });
+    expect(nodes.get('starter')!.attributes).toMatchObject({ content: 'Starter', level: 3 });
+    expect(nodes.get('team')!.attributes).toMatchObject({ content: 'Team', level: 3 });
+    expect(nodes.get('studio')!.attributes).toMatchObject({ content: 'Studio', level: 3 });
+    expect(nodes.get('starter-price')!.attributes).toMatchObject({ content: '<span class="amount">$0</span> / test site' });
+    expect(nodes.get('starter-price-copy')!.attributes).toMatchObject({ content: 'Validate one registered block against the authoring suite.' });
+    expect(nodes.get('badge')!.attributes).toMatchObject({ content: 'Recommended' });
+    expect(nodes.get('team-price')!.attributes).toMatchObject({ content: '<span class="amount">$49</span> / month' });
+    expect(nodes.get('team-price-copy')!.attributes).toMatchObject({ content: 'Package shared patterns with tracked style and activation receipts.' });
+    expect(nodes.get('studio-price')!.attributes).toMatchObject({ content: '<span class="amount">Let’s talk</span>' });
+    expect(nodes.get('studio-price-copy')!.attributes).toMatchObject({ content: 'Review larger pattern libraries and bespoke authoring workflows.' });
+    expect(nodes.get('starter-link')!.attributes).toMatchObject({ text: 'Start testing', url: '/starter' });
+    expect(nodes.get('team-link')!.attributes).toMatchObject({ text: 'Try Team', url: '/team' });
+    expect(nodes.get('studio-link')!.attributes).toMatchObject({ text: 'Contact us', url: '/studio' });
+    validateSourceContent(html, compileRegisteredBlock(plan).template);
   });
 
   it('keeps local assets, deterministic hashes, and the reviewed output path intact', async () => {
-    const { html } = await source('semantic/local-assets.html');
+    const { html, sourcePath } = await source('semantic/local-assets.html');
+    const assetSource = path.join(benchmarkRoot, 'assets', 'aurora-dashboard.svg');
+    const assetBytes = await readFile(assetSource);
     const ref = refs(html);
     const proposal = { structure: [{ id: 'root', block: 'core/group', sourceRef: ref('section'), children: [
       { id: 'copy', block: 'core/group', sourceRef: ref('div'), children: [
         { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) }, { id: 'title', block: 'core/heading', sourceRef: ref('h2') }, { id: 'body', block: 'core/paragraph', sourceRef: ref('p', 1) }, { id: 'buttons', block: 'core/buttons', children: [{ id: 'cta', block: 'core/button', sourceRef: ref('a') }] },
       ] }, { id: 'image', block: 'core/image', sourceRef: ref('figure') },
     ] }] };
-    // The fixture's URL is deliberately relative to the shared sources directory; retain that
-    // real fixture asset while presenting the source under its owning asset root.
-    const options = { sourcePath: path.join(benchmarkRoot, 'assets', 'local-assets.html'), author: { name: 'example/local-assets' }, proposal };
+    const options = { sourcePath, author: { name: 'example/local-assets' }, proposal };
     const [first, second] = await Promise.all([author(html, options), author(html, options)]);
     expect(first.ok, JSON.stringify(first.items)).toBe(true);
     expect(second.ok).toBe(true);
     const plan = first.package!.canonicalPlan!;
     expect(plan).toEqual(second.package!.canonicalPlan);
     expect(hashAuthoringPlan(plan)).toBe(hashAuthoringPlan(second.package!.canonicalPlan!));
-    expect(plan.structure[0]!.children![1]!.attributes).toMatchObject({ alt: 'Aurora dashboard with color tokens, release receipts, and a completed activation check', caption: 'Local SVG fixture: no network asset may substitute for this file.' });
-    expect(first.package!.assets).toEqual(expect.arrayContaining([expect.objectContaining({ path: expect.stringMatching(/^assets\/aurora-dashboard-/) })]));
+    const asset = plan.assets.find((candidate) => candidate.source === assetSource)!;
+    expect(asset).toMatchObject({ source: assetSource, sha256: createHash('sha256').update(assetBytes).digest('hex'), destination: expect.stringMatching(/^assets\/aurora-dashboard-/), uses: [{ node: 'image', attribute: 'url' }] });
+    expect(plan.structure[0]!.children![1]!.attributes).toMatchObject({ url: `./${asset.destination}`, alt: 'Aurora dashboard with color tokens, release receipts, and a completed activation check', caption: 'Local SVG fixture: no network asset may substitute for this file.' });
+    expect(first.package!.assets).toEqual(expect.arrayContaining([expect.objectContaining({ path: asset.destination, sha256: asset.sha256 })]));
     const output = planRegisteredBlockOutput(plan);
-    const destination = await mkdtemp(path.join(tmpdir(), 'block-runner-proposal-'));
+    const parent = await mkdtemp(path.join(tmpdir(), 'block-runner-proposal-'));
+    const destination = path.join(parent, 'not-yet-created');
     try {
       const inspection = await inspectAuthoringDestination(destination, output);
+      await expect(access(destination)).rejects.toThrow();
       const confirmation = hashAuthoringConfirmation(plan, inspection);
       expect(renderAuthoringPreview(plan, { confirmationHash: confirmation })).toContain(confirmation);
+      await expect(access(destination)).rejects.toThrow();
       const generated = compileRegisteredBlock(plan);
+      expect(generated.assets).toContainEqual(expect.objectContaining({ path: asset.destination, content: assetBytes }));
       const written = await writeGeneratedRegisteredBlock(destination, generated, inspection);
       expect(written.written).toEqual(expect.arrayContaining(['block.json']));
-      await expect(readFile(path.join(destination, plan.assets[0]!.destination!))).resolves.toBeInstanceOf(Buffer);
-    } finally { await rm(destination, { recursive: true, force: true }); }
+      await expect(readFile(path.join(destination, asset.destination!))).resolves.toEqual(assetBytes);
+    } finally { await rm(parent, { recursive: true, force: true }); }
     const changed = await author(`${html}\n`, options);
     expect(changed.ok).toBe(false);
     expect(changed.items.map((item) => item.reason).join('\n')).toMatch(/stale|another source/i);

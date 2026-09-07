@@ -743,14 +743,15 @@ function cssRuleUsesAsset(rule: import('../authoring/schema.js').AuthoringCssRul
   return rule.declarations.some((declaration) => declaration.value.includes(destination) || declaration.value.includes(`./${destination}`));
 }
 
-/** Resolve a source asset only from a relative reference beneath the hash-bound HTML entry. */
+/** Resolve a source asset only from a relative reference beneath the hash-bound HTML source root. */
 function resolvedCoverageAssetSource(plan: AuthoringPlan, reference: string): string | undefined {
   if (!plan.source || plan.source.entry === '<inline>' || /^(?:[a-z][a-z0-9+.-]*:|\/\/|\/)/i.test(reference)) return undefined;
   const pathname = reference.split(/[?#]/, 1)[0];
   if (!pathname) return undefined;
   const sourceDirectory = path.dirname(path.resolve(plan.source.entry));
+  const assetRoot = path.dirname(sourceDirectory);
   const resolved = path.resolve(sourceDirectory, pathname);
-  const relative = path.relative(sourceDirectory, resolved);
+  const relative = path.relative(assetRoot, resolved);
   if (!relative || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) return undefined;
   return resolved;
 }
