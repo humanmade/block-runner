@@ -159,7 +159,7 @@ try {
     editPersistence,
   });
 
-  const reopened = await phase('editor-reopen', () => reopenPost(page));
+  const reopened = await phase('editor-reopen', () => reopenPost(page, fixture));
   const reopenedState = await editorState(page);
   const reopenPersistence = editedValuesPersisted(preEdit, reopenedState, fixture.editableFields ?? [], fixture.blockName);
   const persisted = savePassed && reopened && reopenedState.invalidBlocks.length === 0 && savedState.contentHash === reopenedState.contentHash && savedState.treeHash === reopenedState.treeHash && reopenPersistence.ok;
@@ -499,7 +499,7 @@ async function publishPost(page, editor) {
   }
 }
 
-async function reopenPost(page) {
+async function reopenPost(page, fixture) {
   try {
     // Editor heartbeat requests can keep networkidle open after the editor is
     // ready. The writing flow is the lifecycle condition that matters here.
@@ -507,6 +507,18 @@ async function reopenPost(page) {
     if (!Number.isInteger(Number(id)) || Number(id) <= 0) return false;
     await page.goto(`${baseUrl}/wp-admin/post.php?post=${Number(id)}&action=edit`, { waitUntil: 'domcontentloaded' });
     await waitForEditorReady(page, { requireCurrentBlocks: true });
+    // The native-style fixture's source image becomes a real local upload
+    // immediately before insertion.  On reopen Core can expose the block
+    // store before that image has mounted in the fresh canvas; capture the
+    // persistence state only after the supported native image is present.
+    if (fixture?.nativeStyleAdapterMatrix) {
+      await page.waitForFunction((selector) => {
+        const iframe = document.querySelector('iframe[name="editor-canvas"]');
+        const root = iframe?.contentDocument ?? document;
+        const image = root.querySelector(selector);
+        return image instanceof HTMLImageElement && image.complete && image.naturalWidth > 0;
+      }, fixture.nativeStyleAdapterMatrix.image.selector, { timeout: 20_000 });
+    }
     return true;
   } catch {
     return false;
