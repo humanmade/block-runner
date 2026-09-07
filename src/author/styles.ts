@@ -611,31 +611,55 @@ export function decodeCssEscapes(value: string): string {
  * states below.  Keeping the raw spelling lets emitted rules retain escaped utility selectors
  * while matching uses the decoded atom (so `focus-visible:outline` never equals its suffix).
  */
-export interface NativeSelectorSubject { raw: string; classes: Array<{ raw: string; decoded: string }>; state?: 'hover' | 'focus' | 'focus-visible' | 'active'; }
+export interface NativeSelectorSubject {
+  raw: string;
+  /** The source compound which is bound to a native node. */
+  staticSelector: string;
+  classes: Array<{ raw: string; decoded: string }>;
+  state?: 'hover' | 'focus' | 'focus-visible' | 'active';
+  /** The only descendant relationship the native image block can faithfully retain. */
+  relation?: 'image' | 'caption';
+}
 export function nativeSelectorSubjects(selectorList: string): NativeSelectorSubject[] | undefined {
   const subjects: NativeSelectorSubject[] = [];
   for (const raw of splitTopLevel(selectorList, ',')) {
     const selector = raw.trim();
-    if (!selector || /[\s>+~\[\]#*]/.test(selector) || /::|:(?:not|is|where|has)\s*\(/i.test(selector)) return undefined;
+    // A figure may target its direct image/caption. Everything else remains deliberately
+    // unsupported: this is markup adaptation, not a general selector compatibility layer.
+    const relationship = /^(.+?)\s*>?\s*(img|figcaption)(.*)$/i.exec(selector);
+    const owner = relationship ? relationship[1]!.trim() : selector;
+    const relation = relationship?.[2]?.toLowerCase() === 'img' ? 'image'
+      : relationship?.[2]?.toLowerCase() === 'figcaption' ? 'caption' : undefined;
+    const suffix = relationship ? relationship[3]!.trim() : '';
+    if (!owner || /[\s>+~\[\]#*]/.test(owner) || /::|:(?:not|is|where|has)\s*\(/i.test(owner)) return undefined;
     let index = 0;
     const classes: Array<{ raw: string; decoded: string }> = [];
     let state: NativeSelectorSubject['state'];
-    while (index < selector.length) {
-      if (selector[index] === '.') {
+    while (index < owner.length) {
+      if (owner[index] === '.') {
         const atomStart = index;
-        const atom = readCssIdentifier(selector, index + 1);
+        const atom = readCssIdentifier(owner, index + 1);
         if (!atom) return undefined;
-        classes.push({ raw: selector.slice(atomStart, atom.end), decoded: atom.value });
+        classes.push({ raw: owner.slice(atomStart, atom.end), decoded: atom.value });
         index = atom.end;
-      } else if (selector[index] === ':') {
-        const match = /^:(focus-visible|hover|focus|active)/i.exec(selector.slice(index));
+      } else if (owner[index] === ':') {
+        const match = /^:(focus-visible|hover|focus|active)/i.exec(owner.slice(index));
         if (!match || state) return undefined;
         state = match[1]!.toLowerCase() as NativeSelectorSubject['state'];
         index += match[0].length;
+      } else if (/^[a-z]/i.test(owner[index]!)) {
+        const match = /^[a-z][\w-]*/i.exec(owner.slice(index));
+        if (!match || index !== 0) return undefined;
+        index += match[0].length;
       } else return undefined;
     }
+    if (suffix && !/^:(focus-visible|hover|focus|active)$/i.test(suffix)) return undefined;
+    if (suffix) {
+      if (state) return undefined;
+      state = suffix.slice(1).toLowerCase() as NativeSelectorSubject['state'];
+    }
     if (!classes.length) return undefined;
-    subjects.push({ raw: selector, classes, ...(state ? { state } : {}) });
+    subjects.push({ raw: selector, staticSelector: owner.replace(/:(?:focus-visible|hover|focus|active)\b/gi, ''), classes, ...(state ? { state } : {}), ...(relation ? { relation } : {}) });
   }
   return subjects;
 }

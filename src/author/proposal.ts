@@ -142,6 +142,12 @@ function sourceAttributes(element: Element, block?: string): Map<string, JsonVal
     if (image?.getAttribute('src')) values.set('url', image.getAttribute('src')!);
     values.set('alt', image?.getAttribute('alt') ?? '');
     if (image?.getAttribute('title')) values.set('title', image.getAttribute('title')!);
+    // These are native core/image attributes, not presentation guesses.  Keeping only valid
+    // positive integer dimensions also avoids serializing browser-invalid values into WP markup.
+    for (const attribute of ['width', 'height'] as const) {
+      const value = image?.getAttribute(attribute);
+      if (value && /^[1-9]\d*$/.test(value)) values.set(attribute, value);
+    }
     const caption = element.matches('figure') ? element.querySelector('figcaption') : undefined;
     if (caption) values.set('caption', safeHtml(caption));
   } else if (block === 'core/button') {

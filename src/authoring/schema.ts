@@ -42,6 +42,8 @@ export type AuthoringCoverageStyleOutcome = 'native' | 'preset' | 'literal' | 's
 
 /** One source declaration and its final destination disposition. */
 export interface AuthoringCoverageStyle {
+  declarationId?: string;
+  ruleId?: string;
   property: string;
   value: string;
   outcome: AuthoringCoverageStyleOutcome;
@@ -585,8 +587,10 @@ function normalizeCoverageLocation(input: unknown, location: string): AuthoringC
 
 function normalizeCoverageStyle(input: unknown, location: string): AuthoringCoverageStyle {
   const value = objectAt(input, location);
-  knownKeys(value, location, ['property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset', 'nativeTargets']);
+  knownKeys(value, location, ['declarationId', 'ruleId', 'property', 'value', 'outcome', 'scope', 'reason', 'atRules', 'source', 'transportSelector', 'node', 'responsive', 'preset', 'nativeTargets']);
   return withOptional({
+    declarationId: optionalString(value.declarationId, `${location}.declarationId`),
+    ruleId: optionalString(value.ruleId, `${location}.ruleId`),
     property: nonEmptyString(value.property, `${location}.property`),
     value: stringAt(value.value, `${location}.value`),
     outcome: enumAt(value.outcome, `${location}.outcome`, ['native', 'preset', 'literal', 'scoped-css', 'warned', 'blocked'] as const),

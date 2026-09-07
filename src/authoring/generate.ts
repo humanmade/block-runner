@@ -616,28 +616,51 @@ function prepareStaticPlan(input: AuthoringPlan): AuthoringPlan {
 }
 
 /** Generated adapter records are compiler-owned claims, not arbitrary extra CSS annotations. */
+const NATIVE_BUTTON_RESET_VALUES = new Map<string, string>([
+  ['margin', '0'], ['margin-top', '0'], ['margin-right', '0'], ['margin-bottom', '0'], ['margin-left', '0'],
+  ['padding', '0'], ['padding-top', '0'], ['padding-right', '0'], ['padding-bottom', '0'], ['padding-left', '0'], ['display', 'block'], ['background', 'transparent'], ['background-color', 'transparent'],
+  ['border', '0'], ['border-top', '0'], ['border-right', '0'], ['border-bottom', '0'], ['border-left', '0'], ['border-radius', '0'], ['box-shadow', 'none'], ['opacity', '1'], ['transform', 'none'], ['translate', 'none'], ['rotate', 'none'], ['scale', 'none'], ['filter', 'none'], ['transition', 'none'], ['transition-property', 'none'], ['transition-duration', '0s'], ['transition-delay', '0s'],
+]);
 function validateNativeAdapterProvenance(plan: AuthoringPlan): void {
   const nodes = new Map<string, AuthoringStructureNode>();
   const visit = (items: readonly AuthoringStructureNode[]) => items.forEach((node) => { if (node.id) nodes.set(node.id, node); visit(node.children ?? []); });
   visit(plan.structure);
-  const generated = new Map<string, 'native-adapter-target' | 'native-adapter-wrapper-reset'>();
-  const collect = (rules: NonNullable<AuthoringPlan['styles']['rules']>) => rules.forEach((rule) => {
-    if (rule.kind === 'conditional') collect(rule.rules); else if (rule.generated) generated.set(rule.selector, rule.generated);
+  const generated: Array<{ selector: string; kind: 'native-adapter-target' | 'native-adapter-wrapper-reset'; property: string; value: string; important?: boolean; atRules: string[] }> = [];
+  const collect = (rules: NonNullable<AuthoringPlan['styles']['rules']>, atRules: string[] = []) => rules.forEach((rule) => {
+    if (rule.kind === 'conditional') collect(rule.rules, [...atRules, `@${rule.name} ${rule.prelude}`]);
+    else if (rule.generated) for (const declaration of rule.declarations) generated.push({ selector: rule.selector, kind: rule.generated, property: declaration.property, value: declaration.value, ...(declaration.important ? { important: true } : {}), atRules });
   });
   collect(plan.styles.rules ?? []);
+  const claimed = new Set<number>();
   for (const entry of plan.coverage?.styles ?? []) for (const target of entry.nativeTargets ?? []) {
     const node = nodes.get(target.node);
     const expected = target.role === 'button-wrapper-reset' ? 'native-adapter-wrapper-reset' : 'native-adapter-target';
-    if (!node || !generated.get(target.selector) || generated.get(target.selector) !== expected) {
+    const expectedValue = target.role === 'button-wrapper-reset' ? NATIVE_BUTTON_RESET_VALUES.get(entry.property) : entry.value;
+    const matchIndex = generated.findIndex((item, index) => !claimed.has(index) && item.selector === target.selector && item.kind === expected
+      && item.property === entry.property && item.value === expectedValue && item.atRules.join('\u0000') === entry.atRules.join('\u0000'));
+    if (!node || matchIndex < 0) {
       throw new AuthoringGenerationError('forged-native-adapter: generated selector/provenance is not present in the canonical rules', 'coverage.styles.nativeTargets');
     }
-    if ((target.role === 'button-link' || target.role === 'button-wrapper-reset') && (node.block !== 'core/button' || !target.selector.includes('.wp-block-button__link') && target.role === 'button-link')) {
+    claimed.add(matchIndex);
+    const marker = `block-runner-native-${target.node.replace(/[^a-zA-Z0-9_-]/g, '-')}`;
+    const state = '(?::(?:hover|focus|focus-visible|active))?';
+    if ((target.role === 'button-link' || target.role === 'button-wrapper-reset') && (node.block !== 'core/button'
+      || (target.role === 'button-link' && !new RegExp(`^\\.${marker} > \\.wp-block-button__link${state}$`).test(target.selector))
+      || (target.role === 'button-wrapper-reset' && !new RegExp(`^\\.${marker}${state}$`).test(target.selector)))) {
       throw new AuthoringGenerationError('forged-native-adapter: button target does not match core/button markup', 'coverage.styles.nativeTargets');
     }
-    if (target.role === 'image' && (node.block !== 'core/image' || !target.selector.includes('figure.wp-block-image'))) {
+    if ((target.role === 'image' || target.role === 'caption') && (node.block !== 'core/image'
+      || !new RegExp(`^figure\\.wp-block-image\\.${marker} > ${target.role === 'caption' ? 'figcaption\\.wp-element-caption' : 'img'}${state}$`).test(target.selector))) {
       throw new AuthoringGenerationError('forged-native-adapter: image target does not match core/image markup', 'coverage.styles.nativeTargets');
     }
-    if (target.role === 'grid-container' && node.block !== 'core/group') throw new AuthoringGenerationError('forged-native-adapter: grid target does not match core/group markup', 'coverage.styles.nativeTargets');
+    if (target.role === 'grid-container' && (node.block !== 'core/group' || !new RegExp(`^\\.${marker}\\.wp-block-group${state}$`).test(target.selector))) throw new AuthoringGenerationError('forged-native-adapter: grid target does not match core/group markup', 'coverage.styles.nativeTargets');
+  }
+  // Provenance is bidirectional: generated adapter CSS is not allowed to outlive the source
+  // declaration that caused it, even if a caller removes every nativeTargets record.
+  for (const [index] of generated.entries()) {
+    if (!claimed.has(index)) {
+      throw new AuthoringGenerationError('forged-native-adapter: generated declaration has no matching source nativeTarget', 'styles.rules');
+    }
   }
 }
 

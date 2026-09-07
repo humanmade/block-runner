@@ -9,6 +9,12 @@ describe('component CSS selector scoping', () => {
     expect(nativeSelectorSubjects('.card > .cta')).toBeUndefined();
   });
 
+  it('retains each selector-list interaction state and the bounded figure relationship', () => {
+    const subjects = nativeSelectorSubjects('.hover\\:lift:hover, .focus\\:ring:focus-visible, figure.media > figcaption:focus');
+    expect(subjects?.map((subject) => subject.state)).toEqual(['hover', 'focus-visible', 'focus']);
+    expect(subjects?.[2]).toMatchObject({ staticSelector: 'figure.media', relation: 'caption' });
+  });
+
   it('uses a zero-specificity root boundary while retaining local selector states and lists', () => {
     const scoped = scopeLocalSelectorList(':where(.card), .card:hover::before', '.wp-block-acme-card');
 
