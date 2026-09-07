@@ -191,7 +191,18 @@ function isCompatibleSourceBinding(element: Element, block: string): boolean {
   if (element.matches('a')) return block === 'core/button';
   return true;
 }
-function referenceLocation(ref: string, hash: string, html: string, path?: string): string { const match = new RegExp(`^${hash}:(\\d+)-(\\d+)$`).exec(ref); if (!match) return `${path ?? '<inline>'}: ${ref}`; const offset = Number(match[1]); if (offset < 0 || offset > html.length) return `${path ?? '<inline>'}: invalid source range ${match[1]}-${match[2]}`; const before = html.slice(0, offset); return `${path ?? '<inline>'}:${before.split('\n').length}:${offset - before.lastIndexOf('\n')} (offset ${offset})`; }
+function referenceLocation(ref: string, _hash: string, html: string, path?: string): string {
+  // Parse a structurally valid reference independently from its hash. Callers still make the
+  // hash-prefix/index checks that reject stale references; this only lets that failure point at
+  // the current source location encoded by an otherwise valid foreign reference.
+  const match = /^([a-f0-9]{64}):(\d+)-(\d+)$/.exec(ref);
+  if (!match) return `${path ?? '<inline>'}: ${ref}`;
+  const start = Number(match[2]);
+  const end = Number(match[3]);
+  if (start < 0 || start >= end || end > html.length) return `${path ?? '<inline>'}: invalid source range ${match[2]}-${match[3]}`;
+  const before = html.slice(0, start);
+  return `${path ?? '<inline>'}:${before.split('\n').length}:${start - before.lastIndexOf('\n')} (offset ${start})`;
+}
 
 /** Proposal callers must either preserve all source content or carry an explicit reviewed change. */
 export function validateProposalSourceContent(sourceHtml: string, bound: AuthoringPlan, plan: AuthoringPlan): void {

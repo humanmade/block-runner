@@ -20,7 +20,7 @@ import {
   renderLicensedFontFace,
 } from '../src/authoring/styles.js';
 import { prepareAuthoringFonts } from '../src/author/plan.js';
-import { author } from '../src/author/index.js';
+import { author, collectSourceEvidence } from '../src/index.js';
 import type { AuthoringPlan } from '../src/authoring/schema.js';
 
 const scratch: string[] = [];
@@ -273,6 +273,27 @@ describe('registered-block font transport', () => {
     expect(report.assets).toContainEqual(expect.objectContaining({ reference: 'Inter.woff2', kind: 'font', outcome: 'prepared' }));
     expect(report.package?.assets).toEqual([expect.objectContaining({ path: expect.stringMatching(/^assets\/Inter-/), sha256: hash })]);
     await expect(readFile(path.join(root, 'Inter.woff2'))).resolves.toEqual(bytes);
+  });
+
+  it('carries proposal-bound content through the same licensed font boundary', async () => {
+    const { sourcePath, source, hash } = await fixture();
+    const html = '<style>@font-face{font-family:Inter;src:url("Inter.woff2")}.copy{font-family:Inter,Arial,sans-serif}</style><p class="copy">Proposal font</p>';
+    const sourceRef = collectSourceEvidence(html).structure.find((item) => item.tag === 'p')!.sourceRef!;
+    const proposal = { structure: [{ id: 'copy', block: 'core/paragraph', sourceRef }] };
+    const rejected = await author(html, { sourcePath, author: { name: 'acme/proposal-font', styles: { mode: 'css' } }, proposal });
+    expect(rejected.package?.canonicalPlan?.styles.fonts).toBeUndefined();
+    expect(rejected.package?.assets ?? []).toEqual([]);
+
+    const accepted = await author(html, {
+      sourcePath,
+      author: { name: 'acme/proposal-font', styles: { mode: 'css', fontLicenses: [decision('Inter.woff2', source, hash, { notice: 'Keep the proposal font notice.' })] } },
+      proposal,
+    });
+    expect(accepted.ok, JSON.stringify(accepted.items)).toBe(true);
+    expect(accepted.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ content: 'Proposal font' });
+    expect(accepted.package!.canonicalPlan!.styles.fonts).toEqual([expect.objectContaining({ assetId: 'asset.0' })]);
+    expect(accepted.package!.assets).toEqual([expect.objectContaining({ path: expect.stringMatching(/^assets\/Inter-/), sha256: hash })]);
+    expect(accepted.package!.files['style.scss']).toContain('Keep the proposal font notice.');
   });
 
   it('keeps an unlicensed HTML font usable with a safe fallback and a source warning', async () => {
