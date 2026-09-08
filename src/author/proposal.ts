@@ -120,10 +120,18 @@ function bindContent(node: AuthoringProposalNode, element: Element, attributes: 
   const apply = (attribute: string, value: JsonValue): void => {
     const change = decision(attribute);
     if (change?.action === 'omit') return;
-    if (attributes[attribute] !== undefined && JSON.stringify(attributes[attribute]) !== JSON.stringify(value) && !change) throw new Error(`proposal ${node.id}.${attribute} changes source content without an explicit source decision`);
+    if (attributes[attribute] !== undefined && !sourceAttributeMatchesProposal(node.block, attribute, attributes[attribute], value) && !change) throw new Error(`proposal ${node.id}.${attribute} changes source content without an explicit source decision`);
     attributes[attribute] = change?.action === 'replace' || change?.action === 'add' ? change.value! : value;
   };
   for (const [attribute, value] of sourceAttributes(element, node.block)) apply(attribute, value);
+}
+
+/** Only native image dimensions accept their numeric proposal form; canonical plans retain source strings. */
+function sourceAttributeMatchesProposal(block: string, attribute: string, proposed: JsonValue, source: JsonValue): boolean {
+  if (JSON.stringify(proposed) === JSON.stringify(source)) return true;
+  return block === 'core/image' && (attribute === 'width' || attribute === 'height')
+    && typeof proposed === 'number' && Number.isSafeInteger(proposed) && proposed > 0
+    && source === String(proposed);
 }
 
 function safeHtml(element: Element): string { const safe = richTextSafe(element); if (!safe.safe) throw new Error(`source content is not RichText-safe: ${safe.reason}`); return cleanRichText(element).html; }

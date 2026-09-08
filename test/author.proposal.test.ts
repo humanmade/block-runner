@@ -15,7 +15,7 @@ import {
   writeGeneratedRegisteredBlock,
 } from '../src/index.js';
 import { validateSourceContent } from '../src/author/content.js';
-import type { AuthoringStructureNode } from '../src/authoring/schema.js';
+import type { AuthoringStructureNode, JsonValue } from '../src/authoring/schema.js';
 
 const benchmarkRoot = path.resolve('benchmarks/authoring/sources');
 async function source(relative: string): Promise<{ html: string; sourcePath: string }> {
@@ -134,6 +134,51 @@ describe('author proposal boundary', () => {
     } });
     expect(report.ok, JSON.stringify(report.items)).toBe(true);
     expect(report.package!.canonicalPlan!.sourceDecisions![0]).toMatchObject({ action: 'replace', original: 'Original copy', value: 'Revised copy' });
+  });
+
+  it.each([
+    ['direct image', '<img src="/hero.jpg" alt="Hero" width="640" height="480">', 'img'],
+    ['figure image', '<figure><img src="/hero.jpg" alt="Hero" width="640" height="480"></figure>', 'figure'],
+  ])('binds %s dimensions from equivalent numeric proposal values as source strings', async (_name, html, tag) => {
+    const reference = refs(html)(tag);
+    const report = await author(html, { author: { name: 'example/proposal' }, proposal: {
+      structure: [{ id: 'image', block: 'core/image', sourceRef: reference, attributes: { width: 640, height: 480 } }],
+    } });
+    expect(report.ok, JSON.stringify(report.items)).toBe(true);
+    expect(report.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ width: '640', height: '480' });
+    expect(report.package!.canonicalPlan!.sourceDecisions).toBeUndefined();
+    const omitted = await author(html, { author: { name: 'example/proposal' }, proposal: {
+      structure: [{ id: 'image', block: 'core/image', sourceRef: reference, attributes: { width: 640 } }],
+      sourceDecisions: [{ action: 'omit', sourceRef: reference, node: 'image', attribute: 'height', reason: 'Height is intentionally omitted.' }],
+    } });
+    expect(omitted.ok, JSON.stringify(omitted.items)).toBe(true);
+    expect(omitted.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ width: '640' });
+    expect(omitted.package!.canonicalPlan!.structure[0]!.attributes).not.toHaveProperty('height');
+    expect(omitted.package!.canonicalPlan!.sourceDecisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'omit', attribute: 'height', original: '480' }),
+    ]));
+  });
+
+  it('requires decisions for changed or invalid image dimension proposal values', async () => {
+    const html = '<img src="/hero.jpg" alt="Hero" width="640" height="480">';
+    const reference = refs(html)('img');
+    const proposal = (width: JsonValue, height: JsonValue) => ({ structure: [{ id: 'image', block: 'core/image', sourceRef: reference, attributes: { width, height } }] });
+    const changed = await author(html, { author: { name: 'example/proposal' }, proposal: proposal(641, 480) });
+    expect(changed.ok).toBe(false);
+    expect(changed.items.map((item) => item.reason).join('\n')).toMatch(/changes source content without an explicit source decision/i);
+    for (const value of [640.5, 0, -640, Infinity, true, {}, Number.MAX_SAFE_INTEGER + 1, '640px']) {
+      const rejected = await author(html, { author: { name: 'example/proposal' }, proposal: proposal(value, 480) });
+      expect(rejected.ok, `${String(value)}: ${JSON.stringify(rejected.items)}`).toBe(false);
+    }
+    const reviewed = await author(html, { author: { name: 'example/proposal' }, proposal: {
+      ...proposal('641', 480),
+      sourceDecisions: [{ action: 'replace', sourceRef: reference, node: 'image', attribute: 'width', value: '641', reason: 'Approved image crop.' }],
+    } });
+    expect(reviewed.ok, JSON.stringify(reviewed.items)).toBe(true);
+    expect(reviewed.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ width: '641', height: '480' });
+    expect(reviewed.package!.canonicalPlan!.sourceDecisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'replace', attribute: 'width', original: '640', value: '641' }),
+    ]));
   });
 
   it('accounts for identical source units by reference and audits href aliases', async () => {
