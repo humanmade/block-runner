@@ -10,7 +10,7 @@ export interface SiteContextOptions {
 
 /**
  * Collect a site.context.json manifest via wesper (WP-CLI collector).
- * REST collection lives in newer wesper; block-runner tracks the published API.
+ * Block Runner exposes the WP-CLI path; Wesper also offers REST collection directly.
  */
 export async function collectSiteContext(options: SiteContextOptions): Promise<string> {
   const context = await collect({

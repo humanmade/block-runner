@@ -74,7 +74,8 @@ real-project feedback and resolved release-relevant failures.
 
 - The context token resolver consumes Wesper 0.0.3's normalized native preset registry instead
   of reparsing potentially different raw settings. An explicit empty registry is authoritative;
-  older settings-only manifests remain supported. The bundled collector dependency is unchanged.
+  older settings-only manifests remain supported. The bundled collector now pins published
+  Wesper 0.0.3.
 - Owner-acceptance preparation now uses explicit semantic proposals, a bounded sibling-asset
   root for its SVG, and a recorded component-containment decision for its reduced-motion CSS.
   The packed-consumer smoke checks both inputs through analysis, preview, and source generation.

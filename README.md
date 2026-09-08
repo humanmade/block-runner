@@ -739,9 +739,8 @@ snapshot at `author.styles.context.theme.settings`; `--context` does not populat
 or import binding permissions. Use Wesper's validation and compatibility helpers in the calling
 harness when those checks are needed.
 
-The bundled `context` command remains on the pinned Wesper 0.0.2 WP-CLI collector. Manifests
-collected separately with the upcoming 0.0.3 release are accepted by the resolver above; upgrading
-the bundled collector requires updating its dependency and lockfile after that release is available.
+The bundled `context` command uses the pinned Wesper 0.0.3 WP-CLI collector. Its manifests
+provide the native preset registry consumed by the resolver above.
 
 ## Styling fidelity
 
