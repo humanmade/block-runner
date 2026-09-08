@@ -150,7 +150,50 @@ describe('author diagnostics', () => {
       proposal: { structure: [{ id: 'group', block: 'core/group', sourceRef: sourceRef(html, 'div') }, { id: 'button', block: 'core/button', sourceRef: sourceRef(html, 'a') }] },
     });
     expect(report.items).toEqual(expect.arrayContaining([
-      expect.objectContaining({ code: 'unresolved-native-style-mapping', details: expect.objectContaining({ classification: 'unsupported-native-style-mapping', unsupportedReason: expect.any(String) }) }),
+      expect.objectContaining({
+        code: 'invalid-proposal-relationship',
+        details: expect.objectContaining({ requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' }, action: 'place-core-button-under-core-buttons', stage: 'final-proposal' }),
+      }),
     ]));
+  });
+
+  it('keeps source analysis visible when a final proposal relationship is rejected', async () => {
+    const html = '<a href="/go">Go</a><figure><img src="https://example.test/photo.jpg" alt="Photo"><figcaption><svg viewBox="0 0 2 2"><rect/></svg></figcaption></figure>';
+    const proposal = { structure: [{ id: 'cta', block: 'core/button', sourceRef: sourceRef(html, 'a') }] };
+    const options = { author: { name: 'example/diagnostic-stages' }, proposal };
+    const [first, second] = await Promise.all([author(html, options), author(html, options)]);
+    expect(first.ok).toBe(false);
+    expect(first.package).toBeUndefined();
+    expect(first.items).toEqual(second.items);
+    expect(first.items.find((item) => /Custom HTML fallback/i.test(item.reason)))
+      .toMatchObject({ details: { stage: 'intermediate', phase: 'source-analysis' } });
+    expect(first.items.find((item) => item.code === 'invalid-proposal-relationship')).toMatchObject({
+      source: { offset: 0 },
+      details: {
+        sourceRef: sourceRef(html, 'a'),
+        node: 'cta',
+        selectedParent: null,
+        requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' },
+        action: 'place-core-button-under-core-buttons',
+        stage: 'final-proposal',
+      },
+    });
+  });
+
+  it('names the core/image correction for a figure bound to an incompatible block', async () => {
+    const html = '<figure><img src="https://example.test/photo.jpg" alt="Photo"></figure>';
+    const report = await author(html, {
+      author: { name: 'example/diagnostic-figure' },
+      proposal: { structure: [{ id: 'layout', block: 'core/columns', sourceRef: sourceRef(html, 'figure') }] },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.package).toBeUndefined();
+    expect(report.items.find((item) => item.code === 'incompatible-proposal-source-binding')).toMatchObject({
+      source: { offset: 0 },
+      details: {
+        sourceRef: sourceRef(html, 'figure'), node: 'layout', block: 'core/columns', requiredBlock: 'core/image',
+        action: 'replace-with-core-image', stage: 'final-proposal',
+      },
+    });
   });
 });
