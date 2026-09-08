@@ -419,7 +419,12 @@ function adaptNativeSourceStyles(
     }
   }
   const gridProperties = new Set(['display', 'grid-template-columns', 'grid-template-rows', 'gap', 'row-gap', 'column-gap']);
-  const isGridSpecific = (property: string) => property === 'grid' || property === 'grid-template' || property.startsWith('grid-');
+  // Placement belongs to the item in its parent's grid, including when that item
+  // is itself a Group. Preserve it as scoped CSS; it does not establish or change
+  // the item's own native layout. Unsupported container declarations still fail.
+  const gridItemProperties = new Set(['grid-area', 'grid-column', 'grid-column-start', 'grid-column-end', 'grid-row', 'grid-row-start', 'grid-row-end']);
+  const isGridSpecific = (property: string) => !gridItemProperties.has(property)
+    && (property === 'grid' || property === 'grid-template' || property.startsWith('grid-'));
   const ownedGrids = new Set<string>();
   const discoverUnconditionalGrids = (items: readonly CssRule[]): void => {
     for (const rule of items) {

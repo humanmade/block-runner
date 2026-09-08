@@ -126,6 +126,39 @@ describe('native source-style adapters', () => {
     expect(report.items).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'unresolved-native-style-mapping' })]));
   });
 
+  it('retains grid-item placement as scoped CSS without making the item a grid container', async () => {
+    const html = '<section class="grid"><header class="span"><h2>Full-width heading</h2></header><div class="card"><p>Card</p></div></section>';
+    const ref = refs(html);
+    const report = await author(html, {
+      author: { name: 'example/grid-placement', styles: { mode: 'css', css: [
+        '.grid { display: grid; grid-template-columns: repeat(2, 1fr); gap: 1rem; }',
+        '.span { grid-column: 1 / -1; grid-row-start: 1; }',
+        '@media (min-width: 640px) { .card { grid-area: 2 / 2 / auto / 3; } }',
+      ].join('\n') } },
+      proposal: { structure: [{ id: 'grid', block: 'core/group', sourceRef: ref('section'), children: [
+        { id: 'intro', block: 'core/group', sourceRef: ref('header'), children: [{ id: 'title', block: 'core/heading', sourceRef: ref('h2') }] },
+        { id: 'card', block: 'core/group', sourceRef: ref('div'), children: [{ id: 'copy', block: 'core/paragraph', sourceRef: ref('p') }] },
+      ] }] },
+    });
+    expect(report.ok, JSON.stringify(report.items)).toBe(true);
+    const plan = report.package!.canonicalPlan!;
+    expect(plan.structure[0]!.attributes?.layout).toMatchObject({ type: 'grid' });
+    for (const child of plan.structure[0]!.children!) {
+      expect(child.attributes?.layout).not.toMatchObject({ type: 'grid' });
+    }
+    const placement = plan.coverage!.styles.filter((entry) => ['grid-column', 'grid-row-start', 'grid-area'].includes(entry.property));
+    expect(placement).toHaveLength(3);
+    for (const entry of placement) {
+      expect(entry.outcome).toBe('scoped-css');
+      expect(entry.nativeTargets).toBeUndefined();
+    }
+    const css = compileRegisteredBlock(plan).files.find((file) => file.path === 'style.scss')!.content;
+    expect(css).toContain('grid-column: 1 / -1');
+    expect(css).toContain('grid-row-start: 1');
+    expect(css).toContain('@media (min-width: 640px)');
+    expect(css).toContain('grid-area: 2 / 2 / auto / 3');
+  });
+
   it('does not treat flex as authored-grid evidence while retaining the core/columns grid rejection', async () => {
     const html = '<section class="layout"><p>One</p><p>Two</p></section>';
     const proposal = { structure: [{ id: 'columns', block: 'core/columns', sourceRef: refs(html)('section'), children: [
