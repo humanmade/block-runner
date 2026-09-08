@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 /** Install the built tarball as a clean engine-strict consumer, then smoke its CLI and library. */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -41,6 +42,45 @@ try {
     || grid?.attributes?.layout?.type !== 'grid'
     || image?.block !== 'core/image' || image.attributes?.caption !== 'Controls remain editable.') {
     throw new Error('Packed guide authoring proposal example did not derive its canonical source, coverage, asset, and native bindings.');
+  }
+
+  // Run the documented owner-acceptance preparation through this packed consumer.
+  // These explicit proposals exercise the supplied fixtures, not a model benchmark.
+  const acceptanceInputs = path.join(consumer, 'acceptance-inputs');
+  run(process.execPath, [path.join(root, 'acceptance/0.9-testing/prepare-inputs.mjs'),
+    '--output', acceptanceInputs, '--candidate-revision', run('git', ['rev-parse', 'HEAD'], root).stdout.trim()], consumer);
+  const acceptanceScript = path.join(consumer, 'author-input.mjs');
+  writeFileSync(acceptanceScript, readFileSync(path.join(root, 'acceptance/0.9-testing/author-input.mjs')));
+  for (const journey of ['local-asset-feature', 'responsive-panel-grid']) {
+    const directory = path.join(consumer, journey);
+    mkdirSync(directory);
+    const sourceRoot = path.join(acceptanceInputs, journey, 'benchmarks/authoring/sources');
+    const report = JSON.parse(run(process.execPath, [acceptanceScript, journey, sourceRoot], directory).stdout);
+    const plan = report.package?.canonicalPlan;
+    if (!report.ok || !plan) throw new Error(`${journey}: acceptance analysis did not produce a canonical plan.`);
+    const source = readFileSync(path.join(sourceRoot, journey === 'local-asset-feature' ? 'semantic/local-assets.html' : 'utility/tailwind-responsive.html'));
+    if (plan.source?.sha256 !== createHash('sha256').update(source).digest('hex')) {
+      throw new Error(`${journey}: acceptance preparation changed source identity.`);
+    }
+    writeFileSync(path.join(directory, 'authoring-plan.json'), JSON.stringify(plan));
+    const output = path.join(directory, 'generated');
+    const preview = JSON.parse(run(process.execPath, [cli, 'author', 'preview', 'authoring-plan.json', '--output-dir', output, '--json'], directory).stdout);
+    run(process.execPath, [cli, 'author', 'write', 'authoring-plan.json', '--output-dir', output, '--confirm', preview.confirmation, '--json'], directory);
+    if (journey === 'local-asset-feature') {
+      const asset = plan.assets.find((entry) => entry.destination?.endsWith('.svg'));
+      if (!asset || !readFileSync(path.join(output, asset.destination)).equals(readFileSync(path.join(sourceRoot, 'assets/aurora-dashboard.svg')))
+        || !plan.fields.some((entry) => entry.node === 'image' && entry.attribute === 'alt' && entry.mode === 'editable')) {
+        throw new Error('Local-asset acceptance lost SVG bytes or editable alternative text.');
+      }
+    } else {
+      const css = readFileSync(path.join(output, 'style.scss'), 'utf8');
+      if (!css.includes('grid-column: 1 / -1') || !css.includes('min-width: 640px') || !css.includes('min-width: 1024px')
+        || !css.includes('prefers-reduced-motion: reduce') || !css.includes('scroll-behavior: auto !important')
+        || !plan.warnings.some((warning) => warning.includes('Component foundation CSS'))) {
+        throw new Error('Responsive acceptance lost grid placement, breakpoints, reduced motion, or its containment warning.');
+      }
+    }
+    console.log(`${journey}: packed analysis, preview, and source write passed.`);
   }
 
   const typecheck = path.join(root, 'node_modules', '.bin', 'tsc');

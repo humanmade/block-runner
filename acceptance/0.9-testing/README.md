@@ -21,9 +21,12 @@ Before any analysis, use the small staging harness below. It checks the pinned
 source bytes and refuses to overwrite an evidence directory:
 
 ```sh
+export CANDIDATE_CHECKOUT="$PWD"
+export EVIDENCE=/absolute/path/to/evidence
+mkdir -p "$EVIDENCE"
 node acceptance/0.9-testing/prepare-inputs.mjs --check
 node acceptance/0.9-testing/prepare-inputs.mjs \
-  --output /absolute/path/to/evidence/inputs \
+  --output "$EVIDENCE/inputs" \
   --candidate-revision "$(git rev-parse HEAD)"
 ```
 
@@ -33,71 +36,67 @@ shipped skill in a clean consumer project. Retain the tarball and its hash; do
 not analyse from this checkout after staging.
 
 ```sh
-mkdir -p /absolute/path/to/evidence/package /absolute/path/to/evidence/consumer
-npm pack --pack-destination /absolute/path/to/evidence/package
-cd /absolute/path/to/evidence/consumer
+mkdir -p "$EVIDENCE/package" "$EVIDENCE/consumer"
+npm pack --pack-destination "$EVIDENCE/package"
+cd "$EVIDENCE/consumer"
 npm init -y
-npm install --ignore-scripts --save-exact /absolute/path/to/evidence/package/block-runner-0.9.0.tgz
+npm install --ignore-scripts --save-exact "$EVIDENCE/package/block-runner-0.9.0.tgz"
 npx --no-install block-runner skill --install --dir .agents/skills
 ```
 
-For each journey, run analysis with the packed CLI and save the whole JSON
-report before extracting `package.canonicalPlan`. Keep plans in the evidence
-directory and invoke the packed binary by absolute path: `author preview` and
-`author write` intentionally accept only safe, relative plan paths. The
-responsive input has a linked stylesheet, so create a consumer-local
-configuration that supplies the staged `tailwind-responsive.css` as
-`author.styles.css` with `author.styles.mode: 'css'`; it is compiled CSS, not
-permission to run a Tailwind project. The local-asset journey needs no
-stylesheet configuration.
+The two inputs use the prepared semantic proposals in [`author-input.mjs`](./author-input.mjs).
+Copy that script into the clean consumer so its public `block-runner` import resolves the
+installed tarball. The script prints the complete analysis JSON and exits nonzero if no
+canonical plan is produced. It does not write generated source.
+
+The SVG proposal explicitly permits reads beneath the staged `sources/` directory because
+its image is a sibling of `semantic/`. The responsive proposal uses native Groups for the
+CSS grid, supplies the linked compiled CSS, and opts into `foundation: 'component'`: the
+universal reduced-motion rule is contained within this block. This is a deliberate scope
+change, recorded in the plan's warnings, not a claim of page-wide equivalence. Neither
+source file is rewritten, no Tailwind compiler runs, and no content is omitted.
 
 ```sh
-# Set these after installing the packed tarball.
-export EVIDENCE=/absolute/path/to/evidence
 export BLOCK_RUNNER="$EVIDENCE/consumer/node_modules/.bin/block-runner"
+cp "$CANDIDATE_CHECKOUT/acceptance/0.9-testing/author-input.mjs" "$EVIDENCE/consumer/author-input.mjs"
 
-# Journey 1: local SVG. Run from the journey directory so the plan path is safe and relative.
-mkdir -p "$EVIDENCE/local-asset-feature"
-cd "$EVIDENCE/local-asset-feature"
-"$BLOCK_RUNNER" author \
-  "$EVIDENCE/inputs/local-asset-feature/benchmarks/authoring/sources/semantic/local-assets.html" \
-  --name block-runner/asset-feature --json > analysis.json
-
-# Journey 2: retain compiled CSS explicitly; do not run Tailwind or load its config.
-mkdir -p "$EVIDENCE/responsive-panel-grid"
-node --input-type=module -e '
-  import { readFile, writeFile } from "node:fs/promises";
-  const css = await readFile(process.argv[1], "utf8");
-  await writeFile(process.argv[2], `${JSON.stringify({ author: { styles: { mode: "css", css } } }, null, 2)}\n`);
-' "$EVIDENCE/inputs/responsive-panel-grid/benchmarks/authoring/sources/utility/tailwind-responsive.css" \
-  "$EVIDENCE/responsive-panel-grid/block-runner.config.json"
-cd "$EVIDENCE/responsive-panel-grid"
-"$BLOCK_RUNNER" author \
-  "$EVIDENCE/inputs/responsive-panel-grid/benchmarks/authoring/sources/utility/tailwind-responsive.html" \
-  --name block-runner/responsive-panel-grid --config block-runner.config.json --json > analysis.json
-
-# Run this in each journey directory after analysis. It stops if no usable canonical plan was produced.
-node --input-type=module -e '
-  import { readFile, writeFile } from "node:fs/promises";
-  const report = JSON.parse(await readFile(process.argv[1], "utf8"));
-  if (!report.ok || !report.package?.canonicalPlan) throw new Error("No canonical plan in analysis report");
-  await writeFile(process.argv[2], `${JSON.stringify(report.package.canonicalPlan, null, 2)}\n`);
-' analysis.json authoring-plan.json
-"$BLOCK_RUNNER" author preview authoring-plan.json --output-dir "$PWD/generated" > preview.txt
+for journey in local-asset-feature responsive-panel-grid; do
+  mkdir -p "$EVIDENCE/$journey"
+  (
+    set -e
+    cd "$EVIDENCE/$journey"
+    node "$EVIDENCE/consumer/author-input.mjs" "$journey" \
+      "$EVIDENCE/inputs/$journey/benchmarks/authoring/sources" > analysis.json
+    node --input-type=module -e '
+      import { readFile, writeFile } from "node:fs/promises";
+      const report = JSON.parse(await readFile("analysis.json", "utf8"));
+      if (!report.ok || !report.package?.canonicalPlan) throw new Error("No canonical plan in analysis report");
+      await writeFile("authoring-plan.json", `${JSON.stringify(report.package.canonicalPlan, null, 2)}\n`);
+    '
+    "$BLOCK_RUNNER" author preview authoring-plan.json --output-dir "$PWD/generated" > preview.txt
+  ) || break
+done
 ```
+
+`npm run smoke:package` exercises these same prepared proposals with staged input bytes in a
+clean packed consumer, then confirms and writes each source package. It checks the copied SVG,
+editable alternative text, grid-item span, responsive breakpoints, reduced-motion CSS and the
+containment warning. That automated check does not record an owner review or WordPress result.
 
 Show the complete preview. Only after the owner authorises its exact hash, run
 `author write` with that hash and exact destination. Then use `plugin inspect`,
 `plugin preview`, and `plugin write` against a supported existing-plugin target
 (with separately approved replacements), build its normal ZIP, and invoke
-`proof --profile full` with a fixture whose editable fields, visual baseline,
-and manual-review scope were created for that generated package. Source
+`proof --profile fidelity-checked` with the hash-matched artifact contract and a fixture whose
+editable fields and visual baseline were created for that generated package. These two proposals
+do not declare pattern overrides; the shared pattern fixture supplies that separate full-profile
+exercise. Retain the owner’s manual review alongside each journey. Source
 generation alone is not an installable-plugin claim. Record corrections to the
 plan as corrections, not as if they had been in the original input.
 
-The full proof cannot be prefilled from this manifest: its fixture must bind
-the generated block name/markup, editable inventory, pattern assertions,
-reviewed golden, and manual-review file to the final ZIP. Until those inputs
+The runtime proof cannot be prefilled from this manifest: its fixture must bind
+the generated block name/markup, editable inventory, artifact capabilities, and
+reviewed golden to the final ZIP. Until those inputs
 exist, `proof` is correctly blocked rather than runnable evidence.
 
 The standard proof fixture may be used for the shared pattern and regeneration
