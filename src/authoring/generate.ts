@@ -33,7 +33,7 @@ import {
  * The owned source-template contract. Changing it changes every generated package and must be an
  * intentional, reviewed release decision.
  */
-export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v10' as const;
+export const REGISTERED_BLOCK_TEMPLATE_VERSION = '0.9-static-v11' as const;
 /**
  * The declarative-style renderer is part of the owned template contract.  It never accepts a
  * stylesheet fragment from the plan: its inputs are validated outcomes and structured rules.
@@ -206,6 +206,8 @@ export function compileRegisteredBlock(input: AuthoringPlan): GeneratedRegistere
   const rootClass = blockRootClass(plan.target.name);
   const assets = collectConfirmedAssets(plan);
   const fontStyles = renderFontStyles(plan, assets);
+  const viewportRoot = hasViewportRoot(plan);
+  const sharedStyles = stylesheetSuffix(plan.styles.rules, rootClass, plan);
 
   const template = compileConfirmedTemplate(plan);
   const allowedBlocks = plan.allowedBlocks ?? unique(template.map(([name]) => name)).sort();
@@ -216,8 +218,9 @@ export function compileRegisteredBlock(input: AuthoringPlan): GeneratedRegistere
     sourceFile('edit.js', 'javascript', emitEditJs(template, allowedBlocks, plan.locking.mode, assets), operations.get('edit.js')!),
     sourceFile('save.js', 'javascript', emitSaveJs(), operations.get('save.js')!),
     sourceFile('style.scss', 'scss', fontStyles.css
-      + emitScss(plan.styles.outcomes, rootClass, hasViewportRoot(plan))
-      + stylesheetSuffix(plan.styles.rules, rootClass, plan), operations.get('style.scss')!),
+      + emitScss(plan.styles.outcomes, rootClass, viewportRoot)
+      + sharedStyles
+      + (viewportRoot ? emitViewportFlowMarginPriority(plan.styles.rules ?? [], rootClass) : ''), operations.get('style.scss')!),
     // Shared styles are loaded by WordPress in both contexts. The editor stylesheet is a stable,
     // owned template seam for explicitly confirmed editor-only affordances.
     sourceFile('editor.scss', 'scss', emitScss([], rootClass)
@@ -521,6 +524,41 @@ function centeredMaxWidthGroup(
     }
   }
   return maxWidth && leftAuto && rightAuto;
+}
+
+/**
+ * WordPress gives every direct child of an is-layout-flow group a theme block-gap margin after
+ * package styles load. Keep only authored simple-class start margins above that host rule for a
+ * source canvas; other flow children still receive the theme gap normally.
+ */
+function emitViewportFlowMarginPriority(
+  rules: NonNullable<AuthoringPlan['styles']['rules']>,
+  rootClass: string,
+  depth = 0,
+): string {
+  const indent = '  '.repeat(depth);
+  return rules.flatMap((rule) => {
+    if (rule.kind === 'conditional') {
+      const nested = emitViewportFlowMarginPriority(rule.rules, rootClass, depth + 1);
+      return nested ? `${indent}@${rule.name} ${rule.prelude} {\n${nested}\n${indent}}` : '';
+    }
+    const selector = simpleStaticClassSelector(rule.selector);
+    const declarations = rule.declarations.filter(({ property }) => (
+      property === 'margin-top' || property === 'margin-block-start'
+    ));
+    if (!selector || declarations.length === 0) return '';
+    return `${indent}${rootClass} ${selector} { ${declarations.map((declaration) => (
+      `${declaration.property}: ${declaration.value}${declaration.important ? ' !important' : ''};`
+    )).join(' ')} }`;
+  }).filter(Boolean).join('\n') + (depth === 0 ? '\n' : '');
+}
+
+function simpleStaticClassSelector(selector: string): string | undefined {
+  const trimmed = selector.trim();
+  const subjects = nativeSelectorSubjects(trimmed);
+  const subject = subjects?.[0];
+  if (!subject || subjects.length !== 1 || subject.state || subject.relation || subject.staticSelector !== trimmed) return undefined;
+  return subject.staticSelector;
 }
 
 /** Typed PHP emitter. It registers the package directory, letting WordPress load block.json metadata. */

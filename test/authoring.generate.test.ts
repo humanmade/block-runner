@@ -145,7 +145,9 @@ describe('registered-block source compiler', () => {
     const input = plan();
     input.structure = [{
       id: 'canvas', block: 'core/group', children: [{
-        id: 'layout', block: 'core/group', attributes: { className: 'mx-auto max-w-screen' },
+        id: 'layout', block: 'core/group', attributes: { className: 'mx-auto max-w-screen' }, children: [{
+          id: 'copy', block: 'core/paragraph', attributes: { className: 'source-gap' },
+        }],
       }],
     }];
     input.styles.rules = [
@@ -153,10 +155,12 @@ describe('registered-block source compiler', () => {
         { property: 'margin-left', value: 'auto' }, { property: 'margin-right', value: 'auto' },
       ] },
       { kind: 'style', selector: '.max-w-screen', declarations: [{ property: 'max-width', value: '80rem' }] },
+      { kind: 'style', selector: '.source-gap', declarations: [{ property: 'margin-top', value: '1.5rem' }] },
     ];
 
     const style = sourceFile(compileRegisteredBlock(input).files, 'style.scss').content;
     expect(style).toContain('.wp-block-acme-callout {\n  width: 100%;\n  max-width: none !important;');
+    expect(style).toContain('.wp-block-acme-callout .source-gap { margin-top: 1.5rem; }');
   });
 
   it('uses the full pinned WordPress schema, including support-value constraints', () => {
