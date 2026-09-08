@@ -28,7 +28,7 @@ describe('canonical agent skill', () => {
     expect(skill).toContain('references/GUIDE.md');
     const guide = await readCanonicalSkillGuide();
     expect(guide).toContain('# Block Runner — agent guide');
-    expect(guide).toContain('Primary HTML workflow: proposal → canonical plan');
+    expect(guide).toContain('Primary HTML workflow: complete proposal → canonical plan');
     expect(guide).toContain('authoring-proposal-example:start');
   });
 
