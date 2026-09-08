@@ -65,26 +65,78 @@ PHP, `block.json`, generated CSS, `registerBlockType`, `register_block_type`, or
 delimiters. The generator owns executable source and block serialization; the model owns the
 reviewable semantic decisions.
 
-### Primary HTML workflow: proposal → canonical plan
+### Primary HTML workflow: complete proposal → canonical plan
 
-This self-contained example uses only public packed imports. It intentionally supplies no manual
-hashes, coverage ledger, assets, or native CSS: those are deterministic core responsibilities.
+Read this proposal contract before the advanced complete-plan format below. A proposal has only
+these root keys: `structure` (required), and optional `fields`, `locking`, `allowedBlocks`,
+`pattern`, and `sourceDecisions`. Do not put `version`, `generatorVersion`, `target`, `source`,
+`coverage`, `styles`, `assets`, `files`, or `warnings` in it: `author()` derives and owns those
+canonical-plan records.
+
+Each `structure` node has required stable `id` and `block`, and optional `sourceRef`,
+`attributes`, `lock`, and recursive `children`. A `sourceRef` is the exact opaque
+`<source-sha256>:<start>-<end>` value returned by `collectSourceEvidence()` for this exact input;
+never construct, shorten, reuse, or edit one. Bind source-content units to their matching native
+block: headings to `core/heading`, paragraphs to `core/paragraph`, list items to
+`core/list-item`, figures (or unwrapped images) to `core/image`, and standalone links to
+`core/button`. Containers such as `section` and `div`, plus required wrappers such as
+`core/buttons`, may use their source reference when they represent source structure. Synthetic
+wrappers have an `id` and `block` but no `sourceRef`; use them only where native nesting requires
+one, for example `core/buttons` around source-bound `core/button` children. Do not bind the same
+source unit twice or bind overlapping content nodes.
+
+`fields` are `{ id, label, mode, node?, attribute?, type?, default?, description? }`; `mode` is
+exactly `fixed`, `editable`, or `override`. Point editable fields at the native node and attribute
+they expose. Supported editing pairs are heading/paragraph/list-item `content`; image `id`,
+`url`, `title`, `alt`, `caption`; and button `text`, `url`, `linkTarget`, `rel`.
+`locking` is `{ mode: "all" | "contentOnly" | "insert" | "none", move?, remove?,
+insert? }`; use a node's optional `{ move?, remove? }` `lock` for an individual node. `allowedBlocks`
+is an optional direct-child insertion allowlist. `pattern` is optional
+`{ ready, overrides: [{ field, label?, description? }] }` and refers to field IDs.
+
+`sourceDecisions` are reviewed dispositions, never executable instructions:
+`{ action: "add" | "replace" | "omit", sourceRef, node?, attribute?, value?, reason }`.
+Every source-content unit must be bound or explicitly omitted with a reason. A replacement names
+the exact bound `node` and `attribute`; an add describes proposal-owned material; an omission is
+for a real source unit. Do not use a decision to hide an unconsumed source value.
+
+Supported native source mappings include `figure > img + figcaption` owned together by one
+`core/image` (`author()` derives and retains the image URL, valid source width and height, alt text, and caption), and `core/buttons > core/button` for
+CTA links. An authored CSS grid is retained on its source-bound `core/group` when the native grid
+mapping is supported. It is not a promise to convert arbitrary CSS grids into `core/columns`.
+Node `label`, plus every complete-plan-only key listed above, belongs only to the advanced
+`GeneratedAuthoringPlan` route and must not appear in a proposal.
+
+This small public example uses only packed public imports. It derives source evidence, source
+coverage, and the external image asset from the supplied HTML; it supplies no manual ledger,
+asset, hash, adapter, or warning.
 
 <!-- authoring-proposal-example:start -->
 ```js
 import { author, collectSourceEvidence } from 'block-runner';
 
-const html = '<section><h2>Build faster</h2><p>Native editable blocks, reviewed first.</p></section>';
+const html = `<style>.feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }</style>
+<section><div class="feature-grid"><div><p>Release note</p><h2>Ship native editing</h2><p>Review the source trail before writing.</p><div><a href="/start">Start</a><a href="/docs">Read docs</a></div></div><figure><img src="https://cdn.example.test/editor.png" alt="Editor controls"><figcaption>Controls remain editable.</figcaption></figure></div></section>`;
 const evidence = collectSourceEvidence(html);
-const ref = (tag) => evidence.structure.find((entry) => entry.tag === tag)?.sourceRef;
+const ref = (tag, occurrence = 0) => evidence.structure.filter((entry) => entry.tag === tag)[occurrence]?.sourceRef;
 const report = await author(html, {
-  author: { name: 'acme/small-hero', title: 'Small hero' },
+  author: { name: 'acme/feature-note', title: 'Feature note', styles: { mode: 'css' } },
   proposal: {
-    structure: [{ id: 'hero', block: 'core/group', sourceRef: ref('section'), children: [
-      { id: 'title', block: 'core/heading', sourceRef: ref('h2') },
-      { id: 'copy', block: 'core/paragraph', sourceRef: ref('p') },
+    structure: [{ id: 'feature', block: 'core/group', sourceRef: ref('section'), children: [
+      { id: 'grid', block: 'core/group', sourceRef: ref('div', 0), children: [
+        { id: 'copy', block: 'core/group', sourceRef: ref('div', 1), children: [
+          { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) },
+          { id: 'title', block: 'core/heading', sourceRef: ref('h2') },
+          { id: 'body', block: 'core/paragraph', sourceRef: ref('p', 1) },
+          { id: 'actions', block: 'core/buttons', sourceRef: ref('div', 2), children: [
+            { id: 'start', block: 'core/button', sourceRef: ref('a', 0) },
+            { id: 'docs', block: 'core/button', sourceRef: ref('a', 1) },
+          ] },
+        ] },
+        { id: 'image', block: 'core/image', sourceRef: ref('figure') },
+      ] },
     ] }],
-    fields: [{ id: 'title', label: 'Title', mode: 'editable', node: 'title', attribute: 'content' }],
+    fields: [{ id: 'title-content', label: 'Title', mode: 'editable', node: 'title', attribute: 'content' }],
     locking: { mode: 'contentOnly' },
   },
 });
@@ -97,10 +149,10 @@ Run it from a project with the packed package installed, then preview, obtain co
 write the exact canonical identity:
 
 ```bash
-node author-proposal.mjs > small-hero.plan.json
-npx --no-install block-runner author preview small-hero.plan.json --output-dir <exact-final-destination>
+node author-proposal.mjs > feature-note.plan.json
+npx --no-install block-runner author preview feature-note.plan.json --output-dir <exact-final-destination>
 # Show the complete preview; obtain its full confirmation hash and explicit approval.
-npx --no-install block-runner author write small-hero.plan.json --confirm '<full preview hash>' --output-dir '<exact-final-destination>'
+npx --no-install block-runner author write feature-note.plan.json --confirm '<full preview hash>' --output-dir '<exact-final-destination>'
 ```
 
 ### Advanced: complete `GeneratedAuthoringPlan` v1 shape

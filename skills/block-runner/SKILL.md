@@ -20,7 +20,8 @@ package.
 
 Four paths. Pick by the requested artifact:
 
-- **You need a reusable, named registered block in code** → for authored HTML, first create an
+- **You need a reusable, named registered block in code** → for authored HTML, first read the
+  complete proposal-only contract in `references/GUIDE.md` §2, then create an
   `AuthorOptions.proposal`, not source code or a full plan. It records only semantic structure,
   source references, editability, locks, and reviewed source decisions; Block Runner returns the
   canonical `GeneratedAuthoringPlan` with hashes, coverage, assets, native style adapters, and

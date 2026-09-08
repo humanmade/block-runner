@@ -262,7 +262,15 @@ describe('author proposal boundary', () => {
         ] },
         { id: 'image', block: 'core/image', sourceRef: ref('figure') },
       ] },
-    ] }], fields: [{ id: 'title-content', label: 'Title', mode: 'editable' as const, node: 'title', attribute: 'content' }], locking: { mode: 'contentOnly' as const } };
+    ] }], fields: [
+      { id: 'eyebrow-content', label: 'Eyebrow', mode: 'editable' as const, node: 'eyebrow', attribute: 'content' },
+      { id: 'title-content', label: 'Title', mode: 'editable' as const, node: 'title', attribute: 'content' },
+      { id: 'lede-content', label: 'Body', mode: 'editable' as const, node: 'lede', attribute: 'content' },
+      { id: 'download-text', label: 'Download CTA', mode: 'editable' as const, node: 'download', attribute: 'text' },
+      { id: 'guide-text', label: 'Guide CTA', mode: 'editable' as const, node: 'guide', attribute: 'text' },
+      { id: 'image-url', label: 'Product image URL', mode: 'editable' as const, node: 'image', attribute: 'url' },
+      { id: 'image-alt', label: 'Product image alt text', mode: 'editable' as const, node: 'image', attribute: 'alt' },
+    ], locking: { mode: 'contentOnly' as const } };
     const options = {
       sourcePath,
       assetRoot: path.dirname(sourcePath),
@@ -282,7 +290,23 @@ describe('author proposal boundary', () => {
     expect(nodes.get('download')!.attributes).toMatchObject({ text: 'Download the testing release', url: '/download' });
     expect(nodes.get('guide')!.attributes).toMatchObject({ text: 'Read the authoring guide', url: '/docs/authoring' });
     expect(nodes.get('image')!.attributes).toMatchObject({ alt: 'Aurora dashboard with color tokens, release receipts, and a completed activation check', caption: 'Native controls stay with the block, not in a screenshot.' });
+    expect(plan.fields).toEqual([
+      expect.objectContaining({ id: 'eyebrow-content', mode: 'editable', node: 'eyebrow', attribute: 'content' }),
+      expect.objectContaining({ id: 'title-content', mode: 'editable', node: 'title', attribute: 'content' }),
+      expect.objectContaining({ id: 'lede-content', mode: 'editable', node: 'lede', attribute: 'content' }),
+      expect.objectContaining({ id: 'download-text', mode: 'editable', node: 'download', attribute: 'text' }),
+      expect.objectContaining({ id: 'guide-text', mode: 'editable', node: 'guide', attribute: 'text' }),
+      expect.objectContaining({ id: 'image-url', mode: 'editable', node: 'image', attribute: 'url' }),
+      expect.objectContaining({ id: 'image-alt', mode: 'editable', node: 'image', attribute: 'alt' }),
+    ]);
     expect(plan.sourceDecisions).toBeUndefined();
+    expect(plan.source).toMatchObject({ entry: sourcePath });
+    expect(plan.assets).toEqual(expect.arrayContaining([expect.objectContaining({
+      source: path.join(path.dirname(sourcePath), 'assets/aurora-dashboard.svg'),
+      uses: [expect.objectContaining({ node: 'image', attribute: 'url' })],
+    })]));
+    expect(plan.structure[0]!.children![0]!.children!.map((node) => node.id)).toEqual(['copy', 'image']);
+    expect(plan.locking).toEqual({ mode: 'contentOnly' });
     const roundtrip = await author(html, {
       sourcePath,
       assetRoot: path.dirname(sourcePath),
@@ -291,6 +315,7 @@ describe('author proposal boundary', () => {
     });
     expect(roundtrip.ok, JSON.stringify(roundtrip.items)).toBe(true);
     expect(roundtrip.package!.canonicalPlan).toEqual(plan);
+    validateSourceContent(html, compileRegisteredBlock(plan).template);
     const tampered = structuredClone(plan);
     tampered.coverage!.styles.find((entry) => entry.transportSelector && entry.nativeTargets?.length)!.transportSelector = '.unrelated-target';
     const rejected = await author(html, { sourcePath, assetRoot: path.dirname(sourcePath), author: options.author, plan: tampered });
