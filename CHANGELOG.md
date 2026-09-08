@@ -1,17 +1,5 @@
 # Changelog
 
-## Unreleased
-
-### Changed
-
-- **Node.js compatibility decision.** Block Runner now explicitly supports Node.js
-  `^20.19.0 || ^22.13.0 || >=24.0.0`, rather than broadly advertising `>=20`.
-  This retains the Node 20 release line by pinning Commander to 14.0.3, but raises
-  its minimum patch release to 20.19.0 because the resolved jsdom and WordPress
-  production dependencies require it. Node 21 and 23 are not supported by that
-  graph. CI installs the lockfile and packed tarball with engine-strict at each
-  exact floor.
-
 ## 0.9.0 — 2026-09-04 — unreleased testing candidate
 
 This is an unreleased 0.9 testing candidate. The public registry currently offers stable
@@ -22,7 +10,18 @@ real-project feedback and resolved release-relevant failures.
 
 ### Added
 
-- **Registered-block authoring.** A versioned `AuthoringPlan` can be reviewed in a deterministic
+- **Source-bound semantic proposals.** For authored HTML, call `collectSourceEvidence()` and
+  submit `AuthorOptions.proposal` with native structure, source references and editing decisions.
+  Block Runner derives the canonical plan, content and CSS coverage, asset hashes, and required
+  warnings. Complete `AuthorOptions.plan` input remains an advanced compatibility route.
+- **Source-content preservation.** Missing, duplicated or stale source bindings are rejected.
+  Intentional additions, replacements and omissions require explicit source decisions.
+  Diagnostics identify the source location and incompatible native relationship to correct.
+- **Native style adapters.** Authored button styles target the native link rather than its wrapper;
+  image sizing retains source dimensions as aspect-ratio evidence. Supported authored grids use
+  native Groups, with grid-item placement retained as scoped CSS. Source canvases and vertical
+  spacing are preserved without changing existing saved block markup.
+- **Registered-block authoring.** A versioned `GeneratedAuthoringPlan` can be reviewed in a deterministic
   terminal preview and compiled into one static registered block whose content remains native
   WordPress `InnerBlocks`. The preview is read-only; `author write --confirm` binds the canonical
   plan, compiler contract, and destination fingerprint before publishing source.
@@ -57,6 +56,29 @@ real-project feedback and resolved release-relevant failures.
 - **Recoverable build cleanup.** `npm run build` moves this checkout's existing `dist/` to
   macOS Trash (or `~/.Trash` when the `trash` CLI is unavailable) before running `tsup` with
   cleanup disabled. The guard refuses target arguments and cannot silently delete another path.
+
+### Changed
+
+- **Node.js compatibility decision.** Block Runner now explicitly supports Node.js
+  `^20.19.0 || ^22.13.0 || >=24.0.0`, rather than broadly advertising `>=20`.
+  This retains the Node 20 release line by pinning Commander to 14.0.3, but raises
+  its minimum patch release to 20.19.0 because the resolved jsdom and WordPress
+  production dependencies require it. Node 21 and 23 are not supported by that
+  graph. CI installs the lockfile and packed tarball with engine-strict at each
+  exact floor.
+- The public authoring example now runs directly with Node and emits a source-bound canonical
+  plan for the CLI's destination-confirmed preview/write workflow. The short skill now describes
+  capability-specific proof requirements consistently with the detailed guide.
+
+### Fixed
+
+- Owner-acceptance preparation now uses explicit semantic proposals, a bounded sibling-asset
+  root for its SVG, and a recorded component-containment decision for its reduced-motion CSS.
+  The packed-consumer smoke checks both inputs through analysis, preview, and source generation.
+- Grid-item `grid-column`, `grid-row` and `grid-area` declarations are no longer mistaken for
+  unsupported grid-container settings. Unsupported container behavior still fails closed.
+- The package private-reference checker finds the npm pack record after lifecycle/build output
+  instead of treating an earlier JSON build message as the package manifest.
 
 ### Release status
 
