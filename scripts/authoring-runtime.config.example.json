@@ -1,0 +1,12 @@
+{
+  "repo": "/absolute/path/to/block-runner",
+  "cli": "/absolute/path/to/packed-consumer/node_modules/.bin/block-runner",
+  "sharedDependencies": "/absolute/path/to/standalone-plugin/node_modules",
+  "docker": "/Applications/Docker.app/Contents/Resources/bin/docker",
+  "wordpress": {
+    "container": "wp-env-proof-wp-env-<run>-tests-cli-1",
+    "url": "http://localhost:8889",
+    "credentials": { "username": "admin", "password": "password" }
+  },
+  "smokeViewport": { "width": 390, "height": 844 }
+}

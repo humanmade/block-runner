@@ -13,6 +13,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
 import { pathToFileURL } from 'node:url';
+import { author } from '../src/author/index.js';
 import { AuthoringGenerationError, compileRegisteredBlock } from '../src/authoring/generate.js';
 import { validateAuthoringPlan } from '../src/authoring/schema.js';
 import {
@@ -90,7 +91,7 @@ function candidateSourcePath(candidateDirectory: string, relative: string): stri
   return path.join(candidateDirectory, 'source', relative);
 }
 
-export function materializeCandidate(fixture: AuthoringFixture, suiteDirectory: string, candidateDirectory: string, receiptDirectory: string, candidatePlan: string, planSnapshot?: Buffer): ReceiptArtifact {
+export async function materializeCandidate(fixture: AuthoringFixture, suiteDirectory: string, candidateDirectory: string, receiptDirectory: string, candidatePlan: string, planSnapshot?: Buffer): Promise<ReceiptArtifact> {
   if (!/^[a-z0-9-]+$/.test(fixture.id)) throw new Error('unsafe fixture id');
   if (!fixture.source?.path || !existsSync(candidatePlan)) throw new Error(`${fixture.id} has missing source or candidate plan`);
   const sourceInput = suiteFile(suiteDirectory, fixture.source.path, fixture.source.sha256);
@@ -102,11 +103,40 @@ export function materializeCandidate(fixture: AuthoringFixture, suiteDirectory: 
     const value = dependency as { path: string; sha256?: unknown };
     return suiteFile(suiteDirectory, value.path, value.sha256);
   });
-  // Expected plans are scoring contracts, not model output and not source code.
-  // Only a supplied canonical candidate may enter the production compiler.
+  // Expected plans are scoring contracts, not model output and not source code. A candidate
+  // only reaches the compiler through the production author() source/coverage gate.
   const candidateBytes = planSnapshot ?? readFileSync(candidatePlan);
   const plan = validateAuthoringPlan(candidateBytes.toString('utf8'));
-  const compiled = compileRegisteredBlock(plan);
+  const stylesheetDependencies = dependencyInputs.filter((input) => path.extname(input.relative).toLowerCase() === '.css');
+  const stylesheet = stylesheetDependencies.length
+    ? Buffer.concat(stylesheetDependencies.map((input) => input.bytes)).toString('utf8')
+    : undefined;
+  const report = await author(sourceInput.bytes.toString('utf8'), {
+    // This is the verified suite input path, deliberately not the temporary candidate snapshot.
+    sourcePath: sourceInput.source,
+    author: {
+      name: plan.target.name,
+      title: plan.target.title,
+      category: plan.target.category,
+      locking: plan.locking,
+      styles: {
+        mode: 'css',
+        ...(stylesheet === undefined ? {} : { css: stylesheet }),
+        ...(plan.styles.foundation === 'component' ? { foundation: 'component' } : {}),
+      },
+    },
+    plan,
+  });
+  if (!report.ok || !report.package?.canonicalPlan || !report.package.manifest) {
+    const reason = report.items.map((item) => item.reason).filter(Boolean).join('; ')
+      || 'production author() did not produce a source-bound canonical package';
+    if (/script behaviour|event-handler behaviour|unsupported-executable-behaviour/i.test(reason)) {
+      throw new AuthoringGenerationError(`unsupported-executable-behaviour: ${reason}`, fixture.source.path);
+    }
+    throw new Error(`production author() rejected candidate: ${reason}`);
+  }
+  const canonicalPlan = report.package.canonicalPlan;
+  const compiled = compileRegisteredBlock(canonicalPlan);
   if (existsSync(candidateDirectory)) throw new Error(`refusing to overwrite candidate: ${candidateDirectory}`);
   mkdirSync(candidateDirectory, { recursive: true });
   for (const file of [...compiled.files, ...compiled.assets]) {
@@ -114,11 +144,17 @@ export function materializeCandidate(fixture: AuthoringFixture, suiteDirectory: 
     mkdirSync(path.dirname(destination), { recursive: true });
     writeFileSync(destination, file.content, { flag: 'wx' });
   }
-  // These are the confirmed style decisions, not a per-source-declaration coverage ledger.
-  // The worker must provide the latter before claiming the style dimension was measured.
-  write(path.join(candidateDirectory, 'style-decisions.json'), `${JSON.stringify(plan.styles, null, 2)}\n`);
+  write(path.join(candidateDirectory, 'style-decisions.json'), `${JSON.stringify(canonicalPlan.styles, null, 2)}\n`);
   write(path.join(candidateDirectory, 'compiler-manifest.json'), `${JSON.stringify(compiled.manifest, null, 2)}\n`);
   writeFileSync(path.join(candidateDirectory, 'authoring-plan.json'), candidateBytes, { flag: 'wx' });
+  write(path.join(candidateDirectory, 'canonical-authoring-plan.json'), `${JSON.stringify(canonicalPlan, null, 2)}\n`);
+  write(path.join(candidateDirectory, 'source-coverage.json'), `${JSON.stringify({
+    valid: true,
+    source: canonicalPlan.source,
+    inputStylesheetSha256: sha256(stylesheet ?? [...sourceInput.bytes.toString('utf8').matchAll(/<style\b[^>]*>([\s\S]*?)<\/style\s*>/gi)].map((match) => match[1]).join('\n')),
+    coverage: canonicalPlan.coverage,
+    canonicalPlan,
+  }, null, 2)}\n`);
   for (const input of [sourceInput, ...dependencyInputs]) {
     const destination = candidateSourcePath(candidateDirectory, input.relative);
     mkdirSync(path.dirname(destination), { recursive: true });
@@ -317,7 +353,7 @@ function unsuccessfulReceipt(
   return receipt;
 }
 
-export function executeFixture(
+export async function executeFixture(
   fixture: AuthoringFixture,
   suiteDirectory: string,
   runDirectory: string,
@@ -325,7 +361,7 @@ export function executeFixture(
   hashes: ReturnType<typeof authoringHashes>,
   plansDirectory: string | undefined,
   workerTimeoutMs = 480_000,
-): AuthoringReceipt {
+): Promise<AuthoringReceipt> {
   if (!/^[a-z0-9-]+$/.test(fixture.id)) throw new Error('unsafe fixture id');
   if (!Number.isSafeInteger(workerTimeoutMs) || workerTimeoutMs < 1) throw new Error('worker timeout must be a positive integer');
   const startedAt = new Date().toISOString();
@@ -349,7 +385,7 @@ export function executeFixture(
   let generatedSourceManifest: ReceiptArtifact;
   try {
     planSnapshot = readFileSync(candidatePlan);
-    generatedSourceManifest = materializeCandidate(fixture, suiteDirectory, candidateDirectory, receiptDirectory, candidatePlan, planSnapshot);
+    generatedSourceManifest = await materializeCandidate(fixture, suiteDirectory, candidateDirectory, receiptDirectory, candidatePlan, planSnapshot);
   } catch (error) {
     if (isMissingFileError(error)) {
       return unsuccessfulReceipt(
@@ -476,7 +512,7 @@ export function executeFixture(
   }
 }
 
-function main(): void {
+async function main(): Promise<void> {
   const suiteDirectory = path.resolve(valueFor('--suite') ?? 'benchmarks/authoring');
   const suppliedPlans = valueFor('--plans');
   const plansDirectory = suppliedPlans ? path.resolve(suppliedPlans) : undefined;
@@ -500,7 +536,7 @@ function main(): void {
   mkdirSync(runDirectory);
   const receipts: AuthoringReceipt[] = [];
   for (const fixture of fixtures) {
-    const receipt = executeFixture(fixture, suiteDirectory, runDirectory, runner, hashes, plansDirectory);
+    const receipt = await executeFixture(fixture, suiteDirectory, runDirectory, runner, hashes, plansDirectory);
     const file = path.join(runDirectory, 'receipts', `${receipt.fixtureId}.json`);
     if (existsSync(file)) throw new Error(`refusing to overwrite fixture receipt: ${file}`);
     write(file, `${JSON.stringify(receipt, null, 2)}\n`);
@@ -538,4 +574,4 @@ function main(): void {
   if (!run.summary.contractPass) process.exitCode = 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) main();
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) void main();

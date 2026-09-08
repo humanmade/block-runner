@@ -26,7 +26,10 @@ describe('canonical agent skill', () => {
     expect(skill).toContain('license: GPL-2.0-or-later');
     expect(skill).toContain('compatibility: Requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0');
     expect(skill).toContain('references/GUIDE.md');
-    expect(await readCanonicalSkillGuide()).toContain('# Block Runner — agent guide');
+    const guide = await readCanonicalSkillGuide();
+    expect(guide).toContain('# Block Runner — agent guide');
+    expect(guide).toContain('Primary HTML workflow: complete proposal → canonical plan');
+    expect(guide).toContain('authoring-proposal-example:start');
   });
 
   it('keeps a balanced activation regression set', async () => {

@@ -509,12 +509,12 @@ boundary. `AuthoringPlan` remains the semantic input contract for existing consu
 deprecated semantic `compileAuthoringPlan()` adapt that contract; their returned `canonicalPlan`
 is a `GeneratedAuthoringPlan` that consumers review and write.
 
-For HTML authoring, a harness first calls `collectSourceEvidence()` (or `author()` analysis) and
-then sends `AuthorOptions.proposal`: an ordered native structure with the returned `sourceRef`s,
-editor fields/locks, and any explicit content decisions. Block Runner binds exact source content,
-assets, CSS coverage, and required warnings before returning the same canonical plan. Existing
-complete `AuthorOptions.plan` callers remain supported. Component foundation containment remains
-an explicit `author.styles.foundation: 'component'` caller policy.
+For HTML authoring, the primary path first calls `collectSourceEvidence()` and then sends
+`AuthorOptions.proposal`: an ordered native structure with the returned `sourceRef`s, editor
+fields/locks, and reviewed source decisions. Block Runner owns exact source hashes/content coverage,
+assets, native style adapters, CSS coverage, and mandatory warnings before returning the canonical
+plan. Inspection/validation need no consent; only the final canonical write identity does. Existing
+complete `AuthorOptions.plan` callers remain supported as an advanced compatibility route.
 The runnable [authoring lifecycle example](examples/authoring-plan.ts) uses the same shape as the
 CLI and skill examples from proposal through preview, confirmation identity, and generation.
 

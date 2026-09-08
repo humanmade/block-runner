@@ -41,9 +41,9 @@ unsure whether the styling matters, ask the user rather than silently flattening
 ## 2. Registered-block authoring — plan, preview, confirm, write, prove
 
 Use this path for one reusable `namespace/slug` block source package. The model interprets the
-design and produces the versioned declarative **`GeneratedAuthoringPlan`**; the deterministic source
-generator produces all executable source and serializes blocks. This is deliberately different
-from converting a design into page `post_content`.
+design into a semantic proposal; deterministic `author()` returns the canonical versioned
+**`GeneratedAuthoringPlan`**, produces executable source, and serializes blocks. This is deliberately
+different from converting a design into page `post_content`.
 
 The 0.9 authoring workflow is an unreleased candidate. Until its npm channel is
 published and independently verified, install a reviewed, pinned candidate tarball in
@@ -52,22 +52,110 @@ nonexistent `@testing` tag: stable `latest` remains on 0.8.0. An installed skill
 rewrites runtime commands to the exact version that installed it, so its compiler and
 guide cannot drift.
 
-### The model's job: make the authoring plan, never the implementation
+### The model's job: make a semantic proposal, never the implementation
 
-The plan must state the target identity and **final** destination, native structure, field modes
-(`fixed`, `editable`, or `override`), locking, style and asset dispositions, pattern-override
-fields, planned outputs, and every warning. Make material choices explicit: which content can be
-edited, which structure is locked, what maps to native/theme support, what requires scoped CSS,
-which assets are available, and which fields a pattern may override. A missing destination is a
-question for the user, not permission to use a temporary directory.
+For HTML, first call `collectSourceEvidence()` and send `AuthorOptions.proposal`: native structure
+with its `sourceRef`s, fields, editability, locking, and reviewed source decisions. Make those
+choices explicit, but do not manufacture ledgers, asset hashes, native CSS adapters, source hashes,
+or mandatory warnings. `author()` owns them and returns the canonical `GeneratedAuthoringPlan`.
+Inspection and validation need no consent; only the final canonical write identity needs it.
 
-The plan is declarative JSON only. Do **not** emit or ask the user to paste React, JSX, TSX,
-PHP, a complete `block.json`, generated CSS, `registerBlockType` or
-`register_block_type` calls, or `<!-- wp:… -->` delimiters. Do not put executable source in a
-plan's file content. The generator owns executable source and block serialization; the model
-owns the reviewable design decisions.
+The proposal is declarative JSON only. Do **not** emit or ask the user to paste React, JSX, TSX,
+PHP, `block.json`, generated CSS, `registerBlockType`, `register_block_type`, or `<!-- wp:… -->`
+delimiters. The generator owns executable source and block serialization; the model owns the
+reviewable semantic decisions.
 
-### `GeneratedAuthoringPlan` v1 shape
+### Primary HTML workflow: complete proposal → canonical plan
+
+Read this proposal contract before the advanced complete-plan format below. A proposal has only
+these root keys: `structure` (required), and optional `fields`, `locking`, `allowedBlocks`,
+`pattern`, and `sourceDecisions`. Do not put `version`, `generatorVersion`, `target`, `source`,
+`coverage`, `styles`, `assets`, `files`, or `warnings` in it: `author()` derives and owns those
+canonical-plan records.
+
+Each `structure` node has required stable `id` and `block`, and optional `sourceRef`,
+`attributes`, `lock`, and recursive `children`. A `sourceRef` is the exact opaque
+`<source-sha256>:<start>-<end>` value returned by `collectSourceEvidence()` for this exact input;
+never construct, shorten, reuse, or edit one. Bind source-content units to their matching native
+block: headings to `core/heading`, paragraphs to `core/paragraph`, list items to
+`core/list-item`, figures (or unwrapped images) to `core/image`, and standalone links to
+`core/button`. Containers such as `section` and `div`, plus required wrappers such as
+`core/buttons`, may use their source reference when they represent source structure. Synthetic
+wrappers have an `id` and `block` but no `sourceRef`; use them only where native nesting requires
+one, for example `core/buttons` around source-bound `core/button` children. Do not bind the same
+source unit twice or bind overlapping content nodes.
+
+`fields` are `{ id, label, mode, node?, attribute?, type?, default?, description? }`; `mode` is
+exactly `fixed`, `editable`, or `override`. Point editable fields at the native node and attribute
+they expose. Supported editing pairs are heading/paragraph/list-item `content`; image `id`,
+`url`, `title`, `alt`, `caption`; and button `text`, `url`, `linkTarget`, `rel`.
+`locking` is `{ mode: "all" | "contentOnly" | "insert" | "none", move?, remove?,
+insert? }`; use a node's optional `{ move?, remove? }` `lock` for an individual node. `allowedBlocks`
+is an optional direct-child insertion allowlist. `pattern` is optional
+`{ ready, overrides: [{ field, label?, description? }] }` and refers to field IDs.
+
+`sourceDecisions` are reviewed dispositions, never executable instructions:
+`{ action: "add" | "replace" | "omit", sourceRef, node?, attribute?, value?, reason }`.
+Every source-content unit must be bound or explicitly omitted with a reason. A replacement names
+the exact bound `node` and `attribute`; an add describes proposal-owned material; an omission is
+for a real source unit. Do not use a decision to hide an unconsumed source value.
+
+Supported native source mappings include `figure > img + figcaption` owned together by one
+`core/image` (`author()` derives and retains the image URL, valid source width and height, alt text, and caption), and `core/buttons > core/button` for
+CTA links. An authored CSS grid is retained on its source-bound `core/group` when the native grid
+mapping is supported. It is not a promise to convert arbitrary CSS grids into `core/columns`.
+Node `label`, plus every complete-plan-only key listed above, belongs only to the advanced
+`GeneratedAuthoringPlan` route and must not appear in a proposal.
+
+This small public example uses only packed public imports. It derives source evidence, source
+coverage, and the external image asset from the supplied HTML; it supplies no manual ledger,
+asset, hash, adapter, or warning.
+
+<!-- authoring-proposal-example:start -->
+```js
+import { author, collectSourceEvidence } from 'block-runner';
+
+const html = `<style>.feature-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 2rem; }</style>
+<section><div class="feature-grid"><div><p>Release note</p><h2>Ship native editing</h2><p>Review the source trail before writing.</p><div><a href="/start">Start</a><a href="/docs">Read docs</a></div></div><figure><img src="https://cdn.example.test/editor.png" alt="Editor controls"><figcaption>Controls remain editable.</figcaption></figure></div></section>`;
+const evidence = collectSourceEvidence(html);
+const ref = (tag, occurrence = 0) => evidence.structure.filter((entry) => entry.tag === tag)[occurrence]?.sourceRef;
+const report = await author(html, {
+  author: { name: 'acme/feature-note', title: 'Feature note', styles: { mode: 'css' } },
+  proposal: {
+    structure: [{ id: 'feature', block: 'core/group', sourceRef: ref('section'), children: [
+      { id: 'grid', block: 'core/group', sourceRef: ref('div', 0), children: [
+        { id: 'copy', block: 'core/group', sourceRef: ref('div', 1), children: [
+          { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) },
+          { id: 'title', block: 'core/heading', sourceRef: ref('h2') },
+          { id: 'body', block: 'core/paragraph', sourceRef: ref('p', 1) },
+          { id: 'actions', block: 'core/buttons', sourceRef: ref('div', 2), children: [
+            { id: 'start', block: 'core/button', sourceRef: ref('a', 0) },
+            { id: 'docs', block: 'core/button', sourceRef: ref('a', 1) },
+          ] },
+        ] },
+        { id: 'image', block: 'core/image', sourceRef: ref('figure') },
+      ] },
+    ] }],
+    fields: [{ id: 'title-content', label: 'Title', mode: 'editable', node: 'title', attribute: 'content' }],
+    locking: { mode: 'contentOnly' },
+  },
+});
+if (!report.ok || !report.package?.canonicalPlan) throw new Error('authoring proposal was rejected');
+process.stdout.write(`${JSON.stringify(report.package.canonicalPlan, null, 2)}\n`);
+```
+<!-- authoring-proposal-example:end -->
+
+Run it from a project with the packed package installed, then preview, obtain confirmation, and
+write the exact canonical identity:
+
+```bash
+node author-proposal.mjs > feature-note.plan.json
+npx --no-install block-runner author preview feature-note.plan.json --output-dir <exact-final-destination>
+# Show the complete preview; obtain its full confirmation hash and explicit approval.
+npx --no-install block-runner author write feature-note.plan.json --confirm '<full preview hash>' --output-dir '<exact-final-destination>'
+```
+
+### Advanced: complete `GeneratedAuthoringPlan` v1 shape
 
 The CLI accepts exactly this versioned JSON shape. Object keys may be in any order; arrays retain
 their order and every listed value participates in the confirmation hash. `files` names
@@ -162,12 +250,9 @@ An empty `files` list lets the compiler enumerate its complete
 source set in the preview; it does not mean no output. A native SVG adds an owned
 `asset-urls.mjs` source file, which is included in confirmation and the manifest.
 
-For existing HTML/CSS input, first analyse the exact input to obtain deterministic `sourceRef`s.
-Then submit `AuthorOptions.proposal` with ordered native structure, source references, fields,
-locks, and explicit add/replace/omit decisions. Block Runner owns source hashes, content transport,
-assets, CSS coverage, and mandatory warnings, then returns the usual canonical plan for preview,
-confirmation, and writing. Complete `AuthorOptions.plan` remains supported for existing callers,
-but do not make a model copy ledgers, asset hashes, destinations, CSS rules, or warnings.
+For existing HTML/CSS input, the proposal workflow above is primary. Complete `AuthorOptions.plan`
+remains supported as an advanced compatibility route, but do not make a model copy ledgers, asset
+hashes, destinations, CSS rules, or warnings.
 
 Tailwind detection is advisory. Supplied compiled CSS can be handled as ordinary CSS; Tailwind
 source/runtime output needs an explicit, pinned build graph (including custom variants, plugins,

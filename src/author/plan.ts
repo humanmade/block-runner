@@ -204,6 +204,7 @@ export function compileAnalyzedDesign(input: {
     ? reconcileProposalStyleOwnership(
       structure, input.rules, input.styleLedger, input.source, input.sourceRefToNode,
       input.stylesheetFacts?.rules ?? input.rules, input.cascadeSensitiveDeclarations ?? new Set(), input.sourcePath,
+      definition.styles?.foundation, `.wp-block-${name.replace('/', '-')}`,
     )
     : { rules: input.rules, styleLedger: input.styleLedger };
   const responsive = liftExactResponsiveStyles({
@@ -326,6 +327,8 @@ function reconcileProposalStyleOwnership(
   sourceRules: readonly CssRule[],
   cascadeSensitiveDeclarations: ReadonlySet<string>,
   sourcePath?: string,
+  foundation?: 'component',
+  scopeRoot?: string,
 ): { rules: readonly CssRule[]; styleLedger: readonly AuthoredStyleLedgerEntry[] } {
   const dom = new JSDOM(source, { includeNodeLocations: true });
   try {
@@ -377,7 +380,7 @@ function reconcileProposalStyleOwnership(
       return output;
     }, []);
     const residual = removePromoted(rules);
-    return adaptNativeSourceStyles(structure, residual, nextLedger, sourceNode, bindings, sourcePath, (ref) => dom.nodeLocation(sourceNode.get(ref)!) ?? undefined);
+    return adaptNativeSourceStyles(structure, residual, nextLedger, sourceNode, bindings, sourcePath, (ref) => dom.nodeLocation(sourceNode.get(ref)!) ?? undefined, foundation, scopeRoot);
   } finally { dom.window.close(); }
 }
 
@@ -390,14 +393,16 @@ const BUTTON_WRAPPER_RESET = new Map<string, string>([
 ]);
 const BUTTON_TARGET_PROPERTIES = new Set(`color background background-color background-image border border-color border-width border-style border-radius box-shadow
   padding padding-top padding-right padding-bottom padding-left margin margin-top margin-right margin-bottom margin-left display width height min-width max-width min-height max-height
-  font font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform white-space opacity transform translate rotate scale filter
+  font font-family font-size font-weight font-style line-height letter-spacing text-align text-decoration text-transform white-space justify-content opacity transform translate rotate scale filter
   transition transition-property transition-duration transition-delay transition-timing-function outline outline-color outline-width outline-style outline-offset cursor`.split(/\s+/));
+const VALID_CUSTOM_PROPERTY = /^--[a-zA-Z_][a-zA-Z0-9_-]*$/;
 
 /** Insert narrowly-qualified native rules beside their exact source rule, preserving nesting/order. */
 function adaptNativeSourceStyles(
   structure: AuthoringStructureNode[], rules: readonly CssRule[], ledger: AuthoredStyleLedgerEntry[],
   sourceNodes: ReadonlyMap<string, Element>, bindings: ReadonlyMap<string, string>, sourcePath: string | undefined,
   locationFor: (ref: string) => { startOffset: number; startLine: number; startCol: number } | undefined,
+  foundation?: 'component', scopeRoot?: string,
 ): { rules: CssRule[]; styleLedger: AuthoredStyleLedgerEntry[] } {
   const nodes = flattenNodes(structure);
   // Conversion retains source classes for residual CSS. For a directly-bound img, however,
@@ -440,6 +445,8 @@ function adaptNativeSourceStyles(
   const targetFor = (selector: string): NativeTarget[] | undefined => {
     const subjects = nativeSelectorSubjects(selector);
     if (!subjects) {
+      const contained = scopeRoot ? scopeLocalSelectorList(selector, scopeRoot, { foundation }) : undefined;
+      if (contained?.ok && contained.foundation) return undefined;
       const bound = [...bindings.entries()].map(([sourceRef, id]) => ({ sourceRef, node: nodes.find((candidate) => candidate.id === id), element: sourceNodes.get(sourceRef) }))
         .filter((candidate): candidate is { sourceRef: string; node: AuthoringStructureNode; element: Element } => !!candidate.node && !!candidate.element);
       if (bound.some((candidate) => ['core/button', 'core/image', 'core/group', 'core/columns'].includes(candidate.node.block))) {
@@ -454,7 +461,7 @@ function adaptNativeSourceStyles(
           .sort((left, right) => (locationFor(left.sourceRef)?.startOffset ?? Number.MAX_SAFE_INTEGER) - (locationFor(right.sourceRef)?.startOffset ?? Number.MAX_SAFE_INTEGER)
             || left.sourceRef.localeCompare(right.sourceRef));
         if (matching.length) throw new NativeTargetBindingError(matching.map((candidate) => ({ sourceRef: candidate.sourceRef, node: candidate.node.id!, role: nativeAdapterRole(candidate.node) })), `${selector} is not a supported single-subject native selector`);
-        throw new Error(`unresolved-native-style-mapping: ${selector} is not a supported single-subject native selector`);
+        return undefined;
       }
       return undefined;
     }
@@ -532,7 +539,12 @@ function adaptNativeSourceStyles(
       });
     }
     if (!targets?.length) return [rule];
-    const gridDeclarations = rule.declarations.filter((declaration) => gridProperties.has(declaration.property));
+    // `display:flex` is ordinary residual layout, not evidence that a Core container owns a
+    // grid. Only display:grid participates in the native-grid ownership/rejection path.
+    const hasNonGridDisplay = rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() !== 'grid');
+    const gridDeclarations = hasNonGridDisplay ? [] : rule.declarations.filter((declaration) => declaration.property !== 'display'
+      ? gridProperties.has(declaration.property)
+      : declaration.value.trim() === 'grid');
     const unresolved = (reason: string, target = targets[0], declaration = rule.declarations[0]) => {
       const sourceRef = target?.sourceRef;
       const location = sourceRef ? locationFor(sourceRef) : undefined;
@@ -552,7 +564,7 @@ function adaptNativeSourceStyles(
       throw unresolved('core/columns cannot own an authored grid');
     }
     if (targets.some((target) => nodes.find((node) => node.id === target.node)?.block === 'core/button')
-      && rule.declarations.some((declaration) => !BUTTON_TARGET_PROPERTIES.has(declaration.property))) {
+      && rule.declarations.some((declaration) => !BUTTON_TARGET_PROPERTIES.has(declaration.property) && !VALID_CUSTOM_PROPERTY.test(declaration.property))) {
       throw unresolved('property is outside the supported core/button adapter');
     }
     for (const target of targets.filter((candidate) => candidate.role === 'image')) {
@@ -592,6 +604,7 @@ function adaptNativeSourceStyles(
     }
     const extras: CssRule[] = targets.flatMap((target, targetIndex) => {
       const targetDeclarations = target.role === 'grid-container' ? rule.declarations.filter((declaration) => gridProperties.has(declaration.property)) : rule.declarations;
+      if (!targetDeclarations.length) return [];
       const targetRule: CssRule = { ...rule, id: `${rule.id}.native-target.${targetIndex}`, selector: target.target, declarations: targetDeclarations, generated: 'native-adapter-target' };
       const resets = target.reset ? rule.declarations.filter((declaration) => BUTTON_WRAPPER_RESET.has(declaration.property)).map((declaration) => ({ ...declaration, id: `${declaration.id}.native-reset.${targetIndex}`, value: BUTTON_WRAPPER_RESET.get(declaration.property)! })) : [];
       return resets.length ? [targetRule, { ...rule, id: `${rule.id}.native-reset.${targetIndex}`, selector: target.reset!, declarations: resets, generated: 'native-adapter-wrapper-reset' } as CssRule] : [targetRule];

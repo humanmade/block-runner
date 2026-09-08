@@ -27,6 +27,22 @@ try {
   const conversion = JSON.parse(run(process.execPath, [cli, 'convert', '<p>Node support smoke</p>', '--json'], consumer).stdout);
   if (!conversion.ok) throw new Error('Packed CLI conversion smoke did not succeed.');
 
+  const guide = readFileSync(path.join(consumer, 'node_modules', 'block-runner', 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
+  const example = guide.match(/<!-- authoring-proposal-example:start -->\s*```js\n([\s\S]*?)\n```\s*<!-- authoring-proposal-example:end -->/);
+  if (!example) throw new Error('Packed guide is missing its marked runnable authoring proposal example.');
+  const exampleFile = path.join(consumer, 'guide-authoring-proposal.mjs');
+  writeFileSync(exampleFile, example[1] + '\n');
+  const canonicalPlan = JSON.parse(run(process.execPath, [exampleFile], consumer).stdout);
+  const nodes = flatten(canonicalPlan.structure ?? []);
+  const grid = nodes.find((node) => node.id === 'grid');
+  const image = nodes.find((node) => node.id === 'image');
+  if (canonicalPlan.version !== 1 || !canonicalPlan.source || !canonicalPlan.coverage
+    || !canonicalPlan.assets?.some((asset) => asset.source === 'https://cdn.example.test/editor.png' && asset.status === 'external')
+    || grid?.attributes?.layout?.type !== 'grid'
+    || image?.block !== 'core/image' || image.attributes?.caption !== 'Controls remain editable.') {
+    throw new Error('Packed guide authoring proposal example did not derive its canonical source, coverage, asset, and native bindings.');
+  }
+
   const typecheck = path.join(root, 'node_modules', '.bin', 'tsc');
   writeFileSync(path.join(consumer, 'library-smoke.mts'), [
     "import { AuthoringGenerationError, convert, type ConvertOptions } from 'block-runner';",
@@ -40,7 +56,7 @@ try {
 
   run(process.execPath, ['--input-type=module', '--eval', [
     "const api = await import('block-runner');",
-    "if (typeof api.convert !== 'function' || typeof api.AuthoringGenerationError !== 'function') throw new Error('missing public library exports');",
+    "if (typeof api.convert !== 'function' || typeof api.author !== 'function' || typeof api.collectSourceEvidence !== 'function' || typeof api.AuthoringGenerationError !== 'function') throw new Error('missing public library exports');",
   ].join('\n')], consumer);
 
   console.log('Packed engine-strict install, CLI, and typed library smoke passed on Node ' + process.versions.node + '.');
@@ -53,6 +69,10 @@ function parsePackJson(stdout) {
   const start = stdout.indexOf('[\n');
   if (start < 0) throw new Error('npm pack did not return JSON output:\n' + stdout);
   return JSON.parse(stdout.slice(start));
+}
+
+function flatten(nodes) {
+  return nodes.flatMap((node) => [node, ...flatten(node.children ?? [])]);
 }
 
 function trash(target) {

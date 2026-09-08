@@ -74,7 +74,7 @@ export function bindAuthoringProposal(input: {
         element = index.get(node.sourceRef);
         if (!element) throw staleSourceRefDiagnostic('proposal sourceRef', node.sourceRef, node.id, input);
         if (isSourceUnit(element) && !isCompatibleSourceBinding(element, node.block)) {
-          throw new Error(`${describeElement(element, dom, input.sourcePath)}: proposal sourceRef ${node.sourceRef} cannot bind ${element.tagName.toLowerCase()} content to ${node.block}`);
+          throw incompatibleSourceBindingDiagnostic(node, element, dom, input);
         }
         if (ownsContent(node.block)) {
           const overlapping = [...usedElements.entries()].find(([, candidate]) => candidate === element || candidate.contains(element!) || element!.contains(candidate));
@@ -91,6 +91,7 @@ export function bindAuthoringProposal(input: {
       return { id: node.id, block: node.block, ...(Object.keys(attributes).length ? { attributes } : {}), ...(node.lock ? { lock: node.lock } : {}), ...(node.children?.length ? { children: node.children.map(bind) } : {}) };
     };
     const structure = input.proposal.structure.map(bind);
+    validateNativeProposalRelationships(input.proposal.structure, index, dom, input);
     const nodeIds = new Set(flatten(input.proposal.structure).map((node) => node.id));
     validateDecisions(decisions, index, sourceRefToNode, nodeIds, input, dom);
     return {
@@ -115,15 +116,74 @@ export function bindAuthoringProposal(input: {
   } finally { dom.window.close(); }
 }
 
+/** Validate native parentage while source and proposal references are still directly available. */
+function validateNativeProposalRelationships(
+  nodes: readonly AuthoringProposalNode[],
+  index: ReadonlyMap<string, Element>,
+  dom: JSDOM,
+  input: Parameters<typeof bindAuthoringProposal>[0],
+  parent?: AuthoringProposalNode,
+): void {
+  for (const node of nodes) {
+    if (node.block === 'core/button' && parent?.block !== 'core/buttons') {
+      const element = node.sourceRef ? index.get(node.sourceRef) : undefined;
+      throw authorDiagnostic(
+        'invalid-proposal-relationship',
+        `proposal node ${node.id} cannot bind core/button outside a core/buttons parent`,
+        sourceLocation(element, dom, input.sourcePath),
+        {
+          sourceRef: node.sourceRef,
+          node: node.id,
+          selectedParent: parent ? { node: parent.id, block: parent.block } : null,
+          requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' },
+          action: 'place-core-button-under-core-buttons',
+        },
+      );
+    }
+    validateNativeProposalRelationships(node.children ?? [], index, dom, input, node);
+  }
+}
+
+function incompatibleSourceBindingDiagnostic(
+  node: AuthoringProposalNode,
+  element: Element,
+  dom: JSDOM,
+  input: Parameters<typeof bindAuthoringProposal>[0],
+): ReturnType<typeof authorDiagnostic> {
+  const sourceTag = element.tagName.toLowerCase();
+  const expectedBlock = sourceTag === 'figure' || sourceTag === 'img' ? 'core/image' : undefined;
+  return authorDiagnostic(
+    'incompatible-proposal-source-binding',
+    `${describeElement(element, dom, input.sourcePath)}: proposal sourceRef ${node.sourceRef} cannot bind ${sourceTag} content to ${node.block}`,
+    sourceLocation(element, dom, input.sourcePath),
+    {
+      sourceRef: node.sourceRef,
+      node: node.id,
+      block: node.block,
+      ...(expectedBlock ? { requiredBlock: expectedBlock } : {}),
+      classification: 'incompatible-source-block-binding',
+      action: expectedBlock === 'core/image' ? 'replace-with-core-image' : 'select-a-compatible-native-block',
+    },
+  );
+}
+
 function bindContent(node: AuthoringProposalNode, element: Element, attributes: Record<string, JsonValue>, decisions: Map<string, AuthoringProposalDecision>, ref: string): void {
   const decision = (attribute: string) => decisions.get(`${ref}:${node.id}:${attribute}`) ?? decisions.get(`${ref}::${attribute}`);
   const apply = (attribute: string, value: JsonValue): void => {
     const change = decision(attribute);
     if (change?.action === 'omit') return;
-    if (attributes[attribute] !== undefined && JSON.stringify(attributes[attribute]) !== JSON.stringify(value) && !change) throw new Error(`proposal ${node.id}.${attribute} changes source content without an explicit source decision`);
+    if (attributes[attribute] !== undefined && !sourceAttributeMatchesProposal(node.block, attribute, attributes[attribute], value) && !change) throw new Error(`proposal ${node.id}.${attribute} changes source content without an explicit source decision`);
     attributes[attribute] = change?.action === 'replace' || change?.action === 'add' ? change.value! : value;
   };
   for (const [attribute, value] of sourceAttributes(element, node.block)) apply(attribute, value);
+}
+
+/** Only native image dimensions accept their numeric proposal form; canonical plans retain source strings. */
+function sourceAttributeMatchesProposal(block: string, attribute: string, proposed: JsonValue, source: JsonValue): boolean {
+  if (JSON.stringify(proposed) === JSON.stringify(source)) return true;
+  return block === 'core/image' && (attribute === 'width' || attribute === 'height')
+    && typeof proposed === 'number' && Number.isSafeInteger(proposed) && proposed > 0
+    && source === String(proposed);
 }
 
 function safeHtml(element: Element): string { const safe = richTextSafe(element); if (!safe.safe) throw new Error(`source content is not RichText-safe: ${safe.reason}`); return cleanRichText(element).html; }

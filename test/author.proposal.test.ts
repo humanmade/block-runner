@@ -15,7 +15,7 @@ import {
   writeGeneratedRegisteredBlock,
 } from '../src/index.js';
 import { validateSourceContent } from '../src/author/content.js';
-import type { AuthoringStructureNode } from '../src/authoring/schema.js';
+import type { AuthoringStructureNode, JsonValue } from '../src/authoring/schema.js';
 
 const benchmarkRoot = path.resolve('benchmarks/authoring/sources');
 async function source(relative: string): Promise<{ html: string; sourcePath: string }> {
@@ -136,6 +136,51 @@ describe('author proposal boundary', () => {
     expect(report.package!.canonicalPlan!.sourceDecisions![0]).toMatchObject({ action: 'replace', original: 'Original copy', value: 'Revised copy' });
   });
 
+  it.each([
+    ['direct image', '<img src="/hero.jpg" alt="Hero" width="640" height="480">', 'img'],
+    ['figure image', '<figure><img src="/hero.jpg" alt="Hero" width="640" height="480"></figure>', 'figure'],
+  ])('binds %s dimensions from equivalent numeric proposal values as source strings', async (_name, html, tag) => {
+    const reference = refs(html)(tag);
+    const report = await author(html, { author: { name: 'example/proposal' }, proposal: {
+      structure: [{ id: 'image', block: 'core/image', sourceRef: reference, attributes: { width: 640, height: 480 } }],
+    } });
+    expect(report.ok, JSON.stringify(report.items)).toBe(true);
+    expect(report.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ width: '640', height: '480' });
+    expect(report.package!.canonicalPlan!.sourceDecisions).toBeUndefined();
+    const omitted = await author(html, { author: { name: 'example/proposal' }, proposal: {
+      structure: [{ id: 'image', block: 'core/image', sourceRef: reference, attributes: { width: 640 } }],
+      sourceDecisions: [{ action: 'omit', sourceRef: reference, node: 'image', attribute: 'height', reason: 'Height is intentionally omitted.' }],
+    } });
+    expect(omitted.ok, JSON.stringify(omitted.items)).toBe(true);
+    expect(omitted.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ width: '640' });
+    expect(omitted.package!.canonicalPlan!.structure[0]!.attributes).not.toHaveProperty('height');
+    expect(omitted.package!.canonicalPlan!.sourceDecisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'omit', attribute: 'height', original: '480' }),
+    ]));
+  });
+
+  it('requires decisions for changed or invalid image dimension proposal values', async () => {
+    const html = '<img src="/hero.jpg" alt="Hero" width="640" height="480">';
+    const reference = refs(html)('img');
+    const proposal = (width: JsonValue, height: JsonValue) => ({ structure: [{ id: 'image', block: 'core/image', sourceRef: reference, attributes: { width, height } }] });
+    const changed = await author(html, { author: { name: 'example/proposal' }, proposal: proposal(641, 480) });
+    expect(changed.ok).toBe(false);
+    expect(changed.items.map((item) => item.reason).join('\n')).toMatch(/changes source content without an explicit source decision/i);
+    for (const value of [640.5, 0, -640, Infinity, true, {}, Number.MAX_SAFE_INTEGER + 1, '640px']) {
+      const rejected = await author(html, { author: { name: 'example/proposal' }, proposal: proposal(value, 480) });
+      expect(rejected.ok, `${String(value)}: ${JSON.stringify(rejected.items)}`).toBe(false);
+    }
+    const reviewed = await author(html, { author: { name: 'example/proposal' }, proposal: {
+      ...proposal('641', 480),
+      sourceDecisions: [{ action: 'replace', sourceRef: reference, node: 'image', attribute: 'width', value: '641', reason: 'Approved image crop.' }],
+    } });
+    expect(reviewed.ok, JSON.stringify(reviewed.items)).toBe(true);
+    expect(reviewed.package!.canonicalPlan!.structure[0]!.attributes).toMatchObject({ width: '641', height: '480' });
+    expect(reviewed.package!.canonicalPlan!.sourceDecisions).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'replace', attribute: 'width', original: '640', value: '641' }),
+    ]));
+  });
+
   it('accounts for identical source units by reference and audits href aliases', async () => {
     const html = '<h2>Same</h2><h2>Same</h2><p>Discard</p><a href="/old">Read</a>';
     const evidence = collectSourceEvidence(html).structure;
@@ -243,6 +288,84 @@ describe('author proposal boundary', () => {
       expect(plan.coverage!.styles.some((entry) => entry.nativeTargets?.some((target) => target.role === 'button-link'))).toBe(true);
     }
     validateSourceContent(html, compileRegisteredBlock(plan).template);
+  });
+
+  it('binds the complete self-contained utility hero handoff through proposal and canonical-plan routes', async () => {
+    const { html, sourcePath } = await source('utility/hero-handoff.html');
+    const css = await readFile(path.join(benchmarkRoot, 'utility', 'hero.css'), 'utf8');
+    const ref = refs(html);
+    const proposal = { structure: [{ id: 'hero', block: 'core/group', sourceRef: ref('section'), children: [
+      { id: 'hero-grid', block: 'core/group', sourceRef: ref('div', 0), children: [
+        { id: 'copy', block: 'core/group', sourceRef: ref('div', 1), children: [
+          { id: 'eyebrow', block: 'core/paragraph', sourceRef: ref('p', 0) },
+          { id: 'title', block: 'core/heading', sourceRef: ref('h1') },
+          { id: 'lede', block: 'core/paragraph', sourceRef: ref('p', 1) },
+          { id: 'buttons', block: 'core/buttons', sourceRef: ref('div', 2), children: [
+            { id: 'download', block: 'core/button', sourceRef: ref('a', 0) },
+            { id: 'guide', block: 'core/button', sourceRef: ref('a', 1) },
+          ] },
+        ] },
+        { id: 'image', block: 'core/image', sourceRef: ref('figure') },
+      ] },
+    ] }], fields: [
+      { id: 'eyebrow-content', label: 'Eyebrow', mode: 'editable' as const, node: 'eyebrow', attribute: 'content' },
+      { id: 'title-content', label: 'Title', mode: 'editable' as const, node: 'title', attribute: 'content' },
+      { id: 'lede-content', label: 'Body', mode: 'editable' as const, node: 'lede', attribute: 'content' },
+      { id: 'download-text', label: 'Download CTA', mode: 'editable' as const, node: 'download', attribute: 'text' },
+      { id: 'guide-text', label: 'Guide CTA', mode: 'editable' as const, node: 'guide', attribute: 'text' },
+      { id: 'image-url', label: 'Product image URL', mode: 'editable' as const, node: 'image', attribute: 'url' },
+      { id: 'image-alt', label: 'Product image alt text', mode: 'editable' as const, node: 'image', attribute: 'alt' },
+    ], locking: { mode: 'contentOnly' as const } };
+    const options = {
+      sourcePath,
+      assetRoot: path.dirname(sourcePath),
+      author: { name: 'block-runner/hero', styles: { mode: 'css' as const, css, foundation: 'component' as const } },
+      proposal,
+    };
+    const first = await author(html, options);
+    expect(first.ok, JSON.stringify(first.items)).toBe(true);
+    const plan = first.package!.canonicalPlan!;
+    const second = await author(html, options);
+    expect(second.ok, JSON.stringify(second.items)).toBe(true);
+    expect(plan).toEqual(second.package!.canonicalPlan);
+    const nodes = nodesById(plan.structure);
+    expect(nodes.get('eyebrow')!.attributes).toMatchObject({ content: 'Block Runner 0.9' });
+    expect(nodes.get('title')!.attributes).toMatchObject({ content: 'Build a WordPress block your team can keep editing.' });
+    expect(nodes.get('lede')!.attributes).toMatchObject({ content: 'Turn a finished interface into a registered block with clear controls, native markup, and a source trail reviewers can inspect.' });
+    expect(nodes.get('download')!.attributes).toMatchObject({ text: 'Download the testing release', url: '/download' });
+    expect(nodes.get('guide')!.attributes).toMatchObject({ text: 'Read the authoring guide', url: '/docs/authoring' });
+    expect(nodes.get('image')!.attributes).toMatchObject({ alt: 'Aurora dashboard with color tokens, release receipts, and a completed activation check', caption: 'Native controls stay with the block, not in a screenshot.' });
+    expect(plan.fields).toEqual([
+      expect.objectContaining({ id: 'eyebrow-content', mode: 'editable', node: 'eyebrow', attribute: 'content' }),
+      expect.objectContaining({ id: 'title-content', mode: 'editable', node: 'title', attribute: 'content' }),
+      expect.objectContaining({ id: 'lede-content', mode: 'editable', node: 'lede', attribute: 'content' }),
+      expect.objectContaining({ id: 'download-text', mode: 'editable', node: 'download', attribute: 'text' }),
+      expect.objectContaining({ id: 'guide-text', mode: 'editable', node: 'guide', attribute: 'text' }),
+      expect.objectContaining({ id: 'image-url', mode: 'editable', node: 'image', attribute: 'url' }),
+      expect.objectContaining({ id: 'image-alt', mode: 'editable', node: 'image', attribute: 'alt' }),
+    ]);
+    expect(plan.sourceDecisions).toBeUndefined();
+    expect(plan.source).toMatchObject({ entry: sourcePath });
+    expect(plan.assets).toEqual(expect.arrayContaining([expect.objectContaining({
+      source: path.join(path.dirname(sourcePath), 'assets/aurora-dashboard.svg'),
+      uses: [expect.objectContaining({ node: 'image', attribute: 'url' })],
+    })]));
+    expect(plan.structure[0]!.children![0]!.children!.map((node) => node.id)).toEqual(['copy', 'image']);
+    expect(plan.locking).toEqual({ mode: 'contentOnly' });
+    const roundtrip = await author(html, {
+      sourcePath,
+      assetRoot: path.dirname(sourcePath),
+      author: options.author,
+      plan,
+    });
+    expect(roundtrip.ok, JSON.stringify(roundtrip.items)).toBe(true);
+    expect(roundtrip.package!.canonicalPlan).toEqual(plan);
+    validateSourceContent(html, compileRegisteredBlock(plan).template);
+    const tampered = structuredClone(plan);
+    tampered.coverage!.styles.find((entry) => entry.transportSelector && entry.nativeTargets?.length)!.transportSelector = '.unrelated-target';
+    const rejected = await author(html, { sourcePath, assetRoot: path.dirname(sourcePath), author: options.author, plan: tampered });
+    expect(rejected.ok).toBe(false);
+    expect(rejected.package).toBeUndefined();
   });
 
   it('binds the semantic cards hierarchy without dropping content', async () => {

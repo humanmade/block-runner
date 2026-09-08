@@ -360,7 +360,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       command: 'author',
       source,
       summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length + fontItems.length },
-      items: [...fontItems, ...graphItems],
+      items: [...stageSourceAnalysisItems(fontItems), ...stageSourceAnalysisItems(graphItems)],
       styleLedger: safetyLedger,
       assets: assets.length > 0 ? assets : undefined,
       evidence: { ...evidence, dependencies: [...evidence.dependencies, { kind: 'tailwind-build', reference: 'pinned compiler/build graph' }], coverage: sourceCoverage(safetyLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
@@ -375,7 +375,7 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       command: 'author',
       source,
       summary: { blocks: 0, valid: 0, invalid: 0, warnings: graphItems.length + fontItems.length },
-      items: [...fontItems, ...graphItems],
+      items: [...stageSourceAnalysisItems(fontItems), ...stageSourceAnalysisItems(graphItems)],
       styleLedger: safetyLedger,
       assets: assets.length > 0 ? assets : undefined,
       evidence: { ...evidence, coverage: sourceCoverage(safetyLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
@@ -402,7 +402,11 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         ...nativeSource.conversion.summary,
         warnings: nativeSource.conversion.summary.warnings + graphItems.length + fontItems.length,
       },
-      items: [...nativeSource.conversion.items, ...fontItems, ...graphItems],
+      items: [
+        ...stageSourceAnalysisItems(nativeSource.conversion.items),
+        ...stageSourceAnalysisItems(fontItems),
+        ...stageSourceAnalysisItems(graphItems),
+      ],
       styleLedger: preflightStyleLedger,
       assets: assets.length > 0 ? assets : undefined,
       evidence: { ...evidence, coverage: sourceCoverage(preflightStyleLedger, assets, [...preparedAssets.values()], styleInput, editorStyleInput, definition, options, fontWarnings) },
@@ -484,7 +488,27 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
         selectorDependencies: selectorTransport.dependencies,
       });
     } catch (error) {
-      return authorFailure(error, source, evidence);
+      const failureItems = stageFinalProposalItems(authoringFailureItems('input', error));
+      return {
+        ...conversion,
+        ok: false,
+        command: 'author',
+        source,
+        summary: {
+          ...conversion.summary,
+          warnings: conversion.summary.warnings + fontItems.length + graphItems.length + assetItems.length + failureItems.length,
+        },
+        items: [
+          ...stageSourceAnalysisItems(conversion.items),
+          ...stageSourceAnalysisItems(fontItems),
+          ...stageSourceAnalysisItems(graphItems),
+          ...stageSourceAnalysisItems(assetItems),
+          ...failureItems,
+        ],
+        assets: assets.length > 0 ? assets : undefined,
+        styleLedger,
+        evidence,
+      };
     }
   }
   let compiled: ReturnType<typeof compileAnalyzedDesign> | undefined;
@@ -602,7 +626,13 @@ export async function author(input: string, options: AuthorOptions = {}): Promis
       ...conversion.summary,
       warnings: conversion.summary.warnings + fontItems.length + graphItems.length + assetItems.length + generationItems.length,
     },
-    items: [...conversion.items, ...fontItems, ...graphItems, ...assetItems, ...generationItems],
+    items: [
+      ...stageSourceAnalysisItems(conversion.items),
+      ...stageSourceAnalysisItems(fontItems),
+      ...stageSourceAnalysisItems(graphItems),
+      ...stageSourceAnalysisItems(assetItems),
+      ...stageFinalProposalItems(generationItems),
+    ],
     assets: assets.length > 0 ? assets : undefined,
     styleLedger: compiled ? [...styleLedger, ...compiled.editorStyleLedger] : styleLedger,
     package: packageSource,
@@ -735,7 +765,7 @@ function authorFailure(
   source?: BlockRunnerReport['source'],
   evidence?: AuthorSourceEvidence,
 ): BlockRunnerReport {
-  const items = authoringFailureItems('input', failure);
+  const items = stageSourceAnalysisItems(authoringFailureItems('input', failure));
   return {
     ok: false,
     command: 'author',
@@ -744,6 +774,26 @@ function authorFailure(
     summary: { blocks: 0, valid: 0, invalid: 0, warnings: items.length },
     items,
   };
+}
+
+type AuthorItemStage = { stage: 'intermediate'; phase: 'source-analysis' } | { stage: 'final-proposal' };
+
+function stageAuthorItems(items: readonly ReportItem[], stage: AuthorItemStage): ReportItem[] {
+  return items.map((item) => ({
+    ...item,
+    details: {
+      ...(item.details && typeof item.details === 'object' && !Array.isArray(item.details) ? item.details : {}),
+      ...stage,
+    },
+  }));
+}
+
+function stageSourceAnalysisItems(items: readonly ReportItem[]): ReportItem[] {
+  return stageAuthorItems(items, { stage: 'intermediate', phase: 'source-analysis' });
+}
+
+function stageFinalProposalItems(items: readonly ReportItem[]): ReportItem[] {
+  return stageAuthorItems(items, { stage: 'final-proposal' });
 }
 
 /**
@@ -1680,7 +1730,12 @@ function reconcileVerifiedNativeTargets(
       && candidate.property === entry.property && candidate.value === entry.value
       && candidate.atRules.join('\u0000') === entry.atRules.join('\u0000')
       && candidate.source?.selector === entry.source?.selector && candidate.source?.offset === entry.source?.offset);
-    if (matching.length === 1 && matching[0]!.nativeTargets?.length) entry.nativeTargets = matching[0]!.nativeTargets!.map((target) => ({ ...target }));
+    if (matching.length === 1 && matching[0]!.nativeTargets?.length) {
+      entry.nativeTargets = matching[0]!.nativeTargets!.map((target) => ({ ...target }));
+      if (entry.nativeTargets.every((target) => target.role === 'image' || target.role === 'caption')) {
+        entry.transportSelector = entry.nativeTargets[0]!.selector;
+      }
+    }
   }
 }
 

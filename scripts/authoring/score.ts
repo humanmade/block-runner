@@ -647,6 +647,7 @@ function requiredWarningCode(fixture: AuthoringFixture): string | undefined {
 }
 
 const STYLE_LEDGER_OWNERS = new Set(['block', 'theme', 'pattern', 'asset', 'unsupported']);
+const VALID_CUSTOM_PROPERTY = /^--[a-zA-Z_][a-zA-Z0-9_-]*$/;
 
 function styleLedgerFailures(file: string): string[] {
   let ledger: unknown;
@@ -664,8 +665,13 @@ function styleLedgerFailures(file: string): string[] {
       failures.push(`style-ledger entry ${index} must be an object`);
       continue;
     }
-    for (const key of ['selector', 'property', 'value', 'editorControl']) {
+    for (const key of ['selector', 'property', 'editorControl']) {
       if (typeof entry[key] !== 'string' || !entry[key].trim()) failures.push(`style-ledger entry ${index} requires ${key}`);
+    }
+    const value = entry.value;
+    const property = entry.property;
+    if (typeof value !== 'string' || (!value.trim() && !(value === '' && typeof property === 'string' && VALID_CUSTOM_PROPERTY.test(property)))) {
+      failures.push(`style-ledger entry ${index} requires value`);
     }
     if (typeof entry.owner !== 'string' || !STYLE_LEDGER_OWNERS.has(entry.owner)) {
       failures.push(`style-ledger entry ${index} has an invalid owner`);
