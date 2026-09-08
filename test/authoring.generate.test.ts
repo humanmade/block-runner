@@ -131,6 +131,7 @@ describe('registered-block source compiler', () => {
 
     const style = sourceFile(first.files, 'style.scss').content;
     expect(style).toContain(`style emitter v${REGISTERED_BLOCK_STYLE_EMITTER_VERSION}`);
+    expect(style).not.toContain('max-width: none !important;');
     expect(style).toContain('border: 1px solid #111;');
     expect(style).toContain('color: var(--wp--preset--color--primary);');
     expect(sourceFile(first.files, 'editor.scss').content).not.toContain('border: 1px solid #111;');
@@ -138,6 +139,24 @@ describe('registered-block source compiler', () => {
     for (const file of first.files) {
       expect(file.content).not.toMatch(/block[- ]runner|tailwind/i);
     }
+  });
+
+  it('preserves a source outer canvas around a centered max-width inner group', () => {
+    const input = plan();
+    input.structure = [{
+      id: 'canvas', block: 'core/group', children: [{
+        id: 'layout', block: 'core/group', attributes: { className: 'mx-auto max-w-screen' },
+      }],
+    }];
+    input.styles.rules = [
+      { kind: 'style', selector: '.mx-auto', declarations: [
+        { property: 'margin-left', value: 'auto' }, { property: 'margin-right', value: 'auto' },
+      ] },
+      { kind: 'style', selector: '.max-w-screen', declarations: [{ property: 'max-width', value: '80rem' }] },
+    ];
+
+    const style = sourceFile(compileRegisteredBlock(input).files, 'style.scss').content;
+    expect(style).toContain('.wp-block-acme-callout {\n  width: 100%;\n  max-width: none !important;');
   });
 
   it('uses the full pinned WordPress schema, including support-value constraints', () => {
