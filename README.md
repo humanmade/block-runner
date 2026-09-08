@@ -717,6 +717,32 @@ export default {
 };
 ```
 
+## Site context from Wesper
+
+Supply a full Wesper manifest as a token source for conversion or canonicalisation:
+
+```sh
+block-runner convert '<p style="color:#0057ff">Hello</p>' --context site.context.json
+```
+
+The resolver prefers Wesper 0.0.3's `theme.tokens.presets`: collected colour, font-family,
+font-size and spacing values map to the matching WordPress preset category and slug.
+An explicitly empty registry stays empty; it does not fall back to old settings. Manifests
+without this registry retain the legacy `theme.settings` route. Malformed context yields no
+resolved tokens, following the existing resolver contract. This mapping does not attest the
+manifest's source hash or turn partial collection into complete site compatibility evidence.
+
+Wesper's `focusContext()` output is a derived view, not a manifest for `--context`. Callers can
+map its selected tokens into `config.tokens.colors`, `fonts`, `fontSizes` and `spacing` for
+the library API. Registered-block authoring separately accepts an explicit theme settings
+snapshot at `author.styles.context.theme.settings`; `--context` does not populate that snapshot
+or import binding permissions. Use Wesper's validation and compatibility helpers in the calling
+harness when those checks are needed.
+
+The bundled `context` command remains on the pinned Wesper 0.0.2 WP-CLI collector. Manifests
+collected separately with the upcoming 0.0.3 release are accepted by the resolver above; upgrading
+the bundled collector requires updating its dependency and lockfile after that release is available.
+
 ## Styling fidelity
 
 Design HTML often carries custom CSS (and sometimes JavaScript) that doesn't match
