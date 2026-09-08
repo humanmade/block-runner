@@ -42,7 +42,7 @@ npm install /absolute/path/to/block-runner-0.9.0.tgz
 ```
 
 Candidate preparation and release evidence are described in
-[`release/0.9-testing`](release/0.9-testing/README.md). Publishing or changing
+[`release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/release/0.9-testing/README.md). Publishing or changing
 npm tags remains a manual owner decision. The registered-block `author`, `plugin`, and
 `proof` workflow below refers to that reviewed candidate, while the page-content
 conversion workflow remains available on stable 0.8.
@@ -111,13 +111,13 @@ still vary between harnesses, so use `--dir` when a client documents a different
 The image is **historical conversion evidence**, not an authoring result. Its workload is 63
 fixed HTML sections per lane (11 serial lanes, 693 conversions); the suite, models/low effort,
 per-lane invalid counts, and monotonic serial timing method are labelled in the
-[benchmark report](benchmarks/presentation/figures.html). Each model gets the same fixture in two
+[benchmark report](https://github.com/humanmade/block-runner/blob/main/benchmarks/presentation/figures.html). Each model gets the same fixture in two
 lanes: **Direct** writes Gutenberg markup itself; **Block Runner** returns an intent tree that the
 package assembles and validates. The dashed line is the deterministic rules converter running
 without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
 
 Registered-block authoring has a separate, currently unscored corpus in
-[`benchmarks/authoring`](benchmarks/authoring/README.md). It has no combined score with this
+[`benchmarks/authoring`](https://github.com/humanmade/block-runner/blob/main/benchmarks/authoring/README.md). It has no combined score with this
 suite: it records editable plans, generated plugin source, native-block use, the style ledger,
 warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
 The authoring benchmark is optional for 0.9 testing and does not run automatically during release
@@ -515,8 +515,20 @@ fields/locks, and reviewed source decisions. Block Runner owns exact source hash
 assets, native style adapters, CSS coverage, and mandatory warnings before returning the canonical
 plan. Inspection/validation need no consent; only the final canonical write identity does. Existing
 complete `AuthorOptions.plan` callers remain supported as an advanced compatibility route.
-The runnable [authoring lifecycle example](examples/authoring-plan.ts) uses the same shape as the
-CLI and skill examples from proposal through preview, confirmation identity, and generation.
+The runnable [authoring example](examples/authoring-plan.mjs) derives a canonical plan from
+HTML and a semantic proposal using only public imports. From a project with the candidate installed:
+
+```sh
+node node_modules/block-runner/examples/authoring-plan.mjs > notice.plan.json
+npx --no-install block-runner author preview notice.plan.json --output-dir generated/notice
+# Review the complete preview and approve its destination-bound confirmation hash.
+npx --no-install block-runner author write notice.plan.json \
+  --confirm '<confirmation-hash-from-preview>' --output-dir generated/notice
+```
+
+The example emits JSON only. The CLI supplies the same destination-bound preview and write checks
+used by other plans; the plan hash alone is not a write confirmation. Continue with either plugin
+packaging route above.
 
 #### Regeneration and saved content
 
@@ -659,12 +671,6 @@ and v1-to-v2 content persistence; `proof-real-wordpress.test.ts` and
 shared publication matrix plus adapter suites for concurrent edits and interruption;
 `proof-visual-baselines.test.ts` for reviewed bytes; and the visibly skipped mutation suite for
 real-ZIP detector checks.
-
-Timing is recorded only as comparable observed samples, never as a general speed claim. The
-baseline is `npm test` at head `631a13bd` with the same lockfile on the same Mini: started
-`2026-09-06T05:08:49.668Z`, finished `2026-09-06T05:14:44.746Z`, duration `355.078s`. Record the
-single required #52 Foundry-gate sample beside it with its exact tested head, command, start time,
-exit time, and duration; do not compare unrelated CI lanes, machines, or workloads.
 
 ## Media Resolution
 
@@ -814,7 +820,7 @@ This requires saved canonical candidate plans and the configured WordPress runti
 the corpus README. Without them it reports blocked work, not a benchmark result. It does
 not turn unrun browser/editor work or a model/tool failure into a zero product score. The 0.9
 testing-release package, installer, and activation checks are run with `npm run release:check`;
-see [`release/0.9-testing`](release/0.9-testing/README.md) for the receipt matrix and the
+see [`release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/release/0.9-testing/README.md) for the receipt matrix and the
 draft product-preview brief.
 
 ## License

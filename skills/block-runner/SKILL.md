@@ -69,9 +69,11 @@ Four paths. Pick by the requested artifact:
   the report and tell the user.
 - **If the CSS matters, use `convert`, not `assemble`.** An intent tree carries structure and
   content, not styling. Ask the user rather than silently flattening their design.
-- **Do not claim a complete registered block without proof.** A full success requires the
-  pattern-override gate and the real WordPress runtime/editor proof, with its receipt. A
-  headless conversion check alone is not enough.
+- **Name the proof claim and retain its receipt.** Registration, editing, and fidelity need
+  their corresponding real WordPress proof. Require pattern-override proof when that capability
+  is claimed; it is not a requirement for an artifact that declares no pattern overrides.
+  The exhaustive `full` profile still requires every full-profile gate. A headless conversion
+  check alone does not establish runtime or editor behavior.
 - **Passwords go in `--wp-app-password-env <NAME>`, never in argv.**
 - **It is an assist, not a gate.** If the tool is unavailable, fall back to your own checks and
   say so — never block the user on it.

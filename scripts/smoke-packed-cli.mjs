@@ -44,6 +44,18 @@ try {
     throw new Error('Packed guide authoring proposal example did not derive its canonical source, coverage, asset, and native bindings.');
   }
 
+  const publicExample = path.join(consumer, 'node_modules/block-runner/examples/authoring-plan.mjs');
+  const examplePlan = JSON.parse(run(process.execPath, [publicExample], consumer).stdout);
+  if (examplePlan.target?.name !== 'acme/notice' || !examplePlan.source || !examplePlan.coverage
+    || !flatten(examplePlan.structure ?? []).some((node) => node.block === 'core/button' && node.attributes?.url === '/details')) {
+    throw new Error('Packed public example did not produce its source-bound canonical plan.');
+  }
+  writeFileSync(path.join(consumer, 'notice.plan.json'), JSON.stringify(examplePlan));
+  const examplePreview = JSON.parse(run(process.execPath, [cli, 'author', 'preview', 'notice.plan.json', '--output-dir', path.join(consumer, 'notice'), '--json'], consumer).stdout);
+  if (!examplePreview.noFilesWritten || !examplePreview.confirmation || examplePreview.confirmation === examplePreview.planHash) {
+    throw new Error('Packed public example did not reach a destination-bound preview.');
+  }
+
   // Run the documented owner-acceptance preparation through this packed consumer.
   // These explicit proposals exercise the supplied fixtures, not a model benchmark.
   const acceptanceInputs = path.join(consumer, 'acceptance-inputs');
