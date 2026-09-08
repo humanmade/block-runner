@@ -539,7 +539,12 @@ function adaptNativeSourceStyles(
       });
     }
     if (!targets?.length) return [rule];
-    const gridDeclarations = rule.declarations.filter((declaration) => gridProperties.has(declaration.property));
+    // `display:flex` is ordinary residual layout, not evidence that a Core container owns a
+    // grid. Only display:grid participates in the native-grid ownership/rejection path.
+    const hasNonGridDisplay = rule.declarations.some((declaration) => declaration.property === 'display' && declaration.value.trim() !== 'grid');
+    const gridDeclarations = hasNonGridDisplay ? [] : rule.declarations.filter((declaration) => declaration.property !== 'display'
+      ? gridProperties.has(declaration.property)
+      : declaration.value.trim() === 'grid');
     const unresolved = (reason: string, target = targets[0], declaration = rule.declarations[0]) => {
       const sourceRef = target?.sourceRef;
       const location = sourceRef ? locationFor(sourceRef) : undefined;

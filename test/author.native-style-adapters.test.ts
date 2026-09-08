@@ -126,6 +126,28 @@ describe('native source-style adapters', () => {
     expect(report.items).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'unresolved-native-style-mapping' })]));
   });
 
+  it('does not treat flex as authored-grid evidence while retaining the core/columns grid rejection', async () => {
+    const html = '<section class="layout"><p>One</p><p>Two</p></section>';
+    const proposal = { structure: [{ id: 'columns', block: 'core/columns', sourceRef: refs(html)('section'), children: [
+      { id: 'first', block: 'core/column', children: [{ id: 'one', block: 'core/paragraph', sourceRef: refs(html)('p') }] },
+      { id: 'second', block: 'core/column', children: [{ id: 'two', block: 'core/paragraph', sourceRef: refs(html)('p', 1) }] },
+    ] }] };
+    const flex = await author(html, {
+      author: { name: 'example/columns-flex', styles: { mode: 'css', css: '.layout { display: flex; gap: 1rem; }' } }, proposal,
+    });
+    expect(flex.ok, JSON.stringify(flex.items)).toBe(true);
+    expect(flex.package!.canonicalPlan!.coverage!.styles.find((entry) => entry.property === 'display')?.nativeTargets).toBeUndefined();
+
+    const grid = await author(html, {
+      author: { name: 'example/columns-grid', styles: { mode: 'css', css: '.layout { display: grid; gap: 1rem; }' } }, proposal,
+    });
+    expect(grid.ok).toBe(false);
+    expect(grid.package).toBeUndefined();
+    expect(grid.items).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'unresolved-native-style-mapping', reason: expect.stringMatching(/core\/columns cannot own an authored grid/i) }),
+    ]));
+  });
+
   it('reads complete image class atoms and bounded figure child compounds', () => {
     expect(nativeSelectorSubjects('.min-h-\\[680px\\]')).toMatchObject([{ classes: [{ decoded: 'min-h-[680px]' }] }]);
     expect(nativeSelectorSubjects('.tracking-\\[0\\.18em\\]')).toMatchObject([{ classes: [{ decoded: 'tracking-[0.18em]' }] }]);
@@ -182,10 +204,14 @@ describe('native source-style adapters', () => {
       author: { name: 'example/unwrapped-button', styles: { mode: 'css', css: 'div .move:hover { color: red; }' } },
       proposal: { structure: [{ id: 'section', block: 'core/group', sourceRef: refs(html)('div') }, { id: 'button', block: 'core/button', sourceRef: refs(html)('a') }] },
     });
-    const item = report.items.find((candidate) => candidate.code === 'unresolved-native-style-mapping')!;
+    const item = report.items.find((candidate) => candidate.code === 'invalid-proposal-relationship')!;
     expect(report.package).toBeUndefined();
     expect(item.source).toMatchObject({ path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21, htmlLine: 1, htmlColumn: 22 });
-    expect(item.details).toMatchObject({ htmlSource: { path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21 }, cssSource: { selector: 'div .move:hover' } });
+    expect(item.details).toMatchObject({
+      sourceRef: refs(html)('a'), node: 'button', selectedParent: null,
+      requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' },
+      action: 'place-core-button-under-core-buttons', stage: 'final-proposal',
+    });
   });
 
   it('retains every matched unwrapped anchor for an unsupported relationship', async () => {
@@ -195,16 +221,14 @@ describe('native source-style adapters', () => {
       author: { name: 'example/unwrapped-buttons', styles: { mode: 'css', css: 'div .move:hover { color: red; }' } },
       proposal: { structure: [{ id: 'section', block: 'core/group', sourceRef: refs(html)('div') }, { id: 'button-a', block: 'core/button', sourceRef: refs(html)('a') }, { id: 'button-b', block: 'core/button', sourceRef: refs(html)('a', 1) }] },
     });
-    const item = report.items.find((candidate) => candidate.code === 'unresolved-native-style-mapping')!;
+    const item = report.items.find((candidate) => candidate.code === 'invalid-proposal-relationship')!;
     expect(report.package).toBeUndefined();
-    expect(item.source).toBeUndefined();
-    expect(item.details).toMatchObject({ cssSource: { selector: 'div .move:hover' } });
-    const details = item.details as { htmlSources?: unknown };
-    expect(details.htmlSources).toEqual([
-      { sourceRef: refs(html)('a'), path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21, line: 1, column: 22 },
-      { sourceRef: refs(html)('a', 1), path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 56, line: 1, column: 57 },
-    ]);
-    expect(item.details).not.toHaveProperty('htmlSource');
+    expect(item.source).toMatchObject({ path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21, htmlLine: 1, htmlColumn: 22 });
+    expect(item.details).toMatchObject({
+      sourceRef: refs(html)('a'), node: 'button-a', selectedParent: null,
+      requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' },
+      action: 'place-core-button-under-core-buttons', stage: 'final-proposal',
+    });
   });
 
   it('rejects adapter targets whose marker is absent from serialized native markup', async () => {

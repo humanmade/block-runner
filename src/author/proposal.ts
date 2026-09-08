@@ -74,7 +74,7 @@ export function bindAuthoringProposal(input: {
         element = index.get(node.sourceRef);
         if (!element) throw staleSourceRefDiagnostic('proposal sourceRef', node.sourceRef, node.id, input);
         if (isSourceUnit(element) && !isCompatibleSourceBinding(element, node.block)) {
-          throw new Error(`${describeElement(element, dom, input.sourcePath)}: proposal sourceRef ${node.sourceRef} cannot bind ${element.tagName.toLowerCase()} content to ${node.block}`);
+          throw incompatibleSourceBindingDiagnostic(node, element, dom, input);
         }
         if (ownsContent(node.block)) {
           const overlapping = [...usedElements.entries()].find(([, candidate]) => candidate === element || candidate.contains(element!) || element!.contains(candidate));
@@ -91,6 +91,7 @@ export function bindAuthoringProposal(input: {
       return { id: node.id, block: node.block, ...(Object.keys(attributes).length ? { attributes } : {}), ...(node.lock ? { lock: node.lock } : {}), ...(node.children?.length ? { children: node.children.map(bind) } : {}) };
     };
     const structure = input.proposal.structure.map(bind);
+    validateNativeProposalRelationships(input.proposal.structure, index, dom, input);
     const nodeIds = new Set(flatten(input.proposal.structure).map((node) => node.id));
     validateDecisions(decisions, index, sourceRefToNode, nodeIds, input, dom);
     return {
@@ -113,6 +114,57 @@ export function bindAuthoringProposal(input: {
       sourceRefToNode,
     };
   } finally { dom.window.close(); }
+}
+
+/** Validate native parentage while source and proposal references are still directly available. */
+function validateNativeProposalRelationships(
+  nodes: readonly AuthoringProposalNode[],
+  index: ReadonlyMap<string, Element>,
+  dom: JSDOM,
+  input: Parameters<typeof bindAuthoringProposal>[0],
+  parent?: AuthoringProposalNode,
+): void {
+  for (const node of nodes) {
+    if (node.block === 'core/button' && parent?.block !== 'core/buttons') {
+      const element = node.sourceRef ? index.get(node.sourceRef) : undefined;
+      throw authorDiagnostic(
+        'invalid-proposal-relationship',
+        `proposal node ${node.id} cannot bind core/button outside a core/buttons parent`,
+        sourceLocation(element, dom, input.sourcePath),
+        {
+          sourceRef: node.sourceRef,
+          node: node.id,
+          selectedParent: parent ? { node: parent.id, block: parent.block } : null,
+          requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' },
+          action: 'place-core-button-under-core-buttons',
+        },
+      );
+    }
+    validateNativeProposalRelationships(node.children ?? [], index, dom, input, node);
+  }
+}
+
+function incompatibleSourceBindingDiagnostic(
+  node: AuthoringProposalNode,
+  element: Element,
+  dom: JSDOM,
+  input: Parameters<typeof bindAuthoringProposal>[0],
+): ReturnType<typeof authorDiagnostic> {
+  const sourceTag = element.tagName.toLowerCase();
+  const expectedBlock = sourceTag === 'figure' || sourceTag === 'img' ? 'core/image' : undefined;
+  return authorDiagnostic(
+    'incompatible-proposal-source-binding',
+    `${describeElement(element, dom, input.sourcePath)}: proposal sourceRef ${node.sourceRef} cannot bind ${sourceTag} content to ${node.block}`,
+    sourceLocation(element, dom, input.sourcePath),
+    {
+      sourceRef: node.sourceRef,
+      node: node.id,
+      block: node.block,
+      ...(expectedBlock ? { requiredBlock: expectedBlock } : {}),
+      classification: 'incompatible-source-block-binding',
+      action: expectedBlock === 'core/image' ? 'replace-with-core-image' : 'select-a-compatible-native-block',
+    },
+  );
 }
 
 function bindContent(node: AuthoringProposalNode, element: Element, attributes: Record<string, JsonValue>, decisions: Map<string, AuthoringProposalDecision>, ref: string): void {
