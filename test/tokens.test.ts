@@ -1,3 +1,5 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -5,6 +7,13 @@ import { canonicalize } from '../src/index.js';
 import { createTokenResolver } from '../src/tokens/resolver.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
+
+function writeContext(manifest: unknown): string {
+  const directory = mkdtempSync(path.join(tmpdir(), 'block-runner-context-'));
+  const contextPath = path.join(directory, 'site.context.json');
+  writeFileSync(contextPath, JSON.stringify(manifest));
+  return contextPath;
+}
 
 const groupBg = (hex: string) =>
   `<!-- wp:group {"style":{"color":{"background":"${hex}"}}} --><div class="wp-block-group has-background" style="background-color:${hex}"><!-- wp:paragraph --><p>Hi</p><!-- /wp:paragraph --></div><!-- /wp:group -->`;
@@ -190,6 +199,76 @@ describe('token resolution', () => {
     expect(tokens.fonts).toMatchObject({ body: 'Inter, sans-serif' });
     expect(tokens.fontSizes).toMatchObject({ large: '2rem' });
     expect(tokens.spacing).toMatchObject({ '40': '1.5rem' });
+  });
+
+  it('reads all normalized Wesper presets and prefers the explicit registry over settings', async () => {
+    const context = writeContext({
+      theme: {
+        tokens: {
+          presets: [
+            { kind: 'color', slug: 'primary', value: '#0073aa' },
+            { kind: 'font-family', slug: 'body', value: 'Inter, sans-serif' },
+            { kind: 'font-size', slug: 'large', value: 'clamp(2rem, 4vw, 3rem)' },
+            { kind: 'spacing', slug: '40', value: 'clamp(1.5rem, 5vw, 3rem)' },
+          ],
+        },
+        settings: {
+          color: { palette: [{ slug: 'primary', color: '#stale' }] },
+          typography: {
+            fontFamilies: [{ slug: 'body', fontFamily: 'stale' }],
+            fontSizes: [{ slug: 'large', size: 'stale' }],
+          },
+          spacing: { spacingSizes: [{ slug: '40', size: 'stale' }] },
+        },
+      },
+    });
+
+    const tokens = await createTokenResolver({}, { tokenResolver: 'context', context }).resolve();
+
+    expect(tokens).toEqual({
+      colors: { primary: '#0073aa' },
+      fonts: { body: 'Inter, sans-serif' },
+      fontSizes: { large: 'clamp(2rem, 4vw, 3rem)' },
+      spacing: { '40': 'clamp(1.5rem, 5vw, 3rem)' },
+    });
+  });
+
+  it('treats explicit empty or malformed preset registries as authoritative', async () => {
+    const withSettings = {
+      theme: { settings: { color: { palette: [{ slug: 'primary', color: '#0073aa' }] } } },
+    };
+    const empty = writeContext({ theme: { ...withSettings.theme, tokens: { presets: [] } } });
+    const malformed = [
+      {},
+      [{ kind: 'unknown', slug: 'primary', value: '#0073aa' }],
+      [{ kind: 'color', slug: ' ', value: '#0073aa' }],
+      [{ kind: 'color', slug: 'primary', value: ' ' }],
+      [{ kind: 'color', slug: '__proto__', value: '#0073aa' }],
+    ].map((presets) => writeContext({ theme: { ...withSettings.theme, tokens: { presets } } }));
+
+    for (const context of [empty, ...malformed]) {
+      await expect(
+        createTokenResolver({}, { tokenResolver: 'context', context }).resolve(),
+      ).resolves.toEqual({ colors: {}, fonts: {}, fontSizes: {}, spacing: {} });
+    }
+  });
+
+  it('canonicalizes native normalized colors from the context registry', async () => {
+    const context = writeContext({
+      theme: {
+        tokens: {
+          presets: [
+            { kind: 'color', slug: 'primary', value: '#0073aa' },
+          ],
+        },
+      },
+    });
+
+    const report = await canonicalize(rawGroupBg('#0073aa'), { context });
+
+    expect(report.ok).toBe(true);
+    expect(report.output).toContain('has-primary-background-color');
+    expect(report.output).not.toContain('#0073aa');
   });
 
   it('fails open to empty tokens when the context manifest is missing or malformed', async () => {
