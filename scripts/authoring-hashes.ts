@@ -42,7 +42,7 @@ export function createAuthoringHashManifest(directory: string): Record<string, u
 function main(): void {
   const args = process.argv.slice(2);
   if (args.some((arg) => arg !== '--check')) throw new Error('Usage: node --import tsx scripts/authoring-hashes.ts [--check]');
-  const directory = path.resolve('benchmarks/authoring');
+  const directory = path.resolve('dev/benchmarks/authoring');
   const expected = createAuthoringHashManifest(directory);
   if (args.includes('--check')) {
     const recorded = JSON.parse(readFileSync(path.join(directory, 'hashes.json'), 'utf8'));

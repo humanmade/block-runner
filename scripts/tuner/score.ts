@@ -74,7 +74,7 @@ export interface ProducerMeta {
 }
 
 export const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-export const EVAL_DIR = path.join(ROOT, 'benchmarks');
+export const EVAL_DIR = path.join(ROOT, 'dev', 'benchmarks');
 export const SPEC_DIR = path.join(EVAL_DIR, 'specs');
 export const PRODUCERS_DIR = path.join(EVAL_DIR, 'producers');
 export const RESULTS_PATH = path.join(EVAL_DIR, 'results.jsonl');

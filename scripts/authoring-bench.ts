@@ -7,7 +7,7 @@
  *
  * Examples:
  *   tsx scripts/authoring-bench.ts --json
- *   tsx scripts/authoring-bench.ts --suite benchmarks/authoring --receipt /tmp/authoring-run.json
+ *   tsx scripts/authoring-bench.ts --suite dev/benchmarks/authoring --receipt /tmp/authoring-run.json
  */
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -80,7 +80,7 @@ function writeReceipt(run: AuthoringRun, target: string): void {
 function help(): void {
   console.log(`Usage: tsx scripts/authoring-bench.ts [options]
 
-  --suite <directory>       Corpus directory (default: benchmarks/authoring)
+  --suite <directory>       Corpus directory (default: dev/benchmarks/authoring)
   --json                    Print full run JSON instead of the human scorecard
   --receipt <file>          Retain full machine-readable run/receipt JSON
   --model <id>              Label the executing model
@@ -98,7 +98,7 @@ function main(): void {
     help();
     return;
   }
-  const suiteDirectory = path.resolve(valueFor('--suite') ?? 'benchmarks/authoring');
+  const suiteDirectory = path.resolve(valueFor('--suite') ?? 'dev/benchmarks/authoring');
   const suite = loadAuthoringSuite(suiteDirectory);
   const run = scoreAuthoringSuite(suite, suiteDirectory, metadata());
   const receipt = optionalValue('--receipt');

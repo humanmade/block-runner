@@ -2,12 +2,12 @@
  * Conversion benchmark harness (cross-producer).
  *
  * A SPEC defines one section once:
- *   benchmarks/specs/<layout>/prompt.md      — the brief given to every producer
- *   benchmarks/specs/<layout>/expected.json  — { intent, tree }: the ideal block tree
+ *   dev/benchmarks/specs/<layout>/prompt.md      — the brief given to every producer
+ *   dev/benchmarks/specs/<layout>/expected.json  — { intent, tree }: the ideal block tree
  *
  * Each PRODUCER answers the same prompts with its own HTML:
- *   benchmarks/producers/<producer>/<layout>.html
- *   benchmarks/base/<producer>.css  — optional; inlined into that producer's
+ *   dev/benchmarks/producers/<producer>/<layout>.html
+ *   dev/benchmarks/base/<producer>.css  — optional; inlined into that producer's
  *       layouts at run time (so a producer can ship semantic markup + a shared
  *       design system). Producers without a base ship fully self-contained HTML.
  *
@@ -15,9 +15,9 @@
  * produced block tree against the SHARED spec on four axes — structure, content,
  * validity, fallbacks — printing a per-producer scorecard to the console.
  *
- * Generated pages (gitignored) under benchmarks/presentation/:
+ * Generated pages (gitignored) under dev/benchmarks/presentation/:
  *   review.html      — per layout: the ideal end state + each producer's render.
- *   scoreboard.html  — scores over time from benchmarks/results.jsonl.
+ *   scoreboard.html  — scores over time from dev/benchmarks/results.jsonl.
  *
  * With `--record` it appends one provenance-tagged record to results.jsonl.
  *
@@ -150,8 +150,8 @@ interface RunRecord {
   producerMeta: Record<string, ProducerMeta>;
 }
 
-const REPORT_PATH = path.join(ROOT, 'benchmarks', 'presentation', 'review.html');
-const SCOREBOARD_PATH = path.join(ROOT, 'benchmarks', 'presentation', 'scoreboard.html');
+const REPORT_PATH = path.join(ROOT, 'dev', 'benchmarks', 'presentation', 'review.html');
+const SCOREBOARD_PATH = path.join(ROOT, 'dev', 'benchmarks', 'presentation', 'scoreboard.html');
 
 async function main(): Promise<void> {
   const startedAt = Date.now();
@@ -160,7 +160,7 @@ async function main(): Promise<void> {
   if (engineLabel() !== 'local') console.log(`engine under test: ${engineLabel()} (${enginePath()})`);
   const specs = loadSpecs();
   if (specs.size === 0) {
-    console.log('No specs found under benchmarks/specs/.');
+    console.log('No specs found under dev/benchmarks/specs/.');
     return;
   }
   const producers = existsSync(PRODUCERS_DIR)
@@ -201,7 +201,7 @@ async function main(): Promise<void> {
   results.sort((a, b) => a.label.localeCompare(b.label));
 
   if (results.length === 0) {
-    console.log('No producer inputs found under benchmarks/producers/.');
+    console.log('No producer inputs found under dev/benchmarks/producers/.');
     return;
   }
 
@@ -223,7 +223,7 @@ async function main(): Promise<void> {
   }
 
   const history = readHistory();
-  mkdirSync(path.dirname(REPORT_PATH), { recursive: true }); // benchmarks/presentation/ generated files are gitignored
+  mkdirSync(path.dirname(REPORT_PATH), { recursive: true }); // dev/benchmarks/presentation/ generated files are gitignored
   writeFileSync(REPORT_PATH, renderHtml(specs, results), 'utf8');
   writeFileSync(SCOREBOARD_PATH, renderScoreboard(history, record), 'utf8');
   console.log(`\nreview page:  file://${REPORT_PATH}`);
@@ -310,7 +310,7 @@ function writeTimings(results: Result[], specs: Map<string, Spec>, convertMs: Ma
     convertMsSlowest: values[values.length - 1],
     perFixture: Object.fromEntries([...convertMs.entries()].sort(([a], [b]) => a.localeCompare(b)).map(([k, v]) => [k, { convertMs: v }])),
   };
-  appendFileSync(path.join(ROOT, 'benchmarks', 'timings.jsonl'), `${JSON.stringify(record)}\n`, 'utf8');
+  appendFileSync(path.join(ROOT, 'dev', 'benchmarks', 'timings.jsonl'), `${JSON.stringify(record)}\n`, 'utf8');
   console.log(`timing: ${(record.convertMsTotal / 1000).toFixed(1)}s total · median ${(record.convertMsMedian / 1000).toFixed(1)}s · slowest ${(record.convertMsSlowest / 1000).toFixed(1)}s`);
 }
 

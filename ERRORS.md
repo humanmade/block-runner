@@ -71,7 +71,7 @@ None.
 
 **Context:** The Codex and Claude benchmark engines ran one model process per fixture from the repository while disabling approval and sandbox protections. The prompts asked models not to use tools, but the process boundary did not enforce that instruction, so a misbehaving cell could mutate the checkout under measurement.
 
-**Remedy:** All benchmark engines now launch from the operating-system temporary directory. Codex uses a read-only sandbox, ignores user configuration, and does not persist sessions; Claude uses safe, restricted, non-persistent mode without bypass permissions. `test/benchmark.test.ts` locks this launch contract.
+**Remedy:** All benchmark engines now launch from the operating-system temporary directory. Codex uses a read-only sandbox, ignores user configuration, and does not persist sessions; Claude uses safe, restricted, non-persistent mode without bypass permissions. `dev/test/benchmark.test.ts` locks this launch contract.
 
 ---
 ### ERR-006: wp-scripts inherits test mode when building a release fixture

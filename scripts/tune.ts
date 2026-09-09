@@ -344,14 +344,14 @@ async function main(): Promise<void> {
   const engine = await loadEngine();
   const specs = loadSpecs();
   if (specs.size === 0) {
-    console.log('No specs found under benchmarks/specs/.');
+    console.log('No specs found under dev/benchmarks/specs/.');
     return;
   }
   const hash = suiteHash(specs);
   const currentScorerHash = scorerHash();
   const all = allFixtures(specs);
   if (all.length === 0) {
-    console.log('No producer inputs found under benchmarks/producers/.');
+    console.log('No producer inputs found under dev/benchmarks/producers/.');
     return;
   }
 
@@ -412,7 +412,7 @@ async function main(): Promise<void> {
 
   if (has('--capture') && regressions.length > 0) {
     const written = captureRegressions(regressions, results, engine.label, modelLabel(), effortLabel());
-    console.log(`\ncaptured ${written.length} regression${written.length === 1 ? '' : 's'} → benchmarks/regressions/`);
+    console.log(`\ncaptured ${written.length} regression${written.length === 1 ? '' : 's'} → dev/benchmarks/regressions/`);
   }
 
   if (has('--baseline-update')) {
@@ -425,7 +425,7 @@ async function main(): Promise<void> {
       currentScorerHash,
       currentGutenbergVersion,
     );
-    console.log(`\nbaseline updated → benchmarks/baselines/ (${Object.keys(updated.fixtures).length} fixtures, best-ever)`);
+    console.log(`\nbaseline updated → dev/benchmarks/baselines/ (${Object.keys(updated.fixtures).length} fixtures, best-ever)`);
   }
 
   // The ratchet gate: a run that regressed a fixture below baseline exits non-zero, unless

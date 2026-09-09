@@ -374,7 +374,7 @@ function hashInput(value: unknown, directory: string): string {
 
 export function authoringHashes(suite: AuthoringSuite, inputs: HashInputs = {}): AuthoringHashes {
   const environment = suite.environment ?? {};
-  const directory = SUITE_DIRECTORIES.get(suite) ?? path.join(ROOT, 'benchmarks', 'authoring');
+  const directory = SUITE_DIRECTORIES.get(suite) ?? path.join(ROOT, 'dev', 'benchmarks', 'authoring');
   const prompt = inputs.prompt ?? suite.prompt ?? suite.fixtures.map((fixture) => fixture.prompt ?? null);
   // The corpus guide is the contract plus the concise README unless a suite supplies one.
   const guide = inputs.guide ?? suite.guide ?? ['contract.md', 'README.md', ...suite.fixtures.map((fixture) => fixture.guide ?? null)];
@@ -978,7 +978,7 @@ export function publishedFigureLabel(run: Pick<AuthoringRun, 'summary' | 'metada
  * `fixtures/`. Duplicate fixture ids are rejected so a suite cannot silently
  * replace a result.  This keeps corpus definitions easy to inspect and review.
  */
-export function loadAuthoringSuite(directory = path.join(ROOT, 'benchmarks', 'authoring')): AuthoringSuite {
+export function loadAuthoringSuite(directory = path.join(ROOT, 'dev', 'benchmarks', 'authoring')): AuthoringSuite {
   let suite: AuthoringSuite = { contract: AUTHORING_BENCHMARK_CONTRACT, fixtures: [] };
   // `suite.json` carries environment/provenance while `fixtures.json` carries
   // the fixture index. Read both when present; neither silently replaces the

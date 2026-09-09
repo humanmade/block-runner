@@ -28,7 +28,7 @@ authoring and retains the pre-1.0 API policy below. Before creating a release, r
 deterministic release candidate gates from the candidate checkout:
 
 ```sh
-npm run release:check -- --manual-review proof/reviews/0.9.0/owner-acceptance.json --receipt release/0.9-testing/receipts/<version>.json
+npm run release:check -- --manual-review proof/reviews/0.9.0/owner-acceptance.json --receipt dev/release/0.9-testing/receipts/<version>.json
 ```
 
 The 13-fixture registered-block authoring benchmark is optional and does not
@@ -48,7 +48,7 @@ counts, and timing method; and the package, skill, and activation matrix. A brow
 without a receipt is `blocked`, not passed. The optional authoring benchmark is recorded as
 pending/unscored unless its separate plans and worker run is retained. The detailed matrix and
 product-preview state live in
-[`release/0.9-testing`](release/0.9-testing/README.md).
+[`dev/release/0.9-testing`](dev/release/0.9-testing/README.md).
 
 1. Bump the version: `npm version patch|minor|major` (commits + tags).
 2. Push the tag: `git push --follow-tags`.

@@ -432,7 +432,7 @@ function validateGeneratedPluginActivation(receipt, zipHash) {
 
 function gitValue(args, fallback) { const result = spawnSync('git', args, { cwd: ROOT, encoding: 'utf8' }); return result.status === 0 && result.stdout.trim() ? result.stdout.trim() : fallback; }
 function authoringProvenance() {
-  const directory = path.join(ROOT, 'benchmarks', 'authoring');
+  const directory = path.join(ROOT, 'dev', 'benchmarks', 'authoring');
   const corpusHash = treeHash(directory, (relative) => relative !== 'hashes.json' && !relative.startsWith('runs/'));
   const fixtureManifestHash = treeHash(directory, (relative) => relative === 'fixtures.json' || relative === 'suite.json' || relative === 'schema.json' || relative.startsWith('fixtures/'));
   const sourceSetHash = treeHash(directory, (relative) => relative.startsWith('sources/'));
@@ -448,7 +448,7 @@ function authoringProvenance() {
   }))));
   const expectedPlanHash = treeHash(directory, (relative) => relative.endsWith('/expected-plan.json'));
   const manifest = JSON.parse(readFileSync(path.join(directory, 'hashes.json'), 'utf8'));
-  if (manifest.values?.suiteHash?.value !== corpusHash.replace(/^sha256:/, '')) throw new Error('benchmarks/authoring/hashes.json suiteHash is stale');
+  if (manifest.values?.suiteHash?.value !== corpusHash.replace(/^sha256:/, '')) throw new Error('dev/benchmarks/authoring/hashes.json suiteHash is stale');
   const environment = activation?.result?.environment ?? {};
   return { suiteHash: corpusHash, corpusHash, scorerHash: hash(canonicalJson({ scorer: hashFile(path.join(ROOT, 'scripts', 'authoring', 'score.ts')), runner: hashFile(path.join(ROOT, 'scripts', 'authoring-runner.ts')) })), fixtureManifestHash, sourceSetHash, sourceDependencyHash, expectedPlanHash, promptGuideHash: hash(canonicalJson([hashFile(path.join(directory, 'contract.md')), hashFile(path.join(directory, 'README.md')), treeHash(path.join(directory, 'fixtures'), (relative) => relative.endsWith('/prompt.md'))])), templateHash: hash(canonicalJson({ compiler: treeHash(path.join(ROOT, 'src/authoring')), plugin: hashFile(path.join(ROOT, 'src/plugin/profile.ts')) })), dependencyHash: hashFile(path.join(ROOT, 'package-lock.json')), wordpressHash: environment.wordpressHash ?? null, themeHash: environment.themeHash ?? null, browserHash: environment.browserHash ?? null, generatedSourceHash: pluginZip?.sourceHash ?? null };
 }

@@ -122,8 +122,8 @@ const artifacts = {};
 const log = [];
 const hash = (bytes) => `sha256:${crypto.createHash('sha256').update(bytes).digest('hex')}`;
 const json = (file) => JSON.parse(fs.readFileSync(file, 'utf8'));
-const fixtureSpec = json(path.join(config.repo, 'benchmarks', 'authoring', 'fixtures.json')).fixtures.find((value) => value.id === fixture);
-if (!fixtureSpec) failPreflight(`fixture ${fixture} is not in ${config.repo}/benchmarks/authoring/fixtures.json.`);
+const fixtureSpec = json(path.join(config.repo, 'dev', 'benchmarks', 'authoring', 'fixtures.json')).fixtures.find((value) => value.id === fixture);
+if (!fixtureSpec) failPreflight(`fixture ${fixture} is not in ${config.repo}/dev/benchmarks/authoring/fixtures.json.`);
 const declaredFidelityViewports = (() => {
   const captures = fixtureSpec.assertions?.fidelity?.viewportCaptures;
   if (!Array.isArray(captures) || captures.length === 0) failPreflight(`fixture ${fixture} must declare at least one fidelity viewport capture.`);

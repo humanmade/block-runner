@@ -29,7 +29,7 @@ import { PROOF_IMAGE_BASE64, PROOF_SVG_SOURCE } from '../src/proof/fixture-image
 const execFileAsync = promisify(execFile);
 const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const projectRoot = path.resolve(scriptDirectory, '..');
-const planPath = path.join(projectRoot, 'test', 'fixtures', 'authoring', 'pattern-overrides.plan.json');
+const planPath = path.join(projectRoot, 'dev', 'test', 'fixtures', 'authoring', 'pattern-overrides.plan.json');
 const visualGoldenPath = fixtureVisualGoldenPath();
 const pluginSlug = 'block-runner-pattern-overrides-fixture';
 const responsivePluginSlug = 'block-runner-responsive-style-fixture';
@@ -119,7 +119,7 @@ export interface BuiltNativeStyleAdapterFixture {
  */
 export async function buildNativeStyleAdapterProofFixture(outputDir: string): Promise<BuiltNativeStyleAdapterFixture> {
   const root = path.resolve(outputDir);
-  const sourcePath = path.join(projectRoot, 'benchmarks', 'authoring', 'sources', 'utility', 'hero.html');
+  const sourcePath = path.join(projectRoot, 'dev', 'benchmarks', 'authoring', 'sources', 'utility', 'hero.html');
   const source = await readFile(sourcePath, 'utf8');
   const inputPath = path.join(root, 'native-style-adapter.original.html');
   const cssPath = path.join(root, 'native-style-adapter.supplied.css');
@@ -362,7 +362,7 @@ export async function buildPatternOverridesFixture(
   const svgBytes = Buffer.from(PROOF_SVG_SOURCE);
   await writeFile(sourceSvg, svgBytes);
   const sourceFont = path.join(root, 'source', 'proof-font.woff2');
-  const fontBytes = await readFile(path.join(projectRoot, 'test', 'fixtures', 'fonts', 'IBMPlexMono-Regular.woff2'));
+  const fontBytes = await readFile(path.join(projectRoot, 'dev', 'test', 'fixtures', 'fonts', 'IBMPlexMono-Regular.woff2'));
   await writeFile(sourceFont, fontBytes);
   const fontFamily = `${registeredBlockFontFamilyPrefix(plan.target.name)}proof`;
   const assetPlan: AuthoringPlan['assets'] = [{ id: 'canonical-image', source: 'source/canonical.png', status: 'ready', destination: 'assets/canonical.png',

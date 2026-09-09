@@ -8,7 +8,7 @@
 #
 # For each commit it: adds a git worktree, installs + builds that version's engine,
 # then runs THIS checkout's suite + harness against it (via BLOCK_RUNNER_ENGINE) and
-# appends a record to benchmarks/results.jsonl tagged `engine=<commit>`.
+# appends a record to dev/benchmarks/results.jsonl tagged `engine=<commit>`.
 #
 # Caveats (see md/08-benchmark-system.md):
 #   - Requires a stable convert() public API; a commit that broke it is a floor.
@@ -34,4 +34,4 @@ for SHA in "$@"; do
   git worktree remove -f "$WT"
 done
 
-echo "=== done. See the scoreboard (benchmarks/presentation/scoreboard.html) for engine-tagged rows. ==="
+echo "=== done. See the scoreboard (dev/benchmarks/presentation/scoreboard.html) for engine-tagged rows. ==="

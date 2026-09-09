@@ -59,14 +59,14 @@ try {
   // Run the documented owner-acceptance preparation through this packed consumer.
   // These explicit proposals exercise the supplied fixtures, not a model benchmark.
   const acceptanceInputs = path.join(consumer, 'acceptance-inputs');
-  run(process.execPath, [path.join(root, 'acceptance/0.9-testing/prepare-inputs.mjs'),
+  run(process.execPath, [path.join(root, 'dev/acceptance/0.9-testing/prepare-inputs.mjs'),
     '--output', acceptanceInputs, '--candidate-revision', run('git', ['rev-parse', 'HEAD'], root).stdout.trim()], consumer);
   const acceptanceScript = path.join(consumer, 'author-input.mjs');
-  writeFileSync(acceptanceScript, readFileSync(path.join(root, 'acceptance/0.9-testing/author-input.mjs')));
+  writeFileSync(acceptanceScript, readFileSync(path.join(root, 'dev/acceptance/0.9-testing/author-input.mjs')));
   for (const journey of ['local-asset-feature', 'responsive-panel-grid']) {
     const directory = path.join(consumer, journey);
     mkdirSync(directory);
-    const sourceRoot = path.join(acceptanceInputs, journey, 'benchmarks/authoring/sources');
+    const sourceRoot = path.join(acceptanceInputs, journey, 'dev/benchmarks/authoring/sources');
     const report = JSON.parse(run(process.execPath, [acceptanceScript, journey, sourceRoot], directory).stdout);
     const plan = report.package?.canonicalPlan;
     if (!report.ok || !plan) throw new Error(`${journey}: acceptance analysis did not produce a canonical plan.`);

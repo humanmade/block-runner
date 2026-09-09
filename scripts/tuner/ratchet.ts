@@ -2,13 +2,13 @@
  * Regression ratchet — the mechanical form of "nothing degrades in silence" (md/00).
  *
  * Per engine/model/effort, the tuner keeps a best-ever score per fixture
- * (benchmarks/baselines/<engine>__<model>__<effort>.json, committed). Any run where a fixture drops
+ * (dev/benchmarks/baselines/<engine>__<model>__<effort>.json, committed). Any run where a fixture drops
  * below its baseline by more than a small threshold makes the run exit non-zero — the loop
  * cannot silently regress, and coverage only ratchets up.
  *
  *   - --baseline-update accepts the current run as the new baseline (a deliberate act).
  *   - --capture writes the regressed fixture's current output beside its prior golden into
- *     benchmarks/regressions/ for inspection.
+ *     dev/benchmarks/regressions/ for inspection.
  */
 import { readFileSync, writeFileSync, existsSync, mkdirSync } from 'node:fs';
 import path from 'node:path';

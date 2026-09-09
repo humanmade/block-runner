@@ -513,7 +513,7 @@ export async function executeFixture(
 }
 
 async function main(): Promise<void> {
-  const suiteDirectory = path.resolve(valueFor('--suite') ?? 'benchmarks/authoring');
+  const suiteDirectory = path.resolve(valueFor('--suite') ?? 'dev/benchmarks/authoring');
   const suppliedPlans = valueFor('--plans');
   const plansDirectory = suppliedPlans ? path.resolve(suppliedPlans) : undefined;
   if (plansDirectory && (!existsSync(plansDirectory) || !lstatSync(plansDirectory).isDirectory())) {

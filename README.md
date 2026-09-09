@@ -98,13 +98,13 @@ still vary between harnesses, so use `--dir` when a client documents a different
 The image is **historical conversion evidence**, not an authoring result. Its workload is 63
 fixed HTML sections per lane (11 serial lanes, 693 conversions); the suite, models/low effort,
 per-lane invalid counts, and monotonic serial timing method are labelled in the
-[benchmark report](https://github.com/humanmade/block-runner/blob/main/benchmarks/presentation/figures.html). Each model gets the same fixture in two
+[benchmark report](https://github.com/humanmade/block-runner/blob/main/dev/benchmarks/presentation/figures.html). Each model gets the same fixture in two
 lanes: **Direct** writes Gutenberg markup itself; **Block Runner** returns an intent tree that the
 package assembles and validates. The dashed line is the deterministic rules converter running
 without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
 
 Registered-block authoring has a separate, currently unscored corpus in
-[`benchmarks/authoring`](https://github.com/humanmade/block-runner/blob/main/benchmarks/authoring/README.md). It has no combined score with this
+[`dev/benchmarks/authoring`](https://github.com/humanmade/block-runner/blob/main/dev/benchmarks/authoring/README.md). It has no combined score with this
 suite: it records editable plans, generated plugin source, native-block use, the style ledger,
 warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
 The authoring benchmark is optional for 0.9 and does not run automatically during release
@@ -581,7 +581,7 @@ output. Consumer proofs require an installable plugin archive and reviewed visua
 inputs for a passing full receipt.
 
 The repository builds its generated fixture plugin and native markup from
-`test/fixtures/authoring/pattern-overrides.plan.json`. Its WordPress visual assertion compares
+`dev/test/fixtures/authoring/pattern-overrides.plan.json`. Its WordPress visual assertion compares
 the completed page with the checked-in, reviewed
 `proof/wordpress-7.1-pattern-overrides.expected.png` golden; it never creates a baseline while
 evaluating one. The real receipt runs without a proof adapter or externally supplied artifacts:
@@ -616,7 +616,7 @@ npx vitest run <affected files>
 For changes to proof startup or publication recovery, run:
 
 ```sh
-npx vitest run test/proof-control-setup.test.ts test/proof.test.ts test/publication.test.ts test/publication.public-api.test.ts
+npx vitest run dev/test/proof-control-setup.test.ts dev/test/proof.test.ts dev/test/publication.test.ts dev/test/publication.public-api.test.ts
 npm run typecheck
 ```
 
@@ -641,10 +641,10 @@ The following inventory makes the focused checks auditable:
   failure and corrupt retained bytes.
 - The one-command staging-failure receipt test remains. The former receipt-index source-order
   assertion is protected by the failed-full-proof content-addressed readable-receipt case in
-  `test/proof.test.ts`. Named CI and release artifact-upload checks retain their `if: always()`
+  `dev/test/proof.test.ts`. Named CI and release artifact-upload checks retain their `if: always()`
   and `node_modules` exclusions.
 - The `src/publication.ts` call-site assertions were removed because the shared lifecycle matrix in
-  `test/publication.test.ts` covers interruption, reconciliation, pending-file races,
+  `dev/test/publication.test.ts` covers interruption, reconciliation, pending-file races,
   corrupt/missing/linked staging, and final verification. Authoring and plugin adapters retain
   their recovery, approval, conflict, and user-visible-error coverage; the public cleanup guard
   retains its recursive-deletion prohibition and guarded-trash fallback.
@@ -808,17 +808,17 @@ theme font presets do not require copying font files.
 
 ## Running the benchmark
 
-A conversion benchmark lives under `benchmarks/`: it measures how faithfully real generator
+A conversion benchmark lives under `dev/benchmarks/`: it measures how faithfully real generator
 output (Impeccable, Codex, Claude, and more) converts to native blocks, across swappable
 converters (the built-in rules, plus experimental LLM translators run via their CLIs).
 
 ```sh
-npm run bench          # score the suite; write benchmarks/presentation/review.html + benchmarks/presentation/scoreboard.html
-npm run bench:record   # also append a provenance-tagged run to benchmarks/results.jsonl
+npm run bench          # score the suite; write dev/benchmarks/presentation/review.html + dev/benchmarks/presentation/scoreboard.html
+npm run bench:record   # also append a provenance-tagged run to dev/benchmarks/results.jsonl
 ```
 
 Runs are recorded with `engine` / `model` / `effort` / `suiteHash`, so older engines stay
-backtestable against the current suite (`scripts/backtest.sh`). See `benchmarks/README.md`
+backtestable against the current suite (`scripts/backtest.sh`). See `dev/benchmarks/README.md`
 for adding producers and engines.
 
 The registered-block authoring corpus is deliberately separate from that conversion suite:
@@ -831,7 +831,7 @@ This requires saved canonical candidate plans and the configured WordPress runti
 the corpus README. Without them it reports blocked work, not a benchmark result. It does
 not turn unrun browser/editor work or a model/tool failure into a zero product score. The 0.9
 package, installer, and activation checks are run with `npm run release:check`;
-see [`release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/release/0.9-testing/README.md) for the receipt matrix and the
+see [`dev/release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/dev/release/0.9-testing/README.md) for the receipt matrix and the
 draft product-preview brief.
 
 ## License

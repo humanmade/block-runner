@@ -4,7 +4,7 @@ import { defineConfig } from 'vitest/config';
 export default defineConfig({
   test: {
     environment: 'node',
-    include: ['test/proof-real-wordpress.test.ts'],
+    include: ['dev/test/proof-real-wordpress.test.ts'],
     fileParallelism: false,
     testTimeout: 480_000,
     hookTimeout: 60_000,
