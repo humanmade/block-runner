@@ -1,5 +1,14 @@
 # Changelog
 
+## 0.9.1 — 2026-09-09
+
+- Add a concise construction reference to the agent skill, with examples for persistence,
+  existing block mechanisms, dependency ownership, and integration wiring.
+- Link project discovery to the reference and remove duplicated guidance.
+- Correct the guide to describe registered-block authoring as released in 0.9.0.
+
+This patch changes skill guidance only; CLI and library behavior are unchanged.
+
 ## 0.9.0 — 2026-09-09
 
 0.9.0 is the public release on npm's `latest` tag. The release workflow runs the required

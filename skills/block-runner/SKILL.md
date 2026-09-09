@@ -20,8 +20,8 @@ package.
 ## Start with the user's project
 
 For a component that belongs in an existing project, read `references/GUIDE.md` §0 before
-choosing an output. Inspect the relevant source and available site context, then recommend a
-supported route. Existing conventions are evidence, not a fixed list of project types. Ask only
+choosing an output, and `references/CONSTRUCTION-PATTERNS.md` for integration examples.
+Inspect the relevant source and available site context, then recommend a supported route. Existing conventions are evidence, not a fixed list of project types. Ask only
 for choices that the request and repository do not answer; use structured questions if your
 harness supports them, otherwise ask in plain language. Skip discovery for a self-contained
 markup check or when the relevant project facts are already established.
