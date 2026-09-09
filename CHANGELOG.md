@@ -7,7 +7,9 @@
 - Link project discovery to the reference and remove duplicated guidance.
 - Correct the guide to describe registered-block authoring as released in 0.9.0.
 
-This patch changes skill guidance only; CLI and library behavior are unchanged.
+- Allow the release receipt validator to accept 0.9 patch versions.
+
+CLI and library behavior are unchanged.
 
 ## 0.9.0 — 2026-09-09
 

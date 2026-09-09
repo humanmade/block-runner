@@ -506,7 +506,7 @@ function validateReleaseReceipt(receipt) {
   for (const key of required) if (!(key in receipt)) failures.push(`missing ${key}`);
   for (const key of Object.keys(receipt)) if (!new Set([...required, 'supersedes', 'measurement', 'acceptance', 'benchmarkReadiness']).has(key)) failures.push(`unsupported top-level field ${key}`);
   if (receipt.schemaVersion !== 1 || !['passed', 'failed', 'unsupported', 'blocked', 'engine_error'].includes(receipt.status) || !['scored', 'unsupported', 'blocked', 'engine_error', 'not_applicable'].includes(receipt.measurementState)) failures.push('invalid receipt status fields');
-  if (!/^0\.9\.0(?:[-+][0-9A-Za-z.-]+)?$/.test(receipt.candidate?.packageVersion ?? '') || !/^[0-9a-f]{7,64}$/.test(receipt.candidate?.commit ?? '') || typeof receipt.candidate?.worktreeClean !== 'boolean') failures.push('invalid candidate identity');
+  if (!/^0\.9\.(?:0|[1-9][0-9]*)(?:[-+][0-9A-Za-z.-]+)?$/.test(receipt.candidate?.packageVersion ?? '') || !/^[0-9a-f]{7,64}$/.test(receipt.candidate?.commit ?? '') || typeof receipt.candidate?.worktreeClean !== 'boolean') failures.push('invalid candidate identity');
   for (const key of ['suiteHash', 'corpusHash', 'scorerHash', 'fixtureManifestHash', 'sourceSetHash', 'sourceDependencyHash', 'expectedPlanHash', 'promptGuideHash', 'templateHash', 'dependencyHash']) if (!/^sha256:[0-9a-f]{64}$/.test(receipt.provenance?.[key] ?? '')) failures.push(`invalid provenance ${key}`);
   for (const key of ['wordpressHash', 'themeHash', 'browserHash', 'generatedSourceHash']) {
     const value = receipt.provenance?.[key];
