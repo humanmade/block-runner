@@ -21,18 +21,18 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 
 ## Per-release flow
 
-### 0.9 testing release
+### 0.9 release
 
-`0.9.x` is a **testing** release line for registered-block authoring. Publish it with the
-`testing` npm dist-tag; it must not be described as the 1.0 stability promise. Before creating a
-release, run the deterministic release candidate gates from the candidate checkout:
+`0.9.0` is a public release on the `latest` npm dist-tag. It includes registered-block
+authoring and retains the pre-1.0 API policy below. Before creating a release, run the
+deterministic release candidate gates from the candidate checkout:
 
 ```sh
-npm run release:check -- --manual-review proof/reviews/0.9-testing/manual-review.json --receipt release/0.9-testing/receipts/<version>.json
+npm run release:check -- --manual-review proof/reviews/0.9.0/owner-acceptance.json --receipt release/0.9-testing/receipts/<version>.json
 ```
 
 The 13-fixture registered-block authoring benchmark is optional and does not
-participate in the deterministic testing-release status. Run it separately only
+participate in the deterministic release status. Run it separately only
 when reviewed candidate plans and a WordPress/browser worker are available:
 
 ```sh
@@ -53,9 +53,9 @@ product-preview state live in
 1. Bump the version: `npm version patch|minor|major` (commits + tags).
 2. Push the tag: `git push --follow-tags`.
 3. Draft a **GitHub Release** for that tag and **Publish** it.
-4. The Release workflow runs the complete release candidate check then publishes 0.9 tags with
-   `npm publish --provenance --access public --tag testing`.
-5. Confirm afterward: `npm view block-runner@testing version` shows the new 0.9 version, and
+4. The Release workflow runs the complete release candidate check then publishes with
+   `npm publish --provenance --access public --tag latest`.
+5. Confirm afterward: `npm view block-runner@latest version` shows the new 0.9 version, and
    `npm audit signatures` passes (provenance attestation present).
 
 ## Pre-1.0 note

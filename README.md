@@ -32,27 +32,14 @@ npm install block-runner          # requires Node.js ^20.19.0 || ^22.13.0 || >=2
 This stable install provides deterministic `convert`, `assemble`, `validate`, `fix`, and
 skill commands without Docker, browser binaries, `wp-env`, or browser-proof dependencies.
 
-The public registry currently offers stable **0.8.0** on `latest`. The 0.9
-registered-block authoring work is an unreleased candidate: use a tarball supplied
-for a pinned candidate revision, not a nonexistent `@testing` tag. In a clean
-consumer project, install that reviewed artifact by path:
+Block Runner 0.9.0 is the current public release on `latest`. The registered-block
+`author`, `plugin`, and `proof` workflow below is available through the standard
+install above, alongside the page-content conversion workflow. The release workflow
+runs its required receipt-backed matrix before publication.
 
-```sh
-npm install /absolute/path/to/block-runner-0.9.0.tgz
-```
-
-Candidate preparation and release evidence are described in
-[`release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/release/0.9-testing/README.md). Publishing or changing
-npm tags remains a manual owner decision. The registered-block `author`, `plugin`, and
-`proof` workflow below refers to that reviewed candidate, while the page-content
-conversion workflow remains available on stable 0.8.
-
-A packed candidate proves only that its named tarball can be consumed. Automated
-proof can establish the specific runtime/editor claim named in its receipt. Neither a
-prepared owner-acceptance checklist nor an agent-assisted keyboard/screenshot review
-records the owner's visual, editing-feel, or manual-accessibility judgement; those
-remain required until a hash-bound owner record is retained. None of these states
-publishes 0.9 or changes an npm tag.
+Automated proof can establish only the specific runtime/editor claim named in its
+receipt. It does not record an owner's visual, editing-feel, or manual-accessibility
+judgement, and it does not establish a new model benchmark.
 
 Then just ask your coding agent:
 
@@ -84,7 +71,7 @@ Block Runner ships a canonical skill in the open Agent Skills layout. Install it
 current project (ask the user before writing files):
 
 ```sh
-# after installing the reviewed candidate tarball in this project
+# after installing Block Runner in this project
 npx --no-install block-runner skill --install
 ```
 
@@ -120,7 +107,7 @@ Registered-block authoring has a separate, currently unscored corpus in
 [`benchmarks/authoring`](https://github.com/humanmade/block-runner/blob/main/benchmarks/authoring/README.md). It has no combined score with this
 suite: it records editable plans, generated plugin source, native-block use, the style ledger,
 warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
-The authoring benchmark is optional for 0.9 testing and does not run automatically during release
+The authoring benchmark is optional for 0.9 and does not run automatically during release
 checks. Required package and WordPress proof remain separate: a missing required gate is
 `blocked`, never a pass.
 
@@ -446,10 +433,9 @@ materialize the compiler-owned package. Shared generated CSS is registered throu
 | `--force` | Replace locally changed or unmanaged files at canonical bundle paths. |
 
 Installed instructions pin runtime commands to the package version that installed them. To
-update an unreleased candidate, first install the newly reviewed tarball, then re-run
+update an installed skill after upgrading Block Runner, re-run
 `npx --no-install block-runner skill --install`. Existing local edits are refused unless
-`--force` is explicit. After a published release, verify its available npm channel before
-using it in an update command.
+`--force` is explicit.
 
 An installation made by 0.7.x predates the managed manifest, so the first upgrade is
 deliberately refused as unmanaged. Review that copy, rerun once with `--force`, and remove the
@@ -516,7 +502,7 @@ assets, native style adapters, CSS coverage, and mandatory warnings before retur
 plan. Inspection/validation need no consent; only the final canonical write identity does. Existing
 complete `AuthorOptions.plan` callers remain supported as an advanced compatibility route.
 The runnable [authoring example](examples/authoring-plan.mjs) derives a canonical plan from
-HTML and a semantic proposal using only public imports. From a project with the candidate installed:
+HTML and a semantic proposal using only public imports. From a project with Block Runner installed:
 
 ```sh
 node node_modules/block-runner/examples/authoring-plan.mjs > notice.plan.json
@@ -844,7 +830,7 @@ npm run authoring:prove -- --plans ./candidate-plans
 This requires saved canonical candidate plans and the configured WordPress runtime worker; see
 the corpus README. Without them it reports blocked work, not a benchmark result. It does
 not turn unrun browser/editor work or a model/tool failure into a zero product score. The 0.9
-testing-release package, installer, and activation checks are run with `npm run release:check`;
+package, installer, and activation checks are run with `npm run release:check`;
 see [`release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/release/0.9-testing/README.md) for the receipt matrix and the
 draft product-preview brief.
 

@@ -4,7 +4,8 @@ description: >-
   Turn WordPress page content or authored design HTML into valid, native, editable Gutenberg blocks,
   or plan a reusable named registered block for deterministic source generation. Use when creating
   WordPress page content or sections, converting authored HTML or a design-tool export into block
-  markup, authoring a reusable named block in a WordPress plugin, validating or repairing Gutenberg
+  markup, authoring a reusable named block in an existing WordPress project, understanding its
+  block integration before generation, validating or repairing Gutenberg
   markup, or before writing blocks to WordPress. Do not use for general WordPress administration,
   unrelated plugin or theme code, frontend-scraped HTML, or non-WordPress HTML.
 license: GPL-2.0-or-later
@@ -15,6 +16,15 @@ compatibility: Requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0 and shell acces
 
 Read `references/GUIDE.md` for the full contract. It is the same guide shipped in the npm
 package.
+
+## Start with the user's project
+
+For a component that belongs in an existing project, read `references/GUIDE.md` §0 before
+choosing an output. Inspect the relevant source and available site context, then recommend a
+supported route. Existing conventions are evidence, not a fixed list of project types. Ask only
+for choices that the request and repository do not answer; use structured questions if your
+harness supports them, otherwise ask in plain language. Skip discovery for a self-contained
+markup check or when the relevant project facts are already established.
 
 ## The short version
 
@@ -27,8 +37,8 @@ Four paths. Pick by the requested artifact:
   canonical `GeneratedAuthoringPlan` with hashes, coverage, assets, native style adapters, and
   mandatory warnings. Run `author
   preview`, show the literal tree and every warning, ask for a clear confirmation, then run
-  `author write` using that exact confirmation. Follow it through plugin packaging and a full
-  proof. The deterministic generator, not the model, writes the executable source.
+  `author write` using that exact confirmation. Follow the agreed source-only or plugin delivery
+  route and its applicable proof claim. The deterministic generator, not the model, writes the executable source.
   For authored HTML, make two calls: analyse exact HTML/CSS for `sourceRef`s, then submit an
   `AuthorOptions.proposal` containing only structure, source references, editability, locks, and
   explicit content decisions. Inspection/validation need no consent; confirmation covers only the
@@ -56,7 +66,9 @@ Four paths. Pick by the requested artifact:
   then obtain a specific yes for its full confirmation hash. A changed design, plan, or
   destination needs a fresh preview and consent. The CLI never prompts for this itself.
 - **Finish the job.** Page markup has to land where the user asked; source packages must land in
-  their final plugin destination, never a temporary folder. For page content, write it where the user asked; or
+  their agreed retained destination, never a temporary folder. Source-only delivery for developer
+  integration is valid when requested; explain the remaining wiring and unverified checks.
+  For page content, write it where the user asked; or
   offer to write it through a WordPress connection if one is available; or show it to them
   with the paste instruction (**Options ⋮ → Code editor**, or `Ctrl+Shift+Alt+M` — pasting
   into the *visual* editor produces a mess). Never leave it in a temp file. See

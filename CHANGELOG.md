@@ -1,14 +1,21 @@
 # Changelog
 
-## 0.9.0 — 2026-09-04 — unreleased testing candidate
+## 0.9.0 — 2026-09-09
 
-This is an unreleased 0.9 testing candidate. The public registry currently offers stable
-`latest: 0.8.0`; no `testing` tag is available. Review the pinned checkout or its supplied packed
-candidate rather than naming an npm channel that does not exist. The release workflow requires the
-receipt-backed matrix and explicit owner approval before publication; 1.0 remains contingent on
-real-project feedback and resolved release-relevant failures.
+0.9.0 is the public release on npm's `latest` tag. The release workflow runs the required
+receipt-backed matrix before publication. The optional registered-block authoring benchmark remains
+separate from deterministic release acceptance, and no new model benchmark result is claimed here.
 
 ### Added
+
+- **Project-aware skill routing.** The shipped skill now begins registered-block work by inspecting
+  the relevant project source, local instructions, working-tree changes, and available site context
+  before recommending a supported route.
+- **Adaptive discovery questions.** The skill reuses facts already established by the request and
+  repository, then asks only for unresolved editorial, ownership, or delivery choices.
+- **Source-only developer handoff.** For an unsupported existing host, the skill can deliver
+  retained generated source with source-backed editor, PHP registration, build, asset, and remaining
+  verification handoff details. It does not claim integration, build, or WordPress proof.
 
 - **Source-bound semantic proposals.** For authored HTML, call `collectSourceEvidence()` and
   submit `AuthorOptions.proposal` with native structure, source references and editing decisions.
@@ -86,17 +93,12 @@ real-project feedback and resolved release-relevant failures.
 
 ### Release status
 
-No final-candidate release matrix, packed-artifact receipt, or owner-acceptance record is claimed
-here. Historical CI, WordPress fixture, ZIP, and mutation evidence remains attached to its own
-revision and artifact; it is not success evidence for a later candidate. An agent-assisted
-keyboard/screenshot review is likewise not a human accessibility certification or owner
-acceptance.
-
-The publishing workflow may upload a package only after the exact final candidate has its required
-receipt-backed matrix and explicit owner release approval. Automated proof establishes only its
-named artifact and claim; prepared-but-unrun owner-acceptance inputs retain required human visual,
-editing-feel, and manual-accessibility decisions. The separate registered-block benchmark remains
-pending and unscored; no new model benchmark results are claimed for this candidate.
+Release evidence is artifact-bound: historical CI, WordPress fixture, ZIP, and mutation evidence
+remains attached to its own revision and artifact. Automated proof establishes only its named
+artifact and claim; it is not a human accessibility certification or owner-acceptance record.
+Prepared-but-unrun owner-acceptance inputs retain the required visual, editing-feel, and
+manual-accessibility decisions. The separate registered-block benchmark remains pending and
+unscored; no new model benchmark result is claimed here.
 
 ## 0.8.0 — 2026-09-02
 

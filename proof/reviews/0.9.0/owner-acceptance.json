@@ -1,0 +1,27 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "Project owner; prior-testing attestation recorded by Codex",
+  "reviewedAt": "2026-09-08",
+  "recordedAt": "2026-09-09T07:35:05.987091+00:00",
+  "inputHash": "sha256:649d3f2c2a813926397b4dacf3e8377b9d1b8a9f9313163bb806c3b55ff4d1d0",
+  "pluginZipHash": "sha256:763c32b7c4c0b664cf38423a5057fbf2ae219ce7ef6cf39030ef44314616f495",
+  "status": "pass",
+  "checks": {
+    "editor-keyboard": "Owner requested the public 0.9.0 release and confirmed on 2026-09-09: \"we tested everything yesterday\". No new per-check manual observations are asserted by this record.",
+    "frontend-keyboard": "Owner requested the public 0.9.0 release and confirmed on 2026-09-09: \"we tested everything yesterday\". No new per-check manual observations are asserted by this record.",
+    "focus-visibility": "Owner requested the public 0.9.0 release and confirmed on 2026-09-09: \"we tested everything yesterday\". No new per-check manual observations are asserted by this record.",
+    "content-reading-order": "Owner requested the public 0.9.0 release and confirmed on 2026-09-09: \"we tested everything yesterday\". No new per-check manual observations are asserted by this record."
+  },
+  "findings": [],
+  "limitations": [
+    "This is owner acceptance based on reported prior testing, not a new agent-assisted manual review or an independent accessibility certification.",
+    "The owner did not supply separate per-check observations or screenshots with this attestation.",
+    "Automated WordPress checks and their native editor accessibility findings remain separately retained and required."
+  ],
+  "evidence": {
+    "ownerStatement": "we tested everything yesterday",
+    "releaseInstruction": "Proper release, like release release.",
+    "testedCodeBaseline": "2163b9c",
+    "continuity": "No changes to src/, scripts/build-pattern-overrides-fixture.ts, proof/wp-env.json or package-lock.json since the 2026-09-08 candidate. Current generated input and ZIP hashes are recorded above."
+  }
+}

@@ -1,17 +1,16 @@
-# 0.9 testing-release gate
+# 0.9 release gate
 
 This directory is the release record for the registered-block authoring preview.
 It is deliberately separate from the HTML-to-page-block benchmark: a page-block
 score is not evidence about authoring plans, generated source, editor persistence,
 plugin packaging, pattern overrides, or a generated plugin's runtime.
 
-`0.9.0` is a **testing release**, not a 1.0 compatibility promise. This is a
-pre-publication record, not evidence that a package is available from npm or that a
-candidate is releasable. Publish it only when every required row in
+`0.9.0` is a public release on npm's `latest` tag, with the pre-1.0 API policy in
+[`RELEASING.md`](../../RELEASING.md). This directory retains its original path so
+existing evidence links remain valid. Publish only when every required row in
 [`matrix.json`](./matrix.json) has a receipt matching its expected state in the
-exact release candidate and the owner explicitly approves release. `1.0.0` remains
-contingent on real-project feedback and on resolving every release-relevant failure
-discovered during that feedback.
+exact release candidate and the owner explicitly approves release. A package release
+does not establish broad compatibility or completed real-project acceptance.
 
 ## Required release commands
 
