@@ -238,13 +238,17 @@ describe('wp-scripts plugin profile', () => {
     await expect(detectWpScriptsPlugin(wrongRoot)).resolves.toMatchObject({ kind: 'unsupported' });
   });
 
-  it('fails unsupported layouts before writes and exposes the standalone choice', async () => {
+  it('fails unsupported layouts before writes and offers source retention before a standalone option', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-'));
     await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { build: 'vite build' } }));
 
     const profile = await detectWpScriptsPlugin(root);
     expect(profile).toMatchObject({ kind: 'unsupported', standaloneAvailable: true });
-    await expect(planExistingPluginOutput(root, block)).rejects.toBeInstanceOf(UnsupportedPluginLayoutError);
+    const error = await planExistingPluginOutput(root, block).catch((caught: unknown) => caught);
+    expect(error).toBeInstanceOf(UnsupportedPluginLayoutError);
+    expect(error).toMatchObject({ message: expect.stringContaining(
+      'Retain the generated source for developer integration into the existing project. A standalone plugin is also available if it suits the project.',
+    ) });
     await expect(stat(path.join(root, 'src'))).rejects.toThrow();
   });
 

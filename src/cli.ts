@@ -331,7 +331,7 @@ plugin
     }
     if (profile.kind !== 'recognized') {
       console.error(`plugin inspect: ${profile.reason}`);
-      console.error('No files written. Use plugin preview <block-dir> --standalone <output-dir> to create a standalone plugin.');
+      console.error('No files written. Retain the generated source for developer integration into the existing project. If it suits the project, you can also use plugin preview <block-dir> --standalone <output-dir> to create a standalone plugin.');
       process.exitCode = 1;
       return;
     }
@@ -966,7 +966,7 @@ async function pluginPlanForCli(
     return await planExistingPluginOutput(options.host!, generated);
   } catch (error) {
     if (error instanceof UnsupportedPluginLayoutError) {
-      throw new Error(`${error.message} Offer: ${pinnedBlockRunnerRuntime()} plugin preview ${shellDisplay(blockDirectory)} --standalone <output-dir>.`);
+      throw new Error(`${error.message} Standalone command: ${pinnedBlockRunnerRuntime()} plugin preview ${shellDisplay(blockDirectory)} --standalone <output-dir>.`);
     }
     throw error;
   }

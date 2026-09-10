@@ -5,7 +5,7 @@ It is deliberately separate from the HTML-to-page-block benchmark: a page-block
 score is not evidence about authoring plans, generated source, editor persistence,
 plugin packaging, pattern overrides, or a generated plugin's runtime.
 
-`0.9.0` is a public release on npm's `latest` tag, with the pre-1.0 API policy in
+The 0.9 line follows the pre-1.0 API policy in
 [`RELEASING.md`](../../../RELEASING.md). This directory retains its original path so
 existing evidence links remain valid. Publish only when every required row in
 [`matrix.json`](./matrix.json) has a receipt matching its expected state in the

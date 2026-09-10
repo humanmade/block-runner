@@ -1,8 +1,28 @@
 # Fit the component to the project
 
 Read this when integrating or changing a component in an existing WordPress project.
-Use the examples to recognize source contracts, then follow the project's actual wiring.
-They are inspection examples, not code to substitute for Block Runner's generator.
+Choose an implementation route, then inspect its contracts and project wiring. Code fragments
+are inspection examples, not substitutes for Block Runner's generator.
+
+## Choose the implementation route
+
+Reuse available local or dependency implementations before defining another. Classify the
+component or extension being changed, not the entire project.
+
+```text
+Compose existing blocks → content, pattern, template or shared composition
+Extend an existing type/editor → style, variation, binding or editor/render extension
+Define or maintain a custom block
+├─ Framework supplies the field editor → field-framework block
+└─ Project owns the native editor/definition
+   ├─ Saved markup supplies the component → saved-markup block
+   ├─ Server produces output from settings/data → data-rendered block
+   └─ Meaningful saved content and server behavior both matter → combined save/render block
+```
+
+These are navigation routes, not compiler modes or an exhaustive taxonomy. A composition can
+contain data-rendered blocks; a saved-markup block can contain interactive or dynamic children.
+Extensions and combined save/render blocks need a specific mechanism before a file plan.
 
 ## Establish the contract
 
@@ -10,15 +30,17 @@ Record only properties that affect the requested change, with file/line referenc
 
 | Question | Properties to distinguish |
 |---|---|
-| What is being created or reused? | Custom type, pattern, style, variation, binding, editor/render extension |
+| What changes? | Reuse, configure, extend, modify or create; identify the owned type, composition or extension |
 | Who owns it? | Theme, plugin, MU plugin or shared package; implementation and presentation may have different owners |
 | What persists? | Attributes, saved markup, children, conditional children, copied content or a shared reference |
 | Who produces the output? | Save function, PHP, parent renderer, browser script or external provider; preview-only output is possible |
 | How does it load? | PHP bootstrap, editor import, metadata/settings, source → build mapping, asset handles/modules and required copies |
-| What must survive? | Nesting, context, locks, data/media identities, dependencies and historical saves |
+| What may editors change? | Starter template, allowed children, parent/ancestor constraints, insertion/movement/removal locks, content-only or field controls |
+| What must survive? | Nesting, context, data/media identities, dependencies and historical saves |
 
-These properties overlap. A package-owned block can save children and use a theme-styled PHP
-wrapper. Unknown properties remain unknown; a new combination need not become a new category.
+Ownership, wiring and editing policy qualify the route; theme/plugin placement or locking alone
+cannot select a save/render implementation. Unknown properties remain unknown. Editor locks are
+not authorization boundaries.
 
 Start with package scripts and manifests, including Composer/npm locks when dependencies are
 relevant. Trace both registrations to their callers. Read active save/render code and effective
@@ -82,6 +104,14 @@ then place them in a PHP-generated success template. Never replace either with `
 Attributes can hold a whole dataset, selected post IDs or provider HTML; preserve normalization,
 query ordering, sanitization and provider policy rather than inferring them from appearance.
 
+Saved content can also be a fallback, a parallel representation, or input to a renderer/filter.
+Preserve authored fallback content even when normal PHP output ignores it, and the selectors
+and conditions used to transform or replace markup. Browser enhancement alone does not make a
+block combined save/render.
+
+A data-rendered block may save a legacy placeholder instead of `null`; preserve that accepted
+form. Without effective save and render definitions, leave the persistence route unresolved.
+
 ### A parent can own its children's rendering
 
 ```text
@@ -117,19 +147,30 @@ Inspect those implementations before changing wrappers, attributes or media iden
 validity does not prove old content survives. Block API version and package version do not describe
 all accepted historical forms.
 
+### Field frameworks own a different editing contract
+
+For an ACF-style block, trace framework registration, field identities and storage, template or
+controller mapping, and asset hooks. Follow those conventions rather than replacing the field
+editor with a native edit/save pair. If the block retains native children, preserve their save
+and render contract too. A `get_field()` call alone establishes neither framework ownership of
+the editor nor where its values persist.
+
 ## Reuse the right WordPress mechanism
 
 | Mechanism | Small example | Preserve |
 |---|---|---|
 | Unsynced pattern | Group → Query → Post Template → Title + Excerpt | Insertion copies blocks; query results remain runtime data |
+| Theme template/part | A block tree placed through theme template resolution | Placement and any database override of the source template |
 | Synced pattern | Shared composition referenced by instances | Shared identity and any explicit per-instance overrides |
 | Style | `registerBlockStyle('core/group', { name: 'outlined', label: 'Outlined' })` | The CSS/behavior that implements the choice |
 | Variation | `registerBlockVariation('core/query', { name: 'example/resources', attributes: { namespace: 'example/resources' } })` | Defaults, children and any accompanying curation controls |
 | Binding | `metadata.bindings.text.source = 'example/primary-term'` | Registered source, context and resolution; not the currently rendered text |
 | Editor/render extension | Query attributes added by a filter; icons added during PHP rendering | Effective schema and output beyond the stock Core definition |
 
-A pattern file declares neither a lock nor a synced lifecycle merely by existing. Styles,
-variations, bindings and filters can coexist. Similar-looking custom markup may lose their behavior.
+Changing an unsynced pattern does not update prior insertions. A pattern file declares neither
+a lock nor a synced lifecycle merely by existing. No new block type does not mean nothing is
+registered: patterns, styles and binding sources have their own wiring. Select the extension
+mechanism explicitly; styles, variations, bindings and filters can coexist but are not interchangeable.
 A type in a site snapshot does not load its implementation into Block Runner's headless registry.
 
 ## Follow integration all the way through
@@ -189,19 +230,24 @@ Provider configuration, script delivery and submission behavior remain separate 
 
 ## Turn findings into a useful recommendation
 
-Use the smallest mechanism that preserves the requested behavior. For example:
+Recommend the smallest mechanism that preserves the requested behavior. Name the construction
+recipe, owner/destination, registration/build wiring, editing policy and specific evidence gaps.
+Infer these from source; ask users only about unresolved choices, not taxonomy labels.
 
 > “The existing resource pattern already supplies the query and layout. Reuse that composition;
 > a new registered type would add no needed behavior.”
 
-> “This theme registers built blocks, but its editor imports them explicitly. The supported static
-> source can be delivered here with a handoff naming the editor import and build step. Site
-> registration and save/reopen remain untested.”
+> “Use a saved-markup block in the existing plugin, with fixed structure and editable text/images.
+> Its shared build needs an explicit editor import and PHP registration. Deliver supported static
+> source with that integration handoff; site registration and save/reopen remain untested.”
 
 > “The shared package owns this form; the theme styles it. The requested submission change belongs
 > in the package's behavior, which the static generator does not produce.”
 
-Follow GUIDE.md §0 for unresolved choices and §2 for supported generation, confirmation and delivery.
-Understanding PHP, providers or a custom build does not add compiler support. For an unfamiliar
-combination, trace the connections; for missing evidence, name the specific gap. Keep source facts,
-interpretation and runtime proof separate.
+State whether the next step is reuse, supported generation or a developer handoff. Recognition
+does not establish generation support: the static generator does not author new PHP renderers,
+field-framework implementations, arbitrary interactions, style/variation/binding implementations
+or pattern registration packages.
+Never substitute a static block for required behavior. Follow [GUIDE.md](GUIDE.md) §0 for capability
+gaps and §2 for supported generation, confirmation and delivery. Keep source facts, interpretation
+and runtime proof separate.

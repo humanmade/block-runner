@@ -23,8 +23,8 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 
 ### 0.9 release
 
-`0.9.0` is a public release on the `latest` npm dist-tag. It includes registered-block
-authoring and retains the pre-1.0 API policy below. Before creating a release, run the
+The 0.9 line includes registered-block authoring and retains the pre-1.0 API policy below.
+Check `npm view block-runner dist-tags` for published versions. Before creating a release, run the
 deterministic release candidate gates from the candidate checkout:
 
 ```sh

@@ -1,6 +1,6 @@
 # Block Runner
 
-**The primitive between everything and WordPress blocks.**
+Convert authored HTML into native WordPress blocks, or generate a reusable registered block.
 
 [![npm version](https://img.shields.io/npm/v/block-runner.svg)](https://www.npmjs.com/package/block-runner)
 [![npm downloads](https://img.shields.io/npm/dm/block-runner.svg)](https://www.npmjs.com/package/block-runner)
@@ -9,19 +9,13 @@
 
 ![Block Runner converts messy design HTML into clean, nested, native Gutenberg blocks: wp:cover ▸ wp:columns ▸ wp:buttons](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/demo/demo.gif)
 
-Block Runner is the layer between **generated content and WordPress**. AI tools, agents, and
-design tools spit out HTML, but the block editor only trusts blocks it recognizes, so it
-freezes everything else into a single "Custom HTML" blob, or breaks the block outright with
-"Attempt Block Recovery." Block Runner converts that output into real, nested, **native**
-Gutenberg blocks (`wp:cover > wp:columns > wp:buttons`) and proves every result is
-editor-valid. Built to sit in an agent loop, a content pipeline, or a CI gate, and
-deliberately a primitive rather than a platform: the blocks it emits are plain, native
-WordPress, editable in any editor with nothing proprietary to keep installed.
+Block Runner converts authored design HTML into nested Gutenberg blocks and checks the result
+against headless WordPress. It also generates static registered-block source from a reviewed
+plan. Use it from a coding agent, a content pipeline, the CLI or the library.
 
-| | Generated HTML reaches the editor as… |
-| --- | --- |
-| **Today** ❌ | one frozen `Custom HTML` blob, or a broken block and *"Attempt Block Recovery"* |
-| **With Block Runner** ✅ | `wp:cover > wp:columns > wp:buttons`: real, nested, editable, valid |
+The package makes no model calls. An agent can interpret the design; deterministic code
+assembles, generates and validates the result. Validation is not proof of visual fidelity or
+compatibility with every WordPress installation.
 
 ## Quickstart
 
@@ -29,67 +23,37 @@ WordPress, editable in any editor with nothing proprietary to keep installed.
 npm install block-runner          # requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0
 ```
 
-This stable install provides deterministic `convert`, `assemble`, `validate`, `fix`, and
-skill commands without Docker, browser binaries, `wp-env`, or browser-proof dependencies.
-
-Block Runner 0.9.0 is the current public release on `latest`. The registered-block
-`author`, `plugin`, and `proof` workflow below is available through the standard
-install above, alongside the page-content conversion workflow. The release workflow
-runs its required receipt-backed matrix before publication.
-
-Automated proof can establish only the specific runtime/editor claim named in its
-receipt. It does not record an owner's visual, editing-feel, or manual-accessibility
-judgement, and it does not establish a new model benchmark.
-
-Then just ask your coding agent:
-
-> Use block-runner to convert this hero into a native Gutenberg block.
-
-Or run the CLI yourself:
+Convert a file to page-content blocks:
 
 ```sh
-# native blocks stream to stdout by default; pipe them anywhere
-block-runner convert hero.html
-
-# pipe in from an agent, a generator, or curl
-generate-page | block-runner convert -
-
-# or write straight to a file
-block-runner convert hero.html --out hero.blocks.html
+npx --no-install block-runner convert hero.html --out hero.blocks.html
+# Use JSON to inspect warnings, source locations and fallback blocks.
+npx --no-install block-runner convert hero.html --json
 ```
 
-Every run is checked against headless Gutenberg, so what comes back is guaranteed
-editor-valid, or Block Runner tells you exactly what wasn't and points at the line.
+For a reusable named block in code, use [registered-block authoring](#registered-block-authoring).
+The standard install includes both workflows; Docker and browser tooling are needed only for
+real-WordPress proof.
 
 ## Using Block Runner from an AI agent
 
-If you are the one deciding the structure, don't write HTML and convert it. Describe the
-structure as an intent tree and pipe it to `block-runner assemble` — deterministic code builds
-the markup, so it cannot come out invalid.
-
-Block Runner ships a canonical skill in the open Agent Skills layout. Install it into the
-current project (ask the user before writing files):
+Install the bundled skill in your project:
 
 ```sh
-# after installing Block Runner in this project
 npx --no-install block-runner skill --install
 ```
 
-That installs the same skill to the cross-agent `.agents/skills/block-runner` location and
-Claude Code's `.claude/skills/block-runner` compatibility location. Project scope is the
-default so the instructions can travel with a repository. Use user scope or one target when
-that is what you want:
+This writes `.agents/skills/block-runner` and `.claude/skills/block-runner`. The skill guides
+project inspection, implementation choice, preview, confirmation and delivery. Then ask:
 
-```sh
-npx --no-install block-runner skill --install --scope user
-npx --no-install block-runner skill --install --target agents
-npx --no-install block-runner skill --install --target claude
-```
+> Use Block Runner to create a reusable block from this design in the existing plugin.
 
-For a harness with another skills directory, use `--dir <skills-directory>`. With no skill
-system, `npx --no-install block-runner skill` prints the complete harness-neutral guide to stdout
-and writes nothing. Project discovery is the most portable choice; user-wide discovery paths
-still vary between harnesses, so use `--dir` when a client documents a different global root.
+For page content with no authored HTML, the agent should submit an intent tree to `assemble`.
+For an existing HTML design, use `convert`. Neither page-content command creates registered
+block source.
+
+Use `--scope user`, `--target agents|claude` or `--dir <skills-directory>` to choose installation
+scope. Without `--install`, `npx --no-install block-runner skill` prints the guide without writing.
 
 ## Benchmark
 
@@ -103,75 +67,33 @@ lanes: **Direct** writes Gutenberg markup itself; **Block Runner** returns an in
 package assembles and validates. The dashed line is the deterministic rules converter running
 without an LLM. Every result is scored from 0 to 100 against the fixture's accepted block tree.
 
-Registered-block authoring has a separate, currently unscored corpus in
-[`dev/benchmarks/authoring`](https://github.com/humanmade/block-runner/blob/main/dev/benchmarks/authoring/README.md). It has no combined score with this
-suite: it records editable plans, generated plugin source, native-block use, the style ledger,
-warnings, build, editor, frontend, pattern overrides, fidelity, and accessibility independently.
-The authoring benchmark is optional for 0.9 and does not run automatically during release
-checks. Required package and WordPress proof remain separate: a missing required gate is
-`blocked`, never a pass.
+The separate [registered-block authoring corpus](https://github.com/humanmade/block-runner/blob/main/dev/benchmarks/authoring/README.md)
+remains unscored. This image does not measure generated plugins, editor persistence or authoring
+quality. Required package and WordPress release proof are separate from either benchmark.
 
-## What it does
+## Capabilities and limits
 
-Two jobs: **convert** generated HTML into native blocks, and **validate** that what you ship
-is editor-valid. Use either half on its own: convert in your agent pipeline, or run the gate
-as a standalone validator in CI.
+- Convert supported HTML structures into native blocks; unsupported structures become Custom
+  HTML with source-located warnings.
+- Assemble an intent tree, validate existing block markup, or canonicalize near-miss markup.
+- Resolve media through a supplied map, WP-CLI or REST; unresolved IDs remain warnings.
+- Map styles to theme tokens or preserve supported off-theme CSS.
+- Generate a static custom wrapper around native editable children, with reviewed locks and assets.
 
-### Convert: generated HTML → native blocks
-
-- **Native blocks, never locked in.** Real `wp:cover > wp:columns > wp:buttons`, properly nested, with real media ids: plain core blocks anyone can edit in any WordPress, not a builder's proprietary block types you have to keep its plugin installed to touch.
-- **Broad element coverage.** Tables, quotes, code, separators, video/audio, `<details>`, YouTube/Vimeo embeds, and image galleries all map to their native core blocks — not just the hero primitives. What genuinely has no native home (inline SVG icons, definition lists, arbitrary iframes) is preserved as Custom HTML with a warning pointed at the line, never dropped and never crashing the run.
-- **Any model, any agent.** Feed it whatever your LLM, agent, or design tool emits, from any vendor, and drop it into your own pipeline instead of adopting someone else's editor.
-- **Media resolution.** Resolve images to real attachment ids via a map, WP-CLI, or the REST API.
-- **Styling fidelity, your call.** Keep off-theme styles or map them to your theme, up to a ceiling you set.
-- **Extensible.** Built-in rules out of the box; add your own, or hand the hardest layouts to an LLM (experimental).
-
-### Validate: prove it's editor-valid
-
-- **A seatbelt for generated blocks.** Models and builders will cheerfully emit markup that corrupts the editor; every result is held to a gate wired to headless Gutenberg first, so *valid* means what the editor means, not what a generator hoped.
-- **Reproducible gate.** Same markup, same verdict, every time. Safe to run on every request and in CI.
-- **Canonicalize.** Rewrite near-miss markup into the exact shape the editor expects.
-- **Never fails silently.** When something can't be expressed natively, it says so and points at the exact line.
-
-## Why Block Runner
-
-Content pours out of AI and agents faster than anyone can hand-build it, but "a block the
-editor actually accepts" is a brutally exact bar. To land one valid block, every one of these
-has to be right:
-
-- **Markup is validated against what the block's `save()` would output.** Attribute order,
-  class names, whitespace, a stray self-closing slash: one mismatch and the editor throws
-  *"This block contains unexpected or invalid content"* and offers Attempt Block Recovery.
-- **Attributes live in a typed HTML-comment schema** (`<!-- wp:cover {"dimRatio":50,...} -->`),
-  order-sensitive, with defaults that must or must not appear depending on the block.
-- **Nesting is enforced.** `wp:columns` accepts only `wp:column`, `wp:buttons` only `wp:button`,
-  `wp:cover` wraps a specific inner container. Put the wrong child inside and the block is invalid.
-- **Each block expects its exact generated classes** (`wp-block-cover`, `wp-element-button`,
-  `has-background-dim`, `wp-image-1234`). Miss one and it breaks or renders wrong.
-- **Images need a real attachment ID**, not just a URL, so you also have to resolve and import
-  media into the library and thread the id through the markup.
-- **Colors, spacing, and fonts can map to your theme presets** (`var:preset|spacing|40`,
-  `has-accent-color`) only when the captured theme category and literal value match; otherwise
-  the reviewed literal or scoped CSS remains explicit.
-- **Blocks carry deprecations.** Markup that validated against last year's `save()` may not
-  validate against this year's.
-- **Anything it can't place collapses into one frozen "Custom HTML" blob**, and the structure,
-  nesting, and editability are gone.
-
-Get any of it wrong and you ship invalid blocks, broken layouts, or one giant uneditable blob.
-Block Runner gets all of it right: it turns whatever your agents and tools generate into real,
-nested, editable blocks with resolved media, then proves every result against headless
-Gutenberg before it reaches the editor.
-
-**Any content in. Real blocks out.**
+Use authored markup, not scraped frontend HTML. Registered-block generation does not create
+new PHP renderers, field-framework editors or arbitrary interaction code. For an existing project,
+the [construction reference](skills/block-runner/references/CONSTRUCTION-PATTERNS.md) helps choose
+between composition, extension and custom-block work without implying generator support.
 
 ## CLI
+
+For a local installation, run these commands with `npx --no-install block-runner`.
 
 | Command | What it does |
 | --- | --- |
 | `convert` | Authored HTML to native post-content blocks, including the legacy styling path. |
 | `author <html> --json` | Analyze one authored design into a canonical registered-block plan, checked source, and style/asset ledgers. Does not write source. |
-| `assemble` | An intent tree — JSON describing which blocks and how they nest — to native blocks, built with `createBlock` so the result cannot be invalid. |
+| `assemble` | An intent tree to native page-content blocks, assembled and validated by Gutenberg. |
 | `author preview <plan\|->` | Validate and render a versioned registered-block GeneratedAuthoringPlan without writing files. |
 | `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write the reviewed compiler-owned source package bound to its SHA-256 confirmation and destination. Build and runtime proof remain separate. |
 | `validate` | Check block markup against headless Gutenberg. |
@@ -195,7 +117,7 @@ block-runner plugin inspect ./my-plugin --json
 # Preview every exact target, then use the displayed fingerprint with `plugin write`.
 block-runner plugin preview ./generated-block --host ./my-plugin
 
-# For an absent or unsupported host layout, make a complete standalone plugin instead.
+# If a standalone plugin suits the project, preview that destination.
 block-runner plugin preview ./generated-block --standalone ./my-notice-plugin
 ```
 
@@ -203,7 +125,8 @@ block-runner plugin preview ./generated-block --standalone ./my-notice-plugin
 `plugin write --confirm <fingerprint>`. Existing PHP or `package.json` files are marked as
 separate replacement approvals, so their absolute preview paths must also be supplied with
 `--approve-replace <path...>` before they can change. An unrecognised host is refused without
-writing and the command offers the standalone form above.
+writing. Retain the generated source for developer integration into the existing project, or
+choose a standalone plugin if that suits the project.
 
 Standalone previews include the complete, versioned npm lock for their pinned local
 `@wordpress/scripts` toolchain. Confirmed writes only materialize the reviewed source and lock
@@ -212,45 +135,23 @@ when preparing the generated plugin to build or package it.
 
 ### Registered-block authoring
 
-HTML analysis returns `package.canonicalPlan`. Save that object as your plan, review its
-native structure and editing policy, then use the same preview/write workflow below.
-Successful analysis uses the canonical source compiler; unresolved Custom HTML regions,
-unsafe assets, and unsupported CSS produce explicit failures, not a ready-to-install package.
+HTML analysis returns `package.canonicalPlan`, a versioned `GeneratedAuthoringPlan` containing
+the target, native structure, fields, locks, style/asset decisions and warnings. Unresolved Custom
+HTML, unsafe assets and unsupported CSS are failures, not a ready-to-install package.
 
-For a reusable registered block, first make a versioned **GeneratedAuthoringPlan** rather than jumping
-from a description or design directly to source. The plan records the block target and native
-structure, editable and locked fields, style outcomes, pattern overrides, assets, planned files,
-and warnings. Review it before any write:
+Preview the plan before writing:
 
 ```sh
 block-runner author preview authoring-plan.json --output-dir generated/feature-grid
 ```
 
-The plain preview is deterministic for a plan, generator version, destination snapshot, and
-terminal width. It shows the plan SHA-256 and a separate confirmation SHA-256 bound to the
-planned destination and its fingerprint, labels fixed/editable/override fields without relying
-on colour, and ends with `No files written.` Preview is
-read-only; it has no prompt. `NO_COLOR` is honoured, and `--json` never contains ANSI escape
-sequences.
+The preview shows the tree, files, warnings and a confirmation hash bound to the plan and
+destination. It writes nothing and does not prompt. After explicit approval, pass that hash and
+the same destination to `author write`.
 
-An installed Block Runner skill presents that preview to the user and asks for explicit
-approval. The CLI itself is always non-interactive. After the user approves the displayed
-confirmation hash, write the exact same plan to the previewed output directory. `--output-dir` is
-the exact package destination (not a parent root):
-
-```sh
-block-runner author write authoring-plan.json \
-  --confirm '<full-sha-256-from-preview>' \
-  --output-dir '<the-previewed-directory>'
-```
-
-Missing, stale, or incorrect confirmation values write nothing. If a plan replaces existing
-files, get a distinct, explicit replacement decision; a path collision, traversal or absolute
-path, changed destination, or any destination-prefix symlink fails before any write. The command
-rechecks these conditions immediately before exclusive, atomic writes. Use `-` for plan input
-only—never as a source of confirmation. `files` may declare only compiler-owned output paths and
-their `create`/`replace` operation; it never accepts file content. The deterministic compiler
-always emits its complete source set (and confirmed assets), including when `files` is empty.
+Missing or stale confirmation, changed destinations, unsafe paths and symlinks are refused.
+Existing-file replacements require a separate decision. The compiler owns file content;
+`files` can declare only its output paths and create/replace operations.
 
 ### Complete source-to-build routes
 
@@ -324,11 +225,8 @@ Library plus `convert`, `assemble`, `validate`, `fix`, `author`, `plugin`, `cont
 and `skill` need only Block Runner's production dependencies. WP-CLI remains an
 external requirement only when selected for context, token, or media resolution.
 
-The 0.9.0 package inventory moves the six real-WordPress/browser packages from the
-19 direct production dependencies to six exact optional peers (retained as development
-dependencies for this repository). A basic installed dependency tree therefore has none of
-`@wordpress/env`, `@playwright/test`, `@wordpress/e2e-test-utils-playwright`, `axe-core`,
-`pixelmatch`, or `pngjs`; install them only in a project that runs real-WordPress proof.
+The browser-proof packages are exact optional peers, absent from a basic installation.
+Install them only where real-WordPress proof will run.
 
 Set up the runtime/editor proof boundary before requesting `runtime` or `editor`:
 
@@ -347,50 +245,29 @@ The `full` profile adds the visual-proof pair:
 npm install --save-dev --save-exact pixelmatch@7.1.0 pngjs@7.0.0
 ```
 
-This is deliberately explicit: the proof command never downloads tooling or a browser, and
-never makes a model call. If its optional tools are absent or on the wrong version, the receipt
-is blocked before Docker starts and prints this exact install command. A working Docker CLI and
-daemon are still required for real-WordPress profiles.
+Proof never downloads tooling or browsers or calls a model. Missing or mismatched tooling blocks
+the run before Docker starts and reports the required installation command. Runtime profiles
+also require a working Docker daemon.
 
 ```sh
-# Fast Gutenberg markup check; no Docker is started.
-block-runner proof dist/acme-hero.zip --profile headless --markup fixtures/hero.blocks.html --input fixtures/hero.source.html --fixture fixtures/hero.proof.json
-
-# Docker/MySQL WordPress 7.1, visible inserter, save/reopen, frontend, deactivation,
-# visual and Axe checks. Evidence and the final receipt are SHA-256 addressed.
-block-runner proof dist/acme-hero.zip --profile full --markup fixtures/hero.blocks.html --input fixtures/hero.source.html --fixture fixtures/hero.proof.json --receipt-dir artifacts/proof
+block-runner proof dist/acme-hero.zip --profile full \
+  --markup fixtures/hero.blocks.html --input fixtures/hero.source.html \
+  --fixture fixtures/hero.proof.json --receipt-dir artifacts/proof
 ```
 
-`headless`, `runtime`, and `editor` remain cumulative operational profiles;
-`full` adds frontend, static deactivation, pattern, visual, and accessibility gates.
-For an artifact that declares `patternOverrides: false`, `editor-verified` and
-`fidelity-checked` do not claim or require pattern behavior. `pattern-verified`
-and `full` do. A required `fail`, `skip`, `blocked`, or missing result fails the
-selected claim. `not_applicable` can pass only for media when the fixture explicitly
-has no media; it never substitutes for omitted proof configuration.
+The fixture supplies editable fields, frontend expectations and reviewed visual/accessibility
+inputs; pattern claims require a pattern fixture. Required failed, skipped, blocked or missing
+gates fail the selected claim. Golden images are read-only inputs, never refreshed during proof.
+Axe results are automated evidence, not complete accessibility certification or owner acceptance.
 
-The fixture supplies the generated block name, a non-empty editable field inventory,
-frontend scope/expectations, reviewed visual golden/masks/threshold, and Axe/manual-review
-scopes. A pattern fixture with edits to persist is required only when the selected claim
-requires pattern behavior. The browser always navigates to the post it created and
-published during the run, then records that ID and permalink. Golden images are
-read-only inputs: the runner stores expected, actual, and diff evidence but never
-refreshes a golden. Axe output is preserved in full; it is an automated check plus a
-separately recorded manual-review status, not a claim of complete WCAG conformance.
-
-Proof tooling is exact-pinned as optional peers and retained in this repository's development dependencies. The included `proof/wp-env.json` pins WordPress core 7.1 and PHP 8.3, while the packed `proof/dependency-pins.json` preserves the direct WordPress package integrity pins that npm intentionally omits from package tarballs. The receipt additionally captures running-container image IDs, database/PHP/core/theme/browser observations, observed plugin metadata, Node and WordPress-package pins, generator/input/plugin/ZIP hashes, command logs, and every evidence object. The environment gate verifies that every retained observation command exited successfully, parses each value against its requested version/hash format, and requires the lockfile or packed pin snapshot plus integrity-pinned direct `@wordpress/*` packages. Missing or malformed observations block the runtime profile. Use `--no-run` only to produce an honest blocked diagnostic receipt after proof tooling is available.
-
-`npm run test:proof:mutations` is an opt-in Docker acceptance suite. It builds deliberately broken plugin ZIPs and proves that registration, save, stylesheet, and pattern failures reach their respective independent gates; it does not run as part of the ordinary unit suite.
-
-Read from stdin with `-`:
-
-```sh
-cat hero.html | block-runner convert -
-```
+The pinned environment and package hashes, runtime observations, logs and evidence objects are
+retained in the receipt. See the [proof guide](skills/block-runner/references/GUIDE.md#proof-is-part-of-completion)
+and [release gate](https://github.com/humanmade/block-runner/blob/main/dev/release/0.9-testing/README.md)
+for profile inputs, accepted upstream findings and release requirements.
 
 ### Flags
 
-All commands:
+Page-content options (see each command's `--help`):
 
 | Flag | Description |
 | --- | --- |
@@ -450,15 +327,13 @@ preserved root-level `GUIDE.md` after confirming the new `references/GUIDE.md` c
 
 ## Run it anywhere
 
-It's a Node CLI, so it drops into whatever you already use: your shell, a pre-commit hook,
-GitHub Actions, or any other CI (GitLab, CircleCI, and friends all run Node). And it's
-model-agnostic: it works on the output of any model, from any vendor.
+Use the CLI in shell scripts, pre-commit hooks or CI.
 
 **pre-commit** (add to `.pre-commit-config.yaml`):
 
 ```yaml
 - repo: https://github.com/humanmade/block-runner
-  rev: v0.1.0
+  rev: v0.9.1
   hooks:
     - id: block-runner
       args: ['content/**/*.html']   # glob of files that contain block markup
@@ -544,66 +419,21 @@ vendor schema at plan parsing time. The static compiler validates capabilities: 
 and string `metadata.variations` PHP-file references fail with a precise compilation error.
 Inline declarative variation records and safe native metadata pass through unchanged.
 
-Migration boundary: `AuthoringPlan` remains the supported semantic import throughout this
-compatibility line, and `SemanticAuthoringPlan` is an additive alias. Use
-`GeneratedAuthoringPlan` for every confirmation flow. Existing semantic values remain accepted
-by the deprecated adapters.
-Passing one to `compileRegisteredBlock` intentionally fails with
-`invalid authoring plan: $.version must be 1`; adapt it first and preview the returned canonical
-plan. No page-content API is renamed or removed by this migration.
+Pass a `GeneratedAuthoringPlan` to `compileRegisteredBlock`. Adapt legacy semantic plans first;
+they are not a second confirmation contract. No page-content API is renamed or removed.
 
 ## Synced-pattern overrides (WordPress 7.1)
 
-The semantic adapter `compileAuthoringPlan()` makes native content regions of a generated wrapper ready for
-WordPress's synced-pattern override flow. It adds a deterministic `metadata.name` and explicit
-`core/pattern-overrides` binding only to supported Core child attributes: rich text
-`content`, image `id`/`url`/`alt`, and button `text`/`url`. Layout remains the one canonical
-InnerBlocks template; the compiler never binds or synthesizes `innerBlocks`.
+Generated wrappers can expose supported native child fields as synced-pattern overrides through
+reviewed `fields` and `pattern.overrides`. Layout remains the canonical InnerBlocks template;
+the compiler does not bind or synthesize `innerBlocks`. Generic Block Bindings are not supported.
 
-Stable names derive from the reviewed plan path, so a synced pattern stores an instance's local
-values in the normal `core/block` `content` map. Use `templateLock: 'all'` or
-`'contentOnly'` when the pattern must retain canonical structure.
+The full proof checks two instances, save/reopen, canonical updates, reset, structural policy,
+a missing-binding negative and frontend output. Use a built plugin ZIP and the reviewed fixture,
+visual and accessibility inputs described under [proof requirements](#wordpress-proof-requirements).
 
-The full proof route is intentionally fail-closed:
-
-```sh
-block-runner proof generated-plugin.zip \\
-  --profile full \\
-  --input design.html \\
-  --markup generated.blocks.html \\
-  --fixture proof-fixture.json
-```
-
-It starts a real WordPress 7.1 `wp-env`, records the canonical `wp_block` content and each
-`core/block.content` instance value in an immutable receipt, then verifies two instances,
-reopen, canonical update, reset, structural policy, a missing-binding negative, and frontend
-output. Consumer proofs require an installable plugin archive and reviewed visual/accessibility
-inputs for a passing full receipt.
-
-The repository builds its generated fixture plugin and native markup from
-`dev/test/fixtures/authoring/pattern-overrides.plan.json`. Its WordPress visual assertion compares
-the completed page with the checked-in, reviewed
-`proof/wordpress-7.1-pattern-overrides.expected.png` golden; it never creates a baseline while
-evaluating one. The real receipt runs without a proof adapter or externally supplied artifacts:
-
-```sh
-npm run verify
-npm run test:proof:wordpress
-```
-
-`verify` runs repository and packaging checks; `test:proof:wordpress` runs the real editor and
-frontend lifecycle. The latter requires a working Docker CLI and daemon. Proof commands record bounded
-Docker, `wp-env`, and browser phases in receipt evidence, so a failed runtime is reported as a
-specific blocked or failed phase instead of exhausting the general test timeout.
-On GitHub Actions, the separate WordPress proof job uploads a
-`wordpress-7.1-pattern-overrides-receipt` artifact on success or failure, retained for 14 days. It contains
-`receipt-index.json`, the content-addressed `receipts/sha256` record, and its
-`evidence/sha256` objects, so reviewers can inspect the WordPress 7.1 lifecycle evidence from
-the relevant build without committing environment-specific run output.
-
-These are automated repository-fixture checks for their exact artifact and revision. They do not
-run the prepared owner-acceptance journeys or establish a human judgement about visual fidelity,
-editing feel, or accessibility.
+These are checks of the supplied artifact, not a human judgement of visual fidelity, editing
+feel or accessibility.
 
 ### Testing workflow
 
@@ -628,42 +458,9 @@ detector wiring changes, and run the existing release check only for release can
 automation. Do not relax the visible mutation skips, runtime-proof gates, thresholds, or the
 intentional `fileParallelism: false` Gutenberg serialization.
 
-The following inventory makes the focused checks auditable:
-
-- The control-startup helper replaces VM extraction and script-order assertions. Its test proves a
-  writable `.block-runner-proof-stage`, retained existing ZIPs before startup, and that an
-  incompatible path is preserved without invoking startup.
-- A proof-runner command test replaces the staged-container-directory literal check: `wp plugin
-  install` receives a byte-identical ZIP beneath `/var/www/html/wp-content/block-runner-proof/`,
-  never an uploads path. The exact `proof/wp-env.json` mapping remains a schema contract.
-- The `wp_upload_bits`, upload-error, retained-byte hash, and no-direct-write checks remain the
-  media byte contract: successful WordPress execution cannot deterministically inject both upload
-  failure and corrupt retained bytes.
-- The one-command staging-failure receipt test remains. The former receipt-index source-order
-  assertion is protected by the failed-full-proof content-addressed readable-receipt case in
-  `dev/test/proof.test.ts`. Named CI and release artifact-upload checks retain their `if: always()`
-  and `node_modules` exclusions.
-- The `src/publication.ts` call-site assertions were removed because the shared lifecycle matrix in
-  `dev/test/publication.test.ts` covers interruption, reconciliation, pending-file races,
-  corrupt/missing/linked staging, and final verification. Authoring and plugin adapters retain
-  their recovery, approval, conflict, and user-visible-error coverage; the public cleanup guard
-  retains its recursive-deletion prohibition and guarded-trash fallback.
-
-Unchanged behavioral coverage includes `authoring.runtime.test.ts` for emitted-component layout
-and v1-to-v2 content persistence; `proof-real-wordpress.test.ts` and
-`proof-pattern-overrides.test.ts` for native editor layout and isolated pattern instances;
-`plugin.profile.test.ts` plus `test:package` for packaged assets;
-`authoring.destination.test.ts` and `registered-block.workflow.test.ts` for confirmation; the
-shared publication matrix plus adapter suites for concurrent edits and interruption;
-`proof-visual-baselines.test.ts` for reviewed bytes; and the visibly skipped mutation suite for
-real-ZIP detector checks.
-
 ## Media Resolution
 
-A `<img src="hero.jpg">` in generated HTML is just a URL, but WordPress image and cover blocks
-want a real media-library attachment with an ID (`wp-image-1234`). Media resolution is how
-Block Runner connects the two: matching or importing each image into the library and threading
-the right id into the block. Choose how it does that:
+Media resolution connects source image URLs to WordPress attachment IDs:
 
 - `noop`: leave URLs as-is and warn when an ID is missing (good for a dry run).
 - `map`: look up IDs and URLs from a JSON map you provide.
@@ -730,17 +527,14 @@ provide the native preset registry consumed by the resolver above.
 
 ## Styling fidelity
 
-Design HTML often carries custom CSS (and sometimes JavaScript) that doesn't match
-the target theme. The `styling` level controls how much of it Block Runner keeps. The
-levels run from safest (cleanest, most editable blocks) to most faithful (keeps the
-original look, but less editable):
+The styling ceiling controls how conversion handles CSS that does not match the target theme:
 
 | Level | What it does |
 |---|---|
-| `strict` | Map to the theme only. Off-theme styles are dropped. Cleanest, fully on-brand, fully editable. |
-| `relaxed` | Keep exact off-theme values on the block (custom color, size, spacing). Still native and fully editable. |
-| `open` | Also keep CSS no block can express, by putting a class on the block and emitting that CSS as a stylesheet you ship alongside. Look preserved, structure still editable. |
-| `source` | Keep the original markup as a Custom HTML block. Exact, but not editable. Last resort. |
+| `strict` | Map to theme presets; report dropped off-theme styles. |
+| `relaxed` | Keep supported off-theme values as native block attributes. |
+| `open` | Also emit supported residual CSS as a sidecar stylesheet to ship alongside the blocks. |
+| `source` | Reserved; not implemented. Requests are rejected. |
 
 You set one ceiling. Per block, Block Runner uses the **strictest level that still
 captures the design**, and never goes past your ceiling. Configure it in
@@ -757,8 +551,7 @@ reported with the input line and the rule that authored it — nothing is droppe
 
 `open` emits a stylesheet, so it needs somewhere to put it. `--styling open` requires
 either `--css-out <path>` or `--json` (where it arrives as `sidecarCss`) and is an error
-otherwise — a level that quietly discarded the CSS it promised to keep would be worse
-than not offering it.
+otherwise.
 
 Custom JavaScript is never inlined. A behavior maps to a native interactive block,
 comes from a block plugin, or is dropped, and every drop or escalation is reported.
@@ -787,24 +580,11 @@ Without that target context it explicitly limits its fidelity claim. Only an exa
 viewport interval on one unambiguous, supported native child can use a responsive state; every
 other conditional source rule remains scoped CSS.
 
-CSS analysis has one tolerant source-facts pass: it retains rule/declaration IDs, exact
-line/column/byte ranges, malformed-declaration and blocked-rule evidence, then feeds asset,
-scope, native, and cascade decisions. PostCSS remains an output validation boundary rather than
-a replacement for this pass: malformed author input and byte-exact URL rewrites need the original
-spans. The URL and `image-set()` value lexer remains specialized because it must distinguish direct
-strings from `url()` tokens and rewrite escaped tokens tail-to-head. Selector cascade matching and
-responsive lifting likewise remain conservative semantic checks; ambiguous conflicts and
-non-equivalent media conditions stay exact scoped CSS or explicit warnings.
-
 Local WOFF/WOFF2 fonts require an explicit source, SHA-256, ownership, and license decision.
 Approved font families get block-specific names and shared editor/frontend CSS. Full redistribution
 notices are retained separately in the production archive because minifiers can remove CSS comments.
 Unlicensed or unsupported faces use a safe fallback with a source-located warning. Destination
 theme font presets do not require copying font files.
-
-> Status: `strict`, `relaxed` and `open` are implemented. `source` is not built yet and is
-> rejected rather than silently downgraded — though the converter already falls back to a
-> Custom HTML block for structure it cannot convert.
 
 ## Running the benchmark
 

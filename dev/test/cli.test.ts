@@ -517,6 +517,38 @@ describe('CLI', () => {
     await expect(stat(outPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('offers source retention when plugin inspect cannot integrate a host layout', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { build: 'vite build' } }));
+
+    const result = await runCli(['plugin', 'inspect', root]);
+
+    expect(result.code).toBe(1);
+    expect(result.stderr).toContain('No files written. Retain the generated source for developer integration into the existing project.');
+    expect(result.stderr).toContain('If it suits the project, you can also use plugin preview <block-dir> --standalone <output-dir>');
+    await expect(stat(path.join(root, 'src'))).rejects.toThrow();
+  });
+
+  it('offers source retention when plugin preview cannot integrate a host layout', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const block = path.join(root, 'generated-block');
+    const host = path.join(root, 'host');
+    await mkdir(block);
+    await mkdir(host);
+    await Promise.all([
+      writeFile(path.join(block, 'block.json'), JSON.stringify({ name: 'acme/notice' })),
+      writeFile(path.join(host, 'package.json'), JSON.stringify({ scripts: { build: 'vite build' } })),
+    ]);
+
+    const result = await runCli(['plugin', 'preview', block, '--host', host]);
+
+    expect(result.code).toBe(2);
+    expect(result.stderr).toContain('Retain the generated source for developer integration into the existing project.');
+    expect(result.stderr).toContain('A standalone plugin is also available if it suits the project.');
+    expect(result.stderr).toContain('Standalone command:');
+    await expect(stat(path.join(host, 'src'))).rejects.toThrow();
+  });
+
   it('refuses to overwrite the input path with --out', async () => {
     const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
     const inputPath = path.join(dir, 'post.html');

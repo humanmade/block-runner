@@ -227,7 +227,7 @@ export class UnsupportedPluginLayoutError extends Error {
   readonly profile: UnsupportedPluginProfile;
 
   constructor(profile: UnsupportedPluginProfile) {
-    super(`${profile.reason} No files were written. Generate a standalone plugin instead.`);
+    super(`${profile.reason} No files were written. Retain the generated source for developer integration into the existing project. A standalone plugin is also available if it suits the project.`);
     this.name = 'UnsupportedPluginLayoutError';
     this.profile = profile;
   }

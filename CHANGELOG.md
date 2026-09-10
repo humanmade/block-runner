@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.2 — 2026-09-10
+
+- Offer source delivery for developer integration when automatic host integration is unsupported;
+  retain standalone plugin packaging as an alternative.
+- Guide implementation choices through composition, extension and custom-block contracts,
+  including field frameworks and combined save/render behavior, without expanding generator support.
+- Shorten the README and clarify installation, supported behavior and proof boundaries.
+
 ## 0.9.1 — 2026-09-09
 
 - Add a concise construction reference to the agent skill, with examples for persistence,
