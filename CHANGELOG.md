@@ -1,5 +1,21 @@
 # Changelog
 
+## 0.9.4 — 2026-09-11
+
+- Route the agent skill by requested artifact before loading detailed instructions, and split
+  page assembly, registered-block authoring and advanced plan references.
+- Consolidate the complete registered-block delivery walkthrough in the shipped authoring guide.
+- Limit the page-intent benchmark engine to its page references and bind its cache identity to
+  the exact instructions used; no new model benchmark result is claimed.
+- Add acceptance coverage for project-owned custom-block development without expanding the
+  static generator's supported output.
+- Separate clean consumer archive tests from the default repository suite while retaining them
+  in CI and release checks, and reuse the proof-enabled package consumer for dependency checks.
+- Select conservative documentation, skill and full CI routes; run the classifier regression
+  tests on every route, retain complete diff history, and serialize shared Query Loop wp-env calls.
+
+CLI and library contracts, runtime dependencies, and generated-block templates are unchanged.
+
 ## 0.9.3 — 2026-09-11
 
 - Distinguish generated-markup diagnostic locations from authored input and show diagnostic codes,
