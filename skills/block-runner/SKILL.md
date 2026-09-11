@@ -4,8 +4,9 @@ description: >-
   Turn WordPress page content or authored design HTML into valid, native, editable Gutenberg blocks,
   or plan a reusable named registered block for deterministic source generation. Use when creating
   WordPress page content or sections, converting authored HTML or a design-tool export into block
-  markup, authoring a reusable named block in an existing WordPress project, understanding its
-  block integration before generation, validating or repairing Gutenberg
+  markup, authoring a reusable named block in an existing WordPress project, continuing an
+  in-scope Gutenberg component through custom PHP or editor code, understanding its block
+  integration before generation, validating or repairing Gutenberg
   markup, or before writing blocks to WordPress. Do not use for general WordPress administration,
   unrelated plugin or theme code, frontend-scraped HTML, or non-WordPress HTML.
 license: GPL-2.0-or-later
@@ -14,36 +15,33 @@ compatibility: Requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0 and shell acces
 
 # Block Runner
 
-## Start with the user's project
+## Pick the artifact first
 
-For a component that belongs in an existing project, read `references/GUIDE.md` §0 before
-choosing an output, and `references/CONSTRUCTION-PATTERNS.md` to choose an implementation route
-and inspect its contracts. Use relevant source and site context to recommend reuse, supported
-generation or a developer handoff. Recognizing a route does not add generator support. Ask only
-for choices that the request and repository do not answer; use structured questions if your
-harness supports them, otherwise ask in plain language. Skip discovery for a self-contained
-markup check or when the relevant project facts are already established.
+Choose the visible result before discovering a project. Read the named first reference, use the
+condition, and stop at its stated boundary. Do not load a construction taxonomy for a
+self-contained page-content or markup-repair task.
 
-## The short version
+| Requested artifact | First reference | Use when | Completion boundary |
+| --- | --- | --- | --- |
+| Native page or post structure | [ASSEMBLE.md](references/ASSEMBLE.md), then [GUIDE.md §5–6](references/GUIDE.md) | You are inventing a page section and have no authored HTML whose styling must survive. Run `npx -y block-runner@latest assemble - --json` with an intent tree. | Valid native page `post_content`, delivered to the agreed destination. |
+| Page or post content from authored design HTML | [GUIDE.md §4](references/GUIDE.md) | The supplied source is authored HTML; use `npx -y block-runner@latest convert - --json` when its CSS matters. | Valid native page `post_content` plus reported fallbacks and styling limits. Never treat frontend-scraped rendered HTML as authored input. |
+| Reusable, named static registered block source | [AUTHORING.md](references/AUTHORING.md) | The requested result is a static `namespace/slug` block in code. | Confirmed source at its exact retained destination; build, integration, and WordPress proof remain separate. The complete plan in [AUTHORING-PLAN.md](references/AUTHORING-PLAN.md) is an advanced route, not a prerequisite. |
+| Custom PHP renderer or editor behaviour in an existing project | [GUIDE.md §1.1](references/GUIDE.md) | Static generation cannot satisfy the requested component. | Continue in project-owned code; retain a useful native subtree only when it genuinely helps. Inspect [CONSTRUCTION-PATTERNS.md](references/CONSTRUCTION-PATTERNS.md) only when project facts needed for that implementation are missing. |
+| Supplied block markup to repair or check | [GUIDE.md §5](references/GUIDE.md) | Markup already exists and must be safe to save. | `validate` → `fix` → `validate`; do not save a hard-invalid result. |
 
-Pick by the requested artifact:
+If “reusable section” does not say whether it is page `post_content` or a named registered source
+block, ask that one artifact question before writing. Do not use this skill for unrelated WordPress
+administration, non-WordPress HTML, or frontend-scraped HTML presented as source.
 
-- **You need a reusable, named static registered block in code** → read `references/AUTHORING.md`.
-  For authored HTML, submit a declarative `AuthorOptions.proposal`, then run `author preview`, show
-  its literal tree and warnings, obtain confirmation for its exact hash, and run `author write`.
-  The deterministic generator writes executable source; follow the agreed source-only or plugin
-  delivery route and name the proof it has not established. The complete `AuthorOptions.plan` is an
-  advanced compatibility route.
+## Discover only missing project facts
 
-- **You are inventing the structure** → do not write HTML. Emit an intent tree (JSON
-  describing which blocks and how they nest) and pipe it to
-  `npx -y block-runner@latest assemble - --json`. Deterministic code builds the markup, so it
-  cannot come out invalid. This is the best path and the one to reach for by default.
-- **You have authored source HTML** → `npx -y block-runner@latest convert - --json`. The only
-  path that carries CSS; use it when the styling matters (`--styling relaxed` is the default).
-  Its result is page `post_content`, not a reusable source package.
-- **You have block markup to check** → `validate` → `fix` → `validate`. Never save markup that
-  is still invalid after `fix`.
+For a component that belongs in an existing project, use [GUIDE.md §0](references/GUIDE.md) after
+the artifact route is clear. Reuse established facts and inspect only the relevant source and site
+context needed for this change. Existing-plugin integration needs inspection; a self-contained
+paragraph repair does not. Use relevant facts to recommend reuse, supported generation or a
+developer handoff. Recognizing a route does not add generator support. Ask only for choices that
+the request and repository do not answer; use structured questions if your harness supports them,
+otherwise ask in plain language.
 
 ## Generator boundary and continuation
 

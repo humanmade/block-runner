@@ -19,5 +19,55 @@
     "Update WordPress core and all installed plugins.",
     "Back up the WordPress database.",
     "Configure redirects in the WordPress admin."
+  ],
+  "routes": [
+    {
+      "prompt": "Invent a native Gutenberg feature section for this WordPress page.",
+      "route": "assemble",
+      "firstReference": "references/ASSEMBLE.md",
+      "artifact": "page post_content"
+    },
+    {
+      "prompt": "Convert this authored landing-page HTML and its CSS into editable WordPress blocks.",
+      "route": "convert",
+      "firstReference": "references/GUIDE.md#4-convert--someone-elses-html-into-page-post_content",
+      "artifact": "page post_content"
+    },
+    {
+      "prompt": "Create a static named Gutenberg block in source code for this existing project.",
+      "route": "author",
+      "firstReference": "references/AUTHORING.md",
+      "artifact": "registered block source"
+    },
+    {
+      "prompt": "Implement a custom PHP renderer and editor control in my existing WordPress plugin.",
+      "route": "project-owned",
+      "firstReference": "references/GUIDE.md#11-continue-project-owned-development-when-static-generation-does-not-fit",
+      "artifact": "project-owned implementation"
+    },
+    {
+      "prompt": "Repair this supplied Gutenberg markup before it is saved.",
+      "route": "validate-fix-validate",
+      "firstReference": "references/GUIDE.md#5-the-pre-flight-loop--before-page-markup-is-saved",
+      "artifact": "validated page post_content"
+    },
+    {
+      "prompt": "Convert the rendered frontend HTML I scraped into authored WordPress content.",
+      "route": "exclude",
+      "firstReference": null,
+      "artifact": "none"
+    },
+    {
+      "prompt": "Create a reusable WordPress section.",
+      "route": "clarify-artifact",
+      "firstReference": "references/GUIDE.md#0-understand-the-project-before-choosing-output",
+      "artifact": "choose page post_content or registered block source before writing"
+    },
+    {
+      "prompt": "Configure redirects in the WordPress admin.",
+      "route": "exclude",
+      "firstReference": null,
+      "artifact": "none"
+    }
   ]
 }
