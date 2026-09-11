@@ -5,8 +5,121 @@ on:
     branches: [main]
   pull_request:
 
+concurrency:
+  group: ${{ github.event_name == 'pull_request' && format('ci-pr-{0}', github.event.pull_request.number) || format('ci-run-{0}', github.run_id) }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+
 jobs:
+  classify:
+    runs-on: ubuntu-latest
+    outputs:
+      route: ${{ steps.scope.outputs.route }}
+      docs: ${{ steps.scope.outputs.docs }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - id: scope
+        name: Classify changed paths
+        shell: bash
+        run: |
+          if [ "${{ github.event_name }}" != "pull_request" ]; then
+            echo 'route=full' >> "$GITHUB_OUTPUT"
+            echo 'docs=[]' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          result="$(node scripts/ci-scope.mjs --base '${{ github.event.pull_request.base.sha }}' --head '${{ github.event.pull_request.head.sha }}')"
+          echo "$result"
+          route="$(node --input-type=module --eval "console.log(JSON.parse(process.argv[1]).route)" "$result")"
+          docs="$(node --input-type=module --eval "console.log(JSON.stringify(JSON.parse(process.argv[1]).docs))" "$result")"
+          echo "route=$route" >> "$GITHUB_OUTPUT"
+          echo "docs=$docs" >> "$GITHUB_OUTPUT"
+
+  documentation-contracts:
+    needs: classify
+    if: needs.classify.outputs.route == 'docs'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci --engine-strict
+      - name: Verify documentation contracts
+        run: npx --no-install vitest run dev/test/skill.test.ts dev/test/node-support.test.ts
+      - run: npm run check:private
+      - name: Check touched documentation whitespace and local links
+        env:
+          DOCS: ${{ needs.classify.outputs.docs }}
+        run: |
+          git diff --check '${{ github.event.pull_request.base.sha }}' '${{ github.event.pull_request.head.sha }}'
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync } from 'node:fs';
+          import path from 'node:path';
+
+          const docs = JSON.parse(process.env.DOCS ?? '[]');
+          for (const document of docs) {
+            if (!existsSync(document)) continue;
+            const text = readFileSync(document, 'utf8');
+            for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)/g)) {
+              const reference = match[1];
+              if (/^(?:[a-z][a-z+.-]*:|#|\/)/i.test(reference)) continue;
+              const target = reference.split('#', 1)[0];
+              if (target && !existsSync(path.resolve(path.dirname(document), target))) {
+                throw new Error(`${document}: missing local Markdown link target ${reference}`);
+              }
+            }
+          }
+          NODE
+
+  skill-contracts:
+    needs: classify
+    if: needs.classify.outputs.route == 'skill'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.13.0
+          cache: npm
+      - run: npm install -g npm@11
+      - run: npm ci --engine-strict
+      - name: Verify documentation and skill CLI contracts
+        run: npx --no-install vitest run dev/test/skill.test.ts dev/test/node-support.test.ts dev/test/cli.test.ts
+      - run: npm run check:private
+      - name: Check touched documentation whitespace and local links
+        env:
+          DOCS: ${{ needs.classify.outputs.docs }}
+        run: |
+          git diff --check '${{ github.event.pull_request.base.sha }}' '${{ github.event.pull_request.head.sha }}'
+          node --input-type=module <<'NODE'
+          import { existsSync, readFileSync } from 'node:fs';
+          import path from 'node:path';
+
+          const docs = JSON.parse(process.env.DOCS ?? '[]');
+          for (const document of docs) {
+            if (!existsSync(document)) continue;
+            const text = readFileSync(document, 'utf8');
+            for (const match of text.matchAll(/!?\[[^\]]*\]\(([^)\s]+)(?:\s+[^)]*)?\)/g)) {
+              const reference = match[1];
+              if (/^(?:[a-z][a-z+.-]*:|#|\/)/i.test(reference)) continue;
+              const target = reference.split('#', 1)[0];
+              if (target && !existsSync(path.resolve(path.dirname(document), target))) {
+                throw new Error(`${document}: missing local Markdown link target ${reference}`);
+              }
+            }
+          }
+          NODE
+      - name: Verify the packed skill consumer
+        run: |
+          test -f dist/cli.js
+          npm run smoke:package
+
   test:
+    needs: classify
+    if: needs.classify.outputs.route == 'full'
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
@@ -35,6 +148,8 @@ jobs:
         run: npm run smoke:package:unsupported-node
 
   package-boundary:
+    needs: classify
+    if: needs.classify.outputs.route == 'full'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -51,6 +166,8 @@ jobs:
         run: npm run test:consumer
 
   wordpress-proof:
+    needs: classify
+    if: needs.classify.outputs.route == 'full'
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
@@ -93,3 +210,55 @@ jobs:
             !${{ runner.temp }}/block-runner-wordpress-7.1-receipt/**/node_modules/**
           if-no-files-found: warn
           retention-days: 14
+
+  ci-scope:
+    name: CI scope
+    if: always()
+    needs: [classify, documentation-contracts, skill-contracts, test, package-boundary, wordpress-proof]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Require the selected route and accept only intentional skips
+        env:
+          CLASSIFY: ${{ needs.classify.result }}
+          ROUTE: ${{ needs.classify.outputs.route }}
+          DOCS: ${{ needs.documentation-contracts.result }}
+          SKILL: ${{ needs.skill-contracts.result }}
+          TEST: ${{ needs.test.result }}
+          PACKAGE_BOUNDARY: ${{ needs.package-boundary.result }}
+          WORDPRESS_PROOF: ${{ needs.wordpress-proof.result }}
+        run: |
+          set -euo pipefail
+          if [ "$CLASSIFY" != success ]; then
+            echo "Path classifier did not succeed: $CLASSIFY"
+            exit 1
+          fi
+          case "$ROUTE" in
+            docs)
+              selected="$DOCS"
+              skipped="$SKILL $TEST $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
+              ;;
+            skill)
+              selected="$SKILL"
+              skipped="$DOCS $TEST $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
+              ;;
+            full)
+              selected="$TEST $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
+              skipped="$DOCS $SKILL"
+              ;;
+            *)
+              echo "Classifier produced an invalid route: $ROUTE"
+              exit 1
+              ;;
+          esac
+          for result in $selected; do
+            if [ "$result" != success ]; then
+              echo "Selected CI job did not succeed: $result"
+              exit 1
+            fi
+          done
+          for result in $skipped; do
+            if [ "$result" != skipped ]; then
+              echo "Unselected CI job was not intentionally skipped: $result"
+              exit 1
+            fi
+          done

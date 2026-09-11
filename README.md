@@ -516,7 +516,9 @@ npm run typecheck
 ```
 
 `npm run verify` remains the required repository gate. It runs the deterministic repository
-suite. Run `npm run test:consumer` separately to build the clean standalone release archive and
+suite. Pull requests that change only the root documentation allowlist or the shipped skill use
+their focused CI contracts; runtime, package, proof, workflow, release, unknown, and main-branch
+changes retain the full route. Run `npm run test:consumer` separately to build the clean standalone release archive and
 the native style-adapter fixture; it needs npm, `unzip`, and enough time for an isolated
 `npm ci` and two ZIP builds. Run `npm run build && npm run test:package`
 when changing exports, packed files, dependency pins, or consumer behavior. The full CI and
