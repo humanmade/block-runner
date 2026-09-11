@@ -47,6 +47,8 @@ jobs:
       - run: npm run build
       - name: Verify basic and proof-enabled packed consumers
         run: npm run test:package
+      - name: Verify clean consumer archive builds
+        run: npm run test:consumer
 
   wordpress-proof:
     runs-on: ubuntu-latest

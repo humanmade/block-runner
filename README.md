@@ -515,13 +515,23 @@ npx vitest run dev/test/proof-control-setup.test.ts dev/test/proof.test.ts dev/t
 npm run typecheck
 ```
 
-`npm run verify` remains the required repository gate. Run `npm run build && npm run test:package`
-when changing exports, packed files, dependency pins, or consumer behavior. Run
+`npm run verify` remains the required repository gate. It runs the deterministic repository
+suite. Run `npm run test:consumer` separately to build the clean standalone release archive and
+the native style-adapter fixture; it needs npm, `unzip`, and enough time for an isolated
+`npm ci` and two ZIP builds. Run `npm run build && npm run test:package`
+when changing exports, packed files, dependency pins, or consumer behavior. The full CI and
+release matrix run both repository and consumer suites. Run
 `npm run test:proof:wordpress` for proof-runner, browser, emitted-editor layout, persistence,
 or pattern changes; it requires Docker. Run the opt-in `npm run test:proof:mutations` only when
 detector wiring changes, and run the existing release check only for release candidates or release
 automation. Do not relax the visible mutation skips, runtime-proof gates, thresholds, or the
 intentional `fileParallelism: false` Gutenberg serialization.
+
+The consumer suite owns these archive assertions: `standalone consumer release archive > resolves,
+clean-installs, builds, and inspects the actual release archive` in
+`plugin.consumer.test.ts`, and `native style adapter proof fixture > retains and pins the public
+utility hero package with authored image sizing` in
+`proof-native-style-adapter-builder.test.ts`.
 
 ## Media Resolution
 

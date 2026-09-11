@@ -73,6 +73,7 @@
     "tune": "tsx scripts/tune.ts",
     "tune:t0": "tsx scripts/tune.ts --tier t0",
     "test": "vitest run",
+    "test:consumer": "vitest run --config vitest.consumer.config.ts",
     "test:proof": "vitest run dev/test/proof.test.ts dev/test/proof-pattern-overrides.test.ts",
     "test:proof:wordpress": "vitest run --config vitest.wordpress.config.ts",
     "test:proof:mutations": "BLOCK_RUNNER_PROOF_MUTATIONS=1 vitest run dev/test/proof-mutations.integration.test.ts",

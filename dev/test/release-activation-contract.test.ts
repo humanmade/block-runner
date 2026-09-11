@@ -33,6 +33,13 @@ describe('release command capture', () => {
   });
 });
 
+describe('release consumer archive coverage', () => {
+  it('runs the consumer archive suite in the full matrix and treats a failed row as failed release status', () => {
+    expect(source).toContain("runRow('candidate-consumer-tests', 'npm', ['run', 'test:consumer']);");
+    expect(source).toContain("statuses.includes('failed') ? 'failed'");
+  });
+});
+
 describe('release evidence paths', () => {
   it('keeps receipt artifacts beside an extensionless receipt stem', () => {
     const begin = source.indexOf('function artifactDirectoryForReceipt(');

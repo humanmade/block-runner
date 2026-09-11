@@ -43,6 +43,7 @@ mkdirSync(evidenceDirectory, { recursive: true });
 try {
   if (selected === 'full-release-matrix') {
     runRow('candidate-verify', 'npm', ['run', 'verify']);
+    runRow('candidate-consumer-tests', 'npm', ['run', 'test:consumer']);
     const plans = valueFor('--plans');
     if (plans) {
       const authoring = runRow('authoring-wordpress-71-proof', 'npm', ['run', 'authoring:prove', '--', '--plans', path.resolve(plans)]);
