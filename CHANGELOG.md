@@ -1,5 +1,19 @@
 # Changelog
 
+## 0.9.3 — Unreleased
+
+- Distinguish generated-markup diagnostic locations from authored input and show diagnostic codes,
+  stages and repair actions in text reports.
+- Preserve authored heading anchors and detect lost or ambiguous local fragment targets during
+  source-bound authoring.
+- Extend the shipped notice example through standalone packaging and ZIP validation.
+- Add focused native Query Loop assembly and WordPress save/reopen, pagination and empty-result
+  proof, with retained CI command and browser receipts.
+- Check clean editor reopening and exercise declared fields through visible native controls.
+- Shorten skill routing and support continuing custom renderer/editor work in ordinary
+  project-owned source when the static generator does not fit. This does not add dynamic-block
+  generation to the compiler.
+
 ## 0.9.2 — 2026-09-10
 
 - Offer source delivery for developer integration when automatic host integration is unsupported;

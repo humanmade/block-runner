@@ -709,6 +709,19 @@ Keep every real nesting level.
 - **Social bar / footer icon row** → `core/group` of a `core/social-links` holding one
   `core/social-link` per network, each with `attrs {"service": "<name>", "url": "<href>"}`.
 
+### Native Query Loop
+
+The intent route accepts a native `core/query` containing `core/post-template` with dynamic
+post fields, plus sibling `core/query-pagination` and `core/query-no-results` blocks. Supply
+explicit query settings such as `inherit: false`, `postType`, `perPage`, `order`, and `orderBy`
+when the query should be independent of the containing page. Dynamic post titles are rendered
+by WordPress; do not replace them with hardcoded text to make saved markup look populated.
+
+The repository's focused WordPress proof covers this shape with two isolated posts, one result
+per page, Next/Previous navigation, a filtered empty state, and clean save/reopen. This is native
+intent output, not automatic Query inference from HTML or custom PHP-renderer generation.
+Use the project's actual taxonomy IDs and verify the result on the target site.
+
 ### Reading the result
 
 `assemble` runs the same validity gate as everything else, so valid output is proven, not

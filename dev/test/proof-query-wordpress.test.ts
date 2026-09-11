@@ -1,6 +1,6 @@
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
-import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,23 +14,24 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const wpEnvConfig = path.join(root, 'proof/wp-env.json');
 const queryFixture = path.join(root, 'dev/test/fixtures/query-loop.intent.json');
 const queryBrowser = path.join(root, 'scripts/proof-query-playwright.mjs');
+type CommandEvidence = { command: string; args: string[]; exitCode: number; stdout: string; stderr: string };
 
 /** This explicit suite is the native Query Loop runtime receipt, not a plugin proof profile. */
 describe('native Query Loop in WordPress 7.1', () => {
   it('assembles, saves, reopens, paginates, and renders no results from the shared intent fixture', async () => {
-    const outputDir = await mkdtemp(path.join(tmpdir(), 'block-runner-query-proof-'));
-    try {
-      await requireDocker();
-    } catch (error) {
-      const blocked = { status: 'blocked', prerequisite: 'docker', reason: error instanceof Error ? error.message : String(error) };
-      await writeFile(path.join(outputDir, 'runtime-blocked.json'), `${JSON.stringify(blocked, null, 2)}\n`, 'utf8');
-      process.stderr.write(`${JSON.stringify({ queryProofEvidence: outputDir, blocked })}\n`);
-      throw error;
-    }
+    const outputDir = await queryProofOutputDirectory();
     const token = `block-runner-query-${Date.now()}`;
     let startedHere = false;
-    const commands: Array<{ command: string; args: string[]; stdout: string; stderr: string }> = [];
+    let dockerBlocked = false;
+    let failure: unknown;
+    const commands: CommandEvidence[] = [];
     try {
+      try {
+        await requireDocker(commands);
+      } catch (error) {
+        dockerBlocked = true;
+        throw error;
+      }
       const status = await wpEnv(['status'], commands).catch(() => undefined);
       startedHere = !/running/i.test(`${status?.stdout ?? ''}\n${status?.stderr ?? ''}`);
       if (startedHere) {
@@ -103,11 +104,10 @@ describe('native Query Loop in WordPress 7.1', () => {
         cwd: root,
         timeout: 180_000,
       }).then(() => ({ exitCode: 0, stdout: '', stderr: '' }), (error: NodeJS.ErrnoException & { stdout?: string; stderr?: string }) => ({
-        exitCode: 1, stdout: error.stdout ?? '', stderr: error.stderr ?? error.message,
+        exitCode: 1, stdout: error.stdout ?? '', stderr: error.stderr || error.message,
       }));
-      commands.push({ command: process.execPath, args: [queryBrowser, '--config', browserConfig, '--out', browserOutput], stdout: browser.stdout, stderr: browser.stderr });
+      commands.push({ command: process.execPath, args: [queryBrowser, '--config', browserConfig, '--out', browserOutput], exitCode: browser.exitCode, stdout: browser.stdout, stderr: browser.stderr });
       const evidence = existsSync(browserOutput) ? JSON.parse(await readFile(browserOutput, 'utf8')) : undefined;
-      await writeFile(path.join(outputDir, 'commands.json'), `${JSON.stringify(commands, null, 2)}\n`, 'utf8');
       process.stderr.write(`${JSON.stringify({ queryProofEvidence: outputDir, browserExitCode: browser.exitCode, errors: evidence?.errors ?? [] })}\n`);
       expect(browser.exitCode, JSON.stringify(evidence, null, 2)).toBe(0);
       expect(evidence?.errors).toEqual([]);
@@ -116,19 +116,49 @@ describe('native Query Loop in WordPress 7.1', () => {
       expect(evidence?.pagination?.second).toHaveLength(1);
       expect(evidence?.pagination).toMatchObject({ firstStatus: 200, secondStatus: 200, returnedStatus: 200 });
       expect(evidence?.emptyResults).toMatchObject({ nextVisible: false });
+    } catch (error) {
+      failure = error;
+      throw error;
     } finally {
       if (startedHere) await wpEnv(['stop'], commands).catch(() => undefined);
+      try {
+        await writeFile(path.join(outputDir, 'commands.json'), `${JSON.stringify(commands, null, 2)}\n`, 'utf8');
+        if (failure) {
+          await writeFile(path.join(outputDir, 'failure.json'), `${JSON.stringify({
+            status: 'failed',
+            reason: failure instanceof Error ? failure.message : String(failure),
+          }, null, 2)}\n`, 'utf8');
+          if (dockerBlocked) {
+            await writeFile(path.join(outputDir, 'runtime-blocked.json'), `${JSON.stringify({
+              status: 'blocked',
+              prerequisite: 'docker',
+              reason: failure instanceof Error ? failure.message : String(failure),
+            }, null, 2)}\n`, 'utf8');
+          }
+        }
+      } catch (retentionError) {
+        // Never replace the runtime failure with an evidence-write failure.
+        if (failure) {
+          process.stderr.write(`${JSON.stringify({ queryProofEvidence: outputDir, retentionError: retentionError instanceof Error ? retentionError.message : String(retentionError) })}\n`);
+        } else {
+          throw retentionError;
+        }
+      }
+      process.stderr.write(`${JSON.stringify({
+        queryProofEvidence: outputDir,
+        failure: failure instanceof Error ? failure.message : failure === undefined ? undefined : String(failure),
+      })}\n`);
     }
   }, 300_000);
 });
 
-async function wp(args: string[], commands: Array<{ command: string; args: string[]; stdout: string; stderr: string }>) {
+async function wp(args: string[], commands: CommandEvidence[]) {
   const result = await wpEnv(['run', 'cli', 'wp', ...args], commands);
   if (result.exitCode !== 0) throw new Error(`wp ${args.join(' ')} failed: ${result.stderr || result.stdout}`);
   return result;
 }
 
-async function wpEnv(args: string[], commands: Array<{ command: string; args: string[]; stdout: string; stderr: string }>) {
+async function wpEnv(args: string[], commands: CommandEvidence[]) {
   try {
     const { stdout, stderr } = await execFileAsync('npx', ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], { cwd: root, timeout: args[0] === 'start' ? 180_000 : 45_000 });
     const result = { command: 'npx', args: ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], exitCode: 0, stdout, stderr };
@@ -136,16 +166,29 @@ async function wpEnv(args: string[], commands: Array<{ command: string; args: st
     return result;
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-    const result = { command: 'npx', args: ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], exitCode: 1, stdout: failure.stdout ?? '', stderr: failure.stderr ?? failure.message };
+    const result = { command: 'npx', args: ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], exitCode: 1, stdout: failure.stdout ?? '', stderr: failure.stderr || failure.message };
     commands.push(result);
     return result;
   }
 }
 
-async function requireDocker() {
+/** CI supplies a retained root; local runs remain isolated in a temporary directory. */
+async function queryProofOutputDirectory(): Promise<string> {
+  const configured = process.env.BLOCK_RUNNER_PROOF_OUTPUT_DIR;
+  if (!configured) return mkdtemp(path.join(tmpdir(), 'block-runner-query-proof-'));
+  const outputDir = path.resolve(configured, 'query-loop');
+  await mkdir(outputDir, { recursive: true });
+  return outputDir;
+}
+
+async function requireDocker(commands: CommandEvidence[]) {
   try {
-    await execFileAsync('docker', ['info', '--format', '{{.ServerVersion}}'], { timeout: 15_000 });
+    const args = ['info', '--format', '{{.ServerVersion}}'];
+    const { stdout, stderr } = await execFileAsync('docker', args, { timeout: 15_000 });
+    commands.push({ command: 'docker', args, exitCode: 0, stdout, stderr });
   } catch (error) {
+    const failure = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
+    commands.push({ command: 'docker', args: ['info', '--format', '{{.ServerVersion}}'], exitCode: 1, stdout: failure.stdout ?? '', stderr: failure.stderr || failure.message });
     throw new Error(`The native Query Loop proof requires a working Docker CLI and daemon: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
