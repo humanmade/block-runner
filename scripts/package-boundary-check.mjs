@@ -30,33 +30,19 @@ const tarball = path.join(packDirectory, tarballs[0]);
 
 const basic = installPacked(tarball, 'basic');
 const manifest = basic.require('block-runner/package.json');
-const beforeDirectDependencies = {
-  ...manifest.dependencies,
-  ...Object.fromEntries(PROOF_TOOLING.map((name) => [name, manifest.peerDependencies?.[name]])),
-};
-const before = installPacked(
-  tarball,
-  'before-proof-boundary',
-  PROOF_TOOLING.map((name) => `${name}@${manifest.peerDependencies?.[name]}`),
-);
-const installedDependencyInventory = compareInstalledDependencyInventories(
-  installedDependencyInventoryFor(before.consumer),
-  installedDependencyInventoryFor(basic.consumer),
-);
 await verifyBasicConsumer(basic);
 
 const proof = installPacked(tarball, 'proof');
 await verifyProofConsumer(proof);
+const installedDependencyInventory = compareInstalledDependencyInventories(
+  installedDependencyInventoryFor(proof.consumer),
+  installedDependencyInventoryFor(basic.consumer),
+);
 
 console.log(JSON.stringify({
-  productionDirectDependencies: {
-    before: Object.keys(beforeDirectDependencies).sort(),
-    after: Object.keys(manifest.dependencies).sort(),
-    removed: Object.keys(beforeDirectDependencies).filter((name) => !manifest.dependencies[name]).sort(),
-  },
   installedDependencyInventory,
   basicConsumer: { proofPackages: 'absent', commands: ['convert', 'assemble', 'validate', 'fix', 'author'] },
-  proofConsumer: { proofPackages: 'explicitly-pinned', browserDownload: 'not-requested', docker: 'not-started' },
+  proofEnabledConsumer: { proofPackages: 'explicitly-pinned', browserDownload: 'not-requested', docker: 'not-started' },
 }, null, 2));
 
 function installPacked(tarballPath, kind, additionalPackages = []) {
@@ -185,15 +171,15 @@ function packageNameAt(location) {
   return match?.[1];
 }
 
-function compareInstalledDependencyInventories(before, after) {
-  const beforeSet = new Set(before);
-  const unexpectedAfter = after.filter((entry) => !beforeSet.has(entry));
-  if (unexpectedAfter.length > 0) {
-    throw new Error(`Basic installed dependency inventory introduced packages absent from the pre-boundary inventory: ${unexpectedAfter.join(', ')}`);
+function compareInstalledDependencyInventories(proofEnabled, basic) {
+  const proofEnabledSet = new Set(proofEnabled);
+  const unexpectedBasic = basic.filter((entry) => !proofEnabledSet.has(entry));
+  if (unexpectedBasic.length > 0) {
+    throw new Error(`Basic installed dependency inventory introduced packages absent from the proof-enabled inventory: ${unexpectedBasic.join(', ')}`);
   }
-  const removed = before.filter((entry) => !after.includes(entry));
-  if (after.length >= before.length || removed.length === 0) {
-    throw new Error('Basic installed dependency inventory was not reduced from the pre-boundary inventory.');
+  const removed = proofEnabled.filter((entry) => !basic.includes(entry));
+  if (basic.length >= proofEnabled.length || removed.length === 0) {
+    throw new Error('Basic installed dependency inventory was not reduced from the proof-enabled inventory.');
   }
   const missingProofPackages = PROOF_TOOLING.filter((name) => !removed.some((entry) => entry.startsWith(`${name}@`)));
   if (missingProofPackages.length > 0) {
@@ -203,7 +189,7 @@ function compareInstalledDependencyInventories(before, after) {
   if (transitiveRemoved.length === 0) {
     throw new Error('Installed dependency inventory did not show a transitive dependency-tree reduction.');
   }
-  return { before, after, removed, transitiveRemoved };
+  return { proofEnabled, basic, removed, transitiveRemoved };
 }
 
 function proofToolingInstallCommand(manifest, profile) {
