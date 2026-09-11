@@ -293,7 +293,12 @@ const headingRule: Rule = {
       return customHtmlFallback(node, context, check);
     }
     const level = Number(node.tagName.slice(1));
-    const block = context.wp.createBlock('core/heading', { level, content: richTextContent(node, context, 'core/heading', 'heading') }, []);
+    const anchor = node.getAttribute('id');
+    const block = context.wp.createBlock('core/heading', {
+      level,
+      content: richTextContent(node, context, 'core/heading', 'heading'),
+      ...(anchor ? { anchor } : {}),
+    }, []);
     block.__blockRunnerSource = context.sourceFor(node);
     warnShortcode(node, context, 'core/heading', 'heading');
     return block;

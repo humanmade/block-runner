@@ -29,7 +29,9 @@ only relevant imports/includes outside the initial directory.
 
 For integration work, read [CONSTRUCTION-PATTERNS.md](CONSTRUCTION-PATTERNS.md) to choose between
 composition, extension and custom-block implementation, then inspect the matching persistence,
-ownership, wiring and editing contracts. These routes do not expand generator support.
+ownership, wiring and editing contracts. When relevant existing custom blocks or patterns exist,
+inspect their registration and input contracts before replacing them with Core blocks. These routes
+do not expand generator support.
 Use supplied construction maps as leads; the reference describes optional CLI discovery without
 requiring it. Record task-relevant findings with repository-relative file/line references and
 separate facts, interpretations and unknowns. Stop once the route is supported or the remaining
@@ -81,7 +83,11 @@ choice and a concrete tradeoff; ordinary conversation must work equally well.
 Keep the requested outcome. An existing pattern or variation may solve the request, but this
 release does not generate new PHP renderers, arbitrary custom interactions, style/variation
 registrations, or pattern registration packages. Do not invent flags for those modes or silently
-substitute a new static block. Explain a capability gap and obtain the missing scope decision.
+substitute a new static block. The declarative generator plan is limited to supported static source
+generation; that is not a restriction on the surrounding project task. For custom behaviour,
+continue in ordinary project-owned code when the request and inspected contracts make the work
+clear. Ask only for a material choice that cannot be resolved from the request or project.
+
 For supported page content or static source generation, continue through the relevant section
 below. Source-bound proposals, canonical confirmation and validation remain unchanged.
 
@@ -115,6 +121,33 @@ brand colours, custom spacing, a specific look — use `convert`, not `assemble`
 tree carries structure and content, not styling, so `assemble` will produce clean but plainer
 blocks. `convert --styling relaxed` keeps exact off-theme values on the block. If you are
 unsure whether the styling matters, ask the user rather than silently flattening their design.
+
+---
+
+## 1.1 Continue project-owned development when static generation does not fit
+
+Block Runner's static authoring path cannot generate a custom PHP renderer or custom editor
+behaviour. Do not relax the requested artifact, claim that static source covers it, or generate a
+shell whose editor, save function, and metadata will immediately be replaced. Instead, inspect the
+relevant project registration, build and editor contracts from §0, then implement that custom
+behaviour in ordinary project-owned source.
+
+Useful native content can still belong inside the broader component. Assemble or convert a native
+subtree when it is genuinely useful, retain the resulting block markup/content in the project, and
+state its actual scope. For example: “Block Runner cannot generate this custom renderer and editor.
+I’ll implement those in the project and use its supported helpers where useful.” If no meaningful
+Block Runner contribution fits, say that plainly rather than claiming unrelated validation did the
+work.
+
+An unknown build layout is a discovery problem: resolve it from relevant source where possible.
+An unsupported automatic plugin profile is a generator limitation: it can still permit normal
+manual integration within the task. Do not require continued regeneration for ordinary
+project-owned source, and do not invent a build configuration or renderer because the generator
+does not provide one.
+
+Use the proof at its actual boundary. Syntax checks and headless markup validation can cover a
+native subtree, but do not prove custom PHP rendering, custom controls, frontend behaviour, or
+editor persistence. Test those in the project's WordPress environment when that proof is in scope.
 
 ---
 

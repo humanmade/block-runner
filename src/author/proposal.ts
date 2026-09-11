@@ -220,7 +220,10 @@ function sourceAttributes(element: Element, block?: string): Map<string, JsonVal
     }
   } else if (block === 'core/heading' || block === 'core/paragraph' || block === 'core/list-item') {
     values.set('content', safeHtml(element));
-    if (block === 'core/heading' && /^h[1-6]$/i.test(element.tagName)) values.set('level', Number(element.tagName.slice(1)));
+    if (block === 'core/heading' && /^h[1-6]$/i.test(element.tagName)) {
+      values.set('level', Number(element.tagName.slice(1)));
+      if (element.id) values.set('anchor', element.id);
+    }
   }
   return values;
 }

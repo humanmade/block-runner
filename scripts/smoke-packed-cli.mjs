@@ -2,7 +2,7 @@
 /** Install the built tarball as a clean engine-strict consumer, then smoke its CLI and library. */
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -55,6 +55,33 @@ try {
   if (!examplePreview.noFilesWritten || !examplePreview.confirmation || examplePreview.confirmation === examplePreview.planHash) {
     throw new Error('Packed public example did not reach a destination-bound preview.');
   }
+  const noticeDirectory = path.join(consumer, 'notice');
+  const noticeWrite = JSON.parse(run(process.execPath, [cli, 'author', 'write', 'notice.plan.json', '--output-dir', noticeDirectory,
+    '--confirm', examplePreview.confirmation, '--json'], consumer).stdout);
+  if (noticeWrite.noFilesWritten || !existsSync(path.join(noticeDirectory, 'block.json'))) {
+    throw new Error('Packed public example did not reach its confirmed source write.');
+  }
+  const pluginDirectory = path.join(consumer, 'acme-notice');
+  const pluginPreview = run(process.execPath, [cli, 'plugin', 'preview', noticeDirectory,
+    '--standalone', pluginDirectory], consumer).stdout;
+  const pluginConfirmation = pluginPreview.match(/^confirmation: ([a-f0-9]{64})$/m)?.[1];
+  if (!pluginConfirmation || !pluginPreview.includes('plugin preview: standalone') || !pluginPreview.includes('No files written.')) {
+    throw new Error('Packed public example did not reach a standalone plugin preview.');
+  }
+  const pluginWrite = JSON.parse(run(process.execPath, [cli, 'plugin', 'write', noticeDirectory,
+    '--standalone', pluginDirectory, '--confirm', pluginConfirmation, '--json'], consumer).stdout);
+  if (!existsSync(path.join(pluginDirectory, 'package.json')) || pluginWrite.delivery?.buildRuntimeProof !== 'not-run') {
+    throw new Error('Packed public example did not reach its confirmed standalone plugin write.');
+  }
+
+  const staleDirectory = path.join(consumer, 'stale-notice');
+  const stalePreview = JSON.parse(run(process.execPath, [cli, 'author', 'preview', 'notice.plan.json', '--output-dir', staleDirectory, '--json'], consumer).stdout);
+  const changedPlan = structuredClone(examplePlan);
+  changedPlan.fields.find((field) => field.id === 'link-text').label = 'Notice link text';
+  writeFileSync(path.join(consumer, 'stale-notice.plan.json'), JSON.stringify(changedPlan));
+  expectFailure(process.execPath, [cli, 'author', 'write', 'stale-notice.plan.json', '--output-dir', staleDirectory,
+    '--confirm', stalePreview.confirmation, '--json'], consumer, 'stale authoring confirmation');
+  if (existsSync(staleDirectory)) throw new Error('Stale authoring confirmation wrote the destination.');
 
   // Run the documented owner-acceptance preparation through this packed consumer.
   // These explicit proposals exercise the supplied fixtures, not a model benchmark.
@@ -139,4 +166,12 @@ function run(command, args, cwd) {
     throw new Error(command + ' ' + args.join(' ') + ' failed with exit ' + result.status + ':\n' + (result.stderr || result.stdout));
   }
   return result;
+}
+
+function expectFailure(command, args, cwd, description) {
+  const result = spawnSync(command, args, { cwd, encoding: 'utf8', env: process.env });
+  if (result.error) throw result.error;
+  if (result.status === 0 || !/confirmation does not match the reviewed plan and destination; no files written/.test(result.stderr)) {
+    throw new Error(description + ' did not fail without writing:\n' + (result.stderr || result.stdout));
+  }
 }

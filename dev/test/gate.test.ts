@@ -39,6 +39,18 @@ describe('gate', () => {
     expect(report.output).toContain('<!-- wp:paragraph -->');
   });
 
+  it('keeps repair warnings attached to the authored input path', async () => {
+    const report = await canonicalize(
+      '<!-- wp:image --><img src="https://example.com/a.jpg" alt="A"/><!-- /wp:image -->',
+      { sourcePath: 'authored.html' },
+    );
+
+    expect(report.items).toContainEqual(expect.objectContaining({
+      reason: expect.stringContaining('rebuilt from parsed attributes'),
+      source: { path: 'blocks[0]' },
+    }));
+  });
+
   it('repairs a genuinely-invalid block by rebuilding from parsed attributes', async () => {
     // An image without its <figure> wrapper is invalid and has no matching
     // deprecation, so plain serialize(parse()) re-emits it still-broken.

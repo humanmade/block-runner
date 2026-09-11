@@ -38,6 +38,21 @@ function nodesById(nodes: readonly AuthoringStructureNode[]) {
 }
 
 describe('author proposal boundary', () => {
+  it('binds an authored heading ID to its native anchor while retaining an internal link', async () => {
+    const html = '<h2 id="details">Details</h2><a href="#details">Read details</a>';
+    const ref = refs(html);
+    const report = await author(html, { author: { name: 'example/anchors' }, proposal: { structure: [
+      { id: 'heading', block: 'core/heading', sourceRef: ref('h2') },
+      { id: 'buttons', block: 'core/buttons', children: [{ id: 'link', block: 'core/button', sourceRef: ref('a') }] },
+    ] } });
+
+    expect(report.ok, JSON.stringify(report.items)).toBe(true);
+    const structure = report.package!.canonicalPlan!.structure;
+    expect(structure[0]!.attributes).toMatchObject({ content: 'Details', level: 2, anchor: 'details' });
+    expect(structure[1]!.children![0]!.attributes).toMatchObject({ text: 'Read details', url: '#details' });
+    validateSourceContent(html, compileRegisteredBlock(report.package!.canonicalPlan!).template);
+  });
+
   it('binds source content into a canonical plan without caller ledgers', async () => {
     const html = '<section><h2>Exact heading</h2><p>Keep <strong>rich text</strong>.</p><a href="/guide" target="_blank" rel="noopener">Read guide</a></section>';
     const evidence = collectSourceEvidence(html);

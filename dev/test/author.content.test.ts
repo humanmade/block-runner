@@ -30,6 +30,30 @@ describe('source-bound content fulfillment', () => {
       .toThrow(/links changed/);
   });
 
+  it('rejects a source-present local fragment target that native output loses', () => {
+    expect(() => validateSourceContent('<h2 id="details">Details</h2><a href="#details">Read details</a>', [
+      ['core/heading', { level: 2, content: 'Details' }, []],
+      button('Read details', '#details'),
+    ])).toThrow(/local fragment target "details" was lost/);
+  });
+
+  it('only compares source-present local targets, decoding valid fragments and rejecting source ambiguity', () => {
+    expect(() => validateSourceContent('<h2 id="release notes">Release notes</h2><p><a href="#release%20notes">Read</a></p><p><a href="#elsewhere">Elsewhere</a></p><p><a href="#">Top</a></p>', [
+      ['core/heading', { level: 2, content: 'Release notes', anchor: 'release notes' }, []],
+      paragraph('<a href="#release%20notes">Read</a>'),
+      paragraph('<a href="#elsewhere">Elsewhere</a>'),
+      paragraph('<a href="#">Top</a>'),
+    ])).not.toThrow();
+    expect(() => validateSourceContent('<h2 id="details">One</h2><h2 id="details">Two</h2><a href="#details">Read</a>', [
+      ['core/heading', { level: 2, content: 'One', anchor: 'details' }, []],
+      ['core/heading', { level: 2, content: 'Two', anchor: 'details' }, []],
+      button('Read', '#details'),
+    ])).toThrow(/local fragment target "details" is ambiguous in source/);
+    expect(() => validateSourceContent('<p><a href="#bad%ZZ">Malformed</a></p>', [
+      paragraph('<a href="#bad%ZZ">Malformed</a>'),
+    ])).not.toThrow();
+  });
+
   it('rejects lost image alternative text', () => {
     expect(() => validateSourceContent('<img src="./source.svg" alt="Release checklist">', [image('')]))
       .toThrow(/image alt text changed/);

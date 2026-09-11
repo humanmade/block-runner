@@ -14,9 +14,6 @@ compatibility: Requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0 and shell acces
 
 # Block Runner
 
-Read `references/GUIDE.md` for the full contract. It is the same guide shipped in the npm
-package.
-
 ## Start with the user's project
 
 For a component that belongs in an existing project, read `references/GUIDE.md` §0 before
@@ -29,21 +26,14 @@ markup check or when the relevant project facts are already established.
 
 ## The short version
 
-Four paths. Pick by the requested artifact:
+Pick by the requested artifact:
 
-- **You need a reusable, named registered block in code** → for authored HTML, first read the
-  complete proposal-only contract in `references/GUIDE.md` §2, then create an
-  `AuthorOptions.proposal`, not source code or a full plan. It records only semantic structure,
-  source references, editability, locks, and reviewed source decisions; Block Runner returns the
-  canonical `GeneratedAuthoringPlan` with hashes, coverage, assets, native style adapters, and
-  mandatory warnings. Run `author
-  preview`, show the literal tree and every warning, ask for a clear confirmation, then run
-  `author write` using that exact confirmation. Follow the agreed source-only or plugin delivery
-  route and its applicable proof claim. The deterministic generator, not the model, writes the executable source.
-  For authored HTML, make two calls: analyse exact HTML/CSS for `sourceRef`s, then submit an
-  `AuthorOptions.proposal` containing only structure, source references, editability, locks, and
-  explicit content decisions. Inspection/validation need no consent; confirmation covers only the
-  final canonical write identity. Complete `AuthorOptions.plan` is an advanced compatibility route.
+- **You need a reusable, named static registered block in code** → read `references/GUIDE.md` §2.
+  For authored HTML, submit a declarative `AuthorOptions.proposal`, then run `author preview`, show
+  its literal tree and warnings, obtain confirmation for its exact hash, and run `author write`.
+  The deterministic generator writes executable source; follow the agreed source-only or plugin
+  delivery route and name the proof it has not established. The complete `AuthorOptions.plan` is an
+  advanced compatibility route.
 
 - **You are inventing the structure** → do not write HTML. Emit an intent tree (JSON
   describing which blocks and how they nest) and pipe it to
@@ -55,38 +45,34 @@ Four paths. Pick by the requested artifact:
 - **You have block markup to check** → `validate` → `fix` → `validate`. Never save markup that
   is still invalid after `fix`.
 
-## Rules that are easy to get wrong
+## Generator boundary and continuation
 
-- **A registered-block plan is declarative only.** Never emit React/JSX, PHP, a complete `block.json`,
-  generated CSS, or `<!-- wp:… -->` delimiters in the plan or chat as a
-  substitute for the generator. The model interprets the design and makes reviewable choices;
-  deterministic code produces executable files. Safe native `block.json` fields belong in
-  `target.metadata`; do not use that field for executable or file-loading capabilities.
-- **Registered-block authoring is preview first.** `author preview` writes no files. Before
-  asking, show the preview's terminal tree, destination, planned files, and warnings verbatim;
-  then obtain a specific yes for its full confirmation hash. A changed design, plan, or
-  destination needs a fresh preview and consent. The CLI never prompts for this itself.
-- **Finish the job.** Page markup has to land where the user asked; source packages must land in
-  their agreed retained destination, never a temporary folder. Source-only delivery for developer
-  integration is valid when requested; explain the remaining wiring and unverified checks.
-  For page content, write it where the user asked; or
-  offer to write it through a WordPress connection if one is available; or show it to them
-  with the paste instruction (**Options ⋮ → Code editor**, or `Ctrl+Shift+Alt+M` — pasting
-  into the *visual* editor produces a mess). Never leave it in a temp file. See
-  `references/GUIDE.md` §6.
-- **Always pass `--json`.** Without it the report items are dropped and you will miss
-  fallbacks, warnings, and source locations.
+- **A generated registered-block plan is declarative only.** Do not use React/JSX, PHP, a complete
+  `block.json`, generated CSS, or `<!-- wp:… -->` delimiters as a substitute for that generator.
+  Its model proposal makes reviewable semantic choices; deterministic code produces the executable
+  files. See §2 for the full proposal and confirmation contract.
+- **Continue project-owned work normally when static generation does not fit.** If the component
+  needs a custom PHP renderer or editor behaviour, inspect its project contracts and implement that
+  code in the project. Do not generate a static shell that will immediately be replaced, and do not
+  require later regeneration of ordinary project-owned source. Retain any useful native subtree from
+  `assemble` or `convert`, and state precisely what Block Runner contributed. For example: “Block
+  Runner cannot generate this custom renderer and editor. I’ll implement those in the project and
+  use its supported helpers where useful.” See `references/GUIDE.md` §1.1.
+- **Finish the job.** Deliver page markup or source to its agreed retained destination, never a
+  temporary folder. Explain remaining wiring and unverified checks; see `references/GUIDE.md` §2
+  and §6. For page content, paste through **Options ⋮ → Code editor** (`Ctrl+Shift+Alt+M`), not the
+  visual editor.
+- **Prefer `--json` for automation.** Text output includes concise reasons and selected repair
+  context, but JSON preserves the complete machine-readable report.
 - **Never hand-write `<!-- wp:... -->` markup.** That is how invalid output happens. Describe
   structure instead and let `assemble` build it.
 - **A `core/html` fallback is not a success.** It means that part is an uneditable blob. Check
   the report and tell the user.
 - **If the CSS matters, use `convert`, not `assemble`.** An intent tree carries structure and
   content, not styling. Ask the user rather than silently flattening their design.
-- **Name the proof claim and retain its receipt.** Registration, editing, and fidelity need
-  their corresponding real WordPress proof. Require pattern-override proof when that capability
-  is claimed; it is not a requirement for an artifact that declares no pattern overrides.
-  The exhaustive `full` profile still requires every full-profile gate. A headless conversion
-  check alone does not establish runtime or editor behavior.
+- **Name the proof claim and retain its receipt.** Headless markup checks do not establish custom
+  PHP, custom controls, frontend behaviour, or editor persistence. See `references/GUIDE.md` §1.1
+  and §2.
 - **Passwords go in `--wp-app-password-env <NAME>`, never in argv.**
 - **It is an assist, not a gate.** If the tool is unavailable, fall back to your own checks and
   say so — never block the user on it.

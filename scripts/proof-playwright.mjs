@@ -162,15 +162,18 @@ try {
 
   const reopened = await phase('editor-reopen', () => reopenPost(page, fixture));
   const reopenedState = await editorState(page);
+  const reopenedClean = reopened ? await observeCleanEditorState(page) : { ok: false, readings: [], reason: 'The saved post did not reopen.' };
   const reopenedSelectorTargets = await resolveScopedSelectorTargets(page, reopenedState, fixture.editableFields ?? [], fixture.blockName);
   const reopenPersistence = editedValuesPersisted(preEdit, reopenedState, fixture.editableFields ?? [], fixture.blockName, reopenedSelectorTargets);
   const savedStateMatchesReopened = savedState.contentHash === reopenedState.contentHash && savedState.treeHash === reopenedState.treeHash;
-  const persisted = savePassed && reopened && reopenedState.invalidBlocks.length === 0 && savedStateMatchesReopened && reopenPersistence.ok;
+  const persisted = savePassed && reopened && reopenedClean.ok && reopenedState.invalidBlocks.length === 0 && savedStateMatchesReopened && reopenPersistence.ok;
   const reopenReason = !savePassed
     ? 'Editor save did not persist the edited block values.'
-    : !reopened
-      ? 'Could not reopen the saved post in the editor.'
-      : reopenedState.invalidBlocks.length > 0
+      : !reopened
+        ? 'Could not reopen the saved post in the editor.'
+        : !reopenedClean.ok
+          ? 'The reopened editor remained dirty after its ready-state boundary.'
+        : reopenedState.invalidBlocks.length > 0
         ? 'The reopened editor contains invalid blocks.'
         : !savedStateMatchesReopened
           ? 'Saved editor tree/content changed after reopening.'
@@ -182,6 +185,7 @@ try {
     saved: savedState,
     savedSelectorTargets,
     reopened: reopenedState,
+    reopenedClean,
     reopenedSelectorTargets,
     savedStateMatchesReopened,
     reopenPersistence,
@@ -428,20 +432,25 @@ async function editAllFields(page, editor, fields, scope) {
       }
       const target = await resolveNativeField(page, scope, field);
       if (field.surface === 'richText') {
-        await editRichTextThroughNativeControl(page, target.clientId, value);
+        const control = await editRichTextThroughNativeControl(page, target.clientId, value);
+        edited.push({ field: field.path, node: target.blockName, control: 'richText', ...control, value, clientId: target.clientId, metadataName: field.metadataName });
       } else if (field.surface === 'altText') {
         await selectNativeBlock(page, target.clientId);
-        await page.getByRole('region', { name: 'Editor settings', exact: true })
-          .getByLabel(/^(?:alt text|alternative text)$/i).fill(value);
+        const alt = page.getByRole('region', { name: 'Editor settings', exact: true })
+          .getByLabel(/^(?:alt text|alternative text)$/i);
+        if (!(await alt.isVisible().catch(() => false))) {
+          throw new Error(`Required native control unavailable: field ${field.path}, node ${target.blockName}, control Editor settings > Alt text.`);
+        }
+        await alt.fill(value);
+        edited.push({ field: field.path, node: target.blockName, control: 'Editor settings > Alt text', value, clientId: target.clientId, metadataName: field.metadataName });
       } else if (field.surface === 'link') {
-        await editPatternButtonThroughNativeControls(page, target, { text: target.attributes.text, url: value });
+        edited.push({ field: field.path, node: target.blockName, ...(await editPatternButtonThroughNativeControls(page, target, { text: target.attributes.text, url: value })) });
       } else if (field.surface === 'media') {
         if (!field.media) throw new Error('Native media proof requires an explicit prepared attachment id, URL, and alt text.');
-        await editPatternImageThroughNativeControls(page, target, field.media);
+        edited.push({ field: field.path, node: target.blockName, ...(await editPatternImageThroughNativeControls(page, target, field.media)) });
       } else {
         throw new Error('Unsupported editable surface.');
       }
-      edited.push({ path: field.path, surface: field.surface, value, clientId: target.clientId, metadataName: field.metadataName });
     } catch (error) {
       return { status: 'fail', reason: `Could not edit ${field.path}: ${error instanceof Error ? error.message : String(error)}`, details: { edited } };
     }
@@ -584,8 +593,10 @@ async function reopenPost(page, fixture) {
 
 async function editorState(page) {
   return page.evaluate(async () => {
-    const blocks = globalThis.wp?.data?.select('core/block-editor')?.getBlocks?.() ?? [];
-    const content = globalThis.wp?.data?.select('core/editor')?.getEditedPostContent?.() ?? '';
+    const blockEditor = globalThis.wp?.data?.select('core/block-editor');
+    const editor = globalThis.wp?.data?.select('core/editor');
+    const blocks = blockEditor?.getBlocks?.() ?? [];
+    const content = editor?.getEditedPostContent?.() ?? '';
     // Parser bookkeeping (originalContent, validationIssues) appears only
     // after reload. A parser can also materialize a registered attribute's
     // declared default (for example Heading's empty `content`) that the
@@ -620,8 +631,48 @@ async function editorState(page) {
       visit(block.innerBlocks ?? []);
     });
     visit(blocks);
-    return { treeHash: await digest(canonical), contentHash: await digest(content), tree: blocks, content, invalidBlocks };
+    return {
+      treeHash: await digest(canonical),
+      contentHash: await digest(content),
+      tree: blocks,
+      content,
+      invalidBlocks,
+      isDirty: typeof editor?.isEditedPostDirty === 'function' ? editor.isEditedPostDirty() : undefined,
+      currentPostId: editor?.getCurrentPostId?.(),
+    };
   });
+}
+
+// This is an observation window, not a wait for WordPress to repair state.
+// `waitForEditorReady()` establishes the mounted editor boundary; retaining two
+// clean reads shortly afterward catches mount-time dirtiness without claiming
+// an unbounded future-clean guarantee.
+async function observeCleanEditorState(page) {
+  const readings = [];
+  for (let index = 0; index < 2; index += 1) {
+    readings.push(await page.evaluate(() => {
+      const editor = globalThis.wp?.data?.select('core/editor');
+      return {
+        observedAt: new Date().toISOString(),
+        currentPostId: editor?.getCurrentPostId?.(),
+        isDirty: typeof editor?.isEditedPostDirty === 'function' ? editor.isEditedPostDirty() : undefined,
+      };
+    }));
+    if (index === 0) await page.waitForTimeout(250);
+  }
+  return cleanEditorReadings(readings);
+}
+
+function cleanEditorReadings(readings) {
+  const ready = Array.isArray(readings) && readings.length === 2
+    && readings.every((reading) => Number.isInteger(Number(reading?.currentPostId)) && Number(reading.currentPostId) > 0
+      && typeof reading.isDirty === 'boolean');
+  return {
+    ok: ready && readings.every((reading) => reading.isDirty === false),
+    ready,
+    readings,
+    ...(ready ? {} : { reason: 'The reopened editor did not expose a current post and dirty-state selector for both observations.' }),
+  };
 }
 
 /**
@@ -1236,7 +1287,7 @@ async function provePatternOverride(page, fixture) {
   for (let index = 0; index < pattern.instances.length; index += 1) {
     const instance = inserted[index];
     const desired = pattern.instances[index].content;
-    const result = await editPatternInstanceThroughNativeControls(page, instance.clientId, desired);
+    const result = await editPatternInstanceThroughNativeControls(page, instance.clientId, desired, pattern.structuralPolicy);
     edited.push({ label: pattern.instances[index].label, clientId: instance.clientId, ...result });
   }
   if (!edited.every((result) => result.ok)) {
@@ -1252,9 +1303,11 @@ async function provePatternOverride(page, fixture) {
   const saved = await savePost(page);
   const afterSave = await editorState(page);
   const reopened = await reopenPost(page);
+  const reopenClean = reopened ? await observeCleanEditorState(page) : { ok: false, readings: [], reason: 'The saved pattern post did not reopen.' };
   const afterReload = await editorState(page);
   const persistedInstances = await patternInstanceStates(page, pattern.ref);
   const persisted = saved && reopened
+    && reopenClean.ok
     && afterSave.contentHash === afterReload.contentHash
     && samePatternInstances(persistedInstances, pattern.instances);
   if (!persisted) {
@@ -1263,6 +1316,7 @@ async function provePatternOverride(page, fixture) {
       preSaveCoreBlockContent: beforeSave,
       afterSave,
       afterReload,
+      reopenClean,
       reopenedCoreBlockContent: persistedInstances,
     });
     return undefined;
@@ -1270,12 +1324,14 @@ async function provePatternOverride(page, fixture) {
 
   const canonicalUpdate = await updateCanonicalPattern(page, pattern.ref, pattern.canonicalUpdate.content);
   const canonicalReopened = canonicalUpdate.ok && await reopenPost(page);
+  const canonicalReopenClean = canonicalReopened ? await observeCleanEditorState(page) : { ok: false, readings: [], reason: 'The canonical-update post did not reopen.' };
   const afterCanonicalUpdate = await editorState(page);
   const afterCanonicalInstances = await patternInstanceStates(page, pattern.ref);
   const updatedGeneratedBlockCheck = canonicalUpdate.ok
     ? inspectGeneratedBlockCoverage(canonicalUpdate.content, fixture.blockName, pattern.requiredBindings)
     : { ok: false, reason: 'canonical_update_unavailable' };
   const canonicalReachedBoth = canonicalUpdate.ok && canonicalReopened
+    && canonicalReopenClean.ok
     && canonicalUpdate.content.includes(pattern.canonicalUpdate.marker)
     && updatedGeneratedBlockCheck.ok
     && samePatternInstances(afterCanonicalInstances, pattern.instances);
@@ -1285,6 +1341,7 @@ async function provePatternOverride(page, fixture) {
       canonicalUpdate,
       updatedGeneratedBlockCheck,
       afterCanonicalUpdate,
+      canonicalReopenClean,
       coreBlockContent: afterCanonicalInstances,
     });
     return undefined;
@@ -1294,10 +1351,11 @@ async function provePatternOverride(page, fixture) {
   const reset = await resetPatternOverride(page, resetTarget?.clientId, pattern.reset.name, pattern.reset.attribute);
   const resetSaved = await savePost(page);
   const resetReopened = await reopenPost(page);
+  const resetReopenClean = resetReopened ? await observeCleanEditorState(page) : { ok: false, readings: [], reason: 'The reset post did not reopen.' };
   const afterReset = await editorState(page);
   const resetInstances = await patternInstanceStates(page, pattern.ref);
   const resetContent = resetInstances[pattern.reset.instance]?.content ?? {};
-  const resetApplied = reset.ok && resetSaved && resetReopened
+  const resetApplied = reset.ok && resetSaved && resetReopened && resetReopenClean.ok
     && !hasOverrideValue(resetContent, pattern.reset.name, pattern.reset.attribute)
     && canonicalUpdate.content.includes(pattern.reset.fallback)
     && samePatternContent(resetInstances[1 - pattern.reset.instance]?.content, pattern.instances[1 - pattern.reset.instance].content);
@@ -1308,6 +1366,7 @@ async function provePatternOverride(page, fixture) {
       reset,
       resetCoreBlockContent: resetInstances,
       resetEditorState: afterReset,
+      resetReopenClean,
     });
     return undefined;
   }
@@ -1328,12 +1387,15 @@ async function provePatternOverride(page, fixture) {
     preSaveCoreBlockContent: beforeSave,
     afterSave,
     afterReload,
+    reopenClean,
     reopenedCoreBlockContent: persistedInstances,
     canonicalUpdate,
     afterCanonicalUpdate,
+    canonicalReopenClean,
     afterCanonicalCoreBlockContent: afterCanonicalInstances,
     reset,
     afterReset,
+    resetReopenClean,
     resetCoreBlockContent: resetInstances,
     structural,
     negative,
@@ -1443,7 +1505,7 @@ async function proveSavedMissingBinding(page, pattern) {
   const refused = readonly?.inert && readonly.readonly && !readonly.editable && readonly.text === negative.fallback;
   const edited = refused
     ? { ok: true, control: 'native readonly field', observed: readonly }
-    : await editPatternInstanceThroughNativeControls(page, instances[0].clientId, desired, {});
+    : await editPatternInstanceThroughNativeControls(page, instances[0].clientId, desired, pattern.structuralPolicy);
   const beforeSave = await patternInstanceStates(page, negative.ref);
   const saved = await savePost(page);
   const reopened = await reopenPost(page);
@@ -1493,7 +1555,7 @@ async function patternInstanceStates(page, ref) {
  * the native binding integration instead of bypassing it with a data-store
  * attribute update.
  */
-async function editPatternInstanceThroughNativeControls(page, clientId, content, expectedStoredContent = content) {
+async function editPatternInstanceThroughNativeControls(page, clientId, content, lockMode, expectedStoredContent = content) {
   if (!clientId) return { ok: false, reason: 'Missing core/block clientId.' };
   const outsideBefore = await editorTreeOutsideRoot(page, clientId);
   const targets = await patternOverrideTargets(page, clientId, content);
@@ -1507,14 +1569,14 @@ async function editPatternInstanceThroughNativeControls(page, clientId, content,
     for (const target of targets) {
       const values = content[target.name];
       if (target.blockName === 'core/image') {
-        controls.push(await editPatternImageThroughNativeControls(page, target, values, clientId));
+        controls.push({ field: target.name, lockMode, ...(await editPatternImageThroughNativeControls(page, target, values, clientId, lockMode)) });
       } else if (target.blockName === 'core/heading' || target.blockName === 'core/paragraph' || target.blockName === 'core/list-item') {
         if (typeof values.content !== 'string') throw new Error(`${target.blockName} is missing a string content value.`);
-        await editRichTextThroughNativeControl(page, target.clientId, values.content);
+        const control = await editRichTextThroughNativeControl(page, target.clientId, values.content);
         await waitForPatternOverrideValue(page, clientId, target.name, 'content', values.content);
-        controls.push({ block: target.blockName, control: 'richText', value: values.content });
+        controls.push({ field: target.name, lockMode, block: target.blockName, control: 'richText', ...control, value: values.content });
       } else if (target.blockName === 'core/button') {
-        controls.push(await editPatternButtonThroughNativeControls(page, target, values, clientId));
+        controls.push({ field: target.name, lockMode, ...(await editPatternButtonThroughNativeControls(page, target, values, clientId)) });
       } else {
         throw new Error(`No native override editor is defined for ${target.blockName}.`);
       }
@@ -1629,9 +1691,10 @@ async function editRichTextThroughNativeControl(page, clientId, value) {
   const field = editorCanvas.locator(`[data-block="${clientId}"][contenteditable="true"], [data-block="${clientId}"] [contenteditable="true"]`).first();
   await field.waitFor({ state: 'visible' });
   await field.fill(value);
+  return { accessibleName: await field.getAttribute('aria-label') ?? undefined };
 }
 
-async function editPatternImageThroughNativeControls(page, target, values, patternClientId) {
+async function editPatternImageThroughNativeControls(page, target, values, patternClientId, lockMode) {
   if (!Number.isInteger(values.id) || typeof values.url !== 'string' || typeof values.alt !== 'string') {
     throw new Error('Image override requires id, url, and alt values from the prepared media library.');
   }
@@ -1657,6 +1720,9 @@ async function editPatternImageThroughNativeControls(page, target, values, patte
 
   await selectNativeBlock(page, target.clientId);
   const alt = page.getByRole('region', { name: 'Editor settings', exact: true }).getByLabel(/^(?:alt text|alternative text)$/i);
+  if (!(await alt.isVisible().catch(() => false))) {
+    throw new Error(`Required native control unavailable: field ${target.name ?? 'image'}, node ${target.blockName}, lock mode ${lockMode ?? 'unspecified'}, control Editor settings > Alt text.`);
+  }
   await alt.fill(values.alt);
   await waitForPatternOverrideValueIfScoped(page, target, 'alt', values.alt, patternClientId);
 
@@ -1684,7 +1750,7 @@ async function editPatternImageThroughNativeControls(page, target, values, patte
 
   return {
     block: target.blockName,
-    control: 'media+altText+title+caption',
+    control: 'media+Editor settings > Alt text+title+caption',
     id: values.id,
     url: values.url,
     alt: values.alt,

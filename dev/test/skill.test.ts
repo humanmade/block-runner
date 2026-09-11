@@ -30,6 +30,8 @@ describe('canonical agent skill', () => {
     expect(guide).toContain('# Block Runner — agent guide');
     expect(guide).toContain('Primary HTML workflow: complete proposal → canonical plan');
     expect(guide).toContain('authoring-proposal-example:start');
+    expect(guide).toContain('Continue project-owned development when static generation does not fit');
+    expect(guide).toMatch(/custom PHP renderer or custom editor\s+behaviour/);
   });
 
   it('keeps a balanced activation regression set', async () => {

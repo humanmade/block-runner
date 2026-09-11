@@ -1,4 +1,5 @@
 import { validate } from '../gate/validate.js';
+import { generatedMarkupItems } from '../gate/provenance.js';
 import { applyMedia } from '../media/apply.js';
 import { createMediaResolver } from '../media/resolver.js';
 import { repairTokens } from '../tokens/apply.js';
@@ -37,8 +38,9 @@ export async function finalizeBlocks(
   warnings.push(...tokenRepair.items);
 
   const output = wp.serialize(tokenRepair.blocks);
+  const { sourcePath: inputPath, ...outputOptions } = options;
   const gate = await validate(output, {
-    ...options,
+    ...outputOptions,
     strict: config.strict,
   });
 
@@ -54,7 +56,7 @@ export async function finalizeBlocks(
       invalid: gate.summary.invalid,
       warnings: warnings.length,
     },
-    items: [...warnings, ...gate.items],
+    items: [...warnings, ...generatedMarkupItems(gate.items, inputPath)],
     output,
   };
 }

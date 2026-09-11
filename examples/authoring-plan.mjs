@@ -2,7 +2,11 @@ import { author, collectSourceEvidence } from 'block-runner';
 
 // From a project with the candidate installed:
 // node node_modules/block-runner/examples/authoring-plan.mjs > notice.plan.json
-// Then use the normal CLI preview/confirmation/write workflow with that exact plan.
+// Preview and confirm the source write, then separately preview and confirm a standalone plugin:
+// npx --no-install block-runner author preview notice.plan.json --output-dir generated/notice
+// npx --no-install block-runner author write notice.plan.json --confirm <author-confirmation> --output-dir generated/notice
+// npx --no-install block-runner plugin preview generated/notice --standalone plugins/acme-notice
+// npx --no-install block-runner plugin write generated/notice --standalone plugins/acme-notice --confirm <plugin-fingerprint>
 const html = '<section><h2>A native notice</h2><p>Review this message before publishing.</p><a href="/details">Read more</a></section>';
 const evidence = collectSourceEvidence(html);
 const ref = (tag) => {
