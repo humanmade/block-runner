@@ -1,0 +1,12 @@
+{
+  "name": "block-runner-project-owned-blocks-proof",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "wp-scripts build --webpack-src-dir=src --output-path=build",
+    "start": "wp-scripts start --webpack-src-dir=src --output-path=build"
+  },
+  "devDependencies": {
+    "@wordpress/scripts": "34.2.0"
+  }
+}
