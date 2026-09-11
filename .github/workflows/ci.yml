@@ -19,6 +19,8 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+      - name: Test CI scope classification
+        run: node --test dev/test/ci-scope.test.mjs
       - id: scope
         name: Classify changed paths
         shell: bash
