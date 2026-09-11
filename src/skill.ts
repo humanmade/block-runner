@@ -52,6 +52,23 @@ interface InstallPlan {
 const SKILL_NAME = 'block-runner';
 const MANIFEST_NAME = '.block-runner-install.json';
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../skills/block-runner/', import.meta.url));
+const PAGE_INTENT_REFERENCE_NAMES = ['GUIDE.md', 'ASSEMBLE.md'] as const;
+
+function readSkillReferencesSync(names: readonly string[]): string {
+  const referencesDirectory = path.join(SOURCE_DIRECTORY, 'references');
+  const readWithTrailingNewline = (name: string): string => {
+    const fileContent = readFileSync(path.join(referencesDirectory, name), 'utf8');
+    return fileContent.endsWith('\n') ? fileContent : `${fileContent}\n`;
+  };
+
+  return names
+    .map((name, index) =>
+      index === 0
+        ? readWithTrailingNewline(name)
+        : `\n---\n\n<!-- references/${name} -->\n\n${readWithTrailingNewline(name)}`,
+    )
+    .join('');
+}
 
 // `npx block-runner skill` prints the whole reference set so a harness without skill support
 // gets the same information as the installed skill.
@@ -68,18 +85,13 @@ export function readCanonicalSkillGuideSync(): string {
   names.splice(guideIndex, 1);
   names.unshift('GUIDE.md');
 
-  const readWithTrailingNewline = (name: string): string => {
-    const fileContent = readFileSync(path.join(referencesDirectory, name), 'utf8');
-    return fileContent.endsWith('\n') ? fileContent : `${fileContent}\n`;
-  };
+  return readSkillReferencesSync(names);
+}
 
-  return names
-    .map((name, index) =>
-      index === 0
-        ? readWithTrailingNewline(name)
-        : `\n---\n\n<!-- references/${name} -->\n\n${readWithTrailingNewline(name)}`,
-    )
-    .join('');
+// Benchmark page-intent conversion needs the shared guide plus the complete intent schema.
+// Keep the CLI's full-bundle reader above unchanged; this is deliberately not a configurable API.
+export function readPageIntentSkillGuideSync(): string {
+  return readSkillReferencesSync(PAGE_INTENT_REFERENCE_NAMES);
 }
 
 export async function readCanonicalSkillGuide(): Promise<string> {

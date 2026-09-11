@@ -1,8 +1,13 @@
 import { readFile } from 'node:fs/promises';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { readCanonicalSkillGuide, validateCanonicalSkill } from '../../src/skill.js';
 import { validateAuthoringPlan } from '../../src/authoring/schema.js';
 import { compileRegisteredBlock } from '../../src/authoring/generate.js';
+
+afterEach(() => {
+  vi.doUnmock('node:fs');
+  vi.resetModules();
+});
 
 describe('canonical agent skill', () => {
   it('compiles the complete registered-block plan taught to calling agents', async () => {
@@ -76,5 +81,42 @@ describe('canonical agent skill', () => {
     for (const reference of fixture.routes.flatMap((entry) => (entry.firstReference ? [entry.firstReference] : []))) {
       expect(skill).toContain(reference.split('#', 1)[0]!);
     }
+  });
+
+  it('reads only the ordered page references with Unicode and trailing-newline normalization', async () => {
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    const reads: string[] = [];
+    vi.resetModules();
+    vi.doMock('node:fs', () => ({
+      ...actual,
+      readFileSync(file: string, encoding: string) {
+        reads.push(file);
+        if (file.endsWith('/GUIDE.md')) return 'guide α';
+        if (file.endsWith('/ASSEMBLE.md')) return 'assemble β\n';
+        throw new Error(`unexpected page reference read: ${file}`);
+      },
+    }));
+    const { readPageIntentSkillGuideSync } = await import('../../src/skill.js');
+
+    expect(readPageIntentSkillGuideSync()).toBe(
+      'guide α\n\n---\n\n<!-- references/ASSEMBLE.md -->\n\nassemble β\n',
+    );
+    expect(reads.map((file) => file.split('/').at(-1))).toEqual(['GUIDE.md', 'ASSEMBLE.md']);
+  });
+
+  it('surfaces a missing selected page reference', async () => {
+    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
+    vi.resetModules();
+    vi.doMock('node:fs', () => ({
+      ...actual,
+      readFileSync(file: string, encoding: string) {
+        if (file.endsWith('/GUIDE.md')) return 'guide\n';
+        if (file.endsWith('/ASSEMBLE.md')) throw new Error('ENOENT: no such file or directory');
+        return actual.readFileSync(file, encoding as BufferEncoding);
+      },
+    }));
+    const { readPageIntentSkillGuideSync } = await import('../../src/skill.js');
+
+    expect(() => readPageIntentSkillGuideSync()).toThrow('ENOENT: no such file or directory');
   });
 });
