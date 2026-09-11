@@ -41,6 +41,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The local-link gate diffs the pull-request base and head. A rebased
+          # head does not retain that base in checkout's default shallow clone.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
@@ -80,6 +84,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+        with:
+          # The local-link gate diffs the pull-request base and head. A rebased
+          # head does not retain that base in checkout's default shallow clone.
+          fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
           node-version: 22.13.0
