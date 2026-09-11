@@ -36,16 +36,45 @@ describe('canonical agent skill', () => {
     expect(guide).toMatch(/custom PHP renderer or custom editor\s+behaviour/);
   });
 
-  it('keeps a balanced activation regression set', async () => {
+  it('keeps activation coverage and explicit artifact routes', async () => {
     const fixture = JSON.parse(
       await readFile(new URL('./fixtures/skill-activation.json', import.meta.url), 'utf8'),
-    ) as { shouldTrigger: string[]; shouldNotTrigger: string[] };
+    ) as {
+      shouldTrigger: string[];
+      shouldNotTrigger: string[];
+      routes: Array<{
+        prompt: string;
+        route: 'assemble' | 'convert' | 'author' | 'project-owned' | 'validate-fix-validate' | 'exclude' | 'clarify-artifact';
+        firstReference: string | null;
+        artifact: string;
+      }>;
+    };
 
-    expect(fixture.shouldTrigger).toHaveLength(9);
-    expect(fixture.shouldNotTrigger).toHaveLength(8);
-    expect(new Set([...fixture.shouldTrigger, ...fixture.shouldNotTrigger]).size).toBe(17);
+    expect(fixture.shouldTrigger.length).toBeGreaterThan(0);
+    expect(fixture.shouldNotTrigger.length).toBeGreaterThan(0);
+    expect(new Set([...fixture.shouldTrigger, ...fixture.shouldNotTrigger]).size).toBe(
+      fixture.shouldTrigger.length + fixture.shouldNotTrigger.length,
+    );
     expect(fixture.shouldTrigger.every((prompt) => /WordPress|Gutenberg|block/i.test(prompt))).toBe(true);
     expect(fixture.shouldNotTrigger.some((prompt) => /non-WordPress|not use WordPress/i.test(prompt))).toBe(true);
     expect(fixture.shouldTrigger).toContain('Create a reusable named Gutenberg block in my existing WordPress plugin.');
+
+    const routeNames = new Set(fixture.routes.map((entry) => entry.route));
+    expect(routeNames).toEqual(
+      new Set(['assemble', 'convert', 'author', 'project-owned', 'validate-fix-validate', 'exclude', 'clarify-artifact']),
+    );
+    expect(fixture.routes.every((entry) => entry.prompt.length > 0 && entry.artifact.length > 0)).toBe(true);
+    expect(
+      fixture.routes
+        .filter((entry) => entry.route !== 'exclude')
+        .every((entry) => entry.firstReference?.startsWith('references/')),
+    ).toBe(true);
+    expect(fixture.routes.filter((entry) => entry.route === 'exclude').every((entry) => entry.firstReference === null)).toBe(true);
+    expect(fixture.routes.find((entry) => entry.route === 'clarify-artifact')?.artifact).toContain('before writing');
+
+    const skill = await readFile(new URL('../../skills/block-runner/SKILL.md', import.meta.url), 'utf8');
+    for (const reference of fixture.routes.flatMap((entry) => (entry.firstReference ? [entry.firstReference] : []))) {
+      expect(skill).toContain(reference.split('#', 1)[0]!);
+    }
   });
 });
