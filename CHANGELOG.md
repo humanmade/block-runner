@@ -1,6 +1,6 @@
 # Changelog
 
-## 0.9.3 — Unreleased
+## 0.9.3 — 2026-09-11
 
 - Distinguish generated-markup diagnostic locations from authored input and show diagnostic codes,
   stages and repair actions in text reports.
