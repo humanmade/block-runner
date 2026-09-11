@@ -326,7 +326,7 @@ gates fail the selected claim. Golden images are read-only inputs, never refresh
 Axe results are automated evidence, not complete accessibility certification or owner acceptance.
 
 The pinned environment and package hashes, runtime observations, logs and evidence objects are
-retained in the receipt. See the [proof guide](skills/block-runner/references/GUIDE.md#proof-is-part-of-completion)
+retained in the receipt. See the [proof guide](skills/block-runner/references/AUTHORING.md#proof-is-part-of-completion)
 and [release gate](https://github.com/humanmade/block-runner/blob/main/dev/release/0.9-testing/README.md)
 for profile inputs, accepted upstream findings and release requirements.
 
