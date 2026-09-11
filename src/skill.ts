@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { constants, existsSync } from 'node:fs';
+import { constants, existsSync, readFileSync, readdirSync } from 'node:fs';
 import { access, chmod, lstat, mkdir, readFile, readdir, realpath, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -53,13 +53,37 @@ const SKILL_NAME = 'block-runner';
 const MANIFEST_NAME = '.block-runner-install.json';
 const SOURCE_DIRECTORY = fileURLToPath(new URL('../skills/block-runner/', import.meta.url));
 
-export async function readCanonicalSkillGuide(): Promise<string> {
-  const guidePath = path.join(SOURCE_DIRECTORY, 'references', 'GUIDE.md');
-  try {
-    return await readFile(guidePath, 'utf8');
-  } catch {
+// `npx block-runner skill` prints the whole reference set so a harness without skill support
+// gets the same information as the installed skill.
+export function readCanonicalSkillGuideSync(): string {
+  const referencesDirectory = path.join(SOURCE_DIRECTORY, 'references');
+  const guidePath = path.join(referencesDirectory, 'GUIDE.md');
+  const names = readdirSync(referencesDirectory)
+    .filter((name) => name.endsWith('.md'))
+    .sort((a, b) => a.localeCompare(b));
+  const guideIndex = names.indexOf('GUIDE.md');
+  if (guideIndex === -1) {
     throw new Error(`skill source file is missing: ${guidePath}`);
   }
+  names.splice(guideIndex, 1);
+  names.unshift('GUIDE.md');
+
+  const readWithTrailingNewline = (name: string): string => {
+    const fileContent = readFileSync(path.join(referencesDirectory, name), 'utf8');
+    return fileContent.endsWith('\n') ? fileContent : `${fileContent}\n`;
+  };
+
+  return names
+    .map((name, index) =>
+      index === 0
+        ? readWithTrailingNewline(name)
+        : `\n---\n\n<!-- references/${name} -->\n\n${readWithTrailingNewline(name)}`,
+    )
+    .join('');
+}
+
+export async function readCanonicalSkillGuide(): Promise<string> {
+  return readCanonicalSkillGuideSync();
 }
 
 export async function validateCanonicalSkill(): Promise<void> {
@@ -224,6 +248,21 @@ function validateBundle(files: BundleFile[]): void {
   }
   if (!byPath.has('references/GUIDE.md')) {
     throw new Error('canonical skill is invalid: references/GUIDE.md is missing');
+  }
+
+  for (const file of files) {
+    if (file.path === 'SKILL.md' || !file.path.endsWith('.md')) {
+      continue;
+    }
+    const fileContent = file.content.toString('utf8');
+    for (const match of fileContent.matchAll(/\]\(([A-Za-z0-9._-]+\.md)(?:#[^)]*)?\)/g)) {
+      const resolved = path.posix.join(path.posix.dirname(file.path), match[1]);
+      if (!byPath.has(resolved)) {
+        throw new Error(
+          `canonical skill is invalid: referenced file is missing: ${resolved} (linked from ${file.path})`,
+        );
+      }
+    }
   }
 }
 
