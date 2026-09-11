@@ -41,10 +41,10 @@ describe('native Query Loop in WordPress 7.1', () => {
         });
         if (started.exitCode !== 0) throw new Error(`Pinned WordPress 7.1 environment did not start: ${started.stderr || started.stdout}`);
       }
-      const [wordpressVersion, phpVersion] = await Promise.all([
-        wp(['core', 'version'], commands).then((result) => result.stdout.trim()),
-        wp(['eval', 'echo PHP_VERSION;'], commands).then((result) => result.stdout.trim()),
-      ]);
+      // wp-env commands share mutable environment state, so concurrent CLI
+      // invocations can make one lose the active environment mid-proof.
+      const wordpressVersion = (await wp(['core', 'version'], commands)).stdout.trim();
+      const phpVersion = (await wp(['eval', 'echo PHP_VERSION;'], commands)).stdout.trim();
       expect(wordpressVersion).toMatch(/^7\.1(?:\.\d+)?$/);
       expect(phpVersion).toMatch(/^8\.3(?:\.\d+)?$/);
 
@@ -58,7 +58,8 @@ describe('native Query Loop in WordPress 7.1', () => {
         'post', 'create', '--post_status=publish', `--post_title=${token} second`, '--post_content=Second seeded Query Loop post.',
         '--post_date=2024-01-02 00:00:00', `--post_category=${categoryId}`, '--porcelain',
       ], commands)).stdout.trim());
-      const [firstLink, secondLink] = await Promise.all([firstId, secondId].map(async (id) => (await wp(['post', 'get', String(id), '--field=url'], commands)).stdout.trim()));
+      const firstLink = (await wp(['post', 'get', String(firstId), '--field=url'], commands)).stdout.trim();
+      const secondLink = (await wp(['post', 'get', String(secondId), '--field=url'], commands)).stdout.trim();
       if (!firstLink || !secondLink) throw new Error('Could not read the seeded post links.');
 
       const fixture = JSON.parse(await readFile(queryFixture, 'utf8')) as { blocks: Array<{ attrs?: Record<string, unknown> }> };
