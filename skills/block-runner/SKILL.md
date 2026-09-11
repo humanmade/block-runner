@@ -28,7 +28,7 @@ markup check or when the relevant project facts are already established.
 
 Pick by the requested artifact:
 
-- **You need a reusable, named static registered block in code** → read `references/GUIDE.md` §2.
+- **You need a reusable, named static registered block in code** → read `references/AUTHORING.md`.
   For authored HTML, submit a declarative `AuthorOptions.proposal`, then run `author preview`, show
   its literal tree and warnings, obtain confirmation for its exact hash, and run `author write`.
   The deterministic generator writes executable source; follow the agreed source-only or plugin
@@ -50,7 +50,7 @@ Pick by the requested artifact:
 - **A generated registered-block plan is declarative only.** Do not use React/JSX, PHP, a complete
   `block.json`, generated CSS, or `<!-- wp:… -->` delimiters as a substitute for that generator.
   Its model proposal makes reviewable semantic choices; deterministic code produces the executable
-  files. See §2 for the full proposal and confirmation contract.
+  files. See `references/AUTHORING.md` for the full proposal and confirmation contract.
 - **Continue project-owned work normally when static generation does not fit.** If the component
   needs a custom PHP renderer or editor behaviour, inspect its project contracts and implement that
   code in the project. Do not generate a static shell that will immediately be replaced, and do not
@@ -59,9 +59,9 @@ Pick by the requested artifact:
   Runner cannot generate this custom renderer and editor. I’ll implement those in the project and
   use its supported helpers where useful.” See `references/GUIDE.md` §1.1.
 - **Finish the job.** Deliver page markup or source to its agreed retained destination, never a
-  temporary folder. Explain remaining wiring and unverified checks; see `references/GUIDE.md` §2
-  and §6. For page content, paste through **Options ⋮ → Code editor** (`Ctrl+Shift+Alt+M`), not the
-  visual editor.
+  temporary folder. Explain remaining wiring and unverified checks; see `references/AUTHORING.md`
+  and `references/GUIDE.md` §6. For page content, paste through **Options ⋮ → Code editor**
+  (`Ctrl+Shift+Alt+M`), not the visual editor.
 - **Prefer `--json` for automation.** Text output includes concise reasons and selected repair
   context, but JSON preserves the complete machine-readable report.
 - **Never hand-write `<!-- wp:... -->` markup.** That is how invalid output happens. Describe
@@ -72,10 +72,11 @@ Pick by the requested artifact:
   content, not styling. Ask the user rather than silently flattening their design.
 - **Name the proof claim and retain its receipt.** Headless markup checks do not establish custom
   PHP, custom controls, frontend behaviour, or editor persistence. See `references/GUIDE.md` §1.1
-  and §2.
+  and `references/AUTHORING.md`.
 - **Passwords go in `--wp-app-password-env <NAME>`, never in argv.**
 - **It is an assist, not a gate.** If the tool is unavailable, fall back to your own checks and
   say so — never block the user on it.
 
-Block structure rules, the full node schema, per-section mappings, token and media resolution,
-exit codes, and failure posture are all in `references/GUIDE.md`.
+Block structure rules, the full node schema and per-section mappings are in
+`references/ASSEMBLE.md`. Token and media resolution, exit codes, and failure posture are in
+`references/GUIDE.md`.

@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
+import { readCanonicalSkillGuide } from '../../src/skill.js';
 
 const sourceSkill = new URL('../../skills/block-runner/', import.meta.url);
 const tsxImport = import.meta.resolve('tsx');
@@ -13,7 +14,7 @@ const { version: packageVersion } = createRequire(import.meta.url)('../../packag
 describe('CLI', () => {
   it('prints the agent guide with skill', async () => {
     const result = await runCli(['skill']);
-    const guide = await readFile(new URL('references/GUIDE.md', sourceSkill), 'utf8');
+    const guide = await readCanonicalSkillGuide();
 
     expect(result.code).toBe(0);
     expect(result.stdout).toBe(guide);
@@ -24,7 +25,7 @@ describe('CLI', () => {
     const resolvedProject = await realpath(project);
     const agentsDestination = path.join(resolvedProject, '.agents', 'skills', 'block-runner');
     const claudeDestination = path.join(resolvedProject, '.claude', 'skills', 'block-runner');
-    const sourceGuide = await readFile(new URL('references/GUIDE.md', sourceSkill), 'utf8');
+    const sourceGuide = await readCanonicalSkillGuide();
     const result = await runCli(['skill', '--install'], '', {}, project);
 
     expect(result.code).toBe(0);
@@ -33,6 +34,8 @@ describe('CLI', () => {
     for (const destination of [agentsDestination, claudeDestination]) {
       const skill = await readFile(path.join(destination, 'SKILL.md'), 'utf8');
       const guide = await readFile(path.join(destination, 'references', 'GUIDE.md'), 'utf8');
+      const authoring = await readFile(path.join(destination, 'references', 'AUTHORING.md'), 'utf8');
+      expect(authoring).toContain(`block-runner@${packageVersion}`);
       expect(skill).toContain('name: block-runner');
       expect(skill).toContain(`block-runner@${packageVersion}`);
       expect(guide).toContain(`block-runner@${packageVersion}`);
@@ -40,9 +43,9 @@ describe('CLI', () => {
       expect(sourceGuide).toContain('npx --no-install block-runner author preview');
       expect(sourceGuide).toContain('npx --no-install block-runner skill --install');
       expect(sourceGuide).not.toMatch(/npx(?:\s+-y)?\s+block-runner@(?:latest|testing)\s+(?:author|plugin|proof)\b/);
-      expect(guide).toContain(`npx -y block-runner@${packageVersion} author preview`);
-      expect(guide).toContain(`npx -y block-runner@${packageVersion} plugin preview`);
-      expect(guide).toContain(`npx -y block-runner@${packageVersion} proof`);
+      expect(authoring).toContain(`npx -y block-runner@${packageVersion} author preview`);
+      expect(authoring).toContain(`npx -y block-runner@${packageVersion} plugin preview`);
+      expect(authoring).toContain(`npx -y block-runner@${packageVersion} proof`);
       expect(guide).toContain('npx --no-install block-runner skill --install');
       expect(guide).not.toMatch(/block-runner@(?:latest|testing)\s+(?:assemble|convert|validate|fix|author|plugin|proof|skill)\b/);
       expect(JSON.parse(await readFile(path.join(destination, '.block-runner-install.json'), 'utf8'))).toMatchObject({
@@ -55,6 +58,7 @@ describe('CLI', () => {
         files: {
           'SKILL.md': { sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), mode: expect.any(Number) },
           'references/GUIDE.md': { sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), mode: expect.any(Number) },
+          'references/AUTHORING.md': { sha256: expect.stringMatching(/^sha256:[0-9a-f]{64}$/), mode: expect.any(Number) },
         },
       });
     }

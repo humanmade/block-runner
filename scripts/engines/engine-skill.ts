@@ -18,11 +18,12 @@ import { createHash } from 'node:crypto';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import type { ConvertOptions, BlockRunnerReport } from '../../src/types.js';
+import { readCanonicalSkillGuideSync } from '../../src/skill.js';
 import { realize } from './intent.js';
 import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from './harness.js';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const GUIDE = readFileSync(path.join(ROOT, 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
+const GUIDE = readCanonicalSkillGuideSync();
 
 export interface AgentSkillProvenance {
   guideHash: string;

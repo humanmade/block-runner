@@ -7,6 +7,7 @@ import { realize } from '../../src/index.js';
 import { INTENT_PROMPT } from '../../scripts/engines/intent.js';
 import { CONVERT_PROMPT } from '../../scripts/engines/prompt.js';
 import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from '../../scripts/engines/harness.js';
+import { readCanonicalSkillGuide } from '../../src/skill.js';
 import {
   WORDPRESS_TARGET,
   expectedToDisplay,
@@ -168,7 +169,7 @@ describe('benchmark contract', () => {
   it('keeps every expected block registered and present in every model-facing contract', async () => {
     const specs = loadSpecs();
     const wp = await getWp();
-    const guide = readFileSync(path.join(ROOT, 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
+    const guide = await readCanonicalSkillGuide();
     const blocks = new Set<string>();
     for (const spec of specs.values()) {
       for (const tree of allTrees(spec)) walk(tree, (node) => blocks.add(node.block));

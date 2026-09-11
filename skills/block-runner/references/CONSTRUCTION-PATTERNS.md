@@ -248,6 +248,6 @@ State whether the next step is reuse, supported generation or a developer handof
 does not establish generation support: the static generator does not author new PHP renderers,
 field-framework implementations, arbitrary interactions, style/variation/binding implementations
 or pattern registration packages.
-Never substitute a static block for required behavior. Follow [GUIDE.md](GUIDE.md) §0 for capability
-gaps and §2 for supported generation, confirmation and delivery. Keep source facts, interpretation
-and runtime proof separate.
+Never substitute a static block for required behavior. Follow [GUIDE.md](GUIDE.md) §0 for
+capability gaps and [AUTHORING.md](AUTHORING.md) for supported generation, confirmation and
+delivery. Keep source facts, interpretation and runtime proof separate.

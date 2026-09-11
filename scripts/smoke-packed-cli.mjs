@@ -28,9 +28,9 @@ try {
   const conversion = JSON.parse(run(process.execPath, [cli, 'convert', '<p>Node support smoke</p>', '--json'], consumer).stdout);
   if (!conversion.ok) throw new Error('Packed CLI conversion smoke did not succeed.');
 
-  const guide = readFileSync(path.join(consumer, 'node_modules', 'block-runner', 'skills', 'block-runner', 'references', 'GUIDE.md'), 'utf8');
+  const guide = readFileSync(path.join(consumer, 'node_modules', 'block-runner', 'skills', 'block-runner', 'references', 'AUTHORING.md'), 'utf8');
   const example = guide.match(/<!-- authoring-proposal-example:start -->\s*```js\n([\s\S]*?)\n```\s*<!-- authoring-proposal-example:end -->/);
-  if (!example) throw new Error('Packed guide is missing its marked runnable authoring proposal example.');
+  if (!example) throw new Error('Packed authoring reference is missing its marked runnable authoring proposal example.');
   const exampleFile = path.join(consumer, 'guide-authoring-proposal.mjs');
   writeFileSync(exampleFile, example[1] + '\n');
   const canonicalPlan = JSON.parse(run(process.execPath, [exampleFile], consumer).stdout);
