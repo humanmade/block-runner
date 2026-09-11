@@ -155,119 +155,30 @@ Existing-file replacements require a separate decision. The compiler owns file c
 
 ### Complete source-to-build routes
 
-Both routes begin with a reviewed `authoring-plan.json`; use `author <design.html> --name
-<namespace/slug> --json` when you need the deterministic HTML analysis to produce its canonical
-plan. Neither route requires hand-written React, PHP, block metadata, or a repair step.
+For the complete source-to-ZIP walkthrough, the route-specific confirmation boundaries, and the
+source-only and existing-plugin alternatives, read [registered-block delivery](skills/block-runner/references/AUTHORING.md#shipped-notice-source-to-standalone-zip).
+It is bundled with the installed skill, so it remains available without this checkout.
 
-#### Shipped notice: source to standalone ZIP
+The shipped [`authoring-plan.mjs`](examples/authoring-plan.mjs) is the executable notice plan used
+by that walkthrough. After installation it is available at
+`node_modules/block-runner/examples/authoring-plan.mjs`; it writes only JSON on success, so its
+redirected output is the reviewed plan. The marked proposal example in the authoring reference
+teaches the proposal API; it is a separate contract, not a replacement for the complete notice
+route.
 
-The shipped [`authoring-plan.mjs`](examples/authoring-plan.mjs) is a complete small consumer
-route. Its authored source is:
+All delivery routes begin with a reviewed `authoring-plan.json`; use `author <design.html> --name
+<namespace/slug> --json` when deterministic HTML analysis must produce its canonical plan. The
+author confirmation binds that plan and source destination, while the separate `plugin preview`
+fingerprint binds the wrapper or host destination. Missing or stale confirmation, changed
+destinations, unsafe paths and symlinks are refused; existing-file replacements require separate
+approval. Neither route requires hand-written React, PHP, block metadata, or a repair step.
 
-```js
-const html = '<section><h2>A native notice</h2><p>Review this message before publishing.</p><a href="/details">Read more</a></section>';
-```
-
-It proposes a native Group containing a Heading, Paragraph, and Buttons parent with a Button
-child, with `locking: { mode: 'contentOnly' }`. Its explicit fields are the complete editing
-contract; supplying a field list does not merge in other inferred fields.
-
-| Source | Node / native attribute | Label | Choice |
-| --- | --- | --- | --- |
-| `A native notice` | `title / content` | Title | Editable |
-| `Review this message before publishing.` | `message / content` | Message | Editable |
-| `Read more` | `link / text` | Link text | Editable |
-| `/details` | `link / url` | Link URL | Editable |
-
-The `contentOnly` policy locks the template structure, while these native fields remain editable.
-There is no implicit fixed field: to make a native field fixed, declare it as such. WordPress
-applies `lock.edit` to a whole native node, so a fixed button text plus an editable button URL on
-the same Button is rejected rather than silently presenting a misleading control.
-
-After installing the package, run this exact route. The example writes only JSON on success, so
-the redirected file is the reviewed plan.
-
-```sh
-node node_modules/block-runner/examples/authoring-plan.mjs > notice.plan.json
-npx --no-install block-runner author preview notice.plan.json --output-dir generated/notice
-# Review the complete preview and copy its confirmation hash.
-npx --no-install block-runner author write notice.plan.json \
-  --confirm '<author-confirmation-from-preview>' --output-dir generated/notice
-
-npx --no-install block-runner plugin preview generated/notice --standalone plugins/acme-notice
-# Review the complete plugin preview and copy its separate fingerprint.
-npx --no-install block-runner plugin write generated/notice --standalone plugins/acme-notice \
-  --confirm '<plugin-fingerprint-from-preview>'
-
-cd plugins/acme-notice
-npm ci
-npm run zip
-npm run test:zip
-```
-
-The author confirmation binds the plan and source destination; the plugin fingerprint separately
-binds the standalone wrapper destination. `npm run zip` produces `acme-notice.zip`, and
-`npm run test:zip` checks its archive policy. Those checks establish reviewed source delivery and
-a buildable archive, not WordPress activation, editor controls, saved-content reopening, or
-frontend persistence.
-
-To see stale confirmation protection, preview an empty destination, change the `link-text` label
-in `notice.plan.json`, then attempt `author write` with the old confirmation. It fails with
-`authoring confirmation does not match the reviewed plan and destination; no files written`.
-Confirm the changed plan with a new preview before writing it. This exercise is intentionally
-separate from the successful route above.
-
-For a real-WordPress claim, prepare the reviewed source input, generated block markup, the ZIP,
-and a real fixture that names this block's editable fields and required assertions. Install the
-optional proof dependencies below and use a working Docker daemon, then run the applicable
-`block-runner proof acme-notice.zip --profile <claim> --input <reviewed-source> --markup <generated-markup> --fixture <real-fixture>`
-command. The notice plan does not declare pattern overrides, so do not use a pattern fixture or
-claim pattern-override readiness for it.
-
-For a retained standalone plugin:
-
-```sh
-block-runner author preview authoring-plan.json --output-dir generated/feature-grid
-# Review the complete preview and obtain its displayed confirmation hash.
-block-runner author write authoring-plan.json --confirm '<confirmation-hash>' --output-dir generated/feature-grid
-
-block-runner plugin preview generated/feature-grid --standalone plugins/acme-feature-grid
-# Review the complete plugin preview and obtain its displayed fingerprint.
-block-runner plugin write generated/feature-grid --standalone plugins/acme-feature-grid --confirm '<plugin-fingerprint>'
-
-cd plugins/acme-feature-grid
-npm ci
-npm run zip
-npm run test:zip
-```
-
-`npm run zip` builds the compiler-generated source and creates
-`acme-feature-grid.zip`; `npm run test:zip` checks the archive policy. That is build-ready
-delivery, not WordPress runtime proof. Run `block-runner proof acme-feature-grid.zip --profile
-full ...` with the reviewed source, markup, and fixture before claiming activation or editor
-behaviour.
-
-For a recognised existing plugin, inspect before making any integration plan:
-
-```sh
-block-runner plugin inspect plugins/acme-host --json
-block-runner author preview authoring-plan.json --output-dir generated/feature-grid
-# Review and approve the displayed confirmation hash.
-block-runner author write authoring-plan.json --confirm '<confirmation-hash>' --output-dir generated/feature-grid
-
-block-runner plugin preview generated/feature-grid --host plugins/acme-host
-# Review the exact paths and separately approve every displayed replacement path.
-block-runner plugin write generated/feature-grid --host plugins/acme-host \
-  --confirm '<plugin-fingerprint>' --approve-replace '<approved-path>'
-
-cd plugins/acme-host
-npm run build
-```
-
-The recognised profile places the generated source and safe registration update into the host,
-then `npm run build` produces the previewed build target. Create the host's normal delivery ZIP
-and run the same `proof --profile full` route; source integration or a build alone is not a
-runtime verification.
+The detailed reference covers [standalone delivery](skills/block-runner/references/AUTHORING.md#standalone-plugin-output),
+[recognised existing-plugin integration](skills/block-runner/references/AUTHORING.md#existing-plugin-output),
+and [source-only developer integration](skills/block-runner/references/AUTHORING.md#source-for-an-existing-project-developer-integration).
+Source delivery or a successful build is not WordPress runtime proof; use the applicable proof
+profile with the reviewed ZIP, source, markup, and fixture before claiming activation, editing,
+saved-content reopening, or frontend behavior.
 
 ### WordPress proof requirements
 

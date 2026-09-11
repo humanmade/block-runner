@@ -162,6 +162,72 @@ unspecified location. The write report means **source delivered only**: it has n
 activated, registered, rendered, or proved the block. Follow its displayed `plugin preview`
 command for the existing-plugin or standalone boundary.
 
+## Shipped notice: source to standalone ZIP
+
+The shipped `authoring-plan.mjs` is a complete small consumer route. After installing the package,
+run it from
+`node_modules/block-runner/examples/authoring-plan.mjs`. Its authored source is:
+
+```js
+const html = '<section><h2>A native notice</h2><p>Review this message before publishing.</p><a href="/details">Read more</a></section>';
+```
+
+It proposes a native Group containing a Heading, Paragraph, and Buttons parent with a Button
+child, with `locking: { mode: 'contentOnly' }`. Its explicit fields are the complete editing
+contract; supplying a field list does not merge in other inferred fields.
+
+| Source | Node / native attribute | Label | Choice |
+| --- | --- | --- | --- |
+| `A native notice` | `title / content` | Title | Editable |
+| `Review this message before publishing.` | `message / content` | Message | Editable |
+| `Read more` | `link / text` | Link text | Editable |
+| `/details` | `link / url` | Link URL | Editable |
+
+The `contentOnly` policy locks the template structure, while these native fields remain editable.
+There is no implicit fixed field: to make a native field fixed, declare it as such. WordPress
+applies `lock.edit` to a whole native node, so a fixed button text plus an editable button URL on
+the same Button is rejected rather than silently presenting a misleading control.
+
+The example writes only JSON on success, so the redirected file is the reviewed plan:
+
+```sh
+node node_modules/block-runner/examples/authoring-plan.mjs > notice.plan.json
+npx --no-install block-runner author preview notice.plan.json --output-dir generated/notice
+# Review the complete preview and copy its confirmation hash.
+npx --no-install block-runner author write notice.plan.json \
+  --confirm '<author-confirmation-from-preview>' --output-dir generated/notice
+
+npx --no-install block-runner plugin preview generated/notice --standalone plugins/acme-notice
+# Review the complete plugin preview and copy its separate fingerprint.
+npx --no-install block-runner plugin write generated/notice --standalone plugins/acme-notice \
+  --confirm '<plugin-fingerprint-from-preview>'
+
+cd plugins/acme-notice
+npm ci
+npm run zip
+npm run test:zip
+```
+
+The author confirmation binds the plan and source destination; the plugin fingerprint separately
+binds the standalone wrapper destination. `npm run zip` produces `acme-notice.zip`, and
+`npm run test:zip` checks its archive policy. Those checks establish reviewed source delivery and
+a buildable archive, not WordPress activation, editor controls, saved-content reopening, or
+frontend persistence.
+
+To see stale confirmation protection, preview an empty destination, change the `link-text` label
+in `notice.plan.json`, then attempt `author write` with the old confirmation. It fails with
+`authoring confirmation does not match the reviewed plan and destination; no files written`.
+Confirm the changed plan with a new preview before writing it. This exercise is intentionally
+separate from the successful route above.
+
+For a real-WordPress claim, prepare the reviewed source input, generated block markup, the ZIP,
+and a real fixture that names this block's editable fields and required assertions. Install the
+optional proof dependencies in [Proof is part of completion](#proof-is-part-of-completion) and use
+a working Docker daemon, then run the applicable
+`block-runner proof acme-notice.zip --profile <claim> --input <reviewed-source> --markup <generated-markup> --fixture <real-fixture>`
+command. The notice plan does not declare pattern overrides, so do not use a pattern fixture or
+claim pattern-override readiness for it.
+
 ## Existing-plugin output
 
 Use this only after inspecting the target plugin. Do not guess its build or registration layout.
