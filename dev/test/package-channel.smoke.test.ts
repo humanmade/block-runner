@@ -1,12 +1,12 @@
 import { spawn } from 'node:child_process';
-import { chmod, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { readCanonicalSkillGuide } from '../../src/skill.js';
 
 const tsxImport = import.meta.resolve('tsx');
 const cliPath = new URL('../../src/cli.ts', import.meta.url).pathname;
-const sourceGuide = new URL('../../skills/block-runner/references/GUIDE.md', import.meta.url);
 
 describe('package channel authoring smoke', () => {
   it('uses an installed candidate for authoring while stable intentionally lacks author', async () => {
@@ -31,7 +31,7 @@ process.exit(result.status ?? 1);
     await chmod(fakeNpx, 0o755);
     await writeFile(path.join(root, 'plan.json'), JSON.stringify(plan()), 'utf8');
 
-    const guide = await readFile(sourceGuide, 'utf8');
+    const guide = await readCanonicalSkillGuide();
     expect(guide).toContain('npx --no-install block-runner author preview authoring-plan.json');
     expect(guide).toContain('npx --no-install block-runner skill --install');
     expect(guide).not.toMatch(/npx(?:\s+-y)?\s+block-runner@testing\s+(?:author|plugin|proof)\b/);
