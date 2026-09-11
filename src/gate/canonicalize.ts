@@ -6,6 +6,7 @@ import { repairTokens } from '../tokens/apply.js';
 import { buildTokenInverseMap } from '../tokens/repair.js';
 import { BlockRunnerReport, CanonicalizeOptions, WpBlock, WpModules } from '../types.js';
 import { validate } from './validate.js';
+import { generatedMarkupItems } from './provenance.js';
 
 /**
  * Rebuild genuinely-invalid registered blocks from their parsed attributes.
@@ -77,14 +78,15 @@ export async function canonicalize(markup: string, options: CanonicalizeOptions 
   }
 
   const output = wp.serialize(blocks);
-  const report = await validate(output, options);
+  const { sourcePath: inputPath, ...outputOptions } = options;
+  const report = await validate(output, outputOptions);
 
   return {
     ...report,
     summary: { ...report.summary, warnings: report.summary.warnings + repairs.filter((item) => item.status === 'warning').length },
     ok: report.summary.invalid === 0,
     command: 'fix',
-    items: [...repairs, ...report.items],
+    items: [...repairs, ...generatedMarkupItems(report.items, inputPath)],
     output,
   };
 }

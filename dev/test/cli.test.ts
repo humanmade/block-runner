@@ -318,6 +318,7 @@ describe('CLI', () => {
 
     expect(result.code).toBe(1);
     expect(result.stdout).toContain('problems found');
+    expect(result.stdout).toContain('line 1');
   });
 
   it('forwards --styling through to the converter', async () => {

@@ -1,0 +1,39 @@
+{
+  "blocks": [
+    {
+      "block": "core/query",
+      "attrs": {
+        "queryId": 1,
+        "query": {
+          "perPage": 1,
+          "postType": "post",
+          "order": "asc",
+          "orderBy": "date",
+          "inherit": false
+        }
+      },
+      "children": [
+        {
+          "block": "core/post-template",
+          "children": [
+            { "block": "core/post-title", "attrs": { "isLink": true } }
+          ]
+        },
+        {
+          "block": "core/query-pagination",
+          "children": [
+            { "block": "core/query-pagination-previous" },
+            { "block": "core/query-pagination-numbers" },
+            { "block": "core/query-pagination-next" }
+          ]
+        },
+        {
+          "block": "core/query-no-results",
+          "children": [
+            { "block": "core/paragraph", "text": "No matching posts." }
+          ]
+        }
+      ]
+    }
+  ]
+}

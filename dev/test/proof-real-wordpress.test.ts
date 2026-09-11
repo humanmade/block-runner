@@ -130,16 +130,33 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     const lifecycle = patternGate?.details as {
       preSaveCoreBlockContent?: Array<{ content: Record<string, unknown> }>;
       reopenedCoreBlockContent?: Array<{ content: Record<string, unknown> }>;
-      edited?: Array<{ ok?: boolean; scope?: { outsideUnchanged?: boolean } }>;
+      reopenClean?: { ok?: boolean; readings?: Array<{ isDirty?: boolean }> };
+      canonicalReopenClean?: { ok?: boolean };
+      resetReopenClean?: { ok?: boolean };
+      edited?: Array<{
+        ok?: boolean;
+        scope?: { outsideUnchanged?: boolean };
+        controls?: Array<{ field?: string; lockMode?: string; control?: string }>;
+      }>;
     } | undefined;
     expect(lifecycle?.preSaveCoreBlockContent).toHaveLength(2);
     expect(lifecycle?.reopenedCoreBlockContent).toHaveLength(2);
     expect(lifecycle?.edited).toHaveLength(2);
     expect(lifecycle?.edited?.every((instance) => instance.ok === true && instance.scope?.outsideUnchanged === true)).toBe(true);
+    expect(lifecycle?.reopenClean).toMatchObject({ ok: true, readings: [{ isDirty: false }, { isDirty: false }] });
+    expect(lifecycle?.canonicalReopenClean).toMatchObject({ ok: true });
+    expect(lifecycle?.resetReopenClean).toMatchObject({ ok: true });
+    expect(lifecycle?.edited?.flatMap((instance) => instance.controls ?? [])).toEqual(expect.arrayContaining([
+      expect.objectContaining({ lockMode: 'contentOnly', control: 'richText' }),
+      expect.objectContaining({ lockMode: 'contentOnly', control: expect.stringContaining('Alt text') }),
+      expect.objectContaining({ lockMode: 'contentOnly', control: expect.stringContaining('link') }),
+    ]));
     expect(lifecycle?.preSaveCoreBlockContent?.[0]?.content)
       .not.toEqual(lifecycle?.preSaveCoreBlockContent?.[1]?.content);
 
     const editorReopen = result.receipt.gates.find((gate) => gate.gate === 'editor_reopen');
+    expect((editorReopen?.details as { reopenedClean?: { ok?: boolean; readings?: Array<{ isDirty?: boolean }> } } | undefined)?.reopenedClean)
+      .toMatchObject({ ok: true, readings: [{ isDirty: false }, { isDirty: false }] });
     const gridMatrix = (editorReopen?.details as {
       browserMatrix?: {
         iframe?: { observed?: boolean };

@@ -87,4 +87,13 @@ describe('convert', () => {
     expect(report.output).toContain('<li><strong>Two</strong></li>');
     expect(report.output).not.toContain('<ul class="wp-block-list"></ul>');
   });
+
+  it('preserves an authored outer heading ID as its native anchor', async () => {
+    const report = await convert('<h2 id="details">Details</h2><a href="#details">Read details</a>', { resolver: 'noop' });
+
+    expect(report.ok).toBe(true);
+    expect(report.output).toContain('"anchor":"details"');
+    expect(report.output).toContain('id="details"');
+    expect(report.output).toContain('href="#details"');
+  });
 });

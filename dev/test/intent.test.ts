@@ -144,6 +144,14 @@ describe('intent assembly', () => {
     expect(report.output).not.toContain('#0073aa');
   });
 
+  it('preserves an explicitly supplied heading anchor without inferring one', async () => {
+    const report = await realize('{"blocks":[{"block":"core/heading","text":"Details","attrs":{"anchor":"details"}}]}');
+
+    expect(report.ok).toBe(true);
+    expect(report.output).toContain('"anchor":"details"');
+    expect(report.output).toContain('id="details"');
+  });
+
   it('warns when a non-default config styling rung does not apply', async () => {
     const report = await realize('{"blocks":[{"block":"core/paragraph","text":"Hi"}]}', {
       config: { styling: 'strict' },

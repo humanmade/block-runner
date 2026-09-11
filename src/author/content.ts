@@ -17,6 +17,7 @@ export function validateSourceContent(sourceHtml: string, compiledTemplate: read
     assertEqual('links', sourceContent.links, generatedContent.links);
     assertEqual('image alt text', sourceContent.imageAlts, generatedContent.imageAlts);
     assertEqual('image captions', sourceContent.imageCaptions, generatedContent.imageCaptions);
+    assertLocalFragmentTargets(sourceContent.localFragmentTargets, generatedContent.localFragmentTargets);
   } finally {
     source.window.close();
     generated?.window.close();
@@ -34,7 +35,7 @@ function serializeCompiledTemplate(template: readonly unknown[]): string {
   return withMutedWordPressConsole(() => wp.serialize(template.map(toBlock)));
 }
 
-function contentFacts(document: Document): { text: string; links: string[]; imageAlts: string[]; imageCaptions: string[] } {
+function contentFacts(document: Document): { text: string; links: string[]; imageAlts: string[]; imageCaptions: string[]; localFragmentTargets: Map<string, number> } {
   const text = normalizeVisibleText(document.body);
   const links = [...document.querySelectorAll('a')]
     .filter((element) => !element.closest('script,style,template,head'))
@@ -45,7 +46,39 @@ function contentFacts(document: Document): { text: string; links: string[]; imag
   const imageCaptions = [...document.querySelectorAll('figure')]
     .filter((element) => element.querySelector('img') && element.querySelector('figcaption'))
     .map((element) => normalizeVisibleText(element.querySelector('figcaption')!));
-  return { text, links, imageAlts, imageCaptions };
+  const ids = new Map<string, number>();
+  for (const element of document.querySelectorAll('[id]')) {
+    if (!element.id) continue;
+    ids.set(element.id, (ids.get(element.id) ?? 0) + 1);
+  }
+  const localFragmentTargets = new Map<string, number>();
+  for (const link of document.querySelectorAll('a[href]')) {
+    if (link.closest('script,style,template,head')) continue;
+    const target = decodeLocalFragment(link.getAttribute('href') ?? '');
+    if (target && ids.has(target)) localFragmentTargets.set(target, ids.get(target)!);
+  }
+  return { text, links, imageAlts, imageCaptions, localFragmentTargets };
+}
+
+function decodeLocalFragment(href: string): string | undefined {
+  if (!href.startsWith('#') || href === '#') return undefined;
+  try {
+    return decodeURIComponent(href.slice(1));
+  } catch {
+    return href.slice(1);
+  }
+}
+
+function assertLocalFragmentTargets(source: ReadonlyMap<string, number>, generated: ReadonlyMap<string, number>): void {
+  for (const [target, sourceCount] of source) {
+    if (sourceCount !== 1) {
+      throw new Error(`Source content fulfillment failed: local fragment target ${JSON.stringify(target)} is ambiguous in source`);
+    }
+    const generatedCount = generated.get(target) ?? 0;
+    if (generatedCount !== 1) {
+      throw new Error(`Source content fulfillment failed: local fragment target ${JSON.stringify(target)} was lost or became ambiguous; source=1 compiled=${generatedCount}`);
+    }
+  }
 }
 
 function normalizeVisibleText(root: Node): string {

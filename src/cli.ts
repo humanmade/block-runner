@@ -31,6 +31,7 @@ import { materializeAuthoringPlan, planRegisteredBlockOutput } from './authoring
 import { classifyRegisteredBlockRegeneration } from './authoring/regeneration.js';
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
 import { renderAuthoringPreview } from './authoring/preview.js';
+import { formatTextReport } from './report/text.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -903,23 +904,6 @@ function emitHint(report: BlockRunnerReport): void {
   if (report.hint) {
     console.error(`hint: ${report.hint}`);
   }
-}
-
-function formatTextReport(report: BlockRunnerReport): string {
-  const status = report.ok ? 'ok' : 'problems found';
-  const lines = [
-    `${report.command}: ${status}`,
-    `blocks=${report.summary.blocks} valid=${report.summary.valid} invalid=${report.summary.invalid} warnings=${report.summary.warnings}`,
-  ];
-
-  for (const item of report.items) {
-    const source = item.source
-      ? ` (${[item.source.path, item.source.selector, item.source.htmlLine ? `line ${item.source.htmlLine}` : undefined].filter(Boolean).join(' ')})`
-      : '';
-    lines.push(`- ${item.status}: ${item.block ?? 'input'}: ${item.reason}${source}`);
-  }
-
-  return lines.join('\n');
 }
 
 function ensureSingleOutputTarget(inputs: Array<{ path?: string; content: string }>, options: CliOptions): void {

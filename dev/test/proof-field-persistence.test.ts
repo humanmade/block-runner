@@ -23,6 +23,9 @@ const matchers = runInNewContext(`(() => { ${helper.slice(matcherStart, matcherE
 const relStart = helper.indexOf('function nativeButtonRel(');
 const relEnd = helper.indexOf('\nasync function waitForPatternOverrideValueIfScoped', relStart);
 const nativeButtonRel = runInNewContext(`(${helper.slice(relStart, relEnd)})`) as (values: unknown) => string;
+const cleanStart = helper.indexOf('function cleanEditorReadings(');
+const cleanEnd = helper.indexOf('\n/**', cleanStart);
+const cleanReadings = runInNewContext(`(${helper.slice(cleanStart, cleanEnd)})`) as (readings: unknown[]) => { ok: boolean; ready: boolean };
 const settingsStart = helper.indexOf('async function openNativeLinkSettings(');
 const settingsEnd = helper.indexOf('\nasync function ', settingsStart + 1);
 const openSettings = runInNewContext(`(${helper.slice(settingsStart, settingsEnd)})`) as (control: unknown) => Promise<void>;
@@ -41,6 +44,21 @@ describe('native field persistence scope', () => {
     expect(canonicalEditorAttributes({ content: '', level: 2 }, definitions)).toEqual({});
     expect(canonicalEditorAttributes({ content: 'Changed', level: 2 }, definitions)).toEqual({ content: 'Changed' });
     expect(canonicalEditorAttributes({ content: '', unknown: '' }, definitions)).toEqual({ unknown: '' });
+  });
+
+  it('requires two ready clean observations after reopening instead of trusting matching content', () => {
+    expect(cleanReadings([
+      { currentPostId: 12, isDirty: false },
+      { currentPostId: 12, isDirty: false },
+    ])).toMatchObject({ ok: true, ready: true });
+    expect(cleanReadings([
+      { currentPostId: 12, isDirty: false },
+      { currentPostId: 12, isDirty: true },
+    ])).toMatchObject({ ok: false, ready: true });
+    expect(cleanReadings([
+      { currentPostId: 12, isDirty: false },
+      { currentPostId: undefined, isDirty: undefined },
+    ])).toMatchObject({ ok: false, ready: false });
   });
 
   it.each(['true', 'false'])('opens link settings without closing a remembered open drawer (%s)', async (initial) => {
