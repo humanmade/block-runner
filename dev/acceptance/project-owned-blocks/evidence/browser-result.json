@@ -1,0 +1,542 @@
+{
+  "runtime": {
+    "baseUrl": "http://localhost:8888",
+    "categoryId": 3,
+    "emptyCategoryId": 4
+  },
+  "editor": {
+    "postId": 52,
+    "permalink": "http://localhost:8888/2026/09/11/project-owned-browser-proof-3/",
+    "beforeIntroductionSave": {
+      "dirty": true,
+      "blocks": [
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "",
+            "focalPoint": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "title": "",
+            "titleLevel": 1,
+            "subtitle": "",
+            "buttonText": "",
+            "buttonUrl": "",
+            "buttonOpensInNewTab": false
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "http://localhost:8888/wp-content/uploads/2026/09/project-owned-hero.png",
+            "focalPoint": {
+              "x": 0.2,
+              "y": 0.8
+            },
+            "title": "Second hero title",
+            "titleLevel": 3,
+            "subtitle": "Second hero subtitle",
+            "buttonText": "Read the resource",
+            "buttonUrl": "https://example.test/resource",
+            "buttonOpensInNewTab": true,
+            "imageId": 6
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 0,
+            "limit": 2
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Resources</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Recent resources from this category.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 4,
+            "limit": 6
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Updated resource introduction</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>This native introduction survives dynamic results.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        }
+      ]
+    },
+    "savedIntroduction": {
+      "dirty": false,
+      "blocks": [
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "",
+            "focalPoint": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "title": "",
+            "titleLevel": 1,
+            "subtitle": "",
+            "buttonText": "",
+            "buttonUrl": "",
+            "buttonOpensInNewTab": false
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "http://localhost:8888/wp-content/uploads/2026/09/project-owned-hero.png",
+            "focalPoint": {
+              "x": 0.2,
+              "y": 0.8
+            },
+            "title": "Second hero title",
+            "titleLevel": 3,
+            "subtitle": "Second hero subtitle",
+            "buttonText": "Read the resource",
+            "buttonUrl": "https://example.test/resource",
+            "buttonOpensInNewTab": true,
+            "imageId": 6
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 0,
+            "limit": 2
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Resources</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Recent resources from this category.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 4,
+            "limit": 6
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Updated resource introduction</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>This native introduction survives dynamic results.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        }
+      ]
+    },
+    "afterIntroductionSave": {
+      "dirty": false,
+      "blocks": [
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "",
+            "focalPoint": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "title": "",
+            "titleLevel": 1,
+            "subtitle": "",
+            "buttonText": "",
+            "buttonUrl": "",
+            "buttonOpensInNewTab": false
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageId": 6,
+            "imageUrl": "http://localhost:8888/wp-content/uploads/2026/09/project-owned-hero.png",
+            "focalPoint": {
+              "x": 0.2,
+              "y": 0.8
+            },
+            "title": "Second hero title",
+            "titleLevel": 3,
+            "subtitle": "Second hero subtitle",
+            "buttonText": "Read the resource",
+            "buttonUrl": "https://example.test/resource",
+            "buttonOpensInNewTab": true
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 0,
+            "limit": 2
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Resources</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Recent resources from this category.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 4,
+            "limit": 6
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Updated resource introduction</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>This native introduction survives dynamic results.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        }
+      ]
+    },
+    "beforeResultsSave": {
+      "dirty": true,
+      "blocks": [
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "",
+            "focalPoint": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "title": "",
+            "titleLevel": 1,
+            "subtitle": "",
+            "buttonText": "",
+            "buttonUrl": "",
+            "buttonOpensInNewTab": false
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageId": 6,
+            "imageUrl": "http://localhost:8888/wp-content/uploads/2026/09/project-owned-hero.png",
+            "focalPoint": {
+              "x": 0.2,
+              "y": 0.8
+            },
+            "title": "Second hero title",
+            "titleLevel": 3,
+            "subtitle": "Second hero subtitle",
+            "buttonText": "Read the resource",
+            "buttonUrl": "https://example.test/resource",
+            "buttonOpensInNewTab": true
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 0,
+            "limit": 2
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Resources</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Recent resources from this category.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 3,
+            "limit": 1
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Updated resource introduction</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>This native introduction survives dynamic results.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        }
+      ]
+    },
+    "reopened": {
+      "dirty": false,
+      "blocks": [
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageUrl": "",
+            "focalPoint": {
+              "x": 0.5,
+              "y": 0.5
+            },
+            "title": "",
+            "titleLevel": 1,
+            "subtitle": "",
+            "buttonText": "",
+            "buttonUrl": "",
+            "buttonOpensInNewTab": false
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/dynamic-hero",
+          "attributes": {
+            "imageId": 6,
+            "imageUrl": "http://localhost:8888/wp-content/uploads/2026/09/project-owned-hero.png",
+            "focalPoint": {
+              "x": 0.2,
+              "y": 0.8
+            },
+            "title": "Second hero title",
+            "titleLevel": 3,
+            "subtitle": "Second hero subtitle",
+            "buttonText": "Read the resource",
+            "buttonUrl": "https://example.test/resource",
+            "buttonOpensInNewTab": true
+          },
+          "inner": [],
+          "markup": "",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 0,
+            "limit": 2
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Resources</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>Recent resources from this category.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        },
+        {
+          "name": "example/resource-list",
+          "attributes": {
+            "categoryId": 3,
+            "limit": 1
+          },
+          "inner": [
+            {
+              "name": "core/heading",
+              "attributes": {
+                "content": {},
+                "level": 2
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            },
+            {
+              "name": "core/paragraph",
+              "attributes": {
+                "content": {},
+                "dropCap": false
+              },
+              "inner": [],
+              "markup": "",
+              "valid": true
+            }
+          ],
+          "markup": "<!-- wp:heading -->\n<h2 class=\"wp-block-heading\">Updated resource introduction</h2>\n<!-- /wp:heading -->\n\n<!-- wp:paragraph -->\n<p>This native introduction survives dynamic results.</p>\n<!-- /wp:paragraph -->",
+          "valid": true
+        }
+      ]
+    }
+  },
+  "errors": []
+}

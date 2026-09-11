@@ -1,0 +1,26 @@
+{
+  "$schema": "https://schemas.wp.org/trunk/block.json",
+  "apiVersion": 3,
+  "name": "example/dynamic-hero",
+  "title": "Dynamic hero",
+  "category": "design",
+  "icon": "cover-image",
+  "description": "A project-owned dynamic media hero.",
+  "textdomain": "block-runner-project-owned-blocks",
+  "attributes": {
+    "imageId": { "type": "number" },
+    "imageUrl": { "type": "string", "default": "" },
+    "focalPoint": { "type": "object", "default": { "x": 0.5, "y": 0.5 } },
+    "title": { "type": "string", "default": "" },
+    "titleLevel": { "type": "number", "default": 1 },
+    "subtitle": { "type": "string", "default": "" },
+    "buttonText": { "type": "string", "default": "" },
+    "buttonUrl": { "type": "string", "default": "" },
+    "buttonOpensInNewTab": { "type": "boolean", "default": false }
+  },
+  "supports": { "html": false },
+  "editorScript": "file:./index.js",
+  "style": "file:./style-index.css",
+  "editorStyle": "file:./index.css",
+  "render": "file:./render.php"
+}

@@ -1,0 +1,3 @@
+.wp-block-example-dynamic-hero { position: relative; overflow: hidden; }
+.wp-block-example-dynamic-hero .example-dynamic-hero__image { display: block; height: 28rem; object-fit: cover; object-position: var(--hero-focal); width: 100%; }
+.wp-block-example-dynamic-hero .example-dynamic-hero__content { inset: auto 1.5rem 1.5rem; position: absolute; }

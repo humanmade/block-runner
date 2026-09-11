@@ -1,0 +1,308 @@
+diff --git a/dev/acceptance/project-owned-blocks/dynamic-hero/block.json b/dev/acceptance/project-owned-blocks/dynamic-hero/block.json
+new file mode 100644
+index 0000000..d09efa7
+--- /dev/null
++++ b/dev/acceptance/project-owned-blocks/dynamic-hero/block.json
+@@ -0,0 +1,17 @@
++{
++  "$schema": "https://schemas.wp.org/trunk/block.json",
++  "apiVersion": 3,
++  "name": "example/dynamic-hero",
++  "title": "Dynamic hero",
++  "category": "design",
++  "attributes": {
++    "mediaId": { "type": "number" },
++    "focalPoint": { "type": "object", "default": { "x": 0.5, "y": 0.5 } },
++    "title": { "type": "string", "default": "A focused story" },
++    "titleLevel": { "type": "number", "default": 1 },
++    "linkUrl": { "type": "string" },
++    "linkTarget": { "type": "boolean", "default": false }
++  },
++  "editorScript": "file:./index.js",
++  "render": "file:./render.php"
++}
+diff --git a/dev/acceptance/project-owned-blocks/dynamic-hero/index.js b/dev/acceptance/project-owned-blocks/dynamic-hero/index.js
+new file mode 100644
+index 0000000..92d8d76
+--- /dev/null
++++ b/dev/acceptance/project-owned-blocks/dynamic-hero/index.js
+@@ -0,0 +1,50 @@
++import { registerBlockType } from '@wordpress/blocks';
++import { useBlockProps, InspectorControls, MediaUpload, MediaUploadCheck, RichText, URLInputButton } from '@wordpress/block-editor';
++import { Button, FocalPointPicker, Notice, PanelBody, SelectControl, ToggleControl } from '@wordpress/components';
++import metadata from './block.json';
++
++function DynamicHeroEdit( { attributes, setAttributes } ) {
++	const { focalPoint, linkTarget, linkUrl, mediaId, title, titleLevel } = attributes;
++	const TagName = `h${ titleLevel }`;
++
++	return (
++		<div { ...useBlockProps() }>
++			<InspectorControls>
++				<PanelBody title="Hero settings">
++					<MediaUploadCheck>
++						<MediaUpload
++							allowedTypes={ [ 'image' ] }
++							value={ mediaId }
++							onSelect={ ( media ) => setAttributes( { mediaId: media.id } ) }
++							render={ ( { open } ) => <Button onClick={ open } variant="secondary">Choose featured image</Button> }
++						/>
++					</MediaUploadCheck>
++					<FocalPointPicker
++						label="Image focal point"
++						value={ focalPoint }
++						onChange={ ( nextFocalPoint ) => setAttributes( { focalPoint: nextFocalPoint } ) }
++					/>
++					<SelectControl
++						label="Title level"
++						value={ titleLevel }
++						options={ [ 1, 2, 3, 4, 5, 6 ].map( ( level ) => ( { label: `H${ level }`, value: level } ) ) }
++						onChange={ ( level ) => setAttributes( { titleLevel: Number( level ) } ) }
++					/>
++					<URLInputButton url={ linkUrl } onChange={ ( nextUrl ) => setAttributes( { linkUrl: nextUrl } ) } />
++					<ToggleControl
++						label="Open link in a new tab"
++						checked={ linkTarget }
++						onChange={ ( nextTarget ) => setAttributes( { linkTarget: nextTarget } ) }
++					/>
++				</PanelBody>
++			</InspectorControls>
++			<Notice status="info" isDismissible={ false }>The featured image uses responsive attachment markup on the front end.</Notice>
++			<RichText tagName={ TagName } value={ title } onChange={ ( nextTitle ) => setAttributes( { title: nextTitle } ) } placeholder="Hero title" />
++		</div>
++	);
++}
++
++registerBlockType( metadata.name, {
++	edit: DynamicHeroEdit,
++	save: () => null,
++} );
+diff --git a/dev/acceptance/project-owned-blocks/dynamic-hero/render.php b/dev/acceptance/project-owned-blocks/dynamic-hero/render.php
+new file mode 100644
+index 0000000..61cbf8f
+--- /dev/null
++++ b/dev/acceptance/project-owned-blocks/dynamic-hero/render.php
+@@ -0,0 +1,39 @@
++<?php
++/**
++ * Server render for the test-owned dynamic hero.
++ *
++ * @var array<string, mixed> $attributes
++ */
++
++$media_id = isset( $attributes['mediaId'] ) ? absint( $attributes['mediaId'] ) : 0;
++$focal_point = isset( $attributes['focalPoint'] ) && is_array( $attributes['focalPoint'] ) ? $attributes['focalPoint'] : array();
++$focal_x = isset( $focal_point['x'] ) ? min( 1, max( 0, (float) $focal_point['x'] ) ) : 0.5;
++$focal_y = isset( $focal_point['y'] ) ? min( 1, max( 0, (float) $focal_point['y'] ) ) : 0.5;
++$level = isset( $attributes['titleLevel'] ) ? absint( $attributes['titleLevel'] ) : 1;
++$level = in_array( $level, array( 1, 2, 3, 4, 5, 6 ), true ) ? $level : 1;
++$title = isset( $attributes['title'] ) ? wp_kses_post( $attributes['title'] ) : '';
++$link_url = isset( $attributes['linkUrl'] ) ? esc_url( $attributes['linkUrl'] ) : '';
++$link_target = ! empty( $attributes['linkTarget'] ) ? ' target="_blank" rel="noopener noreferrer"' : '';
++$image = $media_id ? wp_get_attachment_image(
++	$media_id,
++	'full',
++	false,
++	array(
++		'class'         => 'wp-block-example-dynamic-hero__image',
++		'loading'       => false,
++		'fetchpriority' => 'high',
++		'decoding'      => 'async',
++		'style'         => sprintf( 'object-position: %.2f%% %.2f%%', $focal_x * 100, $focal_y * 100 ),
++	)
++) : '';
++?>
++<section <?php echo get_block_wrapper_attributes(); ?>>
++	<?php if ( $image ) : ?>
++		<?php if ( $link_url ) : ?><a href="<?php echo $link_url; ?>"<?php echo $link_target; ?>><?php endif; ?>
++		<?php echo wp_kses_post( $image ); ?>
++		<?php if ( $link_url ) : ?></a><?php endif; ?>
++	<?php else : ?>
++		<p class="wp-block-example-dynamic-hero__helper">Choose a featured image to complete this hero.</p>
++	<?php endif; ?>
++	<?php if ( $title ) : ?><h<?php echo esc_attr( (string) $level ); ?> class="wp-block-example-dynamic-hero__title"><?php echo $title; ?></h<?php echo esc_attr( (string) $level ); ?>><?php endif; ?>
++</section>
+diff --git a/dev/acceptance/project-owned-blocks/resource-list/block.json b/dev/acceptance/project-owned-blocks/resource-list/block.json
+new file mode 100644
+index 0000000..84647c2
+--- /dev/null
++++ b/dev/acceptance/project-owned-blocks/resource-list/block.json
+@@ -0,0 +1,13 @@
++{
++  "$schema": "https://schemas.wp.org/trunk/block.json",
++  "apiVersion": 3,
++  "name": "example/resource-list",
++  "title": "Resource list",
++  "category": "widgets",
++  "attributes": {
++    "category": { "type": "string", "default": "" },
++    "limit": { "type": "number", "default": 3 }
++  },
++  "editorScript": "file:./index.js",
++  "render": "file:./render.php"
++}
+diff --git a/dev/acceptance/project-owned-blocks/resource-list/index.js b/dev/acceptance/project-owned-blocks/resource-list/index.js
+new file mode 100644
+index 0000000..380dca3
+--- /dev/null
++++ b/dev/acceptance/project-owned-blocks/resource-list/index.js
+@@ -0,0 +1,64 @@
++import { registerBlockType, parse } from '@wordpress/blocks';
++import { InnerBlocks, InspectorControls, useBlockProps } from '@wordpress/block-editor';
++import { useDispatch, useSelect } from '@wordpress/data';
++import { PanelBody, RangeControl, TextControl } from '@wordpress/components';
++import { useEffect } from '@wordpress/element';
++import { realize } from 'block-runner';
++import metadata from './block.json';
++
++export const RESOURCES_INTENT = {
++	blocks: [
++		{ block: 'core/heading', text: 'Resources', level: 2 },
++		{ block: 'core/paragraph', text: 'Browse our latest resources.' },
++	],
++};
++
++export async function createInitialResourcesBlocks() {
++	const report = await realize( JSON.stringify( RESOURCES_INTENT ) );
++	if ( ! report.ok || ! report.output ) {
++		throw new Error( 'Block Runner could not assemble the initial resource content.' );
++	}
++
++	return parse( report.output );
++}
++
++function ResourceListEdit( { attributes, clientId, setAttributes } ) {
++	const { replaceInnerBlocks } = useDispatch( 'core/block-editor' );
++	const hasInnerBlocks = useSelect(
++		( select ) => select( 'core/block-editor' ).getBlock( clientId )?.innerBlocks.length > 0,
++		[ clientId ]
++	);
++
++	useEffect( () => {
++		if ( hasInnerBlocks ) {
++			return undefined;
++		}
++
++		let active = true;
++		createInitialResourcesBlocks().then( ( blocks ) => {
++			if ( active ) {
++				replaceInnerBlocks( clientId, blocks, false );
++			}
++		} );
++		return () => {
++			active = false;
++		};
++	}, [ clientId, hasInnerBlocks, replaceInnerBlocks ] );
++
++	return (
++		<div { ...useBlockProps() }>
++			<InspectorControls>
++				<PanelBody title="Resource query">
++					<TextControl label="Category slug" value={ attributes.category } onChange={ ( category ) => setAttributes( { category } ) } />
++					<RangeControl label="Resources to show" value={ attributes.limit } onChange={ ( limit ) => setAttributes( { limit } ) } min={ 1 } max={ 12 } />
++				</PanelBody>
++			</InspectorControls>
++			<InnerBlocks />
++		</div>
++	);
++}
++
++registerBlockType( metadata.name, {
++	edit: ResourceListEdit,
++	save: () => <InnerBlocks.Content />,
++} );
+diff --git a/dev/acceptance/project-owned-blocks/resource-list/render.php b/dev/acceptance/project-owned-blocks/resource-list/render.php
+new file mode 100644
+index 0000000..0ce82a5
+--- /dev/null
++++ b/dev/acceptance/project-owned-blocks/resource-list/render.php
+@@ -0,0 +1,34 @@
++<?php
++/**
++ * Server render for the test-owned combined resource list.
++ *
++ * @var array<string, mixed> $attributes
++ * @var string $content
++ */
++
++$category = isset( $attributes['category'] ) ? sanitize_title( $attributes['category'] ) : '';
++$limit = isset( $attributes['limit'] ) ? absint( $attributes['limit'] ) : 3;
++$limit = min( 12, max( 1, $limit ) );
++$query_args = array(
++	'post_status'    => 'publish',
++	'posts_per_page' => $limit,
++	'no_found_rows'  => true,
++);
++
++if ( $category ) {
++	$query_args['category_name'] = $category;
++}
++
++$resources = new WP_Query( $query_args );
++?>
++<section <?php echo get_block_wrapper_attributes(); ?>>
++	<?php echo wp_kses_post( $content ); ?>
++	<?php if ( $resources->have_posts() ) : ?>
++		<ul class="wp-block-example-resource-list__results">
++			<?php while ( $resources->have_posts() ) : $resources->the_post(); ?>
++				<li><a href="<?php echo esc_url( get_permalink() ); ?>"><?php echo esc_html( get_the_title() ); ?></a></li>
++			<?php endwhile; ?>
++		</ul>
++	<?php endif; ?>
++</section>
++<?php wp_reset_postdata(); ?>
+diff --git a/dev/test/project-owned-blocks.source-contract.test.ts b/dev/test/project-owned-blocks.source-contract.test.ts
+new file mode 100644
+index 0000000..34e48cf
+--- /dev/null
++++ b/dev/test/project-owned-blocks.source-contract.test.ts
+@@ -0,0 +1,49 @@
++import { readFile } from 'node:fs/promises';
++import path from 'node:path';
++import { fileURLToPath } from 'node:url';
++import { describe, expect, it } from 'vitest';
++import { realize } from '../../src/index.js';
++
++const ROOT = path.resolve( path.dirname( fileURLToPath( import.meta.url ) ), '..', 'acceptance', 'project-owned-blocks' );
++
++async function source( ...segments: string[] ): Promise<string> {
++	return readFile( path.join( ROOT, ...segments ), 'utf8' );
++}
++
++describe( 'project-owned dynamic block source contract', () => {
++	it( 'keeps custom hero controls and attachment-derived server rendering in the consumer', async () => {
++		const [ editor, renderer ] = await Promise.all( [ source( 'dynamic-hero', 'index.js' ), source( 'dynamic-hero', 'render.php' ) ] );
++
++		expect( editor ).toContain( 'MediaUpload' );
++		expect( editor ).toContain( 'FocalPointPicker' );
++		expect( editor ).toContain( 'RichText' );
++		expect( editor ).toContain( 'Title level' );
++		expect( editor ).toContain( 'URLInputButton' );
++		expect( editor ).toContain( 'save: () => null' );
++		expect( renderer ).toContain( 'wp_get_attachment_image' );
++		expect( renderer ).toContain( "'fetchpriority' => 'high'" );
++		expect( renderer ).toContain( "'loading'       => false" );
++		expect( renderer ).toContain( 'wp_kses_post' );
++		expect( renderer ).toContain( 'Choose a featured image' );
++	} );
++
++	it( 'uses Block Runner output as parsed, saved native resource-list children', async () => {
++		const [ editor, renderer ] = await Promise.all( [ source( 'resource-list', 'index.js' ), source( 'resource-list', 'render.php' ) ] );
++		const report = await realize( JSON.stringify( {
++			blocks: [
++				{ block: 'core/heading', text: 'Resources', level: 2 },
++				{ block: 'core/paragraph', text: 'Browse our latest resources.' },
++			],
++		} ) );
++
++		expect( report.ok ).toBe( true );
++		expect( report.output ).toContain( '<!-- wp:heading -->' );
++		expect( editor ).toContain( 'realize( JSON.stringify( RESOURCES_INTENT ) )' );
++		expect( editor ).toContain( 'return parse( report.output );' );
++		expect( editor ).toContain( 'replaceInnerBlocks( clientId, blocks, false )' );
++		expect( editor ).toContain( '<InnerBlocks.Content />' );
++		expect( renderer ).toContain( 'wp_kses_post( $content )' );
++		expect( renderer ).toContain( "'post_status'    => 'publish'" );
++		expect( renderer ).toContain( "'category_name'" );
++	} );
++} );
