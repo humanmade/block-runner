@@ -13,51 +13,26 @@
  *     --producer claude-impeccable --layouts hero-cover,pricing-table
  */
 import { execFileSync } from 'node:child_process';
-import { existsSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import type { ConvertOptions, BlockRunnerReport } from '../../src/types.js';
-import { readCanonicalSkillGuideSync } from '../../src/skill.js';
+import { readPageIntentSkillGuideSync } from '../../src/skill.js';
 import { realize } from './intent.js';
 import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from './harness.js';
 
-const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
-const GUIDE = readCanonicalSkillGuideSync();
+const PAGE_GUIDE = readPageIntentSkillGuideSync();
 
 export interface AgentSkillProvenance {
   guideHash: string;
-  authoringCommandHash: string;
-  authoringSchemaHash: string;
 }
 
 function hash(value: string): string {
   return `sha256:${createHash('sha256').update(value).digest('hex')}`;
 }
 
-/** Hash the implemented command and plan contract which the guide directs models to use. */
-function hashSourceSet(paths: string[]): string {
-  return hash(paths.map((relativePath) => {
-    const sourcePath = path.join(ROOT, relativePath);
-    if (!existsSync(sourcePath)) {
-      throw new Error(`authoring provenance source is missing: ${relativePath}`);
-    }
-    const content = readFileSync(sourcePath, 'utf8');
-    return `${relativePath}\0${content}`;
-  }).join('\0'));
-}
-
-// The guide tells the model which authoring command and schema it must use. Record all three
-// components individually as well as in promptHash: the aggregate invalidates the tuner cache;
-// named values make a historical benchmark run independently auditable.
+// This engine only reads the page-intent references. The hash records that exact ordered text so
+// cache records remain independently auditable without coupling to registered-block authoring.
 export const agentSkillProvenance: AgentSkillProvenance = Object.freeze({
-  guideHash: hash(GUIDE),
-  authoringCommandHash: hashSourceSet(['src/cli.ts']),
-  authoringSchemaHash: hashSourceSet([
-    'src/authoring/schema.ts',
-    'src/authoring/preview.ts',
-    'src/authoring/destination.ts',
-  ]),
+  guideHash: hash(PAGE_GUIDE),
 });
 
 // The framing an agent supplies around the guide when it has been handed a design to convert.
@@ -73,11 +48,9 @@ Do not run any commands, write any files, or output block markup.
 HTML:
 `;
 
-// The shipped guide is itself an engine prompt. Include the authoring command/schema revisions:
-// a guide sentence that names an old plan shape or write workflow is not reproducible against a
-// newer deterministic implementation. Tuner cache keys and benchmark records use this value.
+// Tuner cache keys and benchmark records use the actual page prompt, not unrelated references.
 export const promptHash = `skill-${createHash('sha256')
-  .update(GUIDE)
+  .update(PAGE_GUIDE)
   .update(TASK)
   .update(JSON.stringify(agentSkillProvenance))
   .digest('hex')
@@ -121,7 +94,7 @@ function callModel(input: string): string {
 
 export async function propose(html: string, _opts?: ConvertOptions): Promise<{ raw: string; error?: string }> {
   try {
-    return { raw: callModel(GUIDE + TASK + html) };
+    return { raw: callModel(PAGE_GUIDE + TASK + html) };
   } catch (error) {
     return { raw: '', error: error instanceof Error ? error.message : String(error) };
   }

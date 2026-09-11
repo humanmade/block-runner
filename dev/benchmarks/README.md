@@ -126,10 +126,10 @@ deterministic **rules engine** in `src/` (no `--engine` flag): it walks authored
 through its rule set and assembles native blocks — cheap, valid, and unbeatable on clean
 semantic input, but it falls back to `core/html` on markup it doesn't recognize.
 
-The other real engine is **Engine C** — a *split* engine in `scripts/engines/engine-c.ts`
+The other real engine is **Engine Skill** — a *split* engine in `scripts/engines/engine-skill.ts`
 (+ its deterministic core `intent.ts`). It separates the two halves of conversion:
 
-- **propose** (`engine-c.ts`) — the costly, non-deterministic half: the model reads the HTML
+- **propose** (`engine-skill.ts`) — the costly, non-deterministic half: the model reads the HTML
   and emits a typed block-**intent** tree (block names + nesting + which content goes where),
   *never* markup.
 - **realize** (`intent.ts`) — the deterministic half: `assemble()` turns that intent into a
@@ -138,26 +138,31 @@ The other real engine is **Engine C** — a *split* engine in `scripts/engines/e
   is a backstop, not a halving tax. Every failure is bounded to wrong structure/attributes,
   never invalid markup.
 
-Engine C exports the tuner's split contract — `propose` / `realize` / `promptHash` — so the
+Engine Skill exports the tuner's split contract — `propose` / `realize` / `promptHash` — so the
 tuner caches the model's intent tree once and replays `realize()` for free (T0) while you
 iterate on the assembler, calling the model again only when the prompt or schema changes.
+
+Engine Skill reads the page-intent pair in this exact order: `GUIDE.md` (17,949 UTF-8 bytes),
+then `ASSEMBLE.md` (9,617 UTF-8 bytes), for 27,566 source bytes at this revision. The ordinary
+`block-runner skill` command still prints the complete reference bundle. These are source-byte
+counts only; no model-quality, latency, or score change is asserted.
 
 All CLI-backed benchmark engines receive their complete task through stdin and launch outside
 the repository. Codex runs with a read-only sandbox, ignored user configuration, and ephemeral
 sessions; Claude runs in safe, restricted, non-persistent mode. A prompt asking the model not
 to write files is not a security boundary, so bypass-permission modes are prohibited here.
 
-Run Engine C:
+Run Engine Skill:
 
 ```sh
-npm run tune  -- --tier t2 --engine scripts/engines/engine-c.ts --engine-label engine-c --model opus
-npm run tune  -- --tier t2 --engine scripts/engines/engine-c.ts --engine-label engine-c --model gpt-5.5 --cli codex --effort high
-npm run bench -- --engine scripts/engines/engine-c.ts --engine-label engine-c --model opus --record
+npm run tune  -- --tier t2 --engine scripts/engines/engine-skill.ts --engine-label engine-skill --model opus
+npm run tune  -- --tier t2 --engine scripts/engines/engine-skill.ts --engine-label engine-skill --model gpt-5.5 --cli codex --effort high
+npm run bench -- --engine scripts/engines/engine-skill.ts --engine-label engine-skill --model opus --record
 ```
 
 - `--engine <path>` (or `BLOCK_RUNNER_ENGINE`) — the engine module; omit for the local rules.
 - `--engine-label` / `--model` / `--effort` — recorded as the run's `engine` / `model` / `effort` provenance.
-- `--cli claude` (default; harness/OAuth, no API key) or `--cli codex` — which model CLI Engine C shells out to.
+- `--cli claude` (default; harness/OAuth, no API key) or `--cli codex` — which model CLI Engine Skill shells out to.
 - `--producer <name>` / `--layouts a,b` — scope a run to a subset (cheap iteration; don't `--record` a scoped run as a baseline).
 
 To add an engine: drop a module in `scripts/engines/`. Prefer the **split-engine contract** —

@@ -7,7 +7,7 @@ import { realize } from '../../src/index.js';
 import { INTENT_PROMPT } from '../../scripts/engines/intent.js';
 import { CONVERT_PROMPT } from '../../scripts/engines/prompt.js';
 import { claudePrintArgs, codexExecArgs, MODEL_WORKDIR } from '../../scripts/engines/harness.js';
-import { readCanonicalSkillGuide } from '../../src/skill.js';
+import { readPageIntentSkillGuideSync } from '../../src/skill.js';
 import {
   WORDPRESS_TARGET,
   expectedToDisplay,
@@ -169,7 +169,7 @@ describe('benchmark contract', () => {
   it('keeps every expected block registered and present in every model-facing contract', async () => {
     const specs = loadSpecs();
     const wp = await getWp();
-    const guide = await readCanonicalSkillGuide();
+    const guide = readPageIntentSkillGuideSync();
     const blocks = new Set<string>();
     for (const spec of specs.values()) {
       for (const tree of allTrees(spec)) walk(tree, (node) => blocks.add(node.block));
@@ -179,7 +179,7 @@ describe('benchmark contract', () => {
       expect(wp.getBlockType(block), `${block} must be registered`).toBeTruthy();
       expect(CONVERT_PROMPT, `${block} missing from direct prompt`).toContain(block);
       expect(INTENT_PROMPT, `${block} missing from intent prompt`).toContain(block);
-      expect(guide, `${block} missing from shipped guide`).toContain(block);
+      expect(guide, `${block} missing from page-intent engine guide`).toContain(block);
     }
   });
 
