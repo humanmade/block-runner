@@ -31,7 +31,7 @@
     "type": "git",
     "url": "git+https://github.com/humanmade/block-runner.git"
   },
-  "homepage": "https://github.com/humanmade/block-runner#readme",
+  "homepage": "https://www.accelerateplugin.com/block-runner",
   "bugs": "https://github.com/humanmade/block-runner/issues",
   "bin": {
     "block-runner": "dist/cli.js"
