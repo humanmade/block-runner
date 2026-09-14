@@ -17,7 +17,7 @@ const pins = JSON.parse(readFileSync(new URL('../../proof/dependency-pins.json',
 };
 
 const proofTooling = {
-  '@wordpress/env': '11.12.0',
+  '@wordpress/env': '11.15.0',
   '@playwright/test': '1.61.1',
   '@wordpress/e2e-test-utils-playwright': '1.51.0',
   'axe-core': '4.11.0',

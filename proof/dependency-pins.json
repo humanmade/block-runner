@@ -19,8 +19,8 @@
       "integrity": "sha512-ekxMfC8MUTf0fKjAQd2IO4m/l1jXC9NznveRf7r8ntmx9nXqd9IHOiYJcH2SBo20C53nWdA4w8+Mbqedf0qzEw=="
     },
     "node_modules/@wordpress/env": {
-      "version": "11.12.0",
-      "integrity": "sha512-P1mYGEgnkYCbBPRaT9uAyxe3hFfsfkvxXKQ+Pfb00z/mXz5xbPC48ZdXTQmxTcpaj0nDwJfrBz0vzc074B5nrA=="
+      "version": "11.15.0",
+      "integrity": "sha512-FZq3eMDXBlZVZU8jVSX/4XoexgiBM4ZBqk69Mh23pz+1MMeQ13l7g5v7zKAAnyA3F9eHd+1sWsUpQnuS1f1T6Q=="
     }
   }
 }

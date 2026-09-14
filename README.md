@@ -208,7 +208,7 @@ Set up the runtime/editor proof boundary before requesting `runtime` or `editor`
 
 ```sh
 npm install --save-dev --save-exact \
-  @wordpress/env@11.12.0 \
+  @wordpress/env@11.15.0 \
   @playwright/test@1.61.1 \
   @wordpress/e2e-test-utils-playwright@1.51.0 \
   axe-core@4.11.0
