@@ -1,5 +1,12 @@
 # Changelog
 
+## 0.9.5 — 2026-09-14
+
+- Patch colour and ZIP dependencies, including the lockfile shipped with generated plugins.
+- Update Vitest and WordPress environment tooling, with matching proof pins and setup instructions.
+- Clarify button-width and colour attributes in the assembly guide.
+- Require generated page markup in the reply when no delivery destination is agreed.
+
 ## 0.9.4 — 2026-09-11
 
 - Route the agent skill by requested artifact before loading detailed instructions, and split
