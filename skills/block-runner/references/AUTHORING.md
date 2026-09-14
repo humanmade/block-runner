@@ -318,7 +318,7 @@ a browser download or model call from the proof command:
 ```bash
 npm install --save-dev --save-exact \
   /absolute/path/to/block-runner-0.9.0.tgz \
-  @wordpress/env@11.12.0 \
+  @wordpress/env@11.15.0 \
   @playwright/test@1.61.1 \
   @wordpress/e2e-test-utils-playwright@1.51.0 \
   axe-core@4.11.0 \

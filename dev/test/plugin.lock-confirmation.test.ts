@@ -44,6 +44,7 @@ describe('standalone lock confirmation', () => {
           devDependencies: { '@wordpress/scripts': '34.2.0' },
         },
         'node_modules/@wordpress/scripts': { version: '34.2.0' },
+        'node_modules/adm-zip': { version: '0.6.1' },
       },
     });
     expect(packageJson).toMatchObject({ engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' } });
