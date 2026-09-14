@@ -7,7 +7,7 @@ Convert authored HTML into native WordPress blocks, or generate a reusable regis
 [![CI](https://github.com/humanmade/block-runner/actions/workflows/ci.yml/badge.svg)](https://github.com/humanmade/block-runner/actions/workflows/ci.yml)
 [![license](https://img.shields.io/github/license/humanmade/block-runner.svg)](./LICENSE)
 
-![Block Runner converts messy design HTML into clean, nested, native Gutenberg blocks: wp:cover ▸ wp:columns ▸ wp:buttons](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/demo/demo.gif)
+![Block Runner driven from Claude Code: preview the registered block, confirm, write it into the plugin](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/demo/demo.gif)
 
 Block Runner converts authored design HTML into nested Gutenberg blocks and checks the result
 against headless WordPress. It also generates static registered-block source from a reviewed
