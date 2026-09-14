@@ -76,7 +76,7 @@ export type PluginRegistrationStrategy = 'direct' | 'metadata-collection';
 export type PluginPlanMode = 'existing' | 'standalone';
 export type PluginFileOperation = 'create' | 'modify';
 /** Versioned, complete npm lock snapshot owned by the standalone plugin template. */
-export const STANDALONE_LOCK_TEMPLATE_VERSION = 'wordpress-scripts-34.2.0-lock-v1' as const;
+export const STANDALONE_LOCK_TEMPLATE_VERSION = 'wordpress-scripts-34.2.0-lock-v2' as const;
 export const STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT = 1549 as const;
 
 export type PluginFileContent = string | Buffer;
