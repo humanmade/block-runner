@@ -1,5 +1,10 @@
 # Changelog
 
+## 0.9.6 — 2026-09-14
+
+- Point the package homepage to the Block Runner website on Accelerate.
+- Update the README demo to show Block Runner driven from Claude Code.
+
 ## 0.9.5 — 2026-09-14
 
 - Patch colour and ZIP dependencies, including the lockfile shipped with generated plugins.
