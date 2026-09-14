@@ -60,6 +60,11 @@ otherwise ask in plain language.
   temporary folder. Explain remaining wiring and unverified checks; see `references/AUTHORING.md`
   and `references/GUIDE.md` §6. For page content, paste through **Options ⋮ → Code editor**
   (`Ctrl+Shift+Alt+M`), not the visual editor.
+- **With no destination, the reply is the delivery, and it has an order.** The complete markup
+  comes first, then whatever you want to say about it. A file you wrote along the way is where the
+  generator put its output, never where the job ended. Do not state a block count, a validation
+  verdict or paste instructions for markup the reply does not contain: a confident description of
+  output the user cannot see reads as success and is the one failure they cannot spot.
 - **Prefer `--json` for automation.** Text output includes concise reasons and selected repair
   context, but JSON preserves the complete machine-readable report.
 - **Never hand-write `<!-- wp:... -->` markup.** That is how invalid output happens. Describe
