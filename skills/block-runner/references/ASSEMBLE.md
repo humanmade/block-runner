@@ -34,6 +34,24 @@ Top level is `{ "blocks": [ ...nodes ] }`.
 a numbered list, `{"service": "github", "url": "..."}` for a social link). Unknown attributes
 are harmless; a block ignores what it does not recognise.
 
+That tolerance cuts both ways: a key WordPress does not declare is dropped without a word, so a
+wrong shape reads as a success. Two cases where that matters:
+
+**A nested style attribute goes in at its full path.** A full-width button is
+`{"style":{"dimensions":{"width":"100%"}}}`, not `{"width":100}`; the flat key is not a declared
+attribute and is discarded. Saved markup carries no width class either way, because `core/button`
+skips serializing it and `has-custom-width` is added when the block renders. Do not write that
+class yourself to make it look applied.
+
+**A colour has two fields, and the wrong one fails quietly.** A theme preset goes in as its slug,
+`{"backgroundColor":"subtle"}`, which becomes `has-subtle-background-color` and follows the theme.
+A colour the palette does not carry goes in `{"style":{"color":{"background":"#f5f5f5"}}}`, which
+becomes an inline `background-color`. Putting a hex in `backgroundColor` instead serializes it
+literally: `#eef3f1` becomes the class `has-eef-3-f-1-background-color`, which matches no preset
+and styles nothing. That last one still passes `validate`, because the class agrees with the
+attribute it was built from. Read the theme's palette before you choose, and prefer the slug when
+one fits.
+
 ## Available blocks
 
 `core/cover`, `core/columns`, `core/column`, `core/media-text`, `core/group`, `core/heading`,
