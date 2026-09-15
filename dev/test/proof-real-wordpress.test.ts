@@ -4,8 +4,9 @@ import { mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { promisify } from 'node:util';
-import { describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { buildNativeStyleAdapterProofFixture, buildPatternOverridesFixture, buildResponsiveStyleProofFixture } from '../../scripts/build-pattern-overrides-fixture.js';
+import { createWordPressProofLifecycle } from './proof-wordpress-lifecycle.js';
 import {
   PROOF_PROFILES,
   canonicalJson,
@@ -22,6 +23,7 @@ import {
 } from '../../src/proof/release-acceptance.js';
 
 const execFileAsync = promisify(execFile);
+const wpEnvConfig = path.resolve('proof/wp-env.json');
 
 type ResponsiveStyleMatrixEvidence = {
   scope?: string;
@@ -53,6 +55,16 @@ type NativeStyleAdapterMatrixEvidence = {
 describe('real WordPress generated-pattern full-profile receipt', () => {
   let scopedFixture: Awaited<ReturnType<typeof buildPatternOverridesFixture>>;
   let historicalGates: Awaited<ReturnType<typeof runProof>>['receipt']['gates'];
+  const lifecycle = createWordPressProofLifecycle(async (args) => {
+    const { stdout, stderr } = await execFileAsync('npx', ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], {
+      timeout: args[0] === 'stop' ? 60_000 : 45_000,
+    });
+    return { stdout, stderr };
+  });
+
+  beforeAll(() => lifecycle.prepare(), 75_000);
+  afterAll(() => lifecycle.cleanup(), 75_000);
+
   it('writes a complete raw WordPress 7.1 receipt with the retained root-grid iframe matrix and a separate acceptance assessment', async () => {
     await requireDocker();
     const outputDir = await proofOutputDirectory();
@@ -73,6 +85,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       fixture: built.fixture,
       artifact: built.artifact,
       outputDir,
+      keepEnvironment: true,
     });
     historicalGates = result.receipt.gates;
 
@@ -215,6 +228,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       fixture: built.fixture,
       artifact: built.artifact,
       outputDir,
+      keepEnvironment: true,
     });
     const editor = result.receipt.gates.find((gate) => gate.gate === 'editor_reopen');
     const frontend = result.receipt.gates.find((gate) => gate.gate === 'frontend_assets');
@@ -254,6 +268,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       fixture: built.fixture,
       artifact: built.artifact,
       outputDir,
+      keepEnvironment: true,
     });
     const editor = result.receipt.gates.find((gate) => gate.gate === 'editor_reopen');
     const frontend = result.receipt.gates.find((gate) => gate.gate === 'frontend_assets');
@@ -297,7 +312,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     const built = scopedFixture;
     const outputDir = await proofOutputDirectory(profile);
     const result = await runProof({ profile, pluginZip: built.pluginZip, artifact: built.artifact,
-      inputPath: built.inputPath, markup: built.nativeContainerMarkup, fixture: built.fixture, outputDir });
+      inputPath: built.inputPath, markup: built.nativeContainerMarkup, fixture: built.fixture, outputDir, keepEnvironment: true });
     expect(result.receipt.requirements?.missingInputs).toEqual([]);
     // Preserve upstream findings, not an artificial all-pass expectation. Every requested gate
     // must execute just as it did for the same artifact under the historical full profile.
@@ -323,6 +338,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       fixture: built.fixture,
       artifact: built.artifact,
       outputDir,
+      keepEnvironment: true,
     });
     const matrix = (result.receipt.gates.find((gate) => gate.gate === 'editor_reopen')?.details as {
       browserMatrix?: {
@@ -349,6 +365,7 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
       const result = await runProof({
         profile: 'editor', pluginZip: built.pluginZip, inputPath: built.inputPath,
         markup: built.nativeContainerMarkup, fixture: built.fixture, outputDir,
+        keepEnvironment: true,
       });
       const matrix = (result.receipt.gates.find((gate) => gate.gate === 'editor_reopen')?.details as {
         browserMatrix?: { iframe?: { observed?: boolean }; rootLayout?: string; beforeAfter?: { ok?: boolean; directNativeChildren?: string[] } };
