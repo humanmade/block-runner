@@ -15,6 +15,8 @@ jobs:
     outputs:
       route: ${{ steps.scope.outputs.route }}
       docs: ${{ steps.scope.outputs.docs }}
+      base: ${{ steps.scope.outputs.base }}
+      head: ${{ steps.scope.outputs.head }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,18 +26,36 @@ jobs:
       - id: scope
         name: Classify changed paths
         shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE: ${{ github.event.pull_request.base.sha }}
+          PR_HEAD: ${{ github.event.pull_request.head.sha }}
+          PUSH_BEFORE: ${{ github.event.before }}
+          PUSH_AFTER: ${{ github.event.after }}
         run: |
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo 'route=full' >> "$GITHUB_OUTPUT"
-            echo 'docs=[]' >> "$GITHUB_OUTPUT"
-            exit 0
+          set -euo pipefail
+          if [ "$EVENT_NAME" = pull_request ]; then
+            base="$PR_BASE"
+            head="$PR_HEAD"
+          elif [ "$EVENT_NAME" = push ]; then
+            base="$PUSH_BEFORE"
+            head="$PUSH_AFTER"
+          else
+            echo "Unsupported event for CI scope classification: $EVENT_NAME" >&2
+            exit 1
           fi
-          result="$(node scripts/ci-scope.mjs --base '${{ github.event.pull_request.base.sha }}' --head '${{ github.event.pull_request.head.sha }}')"
+          if [ -z "$base" ] || [ -z "$head" ] || [[ "$base" =~ ^0+$ ]] || [[ "$head" =~ ^0+$ ]]; then
+            result='{"route":"full","docs":[],"reason":"missing-range-boundary"}'
+          else
+            result="$(node scripts/ci-scope.mjs --base "$base" --head "$head")"
+          fi
           echo "$result"
           route="$(node --input-type=module --eval "console.log(JSON.parse(process.argv[1]).route)" "$result")"
           docs="$(node --input-type=module --eval "console.log(JSON.stringify(JSON.parse(process.argv[1]).docs))" "$result")"
           echo "route=$route" >> "$GITHUB_OUTPUT"
           echo "docs=$docs" >> "$GITHUB_OUTPUT"
+          echo "base=$base" >> "$GITHUB_OUTPUT"
+          echo "head=$head" >> "$GITHUB_OUTPUT"
 
   documentation-contracts:
     needs: classify
@@ -44,8 +64,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The local-link gate diffs the pull-request base and head. A rebased
-          # head does not retain that base in checkout's default shallow clone.
+          # The local-link gate diffs the event's base and head. A rebased PR
+          # head does not retain its base in checkout's default shallow clone.
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -59,8 +79,10 @@ jobs:
       - name: Check touched documentation whitespace and local links
         env:
           DOCS: ${{ needs.classify.outputs.docs }}
+          BASE: ${{ needs.classify.outputs.base }}
+          HEAD: ${{ needs.classify.outputs.head }}
         run: |
-          git diff --check '${{ github.event.pull_request.base.sha }}' '${{ github.event.pull_request.head.sha }}'
+          git diff --check "$BASE" "$HEAD"
           node --input-type=module <<'NODE'
           import { existsSync, readFileSync } from 'node:fs';
           import path from 'node:path';
@@ -79,6 +101,23 @@ jobs:
             }
           }
           NODE
+      - name: Verify demo contracts
+        run: |
+          set -euo pipefail
+          bash -n demo/demo.sh
+          test -s demo/demo.gif
+          test -s assets/benchmark.jpg
+          node --input-type=module <<'NODE'
+          import { readFileSync } from 'node:fs';
+
+          const tape = readFileSync('demo/demo.tape', 'utf8');
+          if (!tape.includes('Type `clear; bash demo/demo.sh`')) {
+            throw new Error('demo/demo.tape must run demo/demo.sh');
+          }
+          if (!tape.includes('Output demo/demo.hq.gif') || !tape.includes('Output demo/demo.mp4')) {
+            throw new Error('demo/demo.tape must retain its documented output formats');
+          }
+          NODE
 
   skill-contracts:
     needs: classify
@@ -87,8 +126,8 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          # The local-link gate diffs the pull-request base and head. A rebased
-          # head does not retain that base in checkout's default shallow clone.
+          # The local-link gate diffs the event's base and head. A rebased PR
+          # head does not retain its base in checkout's default shallow clone.
           fetch-depth: 0
       - uses: actions/setup-node@v4
         with:
@@ -102,8 +141,10 @@ jobs:
       - name: Check touched documentation whitespace and local links
         env:
           DOCS: ${{ needs.classify.outputs.docs }}
+          BASE: ${{ needs.classify.outputs.base }}
+          HEAD: ${{ needs.classify.outputs.head }}
         run: |
-          git diff --check '${{ github.event.pull_request.base.sha }}' '${{ github.event.pull_request.head.sha }}'
+          git diff --check "$BASE" "$HEAD"
           node --input-type=module <<'NODE'
           import { existsSync, readFileSync } from 'node:fs';
           import path from 'node:path';
