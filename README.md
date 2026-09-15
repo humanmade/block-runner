@@ -18,7 +18,7 @@ Block Runner is an open-source CLI and JavaScript library from Human Made. It co
 Requires Node.js **20.19.0+ on 20.x, 22.13.0+ on 22.x, or 24.0.0+**. Node 21 and 23 are unsupported. Basic conversion needs no AI agent, Docker or running WordPress site.
 
 ```sh
-npm install block-runner
+npm install block-runner # Node.js ^20.19.0 || ^22.13.0 || >=24.0.0
 printf '<p>Hello WordPress</p>\n' > hello.html
 npx --no-install block-runner convert hello.html
 ```
