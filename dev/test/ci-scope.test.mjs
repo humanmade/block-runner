@@ -4,10 +4,14 @@ import { classifyChanges, classifyDiffResult, parseNameStatus } from '../../scri
 
 const entry = (status, ...paths) => ({ status, paths });
 
-test('selects the documentation route only for the root documentation allowlist', () => {
+test('selects the documentation route only for the explicit documentation and demo allowlists', () => {
   assert.deepEqual(
     classifyChanges([entry('M', 'README.md'), entry('A', 'CHANGELOG.md')]),
-    { route: 'docs', docs: ['CHANGELOG.md', 'README.md'], reason: 'root-documentation-only' },
+    { route: 'docs', docs: ['CHANGELOG.md', 'README.md'], reason: 'documentation-and-demo-only' },
+  );
+  assert.deepEqual(
+    classifyChanges([entry('M', 'README.md'), entry('M', 'demo/demo.sh'), entry('M', 'demo/demo.gif')]),
+    { route: 'docs', docs: ['README.md'], reason: 'documentation-and-demo-only' },
   );
 });
 
@@ -34,14 +38,20 @@ test('keeps unknown Markdown on the full route', () => {
   assert.equal(classifyChanges([entry('M', 'dev/benchmarks/README.md')]).route, 'full');
 });
 
-test('uses both sides of a rename', () => {
+test('keeps renames and copies on the full route even when every path is allowlisted', () => {
   assert.equal(classifyChanges([entry('R100', 'README.md', 'src/README.md')]).route, 'full');
-  assert.equal(classifyChanges([entry('R100', 'skills/block-runner/SKILL.md', 'README.md')]).route, 'skill');
+  assert.equal(classifyChanges([entry('R100', 'skills/block-runner/SKILL.md', 'README.md')]).route, 'full');
+  assert.equal(classifyChanges([entry('C100', 'README.md', 'CHANGELOG.md')]).route, 'full');
 });
 
-test('uses deleted paths', () => {
+test('keeps deletions on the full route even when the deleted path is allowlisted', () => {
   assert.equal(classifyChanges([entry('D', 'scripts/old-check.mjs')]).route, 'full');
-  assert.equal(classifyChanges([entry('D', 'ERRORS.md')]).route, 'docs');
+  assert.equal(classifyChanges([entry('D', 'ERRORS.md')]).route, 'full');
+});
+
+test('keeps type changes and unmerged paths on the full route', () => {
+  assert.equal(classifyChanges([entry('T', 'README.md')]).route, 'full');
+  assert.equal(classifyChanges([entry('U', 'README.md')]).route, 'full');
 });
 
 test('keeps empty input and unavailable or malformed diffs on the full route', () => {

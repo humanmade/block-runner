@@ -3,6 +3,7 @@
 import { spawnSync } from 'node:child_process';
 
 const DOCUMENTATION_PATHS = new Set(['README.md', 'CHANGELOG.md', 'ERRORS.md', 'DECISIONS.md']);
+const DEMO_PATHS = new Set(['demo/demo.sh', 'demo/demo.tape', 'demo/demo.gif', 'assets/benchmark.jpg']);
 const SKILL_PREFIX = 'skills/block-runner/';
 
 /**
@@ -15,6 +16,10 @@ export function classifyChanges(entries) {
     return { route: 'full', docs: [], reason: 'empty-diff' };
   }
 
+  if (entries.some((entry) => !entry || (entry.status !== 'A' && entry.status !== 'M'))) {
+    return { route: 'full', docs: [], reason: 'non-additive-or-unknown-change' };
+  }
+
   const paths = entries.flatMap((entry) => entry.paths ?? []);
   if (paths.length === 0 || paths.some((path) => typeof path !== 'string' || path.length === 0)) {
     return { route: 'full', docs: [], reason: 'unclassified-path' };
@@ -22,8 +27,8 @@ export function classifyChanges(entries) {
 
   const docs = [...new Set(paths.filter((path) => DOCUMENTATION_PATHS.has(path)
     || (path.startsWith(SKILL_PREFIX) && path.endsWith('.md'))))].sort();
-  if (paths.every((path) => DOCUMENTATION_PATHS.has(path))) {
-    return { route: 'docs', docs, reason: 'root-documentation-only' };
+  if (paths.every((path) => DOCUMENTATION_PATHS.has(path) || DEMO_PATHS.has(path))) {
+    return { route: 'docs', docs, reason: 'documentation-and-demo-only' };
   }
 
   if (paths.every((path) => DOCUMENTATION_PATHS.has(path) || path.startsWith(SKILL_PREFIX))
