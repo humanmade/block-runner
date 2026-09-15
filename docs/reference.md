@@ -456,4 +456,3 @@ Approved font families get block-specific names and shared editor/frontend CSS. 
 notices are retained separately in the production archive because minifiers can remove CSS comments.
 Unlicensed or unsupported faces use a safe fallback with a source-located warning. Destination
 theme font presets do not require copying font files.
-
