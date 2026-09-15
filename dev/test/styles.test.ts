@@ -1,3 +1,6 @@
+import { mkdtempSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { convert } from '../../src/index.js';
 import type { RuleContext } from '../../src/types.js';
@@ -6,6 +9,13 @@ import { expandShorthand, parseInlineStyle } from '../../src/styles/parse.js';
 
 const warningsOf = (items: Awaited<ReturnType<typeof convert>>['items']) =>
   items.filter((item) => item.status === 'warning').map((item) => item.reason);
+
+function writeContext(manifest: unknown): string {
+  const directory = mkdtempSync(path.join(tmpdir(), 'block-runner-context-'));
+  const contextPath = path.join(directory, 'site.context.json');
+  writeFileSync(contextPath, JSON.stringify(manifest));
+  return contextPath;
+}
 
 describe('inline style parsing', () => {
   it('expands box shorthands with CSS 1-4 value semantics', () => {
@@ -901,6 +911,56 @@ describe('styling — capability source', () => {
       expect.stringContaining('carries no blocks.types registry'),
     );
     // Falling back to the pin must still convert, not refuse everything.
+    expect(report.output).toContain('padding-top:8px');
+  });
+
+  it('does not block conversion for additive collector relationships and a partial block warning', async () => {
+    const context = writeContext({
+      contextVersion: 1,
+      site: { environment: 'local', isMultisite: false },
+      provenance: {
+        collectedAt: '2026-09-15T00:00:00.000Z',
+        collector: 'wp-cli',
+        collectorVersion: '0.2.3',
+        sourceHash: 'sha256:fixture',
+        partial: true,
+      },
+      blocks: {
+        types: [{
+          name: 'core/group',
+          attributes: {},
+          supports: { spacing: { padding: true } },
+          source: 'core',
+          owner: { status: 'unknown', reason: 'scan_incomplete' },
+          providesContext: { 'acme/productId': 'productId' },
+        }],
+      },
+      contentModel: {
+        postTypes: [{
+          name: 'product',
+          taxonomies: ['product_cat'],
+          owner: { status: 'unknown', reason: 'incomplete_registration_trace' },
+        }],
+        taxonomies: [{
+          name: 'product_cat',
+          objectTypes: ['product'],
+          owner: { status: 'unknown', reason: 'incomplete_registration_trace' },
+        }],
+      },
+      warnings: [
+        {
+          code: 'blocks.provides_context_attribute_missing',
+          severity: 'warning',
+          surface: 'blocks.types.core/group.providesContext.acme/productId',
+          message: 'Block "core/group" provides context "acme/productId" from "productId", but the registered block attributes do not include it.',
+          coverage: 'partial',
+        },
+      ],
+    });
+
+    const report = await convert(`<div style="padding:8px">Text</div>`, { context });
+
+    expect(report.ok).toBe(true);
     expect(report.output).toContain('padding-top:8px');
   });
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.7 — 2026-09-15
+
+- Update Wesper to 0.4.1, retaining compatibility with optional ownership and taxonomy evidence and partial collection warnings.
+- Reuse WordPress between sequential proof cases while retaining each artifact installation and browser check.
+- Run focused CI checks for allowlisted documentation and demo updates pushed to main.
+
 ## 0.9.6 — 2026-09-14
 
 - Point the package homepage to the Block Runner website on Accelerate.
