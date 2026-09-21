@@ -17,11 +17,18 @@ export function bootHeadlessWordPressSync(): WpModules {
     installDomGlobals();
 
     const require = createRequire(import.meta.url);
+    const blockLibraryEntry = require.resolve('@wordpress/block-library');
+    // Core block save functions call block-editor helpers. Resolve the registry from that same
+    // block-editor package rather than from this package: npm may otherwise nest an identical
+    // @wordpress/blocks version here when the consumer has a newer top-level copy.
+    const blockLibraryRequire = createRequire(blockLibraryEntry);
+    const blockEditorEntry = blockLibraryRequire.resolve('@wordpress/block-editor');
+    const blockEditorRequire = createRequire(blockEditorEntry);
     const { blockLibrary, blocks } = withMutedWordPressConsole(() => ({
       blockLibrary: require('@wordpress/block-library') as {
         registerCoreBlocks: () => void;
       },
-      blocks: require('@wordpress/blocks') as WpModules,
+      blocks: blockEditorRequire('@wordpress/blocks') as WpModules,
     }));
 
     withMutedWordPressConsole(() => {

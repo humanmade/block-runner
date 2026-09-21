@@ -32,6 +32,9 @@ const basic = installPacked(tarball, 'basic');
 const manifest = basic.require('block-runner/package.json');
 await verifyBasicConsumer(basic);
 
+const conflictingGutenberg = installPacked(tarball, 'conflicting-gutenberg', ['@wordpress/blocks@16.0.0']);
+await verifyConflictingGutenbergConsumer(conflictingGutenberg);
+
 const proof = installPacked(tarball, 'proof');
 await verifyProofConsumer(proof);
 const installedDependencyInventory = compareInstalledDependencyInventories(
@@ -100,6 +103,16 @@ async function verifyBasicConsumer({ consumer, packageRoot, cli, require }) {
   const expectedCommand = proofToolingInstallCommand(manifest, 'runtime');
   if (!blocked.stdout.includes(expectedCommand) || !blocked.stdout.includes('No tooling was downloaded or started.')) {
     throw new Error(`Normal unavailable-proof output did not provide the required setup instruction: ${blocked.stdout}`);
+  }
+}
+
+async function verifyConflictingGutenbergConsumer({ packageRoot }) {
+  const library = await import(pathToFileURL(path.join(packageRoot, 'dist', 'index.js')).href);
+  const report = await library.author('<section><p>Pinned runtime.</p><h2>Core blocks agree.</h2><p>Save hooks retain their attributes.</p></section>', {
+    author: { name: 'acme/conflicting-gutenberg-runtime', title: 'Conflicting Gutenberg runtime' },
+  });
+  if (!report.ok || !report.package?.canonicalPlan) {
+    throw new Error(`Packed authoring failed with a conflicting top-level @wordpress/blocks version: ${JSON.stringify(report.items)}`);
   }
 }
 
