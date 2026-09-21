@@ -3,16 +3,16 @@
   "source": "package-lock.json",
   "packages": {
     "node_modules/@wordpress/block-editor": {
-      "version": "17.0.0",
-      "integrity": "sha512-RGWvjWLwIKMKEgLt6kZseC+oEO7oNnDFMzfZ56eGuQKZCKM88x5F7jaEly6YWqj8XtonXEz1ihfxL5JrPeSFNg=="
+      "version": "17.1.0",
+      "integrity": "sha512-p+4YgopJOP/gXif9QEjE3LpQY8fGMtGCVkRZ37Ia6fl9rH8QPD6MDhgCjsg1LDazMTc18MwbMyRKLFfFrwqeUw=="
     },
     "node_modules/@wordpress/block-library": {
-      "version": "10.5.0",
-      "integrity": "sha512-+zpSxYNHitzBboMdziL/lS9oc1r0VaEiz1EPZCYWqJk6iRINNGYuv0FKCgO87dmeL/rQ2dBvuVsTzpcFERb/Lg=="
+      "version": "11.0.0",
+      "integrity": "sha512-WdtkEUkvbJKw1t+GVRl/nl2bgqhsYqsdsPxCl4BfEw4Xtc+i5MwRXN0d3cY6ZMIP/e51L+QxASvk50VBtla17A=="
     },
     "node_modules/@wordpress/blocks": {
-      "version": "15.27.0",
-      "integrity": "sha512-HW8SJBMF2HhZn8/9XKxu37Rspm3Oqb5odGHnpcc29jZKbYRzH/7AhEUYAdjuUedVwXB2UvzaybDMFFOZ6lN4FA=="
+      "version": "16.0.0",
+      "integrity": "sha512-wDL8R5VuJK0vvavZbvSUjWagPB5Vt9bmNQo1G8OAoAjl/JUCICjU9BvZWM8XK/BXSS95qcb5l3H3UIca5onuwQ=="
     },
     "node_modules/@wordpress/e2e-test-utils-playwright": {
       "version": "1.51.0",

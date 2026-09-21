@@ -58,7 +58,7 @@ async function verifyBasicConsumer({ consumer, packageRoot, cli, require }) {
   const manifest = require('block-runner/package.json');
   for (const name of PROOF_TOOLING) {
     if (manifest.dependencies[name]) throw new Error(`Proof tooling remains a production dependency: ${name}`);
-    if (manifest.peerDependencies?.[name] !== manifest.devDependencies?.[name]) throw new Error(`Proof peer is not pinned to development tooling: ${name}`);
+    if (manifest.peerDependencies?.[name] !== `^${manifest.devDependencies?.[name]}`) throw new Error(`Proof peer is not a compatible range from development tooling: ${name}`);
     if (manifest.peerDependenciesMeta?.[name]?.optional !== true) throw new Error(`Proof peer is not optional: ${name}`);
     try {
       require.resolve(`${name}/package.json`);
@@ -105,10 +105,10 @@ async function verifyBasicConsumer({ consumer, packageRoot, cli, require }) {
 
 async function verifyProofConsumer({ consumer, packageRoot, cli, require }) {
   const manifest = require('block-runner/package.json');
-  const pins = Object.entries(manifest.peerDependencies ?? {}).map(([name, version]) => `${name}@${version}`);
+  const pins = PROOF_TOOLING.map((name) => `${name}@${manifest.devDependencies[name]}`);
   run('npm', ['install', '--ignore-scripts', '--no-audit', '--no-fund', '--save-dev', '--save-exact', ...pins], { cwd: consumer });
   for (const name of PROOF_TOOLING) {
-    const expected = manifest.peerDependencies[name];
+    const expected = manifest.devDependencies[name];
     const installed = require(`${name}/package.json`).version;
     if (installed !== expected) throw new Error(`Proof tooling pin mismatch for ${name}: expected ${expected}, got ${installed}`);
   }
@@ -194,7 +194,7 @@ function compareInstalledDependencyInventories(proofEnabled, basic) {
 
 function proofToolingInstallCommand(manifest, profile) {
   const required = profile === 'full' ? PROOF_TOOLING : PROOF_TOOLING.slice(0, 4);
-  return `npm install --save-dev --save-exact ${required.map((name) => `${name}@${manifest.peerDependencies?.[name]}`).join(' ')}`;
+  return `npm install --save-dev --save-exact ${required.map((name) => `${name}@${manifest.devDependencies?.[name]}`).join(' ')}`;
 }
 
 function run(command, args, { cwd = ROOT, expectedStatus = 0, env = process.env } = {}) {
