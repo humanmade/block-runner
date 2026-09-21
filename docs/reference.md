@@ -118,8 +118,9 @@ Library plus `convert`, `assemble`, `validate`, `fix`, `author`, `plugin`, `cont
 and `skill` need only Block Runner's production dependencies. WP-CLI remains an
 external requirement only when selected for context, token, or media resolution.
 
-The browser-proof packages are exact optional peers, absent from a basic installation.
-Install them only where real-WordPress proof will run.
+The browser-proof packages are optional peers with compatible caret ranges, absent from a basic
+installation. The proof setup below deliberately pins the known-good versions for reproducible
+real-WordPress proof.
 
 Set up the runtime/editor proof boundary before requesting `runtime` or `editor`:
 

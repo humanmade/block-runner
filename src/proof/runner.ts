@@ -1917,7 +1917,7 @@ function commandFailure(command: string, error: unknown): ProofCommandResult {
 }
 
 function proofToolingVersion(name: (typeof PROOF_TOOLING)[number]): string {
-  const version = packageJson.peerDependencies?.[name] ?? packageJson.devDependencies?.[name];
+  const version = packageJson.devDependencies?.[name];
   if (!version) throw new Error(`Missing pinned proof tooling declaration for ${name}.`);
   return version;
 }
