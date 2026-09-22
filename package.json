@@ -91,9 +91,9 @@
   },
   "dependencies": {
     "@babel/parser": "7.29.8",
-    "@wordpress/block-editor": "17.0.0",
-    "@wordpress/block-library": "10.5.0",
-    "@wordpress/blocks": "15.27.0",
+    "@wordpress/block-editor": "17.1.0",
+    "@wordpress/block-library": "11.0.0",
+    "@wordpress/blocks": "16.0.0",
     "ajv": "8.18.0",
     "commander": "14.0.3",
     "fast-glob": "3.3.3",
@@ -120,12 +120,12 @@
     "vitest": "4.1.11"
   },
   "peerDependencies": {
-    "@playwright/test": "1.61.1",
-    "@wordpress/e2e-test-utils-playwright": "1.51.0",
-    "@wordpress/env": "11.15.0",
-    "axe-core": "4.11.0",
-    "pixelmatch": "7.1.0",
-    "pngjs": "7.0.0"
+    "@playwright/test": "^1.61.1",
+    "@wordpress/e2e-test-utils-playwright": "^1.51.0",
+    "@wordpress/env": "^11.15.0",
+    "axe-core": "^4.11.0",
+    "pixelmatch": "^7.1.0",
+    "pngjs": "^7.0.0"
   },
   "peerDependenciesMeta": {
     "@playwright/test": {

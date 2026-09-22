@@ -31,7 +31,7 @@ describe('proof packaging boundary', () => {
     for (const [name, version] of Object.entries(proofTooling)) {
       expect(packageJson.dependencies[name]).toBeUndefined();
       expect(packageJson.devDependencies[name]).toBe(version);
-      expect(packageJson.peerDependencies[name]).toBe(version);
+      expect(packageJson.peerDependencies[name]).toBe(`^${version}`);
       expect(packageJson.peerDependenciesMeta[name]).toEqual({ optional: true });
     }
   });

@@ -189,7 +189,7 @@ describe('benchmark contract', () => {
     };
 
     expect(WORDPRESS_TARGET).toBe('7.1');
-    expect(gutenbergVersion()).toBe('10.5.0');
+    expect(gutenbergVersion()).toBe('11.0.0');
     expect(pkg.dependencies['@wordpress/block-library']).toBe(gutenbergVersion());
   });
 
