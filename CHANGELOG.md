@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.9.8 — 2026-09-22
+
+- Allow compatible versions of optional proof tooling so existing project dependencies do not block installation. WordPress proof still requires the exact tested toolchain.
+- Update the pinned Gutenberg packages together, fixing the reported `author()` crash in projects using `@wordpress/blocks` 16.0.0.
+- Clarify the README, architecture and command reference, and add a worked custom conversion rule example.
+
 ## 0.9.7 — 2026-09-15
 
 - Update Wesper to 0.4.1, retaining compatibility with optional ownership and taxonomy evidence and partial collection warnings.
