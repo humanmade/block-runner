@@ -2,6 +2,42 @@
 
 Start with the [README](../README.md) for a first conversion, or the [architecture guide](architecture.md) for the code paths. This reference covers commands, configuration and compatibility details. The [registered-block delivery guide](../skills/block-runner/references/AUTHORING.md#shipped-notice-source-to-standalone-zip) owns the complete source-to-ZIP procedure.
 
+## Native block support boundaries
+
+Four different claims need different evidence:
+
+| Route | What it establishes | What it does not establish |
+|---|---|---|
+| Explicit intent through CLI `assemble` / library `realize()` | Registered blocks and open attributes pass through shared finalisation and the headless validity gate | A live destination registry, server rendering, interaction or edit persistence |
+| Registered-block composition | Native nesting and save round trips accepted by the authoring capability gate | Every native attribute being exposed as an editable field |
+| Declared editable fields | The compiler's reviewed Heading, Paragraph, List Item, Image and Button attribute surfaces | Tab Panel label editing or automatic pattern overrides for arbitrary registered blocks |
+| WordPress browser proof | The exact fixture and runtime exercised by a retained receipt | Other runtime versions, manual visual acceptance, model quality or collaboration |
+
+Native Tabs page content is covered on WordPress 7.1 by the explicit two-panel,
+rich-content and independent-instance fixtures. The browser proof checks the frontend
+before editor effects, label/body edits, saved/reopened content hashes, clean editor
+state, ARIA associations, clicks and keyboard behaviour against a native control.
+Use the [Tabs input contract](../skills/block-runner/references/ASSEMBLE.md#native-tabs-page-content).
+Nested Tabs, HTML inference and registered-block label overrides remain unqualified.
+
+The September catch-up leaves these candidates deferred, rather than enabling them
+from registry presence alone:
+
+| Candidate | Required scope before qualification |
+|---|---|
+| Icon | A named destination-registered icon and live rendering proof; transporting a static SVG does not register an icon collection |
+| Playlist | An audio-collection input, attachment/track metadata, playback and persistence; the current media resolver handles Image/Cover |
+| Breadcrumbs | A seeded target-site hierarchy and explicit dynamic-content intent |
+| Gallery Grid | An explicitly supported Gutenberg/Core target plus desktop/mobile crop, layout, links and image-ID proof; it is a `core/gallery` variation, not `core/gallery-grid` |
+| Description List and Table of Contents | An accepted upstream release contract, followed by term/detail or heading/anchor persistence proof |
+| Additional responsive controls | A source-fidelity audit of actual native output; retain authored CSS when no equivalent native control exists |
+
+Accordion first shipped in [WordPress 6.9](https://make.wordpress.org/core/2025/11/25/wordpress-6-9-field-guide/).
+The benchmark attribution correction does not change expected block trees or scores.
+The deferred source contracts and promotion conditions remain in [the catch-up tracker](https://github.com/humanmade/block-runner/issues/119).
+
+Generated-template compatibility is a separate [three-lane investigation](https://github.com/humanmade/block-runner/issues/118). The public release-proof identity remains WordPress 7.1, and the current template prop remains required for that floor.
+
 ## CLI
 
 For a local installation, run these commands with `npx --no-install block-runner`.
