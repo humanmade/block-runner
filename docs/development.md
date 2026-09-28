@@ -91,3 +91,32 @@ not turn unrun browser/editor work or a model/tool failure into a zero product s
 package, installer, and activation checks are run with `npm run release:check`;
 see [`dev/release/0.9-testing`](https://github.com/humanmade/block-runner/blob/main/dev/release/0.9-testing/README.md) for the receipt matrix and the
 draft product-preview brief.
+
+## WordPress and Gutenberg compatibility probe
+
+The development compatibility suite builds the existing pattern-override plugin once,
+then installs the same ZIP in three sequential, isolated PHP 8.3 environments:
+WordPress 7.1; WordPress 7.1.2; and WordPress 7.1.2 with Gutenberg 24.0.0.
+It uses ports 8891–8893 and refuses to claim an already-running lane.
+
+```sh
+npm ci
+npx --no-install playwright install chromium
+BLOCK_RUNNER_COMPAT_OUTPUT_DIR=/tmp/block-runner-compat \
+  npx --no-install vitest run --config vitest.gutenberg-compat.config.ts
+```
+
+Use a fresh output directory for each run. Without that variable, the suite creates
+an isolated temporary directory and prints its path. `compatibility.json` records the
+ZIP, input and generated-template hashes plus each lane's result. Each lane retains
+`receipt.json` (versions and command output), `browser-result.json` (editor states,
+frontend checks and pattern isolation), and browser screenshots/trace under `artifacts/`.
+Build or runtime failures retain failure evidence and fail the suite; they are not skips.
+On macOS, use OrbStack and check the effective Docker endpoint before running it.
+
+This is a development compatibility observation, not the public WordPress 7.1 release
+receipt or manual acceptance. It compares child trees immediately after insertion and
+after save/reopen, exercises bundled media and a supported field edit, and reuses the
+existing two-instance pattern-override lifecycle. Browser console warnings remain
+visible, including Gutenberg's expected template-prop deprecation. No model calls or
+collaborative-editing server are involved.

@@ -10,6 +10,7 @@ export default defineConfig({
       'dev/test/proof-real-wordpress.test.ts',
       'dev/test/proof-query-wordpress.test.ts',
       'dev/test/proof-tabs-wordpress.test.ts',
+      'dev/test/proof-gutenberg-compat.test.ts',
       'dev/test/plugin.consumer.test.ts',
       'dev/test/proof-native-style-adapter-builder.test.ts',
     ],

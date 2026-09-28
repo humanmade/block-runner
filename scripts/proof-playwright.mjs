@@ -90,12 +90,14 @@ await page.context().tracing.start({ screenshots: true, snapshots: true, sources
 page.setDefaultTimeout(20_000);
 page.setDefaultNavigationTimeout(20_000);
 const consoleErrors = [];
+const consoleWarnings = [];
 const pageErrors = [];
 const responses = [];
 let publication;
 let patternLifecycle;
 page.on('console', (message) => {
   if (message.type() === 'error') consoleErrors.push(message.text());
+  if (message.type() === 'warning') consoleWarnings.push(message.text());
 });
 page.on('pageerror', (error) => pageErrors.push(error.message));
 page.on('response', (response) => {
@@ -272,7 +274,7 @@ try {
     if (!gates[gate]) blocked(gate, error instanceof Error ? error.message : String(error));
   }
 } finally {
-  const runtime = { consoleErrors, pageErrors, responses };
+  const runtime = { consoleErrors, consoleWarnings, pageErrors, responses };
   if (gates.frontend_runtime_errors?.details) {
     gates.frontend_runtime_errors.details.runtime = runtime;
   }
@@ -2114,8 +2116,11 @@ async function proveFrontend(page, fixture, baseUrl, activePublication, artifact
   const responseStart = responses.length;
   const consoleStart = consoleErrors.length;
   const pageErrorStart = pageErrors.length;
-  // Frontend means the published visitor experience, not the authenticated
-  // editor's admin bar (which can also overlay a scoped screenshot).
+  // Leave the editor while still authenticated so its unload beacon can release
+  // the post lock. Clearing cookies first makes Gutenberg 24.0's native
+  // wp-remove-post-lock request fail with HTTP 400 during frontend navigation.
+  await page.goto('about:blank', { waitUntil: 'networkidle' });
+  // Frontend means the published visitor experience, not the editor's admin bar.
   await page.context().clearCookies();
   const response = await page.goto(new URL(activePublication.permalink, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('load');
