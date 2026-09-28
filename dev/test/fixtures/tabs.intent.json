@@ -1,0 +1,54 @@
+{
+  "blocks": [
+    {
+      "block": "core/tabs",
+      "attrs": {
+        "activeTabIndex": 0
+      },
+      "children": [
+        {
+          "block": "core/tab-list",
+          "attrs": {
+            "tabs": [
+              {
+                "label": "Overview"
+              },
+              {
+                "label": "Details"
+              }
+            ]
+          }
+        },
+        {
+          "block": "core/tab-panels",
+          "children": [
+            {
+              "block": "core/tab-panel",
+              "attrs": {
+                "label": "Overview"
+              },
+              "children": [
+                {
+                  "block": "core/paragraph",
+                  "text": "First panel content."
+                }
+              ]
+            },
+            {
+              "block": "core/tab-panel",
+              "attrs": {
+                "label": "Details"
+              },
+              "children": [
+                {
+                  "block": "core/paragraph",
+                  "text": "Second panel content."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
