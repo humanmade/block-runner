@@ -2116,8 +2116,11 @@ async function proveFrontend(page, fixture, baseUrl, activePublication, artifact
   const responseStart = responses.length;
   const consoleStart = consoleErrors.length;
   const pageErrorStart = pageErrors.length;
-  // Frontend means the published visitor experience, not the authenticated
-  // editor's admin bar (which can also overlay a scoped screenshot).
+  // Leave the editor while still authenticated so its unload beacon can release
+  // the post lock. Clearing cookies first makes Gutenberg 24.0's native
+  // wp-remove-post-lock request fail with HTTP 400 during frontend navigation.
+  await page.goto('about:blank', { waitUntil: 'networkidle' });
+  // Frontend means the published visitor experience, not the editor's admin bar.
   await page.context().clearCookies();
   const response = await page.goto(new URL(activePublication.permalink, baseUrl).toString(), { waitUntil: 'domcontentloaded' });
   await page.waitForLoadState('load');

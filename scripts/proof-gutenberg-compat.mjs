@@ -93,6 +93,9 @@ export async function proveGutenbergCompatibility({ root, outputDir, built, expe
         const browser = JSON.parse(await readFile(browserOutput, 'utf8'));
         observed.runtime.browser = browser.environment.browser;
         observed.gates = Object.fromEntries(gates.map((gate) => [gate, browser.gates[gate]?.status]));
+        const runtime = browser.gates.frontend_runtime_errors?.details?.runtime;
+        observed.console = runtime;
+        observed.templateDeprecations = (runtime?.consoleWarnings ?? []).filter((warning) => warning.includes('The template prop of InnerBlocks and useInnerBlocksProps'));
         for (const gate of gates) assert.equal(browser.gates[gate]?.status, 'pass', `${lane.name}: ${gate}: ${browser.gates[gate]?.reason}`);
         const states = browser.gates.editor_reopen.details;
         observed.children = {};
@@ -102,11 +105,8 @@ export async function proveGutenbergCompatibility({ root, outputDir, built, expe
           assert.deepEqual(shape(roots[0].innerBlocks), shape(expectedTree), `${phase} must contain exactly the compiled tree`);
           observed.children[phase] = { count: count(roots[0].innerBlocks), shape: shape(roots[0].innerBlocks) };
         }
-        const runtime = browser.gates.frontend_runtime_errors.details.runtime;
-        observed.console = runtime;
         assert.deepEqual(runtime.pageErrors, []);
         assert.deepEqual(runtime.consoleErrors, []);
-        observed.templateDeprecations = runtime.consoleWarnings.filter((warning) => warning.includes('The template prop of InnerBlocks and useInnerBlocksProps'));
         if (lane.gutenberg) assert.ok(observed.templateDeprecations.length, 'Expected template deprecation was not observed.');
         assert.equal(hash(await readFile(built.pluginZip)), identity.zip);
         observed.status = 'passed';
