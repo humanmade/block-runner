@@ -457,3 +457,16 @@ Approved font families get block-specific names and shared editor/frontend CSS. 
 notices are retained separately in the production archive because minifiers can remove CSS comments.
 Unlicensed or unsupported faces use a safe fallback with a source-located warning. Destination
 theme font presets do not require copying font files.
+
+### Generated template compatibility
+
+Generated blocks retain `template: TEMPLATE` in `useInnerBlocksProps` for the WordPress
+7.1 floor. [WordPress 7.1's template hook](https://github.com/WordPress/WordPress/blob/b998fef9238af183f9523b3df71618e6e57498b6/wp-includes/js/dist/block-editor.js)
+uses the prop. [Gutenberg 24.0's hook](https://github.com/WordPress/gutenberg/blob/50ad79ef7ebc5f1d2a75def068887e33a15f2634/packages/block-editor/src/components/inner-blocks/use-inner-block-template-sync.js)
+warns about that prop but still executes it, and reads the block type's template only
+when the prop is absent. A settings-only migration needs an approved runtime boundary
+or a demonstrated compatibility mechanism; moving it into `block.json` is not this change.
+
+The [development compatibility probe](development.md#wordpress-and-gutenberg-compatibility-probe)
+keeps its observations separate from release acceptance. A successful single-user
+save/reopen run does not establish collaborative editing support.
