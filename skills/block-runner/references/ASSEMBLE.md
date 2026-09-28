@@ -59,7 +59,8 @@ one fits.
 `core/quote`, `core/pullquote`, `core/details`, `core/gallery`, `core/table`, `core/code`,
 `core/separator`, `core/social-links`, `core/social-link`, `core/video`, `core/audio`,
 `core/embed`, `core/file`, `core/accordion`, `core/accordion-item`,
-`core/accordion-heading`, `core/accordion-panel`.
+`core/accordion-heading`, `core/accordion-panel`, `core/tabs`, `core/tab-list`,
+`core/tab-panels`, `core/tab-panel`.
 
 ## Structural rules
 
@@ -170,3 +171,81 @@ Use the project's actual taxonomy IDs and verify the result on the target site.
 assumed. It fails loudly rather than quietly: malformed JSON, or JSON with no blocks in it,
 exits `1` with a reason — it will never hand you a clean empty result. A block name that is
 not registered produces a warning naming that node.
+
+## Native Tabs page content
+
+Use `core/tabs > [core/tab-list, core/tab-panels > core/tab-panel]` for explicit
+Tabs content on WordPress 7.1. Supply **both** `tab-list.attrs.tabs` and each
+`tab-panel.attrs.label`, with matching labels in the same order. The saved buttons
+come from the list array; the editor synchronises that array from panel labels.
+Headless assembly does not run that editor effect. `text` is not a panel-label alias.
+
+```json
+{
+  "blocks": [
+    {
+      "block": "core/tabs",
+      "attrs": {
+        "activeTabIndex": 0
+      },
+      "children": [
+        {
+          "block": "core/tab-list",
+          "attrs": {
+            "tabs": [
+              {
+                "label": "Overview"
+              },
+              {
+                "label": "Details"
+              }
+            ]
+          }
+        },
+        {
+          "block": "core/tab-panels",
+          "children": [
+            {
+              "block": "core/tab-panel",
+              "attrs": {
+                "label": "Overview"
+              },
+              "children": [
+                {
+                  "block": "core/paragraph",
+                  "text": "First panel content."
+                }
+              ]
+            },
+            {
+              "block": "core/tab-panel",
+              "attrs": {
+                "label": "Details"
+              },
+              "children": [
+                {
+                  "block": "core/paragraph",
+                  "text": "Second panel content."
+                }
+              ]
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}
+```
+
+The CLI `assemble` command and library `realize()` run the shared media/token/validity
+gate. Library `assemble()` returns block objects without finalisation. Native Tabs
+page-content proof covers plain and rich panels, two independent instances, frontend
+buttons before opening the editor, label/body edits, save/reopen, and keyboard
+focus versus activation against a native WordPress control.
+
+This does not infer Tabs from arbitrary HTML or qualify nested Tabs. Registered-block
+composition and declared editable fields remain separate: a registered Tab Panel does
+not grant an editable label field or a pattern-override contract in the authoring compiler.
+
+Sources: [WordPress 7.1 Tab List metadata](https://github.com/WordPress/WordPress/blob/b998fef9238af183f9523b3df71618e6e57498b6/wp-includes/blocks/tab-list/block.json)
+and [native keyboard actions](https://github.com/WordPress/WordPress/blob/b998fef9238af183f9523b3df71618e6e57498b6/wp-includes/js/dist/script-modules/block-library/tabs/view.js).
