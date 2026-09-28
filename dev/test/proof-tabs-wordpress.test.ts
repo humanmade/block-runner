@@ -25,8 +25,10 @@ describe('native Tabs in WordPress 7.1', () => {
     const lifecycle = createWordPressProofLifecycle(async (args) => {
       const result = await wpEnv([...args], commands);
       if (result.exitCode) throw new Error(result.stderr || result.stdout);
+      if (args[0] === 'status') alreadyRunning = JSON.parse(result.stdout).status === 'running';
       return result;
     });
+    let alreadyRunning = false;
     let dockerBlocked = false;
     let failure: unknown;
     const commands: CommandEvidence[] = [];
@@ -38,8 +40,10 @@ describe('native Tabs in WordPress 7.1', () => {
         throw error;
       }
       await lifecycle.prepare();
-      const started = await startWithPreparedStageMount({ root, start: () => wpEnv(['start'], commands) });
-      if (started.exitCode) throw new Error(started.stderr || started.stdout);
+      if (!alreadyRunning) {
+        const started = await startWithPreparedStageMount({ root, start: () => wpEnv(['start'], commands) });
+        if (started.exitCode) throw new Error(started.stderr || started.stdout);
+      }
       // wp-env commands share mutable environment state, so concurrent CLI
       // invocations can make one lose the active environment mid-proof.
       const wordpressVersion = (await wp(['core', 'version'], commands)).stdout.trim();
@@ -129,7 +133,7 @@ async function wpEnv(args: string[], commands: CommandEvidence[]) {
     return result;
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-    const result = { command: 'npx', args: ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], exitCode: 1, stdout: failure.stdout ?? '', stderr: failure.stderr || failure.message };
+    const result = { command: 'npx', args: ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], exitCode: 1, stdout: failure.stdout ?? '', stderr: `${failure.message}\n${failure.stderr ?? ''}` };
     commands.push(result);
     return result;
   }
@@ -151,7 +155,7 @@ async function requireDocker(commands: CommandEvidence[]) {
     commands.push({ command: 'docker', args, exitCode: 0, stdout, stderr });
   } catch (error) {
     const failure = error as NodeJS.ErrnoException & { stdout?: string; stderr?: string };
-    commands.push({ command: 'docker', args: ['info', '--format', '{{.ServerVersion}}'], exitCode: 1, stdout: failure.stdout ?? '', stderr: failure.stderr || failure.message });
+    commands.push({ command: 'docker', args: ['info', '--format', '{{.ServerVersion}}'], exitCode: 1, stdout: failure.stdout ?? '', stderr: `${failure.message}\n${failure.stderr ?? ''}` });
     throw new Error(`The native Tabs proof requires a working Docker CLI and daemon: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
