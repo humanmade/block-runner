@@ -15,7 +15,7 @@ const gates = ['client_registry', 'editor_inserter', 'editor_field_editing', 'ed
 export async function proveGutenbergCompatibility({ root, outputDir, built, expectedTree, imageBase64 }) {
   const identity = {
     zip: hash(await readFile(built.pluginZip)), input: hash(await readFile(built.inputPath)),
-    template: hash(await readFile(path.join(built.pluginDirectory, 'src', 'edit.js'))),
+    template: hash(await readFile(path.join(built.pluginDirectory, 'src', 'blocks', built.fixture.blockName.split('/')[1], 'edit.js'))),
   };
   const receipt = { kind: 'development-compatibility', identity, lanes: [], status: 'failed' };
   const lanes = [
