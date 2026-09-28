@@ -90,12 +90,14 @@ await page.context().tracing.start({ screenshots: true, snapshots: true, sources
 page.setDefaultTimeout(20_000);
 page.setDefaultNavigationTimeout(20_000);
 const consoleErrors = [];
+const consoleWarnings = [];
 const pageErrors = [];
 const responses = [];
 let publication;
 let patternLifecycle;
 page.on('console', (message) => {
   if (message.type() === 'error') consoleErrors.push(message.text());
+  if (message.type() === 'warning') consoleWarnings.push(message.text());
 });
 page.on('pageerror', (error) => pageErrors.push(error.message));
 page.on('response', (response) => {
@@ -272,7 +274,7 @@ try {
     if (!gates[gate]) blocked(gate, error instanceof Error ? error.message : String(error));
   }
 } finally {
-  const runtime = { consoleErrors, pageErrors, responses };
+  const runtime = { consoleErrors, consoleWarnings, pageErrors, responses };
   if (gates.frontend_runtime_errors?.details) {
     gates.frontend_runtime_errors.details.runtime = runtime;
   }
