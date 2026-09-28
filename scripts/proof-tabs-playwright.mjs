@@ -202,4 +202,3 @@ async function editPostTitle(page, value) {
   const title = await iframeTitle.isVisible().catch(() => false) ? iframeTitle : topLevelTitle;
   await title.fill(value);
 }
-
