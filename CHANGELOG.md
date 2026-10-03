@@ -1,5 +1,13 @@
 # Changelog
 
+## 0.9.9 — 2026-10-03
+
+- Reject inline content inside synced-pattern references before serialization can discard it. Failed repairs preserve the original markup, and both conversion and assembly reject malformed references before emitting output.
+- Explain shared pattern definitions, named instance overrides and explicit detachment in the agent guide.
+- Add native Tabs assembly and WordPress editor/frontend regression coverage, including persistence, independent instances and keyboard behaviour.
+- Add a development compatibility suite for generated blocks across WordPress 7.1, 7.1.2 and WordPress 7.1.2 with Gutenberg 24.0.0.
+- Clarify native-block support and proof boundaries, and correct Accordion's first WordPress release to 6.9.
+
 ## 0.9.8 — 2026-09-22
 
 - Allow compatible versions of optional proof tooling so existing project dependencies do not block installation. WordPress proof still requires the exact tested toolchain.
