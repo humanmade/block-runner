@@ -522,6 +522,22 @@ describe('CLI', () => {
     await expect(stat(outPath)).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
+  it('fails validation and refuses to write a lossy synced-pattern repair', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const inputPath = path.join(dir, 'pattern.html');
+    const outPath = path.join(dir, 'fixed.html');
+    const markup = '<!-- wp:block {"ref":123} --><!-- wp:paragraph --><p>Keep me</p><!-- /wp:paragraph --><!-- /wp:block -->';
+    await writeFile(inputPath, markup);
+    const validation = await runCli(['validate', inputPath, '--json']);
+    expect(validation.code).toBe(1);
+    expect(JSON.parse(validation.stdout).items[0].reason).toContain('serialization would discard');
+    const repair = await runCli(['fix', inputPath, '--out', outPath]);
+    expect(repair.code).toBe(2);
+    expect(repair.stderr).toContain('--out is only written when the command succeeds');
+    await expect(stat(outPath)).rejects.toMatchObject({ code: 'ENOENT' });
+    expect(await readFile(inputPath, 'utf8')).toBe(markup);
+  });
+
   it('offers source retention when plugin inspect cannot integrate a host layout', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
     await writeFile(path.join(root, 'package.json'), JSON.stringify({ scripts: { build: 'vite build' } }));

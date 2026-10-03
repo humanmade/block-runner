@@ -106,7 +106,7 @@ to adding a plugin merely because it is easier to generate. The handoff is descr
 | A reusable named block that must live in plugin or theme source | **`author preview`** → confirmation → **`author write`**, then package and proof it | This produces registered-block source. It is not page `post_content`. |
 | New content for a page or post, with no authored HTML | **`assemble`** | An intent tree becomes native page blocks. |
 | Existing authored HTML that must become page or post `post_content` | **`convert`** | Rule-based translation of existing markup, and the only content path that carries CSS. Do not use frontend-scraped render output. |
-| Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Proves the editor will accept it. |
+| Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Checks block markup; site references and editor behavior still need target-site verification. |
 
 Choose by the requested artifact, not merely by the input format. A supplied HTML design still
 uses registered-block authoring when the user wants a reusable named block in code. Conversely,
@@ -197,6 +197,24 @@ design yourself and describing it as an intent tree instead.
 ---
 
 ## 5. The pre-flight loop — before page markup is saved
+
+### Synced patterns
+
+The shared pattern definition stores its blocks in a `wp_block` post. A page instance stores
+only the reference and optional per-instance overrides, for example:
+
+```html
+<!-- wp:block {"ref":123,"content":{"Heading":{"content":"Custom heading"}}} /-->
+```
+
+Read the referenced pattern before choosing override keys: `Heading` must exactly match a
+child's `metadata.name`, and that child's bindings must enable the requested attribute through
+`core/pattern-overrides` (either an explicit attribute binding or `__default`). Never put inline
+children inside `wp:block`; they are not saved as instance overrides. `validate`, `fix`, and
+CLI `assemble` reject that shape, and `fix` cannot safely infer a replacement. For intent JSON,
+put `ref` and `content` in `attrs` and omit `children`. If the user wants a detached copy, use
+ordinary blocks explicitly. Validating markup offline does not verify that the referenced
+pattern exists or that its override names match. Confirm those on the target site.
 
 Run this on block markup before you write it to WordPress:
 

@@ -7,6 +7,7 @@ import { buildTokenInverseMap } from '../tokens/repair.js';
 import { BlockRunnerReport, CanonicalizeOptions, WpBlock, WpModules } from '../types.js';
 import { validate } from './validate.js';
 import { generatedMarkupItems } from './provenance.js';
+import { patternReferenceErrors } from './patterns.js';
 
 /**
  * Rebuild genuinely-invalid registered blocks from their parsed attributes.
@@ -65,6 +66,11 @@ export async function canonicalize(markup: string, options: CanonicalizeOptions 
   const config = await loadConfig(options);
 
   const parsed = withMutedWordPressConsole(() => wp.parse(markup, { __unstableSkipMigrationLogs: true }));
+  // Gutenberg can call these valid, then drop all their children during serialization.
+  // Refuse the whole repair before token changes or rebuilding can lose the original input.
+  if (patternReferenceErrors(parsed).length > 0) {
+    return { ...await validate(markup, options), command: 'fix', output: markup };
+  }
   let repairs: BlockRunnerReport['items'] = [];
 
   // createBlock revalidates as it rebuilds; Gutenberg dumps large validation
