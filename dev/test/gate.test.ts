@@ -2,6 +2,50 @@ import { describe, expect, it } from 'vitest';
 import { canonicalize, validate } from '../../src/index.js';
 
 describe('gate', () => {
+  const inline = '<!-- wp:paragraph --><p>Keep this content</p><!-- /wp:paragraph -->';
+  const reference = `<!-- wp:block {"ref":123} -->${inline}<!-- /wp:block -->`;
+
+  it.each([
+    reference,
+    `<!-- wp:group --><div class="wp-block-group">${reference}</div><!-- /wp:group -->`,
+    '<!-- wp:block {"ref":123} --><p>Keep this content</p><!-- /wp:block -->',
+  ])('rejects and preserves inline synced-pattern content during repair: %s', async (markup) => {
+    const report = await validate(markup, { sourcePath: 'pattern.html' });
+    expect(report.ok).toBe(false);
+    expect(report.items).toContainEqual(expect.objectContaining({
+      block: 'core/block', status: 'invalid',
+      reason: expect.stringContaining('serialization would discard'),
+      source: expect.objectContaining({ path: 'pattern.html' }),
+    }));
+    const fixed = await canonicalize(markup);
+    expect(fixed.ok).toBe(false);
+    expect(fixed.output).toBe(markup);
+  });
+
+  it('locates a malformed reference after an earlier valid reference', async () => {
+    const report = await validate(`<!-- wp:block {"ref":123} /-->\n${reference}`);
+    expect(report.items[0]?.source?.htmlLine).toBe(2);
+  });
+
+  it.each([
+    '<!-- wp:block {"ref":123} /-->',
+    '<!-- wp:block {"ref":123} --> \n <!-- /wp:block -->',
+    '<!-- wp:block {"ref":123,"content":{"Text":{"content":"Custom text"}}} /-->',
+    '<!-- wp:block {"ref":123,"overrides":{"Text":{"content":"Custom text"}}} /-->',
+    '<!-- wp:block {"ref":123,"content":{"Text":{"values":{"content":"Custom text"}}}} /-->',
+    `<!-- wp:group --><div class="wp-block-group">${inline}</div><!-- /wp:group -->`,
+    '<!-- wp:paragraph {"metadata":{"name":"Text","bindings":{"__default":{"source":"core/pattern-overrides"}}}} --><p>Default</p><!-- /wp:paragraph -->',
+  ])('preserves valid references, legacy overrides and pattern definitions: %s', async (markup) => {
+    expect((await validate(markup)).ok).toBe(true);
+    const fixed = await canonicalize(markup);
+    expect(fixed.ok).toBe(true);
+    if (markup.includes('Custom text')) {
+      expect(fixed.output).toContain('"content":{"Text":{"content":"Custom text"}}');
+    }
+    if (markup.includes('Keep this content')) expect(fixed.output).toContain('Keep this content');
+    if (markup.includes('Default')) expect(fixed.output).toContain('Default');
+  });
+
   it('validates valid block markup', async () => {
     const report = await validate('<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->');
 

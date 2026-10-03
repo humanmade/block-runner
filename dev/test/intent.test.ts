@@ -6,6 +6,29 @@ import { realize, validate } from '../../src/index.js';
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 describe('intent assembly', () => {
+  it('rejects nested synced-pattern children before serialization loses them', async () => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/group', children: [{
+        block: 'core/block', attrs: { ref: 123 },
+        children: [{ block: 'core/paragraph', text: 'Keep this content' }],
+      }],
+    }] }), { sourcePath: 'intent.json' });
+    expect(report.ok).toBe(false);
+    expect(report.output).toBe('');
+    expect(report.items).toContainEqual(expect.objectContaining({
+      block: 'core/block', status: 'invalid', source: { path: 'intent.json' },
+      details: { blockPath: 'blocks[0].innerBlocks[0]', locationKind: 'block-tree' },
+    }));
+  });
+
+  it('preserves synced-pattern overrides supplied as attributes', async () => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/block', attrs: { ref: 123, content: { Text: { content: 'Custom text' } } },
+    }] }));
+    expect(report.ok).toBe(true);
+    expect(report.output).toBe('<!-- wp:block {"ref":123,"content":{"Text":{"content":"Custom text"}}} /-->');
+  });
+
   it('assembles a nested cover, columns, and buttons tree into valid markup', async () => {
     const report = await realize(
       JSON.stringify({

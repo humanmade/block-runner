@@ -1,5 +1,6 @@
-import { validate } from '../gate/validate.js';
+import { flattenBlocks, validate } from '../gate/validate.js';
 import { generatedMarkupItems } from '../gate/provenance.js';
+import { patternReferenceErrors } from '../gate/patterns.js';
 import { applyMedia } from '../media/apply.js';
 import { createMediaResolver } from '../media/resolver.js';
 import { repairTokens } from '../tokens/apply.js';
@@ -32,6 +33,16 @@ export async function finalizeBlocks(
   context: FinalizeContext,
 ): Promise<BlockRunnerReport> {
   const warnings = [...(context.warnings ?? [])];
+  const invalidReferences = patternReferenceErrors(blocks, options.sourcePath);
+  if (invalidReferences.length > 0) {
+    return {
+      ok: false,
+      command: context.command,
+      summary: { blocks: flattenBlocks(blocks).length, valid: 0, invalid: invalidReferences.length, warnings: warnings.length },
+      items: [...warnings, ...invalidReferences],
+      output: '',
+    };
+  }
   warnings.push(...(await applyMedia(blocks, createMediaResolver(config, options), config)));
 
   const tokenRepair = await repairTokens(blocks, config, options, context.tokens);

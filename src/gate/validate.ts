@@ -1,6 +1,7 @@
 import { formatWithOptions } from 'node:util';
 import { getWp } from '../headless/wp.js';
 import { withMutedWordPressConsole } from '../headless/env.js';
+import { patternReferenceProblem } from './patterns.js';
 import {
   BlockRunnerReport,
   ReportItem,
@@ -27,6 +28,9 @@ export async function validate(markup: string, options: ValidateOptions = {}): P
 
   for (const block of flattenBlocks(blocks)) {
     summary.blocks += 1;
+    // Advance for valid blocks too, so a later reference points at its own occurrence.
+    const source = locateBlock(markup, block, searchOffset, options.sourcePath);
+    if (source.offset != null) searchOffset = source.offset + 1;
 
     // `core/html` is a raw passthrough: since @wordpress/block-library 10.5.0 (WordPress 7.1)
     // its `save()` returns null, so the generic validator expects EMPTY output and rejects any
@@ -40,7 +44,10 @@ export async function validate(markup: string, options: ValidateOptions = {}): P
       continue;
     }
 
-    const [isValid, issues] = withMutedWordPressConsole(() => wp.validateBlock(block));
+    const problem = patternReferenceProblem(block);
+    const [isValid, issues] = problem
+      ? [false, [] as unknown[]] as const
+      : withMutedWordPressConsole(() => wp.validateBlock(block));
 
     if (isValid) {
       summary.valid += 1;
@@ -48,14 +55,10 @@ export async function validate(markup: string, options: ValidateOptions = {}): P
     }
 
     summary.invalid += 1;
-    const source = locateBlock(markup, block, searchOffset, options.sourcePath);
-    if (source.offset != null) {
-      searchOffset = source.offset + 1;
-    }
     items.push({
       block: block.name,
       status: 'invalid',
-      reason: formatValidationIssues(issues),
+      reason: problem ?? formatValidationIssues(issues),
       source,
     });
   }

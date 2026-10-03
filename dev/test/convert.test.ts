@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { convert } from '../../src/index.js';
+import type { Rule } from '../../src/types.js';
 
 const heroHtml = String.raw`
 <!-- wp:html -->
@@ -25,6 +26,26 @@ const heroHtml = String.raw`
 `;
 
 describe('convert', () => {
+  it('rejects synced-pattern children emitted by a custom rule', async () => {
+    const rule: Rule = {
+      id: 'pattern-reference',
+      match: (node) => node.tagName === 'SECTION',
+      emit: async (_node, context) => context.wp.createBlock('core/block', { ref: 123 }, [
+        context.wp.createBlock('core/paragraph', { content: 'Keep this content' }),
+      ]),
+    };
+    const report = await convert('<section>Keep this content</section>', {
+      sourcePath: 'design.html',
+      config: { rules: { custom: [rule] } },
+    });
+    expect(report.ok).toBe(false);
+    expect(report.output).toBe('');
+    expect(report.items).toContainEqual(expect.objectContaining({
+      block: 'core/block', status: 'invalid',
+      source: expect.objectContaining({ path: 'design.html', htmlLine: 1 }),
+    }));
+  });
+
   it('converts a CSS-background hero to native cover content without Custom HTML', async () => {
     const report = await convert(heroHtml, {
       sourcePath: 'hero.html',
