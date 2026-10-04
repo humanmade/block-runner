@@ -1,4 +1,5 @@
 import path from 'node:path';
+import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { assemble, realize, validate } from '../../src/index.js';
@@ -9,6 +10,29 @@ import type { IntentNode } from '../../src/types.js';
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 describe('intent assembly', () => {
+  it('preserves the native styles and headerless table taught in the shipped guide', async () => {
+    const guide = await readFile(new URL('../../skills/block-runner/references/ASSEMBLE.md', import.meta.url), 'utf8');
+    const example = guide.match(/### Native styles and layout[\s\S]*?```json\n([\s\S]*?)\n```/);
+    expect(example).not.toBeNull();
+    const report = await realize(example![1]);
+    expect(report.ok).toBe(true);
+    expect(report.summary.warnings).toBe(0);
+    const wp = await getWp();
+    const [group] = wp.parse(report.output!);
+    expect(group.attributes.layout).toEqual({ type: 'constrained' });
+    const [paragraph, table] = group.innerBlocks;
+    expect(paragraph.attributes).toMatchObject({
+      textColor: 'contrast', backgroundColor: 'base', className: 'is-style-callout',
+      style: {
+        typography: { textAlign: 'center' },
+        spacing: { padding: { top: 'var:preset|spacing|40', bottom: 'var:preset|spacing|40' } },
+      },
+    });
+    expect(table.attributes.head).toEqual([]);
+    expect(report.output).not.toContain('<thead>');
+    expect(report.output).toContain('<td>Name</td><td>Value</td>');
+  });
+
   it.each([false, true])('warns for discarded explicit attributes without failing (strict: %s)', async (strict) => {
     const report = await realize(JSON.stringify({ blocks: [{
       block: 'core/group', children: [{

@@ -294,6 +294,32 @@ const fixed = await canonicalize(converted.output);
 
 `realize(json)` consumes an intent JSON string and returns the complete assembly report, including media/token processing and validation. CLI `assemble` calls it. Library `assemble(nodes)` only builds Gutenberg block objects; it does not run that finalisation workflow.
 
+Intent assembly accepts explicit native attributes, including theme presets, spacing, layout and
+block style classes. It does not extract those attributes from CSS; use `convert` for existing
+authored HTML/CSS requiring interpretation. See the [native styling and headerless-table example](../skills/block-runner/references/ASSEMBLE.md#native-styles-and-layout).
+Its shapes are checked against the pinned headless registry; target-editor and theme rendering
+remain separate proof.
+
+For several inputs, call `realize()` sequentially in one process and keep each report:
+
+```js
+import { realize } from 'block-runner';
+
+const inputs = [
+  { name: 'intro', blocks: [{ block: 'core/paragraph', text: 'Welcome' }] },
+  { name: 'details', blocks: [{ block: 'core/list', items: ['First', 'Second'] }] },
+];
+const reports = [];
+for (const { name, blocks } of inputs) {
+  const report = await realize(JSON.stringify({ blocks }), { sourcePath: `${name}.json` });
+  reports.push({ name, report });
+}
+console.log(reports.map(({ name, report }) => ({ name, ok: report.ok, ...report.summary })));
+```
+
+Check each report's `ok` and `items` before using its output. Untouched successful output has
+already passed media/token finalization and validation; another validation call adds no proof.
+
 ### Registered-block authoring contract
 
 `GeneratedAuthoringPlan` is the public authoring contract at the preview/confirmation/write
