@@ -2,10 +2,45 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { realize, validate } from '../../src/index.js';
+import { getWp } from '../../src/headless/wp.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 describe('intent assembly', () => {
+  it.each([false, true])('preserves nested lists and siblings (ordered: %s)', async (ordered) => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/list', attrs: { ordered }, children: [
+        { block: 'core/list-item', text: 'Parent', children: [{
+          block: 'core/list', attrs: { ordered: !ordered }, children: [
+            { block: 'core/list-item', text: 'Child', children: [{
+              block: 'core/list', items: ['Grandchild'],
+            }] },
+            { block: 'core/list-item', text: 'Child sibling' },
+          ],
+        }] },
+        { block: 'core/list-item', text: 'Parent sibling' },
+      ],
+    }] }));
+    expect(report.ok).toBe(true);
+    expect(report.summary).toMatchObject({ blocks: 8, valid: 8, invalid: 0 });
+    const wp = await getWp();
+    const [list] = wp.parse(report.output!);
+    expect(list.attributes.ordered).toBe(ordered);
+    expect(list.innerBlocks.map((item) => String(item.attributes.content))).toEqual(['Parent', 'Parent sibling']);
+    const childList = list.innerBlocks[0].innerBlocks[0];
+    expect(childList.attributes.ordered).toBe(!ordered);
+    expect(childList.innerBlocks.map((item) => String(item.attributes.content))).toEqual(['Child', 'Child sibling']);
+    expect(String(childList.innerBlocks[0].innerBlocks[0].innerBlocks[0].attributes.content)).toBe('Grandchild');
+    expect((await validate(wp.serialize(wp.parse(report.output!)))).ok).toBe(true);
+  });
+
+  it('preserves plain list shorthand', async () => {
+    const report = await realize('{"block":"core/list","items":["First","Second"]}');
+    const wp = await getWp();
+    expect(report.ok).toBe(true);
+    expect(wp.parse(report.output!)[0].innerBlocks.map((item) => String(item.attributes.content))).toEqual(['First', 'Second']);
+  });
+
   it('rejects nested synced-pattern children before serialization loses them', async () => {
     const report = await realize(JSON.stringify({ blocks: [{
       block: 'core/group', children: [{
