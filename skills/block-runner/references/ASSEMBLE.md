@@ -55,6 +55,51 @@ and styles nothing. That last one still passes `validate`, because the class agr
 attribute it was built from. Read the theme's palette before you choose, and prefer the slug when
 one fits.
 
+### Native styles and layout
+
+Use native attributes directly when authoring a styled page. Alignment belongs at
+`attrs.style.typography.textAlign` in the pinned registry, and layout belongs at `attrs.layout`.
+A top-level intent `layout` is not mapped; a paragraph's flat `attrs.textAlign` is discarded.
+This example also shows a headerless table:
+
+```json
+{
+  "blocks": [{
+    "block": "core/group",
+    "attrs": { "layout": { "type": "constrained" } },
+    "children": [{
+      "block": "core/paragraph",
+      "text": "Native styling",
+      "attrs": {
+        "textColor": "contrast",
+        "backgroundColor": "base",
+        "className": "is-style-callout",
+        "style": {
+          "typography": { "textAlign": "center" },
+          "spacing": { "padding": { "top": "var:preset|spacing|40", "bottom": "var:preset|spacing|40" } }
+        }
+      }
+    }, {
+      "block": "core/table",
+      "attrs": { "body": [{ "cells": [{ "content": "Name", "tag": "td" }, { "content": "Value", "tag": "td" }] }] }
+    }]
+  }]
+}
+```
+
+Save this as `intent.json` and run `assemble intent.json --json`, or pass its JSON string to
+library `realize()`. The preset slugs `contrast`, `base`, `40` and class `is-style-callout` are
+illustrative: use values and registered block styles verified in the target theme. Accepting a
+class or preset does not prove that the theme defines it.
+
+For a headerless table, use native `attrs.body` cells as shown. The `rows` string-array shorthand
+is still useful when a header is wanted: its first row becomes the header and later rows become
+the body. Do not remove generated `<thead>` markup to change that contract.
+
+These attribute shapes are checked against Block Runner's pinned Gutenberg packages, not every
+WordPress version. Verify the target editor, save/reopen and frontend before claiming matching
+presentation. Native attributes do not ask Block Runner to interpret arbitrary source CSS.
+
 ## Available blocks
 
 `core/cover`, `core/columns`, `core/column`, `core/media-text`, `core/group`, `core/heading`,
@@ -104,8 +149,9 @@ Keep every real nesting level.
   when the background is a solid colour or gradient rather than an image. If the hero sets
   copy beside a product image, that is `core/columns` *inside* the cover, with the image as a
   `core/image` in a `core/column` — not `core/media-text`.
-- **Image beside text as a mid-page feature row** → a `core/media-text` (image on the media
-  side, heading/paragraph/list/buttons on the text side). Never `core/columns` for this. Where
+- **Image beside text as a mid-page feature row** → prefer `core/media-text` (image on the media
+  side, heading/paragraph/list/buttons on the text side). A verified theme or project layout
+  contract can call for `core/columns`; without that evidence, keep the Media & Text default. Where
   several such rows alternate down the page, they are sibling `core/media-text` blocks sharing
   the one section group — do not give each row a group of its own.
 - **FAQ / accordion (a SET of collapsible panels)** → `core/group` of a heading then ONE

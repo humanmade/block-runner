@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Clarify native intent styling versus HTML/CSS conversion, with runnable native-attribute, headerless-table and sequential library examples. Verified theme layout contracts can override generic block-mapping defaults.
 - Warn when the native block constructor discards explicitly supplied intent attributes, including the attribute key and input path without raw values. Warnings remain informational in strict mode.
 - Preserve nested lists inside intent list items.
 - Reject malformed intent nodes, children, list items and table cells with input-located errors instead of returning partial content.

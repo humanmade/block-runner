@@ -104,8 +104,8 @@ to adding a plugin merely because it is easier to generate. The handoff is descr
 | You need | Use | Why |
 |---|---|---|
 | A reusable named block that must live in plugin or theme source | **`author preview`** → confirmation → **`author write`**, then package and proof it | This produces registered-block source. It is not page `post_content`. |
-| New content for a page or post, with no authored HTML | **`assemble`** | An intent tree becomes native page blocks. |
-| Existing authored HTML that must become page or post `post_content` | **`convert`** | Rule-based translation of existing markup, and the only content path that carries CSS. Do not use frontend-scraped render output. |
+| New content for a page or post, including explicit native styles and theme presets | **`assemble`** | An intent tree becomes native page blocks with the attributes you supply. |
+| Existing authored HTML/CSS that must become page or post `post_content` | **`convert`** | Rule-based interpretation of authored markup and supported CSS. Do not use frontend-scraped render output. |
 | Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Checks block markup; site references and editor behavior still need target-site verification. |
 
 Choose by the requested artifact, not merely by the input format. A supplied HTML design still
@@ -117,11 +117,14 @@ The single most common mistake is reaching for `convert` when you were about to 
 HTML yourself. If you are the one inventing the structure, do not write HTML and convert it —
 describe the structure to `assemble` directly. You will get better blocks with less work.
 
-**The exception that matters:** if the input has meaningful CSS you need to preserve —
-brand colours, custom spacing, a specific look — use `convert`, not `assemble`. An intent
-tree carries structure and content, not styling, so `assemble` will produce clean but plainer
-blocks. `convert --styling relaxed` keeps exact off-theme values on the block. If you are
-unsure whether the styling matters, ask the user rather than silently flattening their design.
+Intent trees carry explicit native attributes, including theme colour presets, spacing, layout
+and block style classes. Author those directly when you know the native shape; do not create
+HTML just to convert it back. See the [native styling example](ASSEMBLE.md#native-styles-and-layout).
+
+Use `convert` when existing authored HTML/CSS needs interpretation. `assemble` does not infer
+attributes from source CSS, and `--styling` remains a conversion option. Neither route proves
+that a target theme renders the intended design: inspect its tokens and conventions, then check
+the actual editor and frontend when that proof is in scope.
 
 ---
 
