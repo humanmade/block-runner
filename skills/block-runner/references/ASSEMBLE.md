@@ -170,7 +170,11 @@ Use the project's actual taxonomy IDs and verify the result on the target site.
 `assemble` runs the same validity gate as everything else, so valid output is proven, not
 assumed. It fails loudly rather than quietly: malformed JSON, or JSON with no blocks in it,
 exits `1` with a reason — it will never hand you a clean empty result. A block name that is
-not registered produces a warning naming that node.
+not registered fails the whole assembly with its name and intent path, in normal and strict
+mode. Malformed nodes, children, list items and table cells also fail with their input location.
+These failures emit no partial markup and happen before media processing. This replaces the
+previous warning-only behavior for unregistered names. The pinned headless registry does not
+automatically load a destination site's custom blocks.
 
 ## Native Tabs page content
 
