@@ -31,11 +31,14 @@ printf '%s' "$INTENT_JSON" | npx -y block-runner@latest assemble - --json
 Top level is `{ "blocks": [ ...nodes ] }`.
 
 `attrs` is an open passthrough — put any extra block attribute there (`{"ordered": true}` for
-a numbered list, `{"service": "github", "url": "..."}` for a social link). Unknown attributes
-are harmless; a block ignores what it does not recognise.
+a numbered list, `{"service": "github", "url": "..."}` for a social link). When Gutenberg discards
+an explicitly supplied key, the assembly report includes an `intent-attribute-dropped` warning
+with the block name, attribute key and exact input path, without its value. These warnings stay
+informational in normal and strict mode. The low-level library `assemble()` still returns block
+objects; use `realize()` for the report and shared finalization.
 
-That tolerance cuts both ways: a key WordPress does not declare is dropped without a word, so a
-wrong shape reads as a success. Two cases where that matters:
+An accepted key does not prove its value is meaningful to a theme. Nested `style` objects remain
+open, and normal defaults or rich-text normalization are not reported as loss. Two cases to check:
 
 **A nested style attribute goes in at its full path.** A full-width button is
 `{"style":{"dimensions":{"width":"100%"}}}`, not `{"width":100}`; the flat key is not a declared

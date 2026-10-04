@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Warn when the native block constructor discards explicitly supplied intent attributes, including the attribute key and input path without raw values. Warnings remain informational in strict mode.
 - Preserve nested lists inside intent list items.
 - Reject malformed intent nodes, children, list items and table cells with input-located errors instead of returning partial content.
 - Reject unregistered intent block names in normal and strict mode. This changes the previous warning-only behavior: `realize` returns a failed report with empty output, and low-level `assemble` rejects. Registering custom block types remains outside the public API.
