@@ -9,6 +9,58 @@ import type { IntentNode } from '../../src/types.js';
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 describe('intent assembly', () => {
+  it.each([false, true])('warns for discarded explicit attributes without failing (strict: %s)', async (strict) => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/group', children: [{
+        block: 'core/paragraph', text: 'Example', attrs: { textAlign: 'center', madeUp: 'private-value' },
+      }],
+    }] }), { strict, sourcePath: 'intent.json' });
+    expect(report.ok).toBe(true);
+    expect(report.summary.warnings).toBe(2);
+    expect(report.output).toContain('<p>Example</p>');
+    for (const key of ['textAlign', 'madeUp']) {
+      expect(report.items).toContainEqual(expect.objectContaining({
+        code: 'intent-attribute-dropped', block: 'core/paragraph', status: 'warning',
+        source: { path: 'intent.json' },
+        details: { intentPath: `blocks[0].children[0].attrs[${JSON.stringify(key)}]`, attribute: key },
+      }));
+    }
+    expect(JSON.stringify(report.items)).not.toContain('private-value');
+  });
+
+  it('keeps discarded attributes informational even when keys contain strict-warning text', async () => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/paragraph', text: 'Example', attrs: { 'no ID': true, 'Custom HTML fallback': true },
+    }] }), { strict: true });
+    expect(report.ok).toBe(true);
+    expect(report.summary.warnings).toBe(2);
+    expect(report.items.every((item) => item.code === 'intent-attribute-dropped')).toBe(true);
+  });
+
+  it('does not confuse accepted native attributes or normalization with discarded keys', async () => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/group', attrs: { layout: { type: 'constrained' } }, children: [{
+        block: 'core/paragraph', text: 'Shorthand wins', attrs: {
+          content: '<strong>Attribute content</strong>', dropCap: false,
+          style: { typography: { textAlign: 'center' }, custom: { untouched: true } },
+          metadata: { name: 'Text', bindings: { content: { source: 'core/post-meta', args: { key: 'summary' } } } },
+        },
+      }, {
+        block: 'core/paragraph', attrs: { content: '<strong>Rich text</strong>' },
+      }],
+    }] }));
+    expect(report.ok).toBe(true);
+    expect(report.summary.warnings).toBe(0);
+    expect(report.output).toContain('Shorthand wins');
+    expect(report.output).not.toContain('Attribute content');
+    expect(report.output).toContain('<strong>Rich text</strong>');
+    const wp = await getWp();
+    const paragraph = wp.parse(report.output!)[0].innerBlocks[0];
+    expect(paragraph.attributes.style).toMatchObject({ typography: { textAlign: 'center' }, custom: { untouched: true } });
+    expect(paragraph.attributes.metadata).toMatchObject({ name: 'Text', bindings: { content: { source: 'core/post-meta' } } });
+    expect(await assemble([{ block: 'core/paragraph', text: 'Still an array', attrs: { madeUp: true } }])).toHaveLength(1);
+  });
+
   it.each([false, true])('preserves nested lists and siblings (ordered: %s)', async (ordered) => {
     const report = await realize(JSON.stringify({ blocks: [{
       block: 'core/list', attrs: { ordered }, children: [
