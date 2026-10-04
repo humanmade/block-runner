@@ -1,5 +1,11 @@
 # Changelog
 
+## Unreleased
+
+- Preserve nested lists inside intent list items.
+- Reject malformed intent nodes, children, list items and table cells with input-located errors instead of returning partial content.
+- Reject unregistered intent block names in normal and strict mode. This changes the previous warning-only behavior: `realize` returns a failed report with empty output, and low-level `assemble` rejects. Registering custom block types remains outside the public API.
+
 ## 0.9.9 — 2026-10-03
 
 - Reject inline content inside synced-pattern references before serialization can discard it. Failed repairs preserve the original markup, and both conversion and assembly reject malformed references before emitting output.

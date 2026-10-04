@@ -202,18 +202,26 @@ describe('intent assembly', () => {
     expect(report.output).toContain('<td>Cell</td>');
   });
 
-  it('warns on an unregistered block name without failing the run', async () => {
-    const report = await realize('{"blocks":[{"block":"core/not-registered","text":"Hi"}]}');
-
-    expect(report.ok).toBe(true);
-    expect(report.items).toContainEqual(
-      expect.objectContaining({
-        block: 'core/not-registered',
-        status: 'warning',
-        reason: 'block type is not registered',
-        details: { intentPath: 'blocks[0]' },
-      }),
-    );
+  it.each([false, true])('rejects unregistered blocks without partial output (strict: %s)', async (strict) => {
+    const unknown = { block: 'example/unregistered', children: [{ block: 'core/paragraph', text: 'Keep me' }] };
+    for (const [nodes, location] of [
+      [[unknown], 'blocks[0]'],
+      [[{ block: 'core/image', url: 'photo.jpg' }, { block: 'core/group', children: [unknown] }], 'blocks[1].children[0]'],
+    ] as const) {
+      const resolver = vi.spyOn(media, 'createMediaResolver');
+      try {
+        const report = await realize(JSON.stringify({ blocks: nodes }), { strict, sourcePath: 'intent.json' });
+        expect(report.ok).toBe(false);
+        expect(report.output).toBe('');
+        expect(report.items[0]).toMatchObject({ status: 'invalid', source: { path: 'intent.json' } });
+        expect(report.items[0].reason).toContain(`${location}: block type`);
+        expect(report.items[0].reason).toContain('example/unregistered');
+        expect(resolver).not.toHaveBeenCalled();
+        await expect(assemble([...nodes] as IntentNode[])).rejects.toThrow('is not registered');
+      } finally {
+        resolver.mockRestore();
+      }
+    }
   });
 
   it('resolves media on the intent path', async () => {
