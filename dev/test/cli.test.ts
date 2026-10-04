@@ -451,8 +451,8 @@ describe('CLI', () => {
     await writeFile(outPath, 'Keep existing output');
     const result = await runCli(['assemble', '-', '--out', outPath],
       '{"blocks":[{"block":"core/paragraph","text":"First"},{"text":"Second"}]}');
-    expect(result.code).toBe(2);
-    expect(result.stderr).toContain('--out is only written when the command succeeds');
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('blocks[1]: expected a node with a non-empty block name');
     expect(await readFile(outPath, 'utf8')).toBe('Keep existing output');
   });
 
