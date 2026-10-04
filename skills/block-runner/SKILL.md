@@ -71,8 +71,9 @@ otherwise ask in plain language.
   structure instead and let `assemble` build it.
 - **A `core/html` fallback is not a success.** It means that part is an uneditable blob. Check
   the report and tell the user.
-- **If the CSS matters, use `convert`, not `assemble`.** An intent tree carries structure and
-  content, not styling. Ask the user rather than silently flattening their design.
+- **Use `assemble` for explicit native styles; use `convert` to interpret authored HTML/CSS.**
+  Intent attributes can carry theme presets, spacing, layout and block style classes. See
+  `references/ASSEMBLE.md#native-styles-and-layout`; verify presentation in the target theme.
 - **Name the proof claim and retain its receipt.** Headless markup checks do not establish custom
   PHP, custom controls, frontend behaviour, or editor persistence. See `references/GUIDE.md` §1.1
   and `references/AUTHORING.md`.
