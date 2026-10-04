@@ -445,14 +445,16 @@ describe('CLI', () => {
     expect(report.items[0]?.reason).toBe('could not parse intent JSON');
   });
 
-  it('preserves an output sentinel when intent assembly fails', async () => {
+  it.each(['malformed', 'unregistered'])('preserves an output sentinel when intent is %s', async (kind) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
     const outPath = path.join(dir, 'out.html');
     await writeFile(outPath, 'Keep existing output');
-    const result = await runCli(['assemble', '-', '--out', outPath],
-      '{"blocks":[{"block":"core/paragraph","text":"First"},{"text":"Second"}]}');
+    const result = await runCli(['assemble', '-', '--out', outPath], JSON.stringify({ blocks: [
+      { block: 'core/paragraph', text: 'First' },
+      kind === 'malformed' ? { text: 'Second' } : { block: 'example/unregistered', text: 'Second' },
+    ] }));
     expect(result.code).toBe(1);
-    expect(result.stdout).toContain('blocks[1]: expected a node with a non-empty block name');
+    expect(result.stdout).toContain('blocks[1]:');
     expect(await readFile(outPath, 'utf8')).toBe('Keep existing output');
   });
 

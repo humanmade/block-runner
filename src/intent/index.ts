@@ -8,7 +8,6 @@ import {
   HeadlessBootError,
   IntentNode,
   IntentTree,
-  ReportItem,
   WpBlock,
   WpModules,
 } from '../types.js';
@@ -88,6 +87,7 @@ async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string)
     throw new Error(`${intentPath}: expected a node with a non-empty block name`);
   }
   const name = node.block;
+  if (!wp.getBlockType(name)) throw new Error(`${intentPath}: block type ${JSON.stringify(name)} is not registered`);
   const text = node.text;
   const attrs: Record<string, unknown> = { ...(node.attrs ?? {}) };
   const children = await assembleWithWp(node.children === undefined ? [] : node.children, wp, `${intentPath}.children`);
@@ -205,7 +205,7 @@ export async function realize(rawIntent: string, options: AssembleOptions = {}):
     const config = await loadConfig(options);
     const wp = await getWp();
     const blocks = await assembleWithWp(extracted.tree.blocks, wp);
-    const warnings = unknownBlockWarnings(extracted.tree.blocks, wp, options.sourcePath);
+    const warnings: BlockRunnerReport['items'] = [];
     if (config.styling !== DEFAULT_CONFIG.styling) {
       warnings.push({
         block: 'input',
@@ -245,28 +245,4 @@ function invalidInputReport(reason: string, options: AssembleOptions): BlockRunn
     ],
     output: '',
   };
-}
-
-function unknownBlockWarnings(nodes: IntentNode[], wp: WpModules, sourcePath?: string): ReportItem[] {
-  const warnings: ReportItem[] = [];
-
-  const visit = (node: IntentNode, intentPath: string): void => {
-    if (node && typeof node.block === 'string' && !wp.getBlockType(node.block)) {
-      warnings.push({
-        block: node.block,
-        status: 'warning',
-        reason: 'block type is not registered',
-        source: sourcePath ? { path: sourcePath } : undefined,
-        details: { intentPath },
-      });
-    }
-    for (const [index, child] of (node?.children ?? []).entries()) {
-      visit(child, `${intentPath}.children[${index}]`);
-    }
-  };
-
-  for (const [index, node] of nodes.entries()) {
-    visit(node, `blocks[${index}]`);
-  }
-  return warnings;
 }
