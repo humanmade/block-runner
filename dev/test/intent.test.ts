@@ -1,8 +1,10 @@
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
-import { realize, validate } from '../../src/index.js';
+import { describe, expect, it, vi } from 'vitest';
+import { assemble, realize, validate } from '../../src/index.js';
 import { getWp } from '../../src/headless/wp.js';
+import * as media from '../../src/media/resolver.js';
+import type { IntentNode } from '../../src/types.js';
 
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
@@ -142,7 +144,62 @@ describe('intent assembly', () => {
     const report = await realize('{"blocks":[{}]}');
 
     expect(report.ok).toBe(false);
-    expect(report.items[0]?.reason).toBe('intent parsed but contained no blocks');
+    expect(report.items[0]?.reason).toContain('blocks[0]: expected a node with a non-empty block name');
+  });
+
+  it.each([
+    [[{ block: 'core/paragraph', text: 'First' }, { text: 'Second' }], 'blocks[1]'],
+    [[{ block: 'core/group', children: [null] }], 'blocks[0].children[0]'],
+    [[{ block: 'core/group', children: {} }], 'blocks[0].children'],
+    [[{ block: 'core/group', children: null }], 'blocks[0].children'],
+    [[{ block: '' }], 'blocks[0]'],
+    [[{ block: 'core/list', items: ['First', { text: 'Second' }] }], 'blocks[0].items[1]'],
+    [[{ block: 'core/list', items: 'First' }], 'blocks[0].items'],
+    [[{ block: 'core/table', rows: [['First'], [{ text: 'Second' }]] }], 'blocks[0].rows[1][0]'],
+    [[{ block: 'core/table', rows: ['First'] }], 'blocks[0].rows[0]'],
+    [[{ block: 'core/table', rows: {} }], 'blocks[0].rows'],
+  ])('rejects malformed consumed input %j at %s', async (nodes, location) => {
+    const report = await realize(JSON.stringify({ blocks: nodes }), { sourcePath: 'intent.json' });
+    expect(report.ok).toBe(false);
+    expect(report.output).toBe('');
+    expect(report.items[0]).toMatchObject({ status: 'invalid', source: { path: 'intent.json' } });
+    expect(report.items[0].reason).toContain(`${location}: expected`);
+    await expect(assemble(nodes as IntentNode[])).rejects.toThrow(`${location}: expected`);
+  });
+
+  it('rejects malformed input before constructing the media resolver', async () => {
+    const resolver = vi.spyOn(media, 'createMediaResolver');
+    try {
+      const report = await realize(JSON.stringify({ blocks: [
+        { block: 'core/image', url: 'photo.jpg' }, { text: 'Missing name' },
+      ] }));
+      expect(report.ok).toBe(false);
+      expect(resolver).not.toHaveBeenCalled();
+    } finally {
+      resolver.mockRestore();
+    }
+  });
+
+  it.each([
+    '{"block":"core/paragraph","text":"Text"}',
+    '[{"block":"core/paragraph","text":"Text"}]',
+    '{"blocks":[{"block":"core/paragraph","text":"Text"}]}',
+    '```json\n{"blocks":[{"block":"core/paragraph","text":"Text"}]}\n```',
+  ])('keeps valid input wrappers', async (raw) => {
+    expect((await realize(raw)).ok).toBe(true);
+  });
+
+  it('keeps explicit tables and ignores unused list shorthand', async () => {
+    const report = await realize(JSON.stringify({ blocks: [
+      { block: 'core/list', items: { unused: true }, children: [{ block: 'core/list-item', text: 'Kept' }] },
+      { block: 'core/table', attrs: { body: [{ cells: [{ content: 'Body only', tag: 'td' }] }] } },
+      { block: 'core/table', rows: [['Header'], ['Cell']] },
+    ] }));
+    expect(report.ok).toBe(true);
+    expect(report.output).toContain('Kept');
+    expect(report.output).toContain('<td>Body only</td>');
+    expect(report.output).toContain('<th>Header</th>');
+    expect(report.output).toContain('<td>Cell</td>');
   });
 
   it('warns on an unregistered block name without failing the run', async () => {

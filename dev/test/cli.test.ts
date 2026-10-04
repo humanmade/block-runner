@@ -445,6 +445,17 @@ describe('CLI', () => {
     expect(report.items[0]?.reason).toBe('could not parse intent JSON');
   });
 
+  it('preserves an output sentinel when intent assembly fails', async () => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const outPath = path.join(dir, 'out.html');
+    await writeFile(outPath, 'Keep existing output');
+    const result = await runCli(['assemble', '-', '--out', outPath],
+      '{"blocks":[{"block":"core/paragraph","text":"First"},{"text":"Second"}]}');
+    expect(result.code).toBe(1);
+    expect(result.stdout).toContain('blocks[1]: expected a node with a non-empty block name');
+    expect(await readFile(outPath, 'utf8')).toBe('Keep existing output');
+  });
+
   it('rejects styling flags on assemble and points callers to convert', async () => {
     for (const args of [
       ['assemble', '-', '--styling', 'strict'],
