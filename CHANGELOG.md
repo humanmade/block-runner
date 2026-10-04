@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.10 — 2026-10-04
 
 - Clarify native intent styling versus HTML/CSS conversion, with runnable native-attribute, headerless-table and sequential library examples. Verified theme layout contracts can override generic block-mapping defaults.
 - Warn when the native block constructor discards explicitly supplied intent attributes, including the attribute key and input path without raw values. Warnings remain informational in strict mode.
