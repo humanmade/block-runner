@@ -97,9 +97,12 @@ async function assembleNode(node: IntentNode, wp: WpModules): Promise<WpBlock | 
       return wp.createBlock(name, attrs, []);
 
     case 'core/paragraph':
-    case 'core/list-item':
       if (text != null) attrs.content = text;
       return wp.createBlock(name, attrs, []);
+
+    case 'core/list-item':
+      if (text != null) attrs.content = text;
+      return wp.createBlock(name, attrs, children);
 
     case 'core/button':
       if (text != null) attrs.text = text;
