@@ -8,9 +8,15 @@ import {
   HeadlessBootError,
   IntentNode,
   IntentTree,
+  ReportItem,
   WpBlock,
   WpModules,
 } from '../types.js';
+
+interface AssemblyDiagnostics {
+  warnings: ReportItem[];
+  sourcePath?: string;
+}
 
 interface ExtractResult {
   parsed: boolean;
@@ -73,16 +79,20 @@ export async function assemble(nodes: IntentNode[]): Promise<WpBlock[]> {
   return assembleWithWp(nodes, await getWp());
 }
 
-async function assembleWithWp(nodes: IntentNode[], wp: WpModules, intentPath = 'blocks'): Promise<WpBlock[]> {
+async function assembleWithWp(
+  nodes: IntentNode[], wp: WpModules, intentPath = 'blocks', diagnostics?: AssemblyDiagnostics,
+): Promise<WpBlock[]> {
   if (!Array.isArray(nodes)) throw new Error(`${intentPath}: expected an array of block nodes`);
   const out: WpBlock[] = [];
   for (const [index, node] of nodes.entries()) {
-    out.push(await assembleNode(node, wp, `${intentPath}[${index}]`));
+    out.push(await assembleNode(node, wp, `${intentPath}[${index}]`, diagnostics));
   }
   return out;
 }
 
-async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string): Promise<WpBlock> {
+async function assembleNode(
+  node: IntentNode, wp: WpModules, intentPath: string, diagnostics?: AssemblyDiagnostics,
+): Promise<WpBlock> {
   if (!node || typeof node.block !== 'string' || !node.block.trim()) {
     throw new Error(`${intentPath}: expected a node with a non-empty block name`);
   }
@@ -90,31 +100,49 @@ async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string)
   if (!wp.getBlockType(name)) throw new Error(`${intentPath}: block type ${JSON.stringify(name)} is not registered`);
   const text = node.text;
   const attrs: Record<string, unknown> = { ...(node.attrs ?? {}) };
-  const children = await assembleWithWp(node.children === undefined ? [] : node.children, wp, `${intentPath}.children`);
+  const children = await assembleWithWp(node.children === undefined ? [] : node.children, wp, `${intentPath}.children`, diagnostics);
+
+  const createBlock = (innerBlocks: WpBlock[]): WpBlock => {
+    const block = wp.createBlock(name, attrs, innerBlocks);
+    if (diagnostics) {
+      for (const key of Object.keys(node.attrs ?? {})) {
+        if (Object.hasOwn(block.attributes, key)) continue;
+        diagnostics.warnings.push({
+          code: 'intent-attribute-dropped',
+          block: name,
+          status: 'warning',
+          reason: `attribute ${JSON.stringify(key)} was discarded by the registered block constructor`,
+          source: diagnostics.sourcePath ? { path: diagnostics.sourcePath } : undefined,
+          details: { intentPath: `${intentPath}.attrs[${JSON.stringify(key)}]`, attribute: key },
+        });
+      }
+    }
+    return block;
+  };
 
   switch (name) {
     case 'core/heading':
       if (text != null) attrs.content = text;
       attrs.level = node.level ?? attrs.level ?? 2;
-      return wp.createBlock(name, attrs, []);
+      return createBlock([]);
 
     case 'core/paragraph':
       if (text != null) attrs.content = text;
-      return wp.createBlock(name, attrs, []);
+      return createBlock([]);
 
     case 'core/list-item':
       if (text != null) attrs.content = text;
-      return wp.createBlock(name, attrs, children);
+      return createBlock(children);
 
     case 'core/button':
       if (text != null) attrs.text = text;
       if (node.url != null) attrs.url = node.url;
-      return wp.createBlock(name, attrs, []);
+      return createBlock([]);
 
     case 'core/image':
       if (node.url != null) attrs.url = node.url;
       if (node.alt != null) attrs.alt = node.alt;
-      return wp.createBlock(name, attrs, []);
+      return createBlock([]);
 
     case 'core/list': {
       let items = children;
@@ -125,7 +153,7 @@ async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string)
           return wp.createBlock('core/list-item', { content: item }, []);
         });
       }
-      return wp.createBlock(name, attrs, items);
+      return createBlock(items);
     }
 
     case 'core/quote': {
@@ -134,17 +162,17 @@ async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string)
       if (body.length === 0 && text != null) {
         body.push(wp.createBlock('core/paragraph', { content: text }, []));
       }
-      return wp.createBlock(name, attrs, body);
+      return createBlock(body);
     }
 
     case 'core/details':
       if (text != null) attrs.summary = text;
-      return wp.createBlock(name, attrs, children);
+      return createBlock(children);
 
     case 'core/pullquote':
       if (text != null) attrs.value = text;
       if (node.citation != null) attrs.citation = node.citation;
-      return wp.createBlock(name, attrs, []);
+      return createBlock([]);
 
     case 'core/table': {
       if (node.rows !== undefined && !Array.isArray(node.rows)) {
@@ -161,12 +189,12 @@ async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string)
         attrs.head = [toCells(node.rows[0], 0, 'th')];
         attrs.body = node.rows.slice(1).map((row, index) => toCells(row, index + 1, 'td'));
       }
-      return wp.createBlock(name, attrs, []);
+      return createBlock([]);
     }
 
     case 'core/cover':
       if (node.url != null) attrs.url = node.url;
-      return wp.createBlock(name, attrs, children);
+      return createBlock(children);
 
     case 'core/media-text':
       if (node.url != null) {
@@ -174,18 +202,18 @@ async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string)
         attrs.mediaType = 'image';
       }
       if (node.alt != null) attrs.mediaAlt = node.alt;
-      return wp.createBlock(name, attrs, children);
+      return createBlock(children);
 
     case 'core/columns':
     case 'core/column':
     case 'core/buttons':
     case 'core/group':
     case 'core/gallery':
-      return wp.createBlock(name, attrs, children);
+      return createBlock(children);
 
     default:
       if (text != null) attrs.content = text;
-      return wp.createBlock(name, attrs, children);
+      return createBlock(children);
   }
 }
 
@@ -204,8 +232,8 @@ export async function realize(rawIntent: string, options: AssembleOptions = {}):
   try {
     const config = await loadConfig(options);
     const wp = await getWp();
-    const blocks = await assembleWithWp(extracted.tree.blocks, wp);
-    const warnings: BlockRunnerReport['items'] = [];
+    const warnings: ReportItem[] = [];
+    const blocks = await assembleWithWp(extracted.tree.blocks, wp, 'blocks', { warnings, sourcePath: options.sourcePath });
     if (config.styling !== DEFAULT_CONFIG.styling) {
       warnings.push({
         block: 'input',
