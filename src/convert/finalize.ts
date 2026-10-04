@@ -73,6 +73,7 @@ export async function finalizeBlocks(
 }
 
 function isStrictFailureWarning(item: ReportItem): boolean {
+  if (item.code === 'intent-attribute-dropped') return false;
   return /Custom HTML fallback|unresolved media|no ID|media map has no ID|sideload is disabled|file not found/i.test(
     item.reason,
   );

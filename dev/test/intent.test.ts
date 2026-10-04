@@ -28,6 +28,15 @@ describe('intent assembly', () => {
     expect(JSON.stringify(report.items)).not.toContain('private-value');
   });
 
+  it('keeps discarded attributes informational even when keys contain strict-warning text', async () => {
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/paragraph', text: 'Example', attrs: { 'no ID': true, 'Custom HTML fallback': true },
+    }] }), { strict: true });
+    expect(report.ok).toBe(true);
+    expect(report.summary.warnings).toBe(2);
+    expect(report.items.every((item) => item.code === 'intent-attribute-dropped')).toBe(true);
+  });
+
   it('does not confuse accepted native attributes or normalization with discarded keys', async () => {
     const report = await realize(JSON.stringify({ blocks: [{
       block: 'core/group', attrs: { layout: { type: 'constrained' } }, children: [{
