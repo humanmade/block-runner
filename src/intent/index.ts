@@ -74,21 +74,23 @@ export async function assemble(nodes: IntentNode[]): Promise<WpBlock[]> {
   return assembleWithWp(nodes, await getWp());
 }
 
-async function assembleWithWp(nodes: IntentNode[], wp: WpModules): Promise<WpBlock[]> {
+async function assembleWithWp(nodes: IntentNode[], wp: WpModules, intentPath = 'blocks'): Promise<WpBlock[]> {
+  if (!Array.isArray(nodes)) throw new Error(`${intentPath}: expected an array of block nodes`);
   const out: WpBlock[] = [];
-  for (const node of nodes) {
-    const block = await assembleNode(node, wp);
-    if (block) out.push(block);
+  for (const [index, node] of nodes.entries()) {
+    out.push(await assembleNode(node, wp, `${intentPath}[${index}]`));
   }
   return out;
 }
 
-async function assembleNode(node: IntentNode, wp: WpModules): Promise<WpBlock | null> {
-  if (!node || typeof node.block !== 'string') return null;
+async function assembleNode(node: IntentNode, wp: WpModules, intentPath: string): Promise<WpBlock> {
+  if (!node || typeof node.block !== 'string' || !node.block.trim()) {
+    throw new Error(`${intentPath}: expected a node with a non-empty block name`);
+  }
   const name = node.block;
   const text = node.text;
   const attrs: Record<string, unknown> = { ...(node.attrs ?? {}) };
-  const children = await assembleWithWp(node.children ?? [], wp);
+  const children = await assembleWithWp(node.children === undefined ? [] : node.children, wp, `${intentPath}.children`);
 
   switch (name) {
     case 'core/heading':
@@ -116,8 +118,12 @@ async function assembleNode(node: IntentNode, wp: WpModules): Promise<WpBlock | 
 
     case 'core/list': {
       let items = children;
-      if (items.length === 0 && Array.isArray(node.items)) {
-        items = node.items.map((item) => wp.createBlock('core/list-item', { content: item }, []));
+      if (items.length === 0 && node.items !== undefined) {
+        if (!Array.isArray(node.items)) throw new Error(`${intentPath}.items: expected an array of strings`);
+        items = node.items.map((item, index) => {
+          if (typeof item !== 'string') throw new Error(`${intentPath}.items[${index}]: expected a string`);
+          return wp.createBlock('core/list-item', { content: item }, []);
+        });
       }
       return wp.createBlock(name, attrs, items);
     }
@@ -141,12 +147,19 @@ async function assembleNode(node: IntentNode, wp: WpModules): Promise<WpBlock | 
       return wp.createBlock(name, attrs, []);
 
     case 'core/table': {
-      if (Array.isArray(node.rows) && node.rows.length > 0) {
-        const toCells = (row: string[], tag: 'th' | 'td'): { cells: { content: string; tag: string }[] } => ({
-          cells: row.map((content) => ({ content, tag })),
-        });
-        attrs.head = [toCells(node.rows[0], 'th')];
-        attrs.body = node.rows.slice(1).map((row) => toCells(row, 'td'));
+      if (node.rows !== undefined && !Array.isArray(node.rows)) {
+        throw new Error(`${intentPath}.rows: expected an array of string arrays`);
+      }
+      if (node.rows && node.rows.length > 0) {
+        const toCells = (row: string[], index: number, tag: 'th' | 'td'): { cells: { content: string; tag: string }[] } => {
+          if (!Array.isArray(row)) throw new Error(`${intentPath}.rows[${index}]: expected an array of strings`);
+          return { cells: row.map((content, cell) => {
+            if (typeof content !== 'string') throw new Error(`${intentPath}.rows[${index}][${cell}]: expected a string`);
+            return { content, tag };
+          }) };
+        };
+        attrs.head = [toCells(node.rows[0], 0, 'th')];
+        attrs.body = node.rows.slice(1).map((row, index) => toCells(row, index + 1, 'td'));
       }
       return wp.createBlock(name, attrs, []);
     }
@@ -191,6 +204,7 @@ export async function realize(rawIntent: string, options: AssembleOptions = {}):
   try {
     const config = await loadConfig(options);
     const wp = await getWp();
+    const blocks = await assembleWithWp(extracted.tree.blocks, wp);
     const warnings = unknownBlockWarnings(extracted.tree.blocks, wp, options.sourcePath);
     if (config.styling !== DEFAULT_CONFIG.styling) {
       warnings.push({
@@ -200,7 +214,6 @@ export async function realize(rawIntent: string, options: AssembleOptions = {}):
         source: options.sourcePath ? { path: options.sourcePath } : undefined,
       });
     }
-    const blocks = await assembleWithWp(extracted.tree.blocks, wp);
     if (blocks.length === 0) {
       return invalidInputReport('intent parsed but contained no blocks', options);
     }
