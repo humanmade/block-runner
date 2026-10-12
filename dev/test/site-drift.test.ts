@@ -91,15 +91,19 @@ describe('read-only site drift inspection', () => {
     const state = { content: '<!-- wp:paragraph --><p>Same body</p><!-- /wp:paragraph -->', title: 'Home', status: 'draft', slug: 'home', parentId: 0, template: 'index' };
     const owned: SiteEntity = { id: 20, kind: 'page', route: '/', state: { ...state, status: 'publish' }, ownership: [{ version: 1, siteId: fixture.input.source.sourceIntent.siteId,
       entityId: id, kind: 'page', lastAppliedHash: managedStateHash(state) }] };
+    const versionTwoState = { content: '<!-- wp:paragraph --><p>Matching metadata hash</p><!-- /wp:paragraph -->', title: 'Second', status: 'draft', slug: 'second', parentId: 0, template: 'index' };
+    const unsupportedOwner: SiteEntity = { id: 22, kind: 'page', route: '/second', state: versionTwoState, ownership: [{ version: 2 as 1, siteId: fixture.input.source.sourceIntent.siteId,
+      entityId: 'second', kind: 'page', lastAppliedHash: managedStateHash(versionTwoState) }] };
     const observed = snapshot(fixture.input.source.sourceIntent.theme.slug, {
-      entities: [owned], options: { show_on_front: 'posts' },
-      siteRecord: { version: 1, siteId: fixture.input.source.sourceIntent.siteId, entities: { [`page:${id}`]: 20, 'page:removed': 21 },
+      entities: [owned, unsupportedOwner], options: { show_on_front: 'posts' },
+      siteRecord: { version: 1, siteId: fixture.input.source.sourceIntent.siteId, entities: { [`page:${id}`]: 20, 'page:second': 22, 'page:removed': 21 },
         options: { show_on_front: { lastAppliedValue: 'page' } }, operation: { token: 'opaque', planHash: 'hash', status: 'outcome_unknown' } },
     });
     const report = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
     expect(report.status).toBe('blocked');
     expect(report.findings).toEqual(expect.arrayContaining([
       expect.objectContaining({ status: 'changed', code: 'managed-state-changed', wpId: 20 }),
+      expect.objectContaining({ status: 'blocked', code: 'invalid-ownership-baseline', entityId: 'page:second', wpId: 22 }),
       expect.objectContaining({ status: 'missing', code: 'missing-owned-entity', entityId: 'page:removed' }),
       expect.objectContaining({ status: 'orphaned', code: 'orphaned-owned-entity', entityId: 'page:removed' }),
       expect.objectContaining({ status: 'changed', code: 'managed-option-changed', entityId: 'show_on_front' }),
@@ -121,6 +125,14 @@ describe('read-only site drift inspection', () => {
       expect.objectContaining({ status: 'dependency', code: 'unowned-navigation-dependency', wpId: 55 }),
       expect.objectContaining({ status: 'dependency', code: 'unresolved-dependency', wpId: 66 }),
     ]));
+
+    const patternState = { content: '<!-- wp:paragraph --><p>Owned pattern</p><!-- /wp:paragraph -->', title: 'Owned pattern', status: 'publish' };
+    const ownedPattern: SiteEntity = { id: 66, kind: 'pattern', route: null, state: patternState, ownership: [{ version: 1,
+      siteId: fixture.input.source.sourceIntent.siteId, entityId: 'owned-pattern', kind: 'pattern', lastAppliedHash: managedStateHash(patternState) }] };
+    const ownedPatternSnapshot = snapshot(fixture.input.source.sourceIntent.theme.slug, { entities: [entity, ownedPattern], navigation: [{ id: 55, content: '', status: 'publish' }],
+      siteRecord: { version: 1, siteId: fixture.input.source.sourceIntent.siteId, entities: { [`page:${sourceId}`]: 20, 'pattern:owned-pattern': 66 }, options: {}, operation: null } });
+    const ownedPatternReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(ownedPatternSnapshot, templateSnapshot(ownedPatternSnapshot.theme.slug, fixture.entities)) });
+    expect(ownedPatternReport.findings).toContainEqual(expect.objectContaining({ status: 'clean', code: 'verified-owned-pattern-dependency', wpId: 66 }));
   });
 
   it('returns blocked for unavailable edit-context permissions and wrong active theme', async () => {

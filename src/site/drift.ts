@@ -200,7 +200,7 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
       const key = `${owner.kind}:${owner.entityId}`;
       const matches = byKey.get(key) ?? [];
       matches.push(entity); byKey.set(key, matches);
-      if (entity.kind !== owner.kind || !owner.entityId || !/^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash)) {
+      if (owner.version !== 1 || entity.kind !== owner.kind || !owner.entityId || !/^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash)) {
         add({ kind: 'inspection', status: 'blocked', entityId: key, wpId: entity.id, code: 'invalid-ownership-baseline', message: 'Owned entity metadata is incomplete or does not match the observed entity type.' });
       } else if (managedStateHash(entity.state) !== owner.lastAppliedHash) {
         add({ kind: entity.kind, status: 'changed', entityId: key, wpId: entity.id, code: 'managed-state-changed', message: 'One or more complete managed fields differ from the last-applied baseline.' });
@@ -256,7 +256,7 @@ function inspectDependencies(content: string, owner: SiteEntity | undefined, sna
     const observed = isNavigation ? snapshot.navigation.some(item => item.id === id) : snapshot.entities.some(item => item.kind === 'pattern' && item.id === id);
     const isOwned = !isNavigation && ownedPatternIds.has(id);
     add({ kind: 'dependency', status: observed && isOwned ? 'clean' : 'dependency', entityId: `${name}:${id}`, wpId: id,
-      code: !observed ? 'unresolved-dependency' : isNavigation ? 'unowned-navigation-dependency' : 'unowned-pattern-dependency',
+      code: !observed ? 'unresolved-dependency' : isNavigation ? 'unowned-navigation-dependency' : isOwned ? 'verified-owned-pattern-dependency' : 'unowned-pattern-dependency',
       message: !observed ? `The referenced ${name} entity ID ${id} is not present in the fresh WordPress snapshot.` : isOwned ? 'The reference resolves to a verified owned synced pattern.' : `The referenced ${name} entity ID ${id} is resolved but its ownership is not verified; inspection did not expand or adopt it.` });
   }
 }
