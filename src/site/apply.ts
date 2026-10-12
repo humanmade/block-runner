@@ -40,7 +40,8 @@ function assertTransition(before:SiteSnapshot,after:SiteSnapshot,op:SitePlanOper
   if(entity){expected.entities=expected.entities.filter(item=>item.id!==entity.id);expected.entities.push(entity);expected.entities.sort((a,b)=>a.id-b.id);if(op.kind!=='attachment')expected.siteRecord!.entities[`${op.kind}:${op.entityId}`]=entity.id;else {const key=attachmentVersionKey(op.entityId,String(op.desired?.sha256));if(after.siteRecord?.entities[key]===entity.id)expected.siteRecord!.entities[key]=entity.id;}}
   if(op.kind==='option'){expected.options[op.entityId]=op.desired!.value;expected.siteRecord!.options[op.entityId]={lastAppliedValue:op.desired!.value};}
   for(const page of expected.entities.filter(item=>item.kind==='page'))page.route=nativePageRoute(page,expected);
-  // Request resolution changes as pages become available; routing configuration itself remains bound.
+  // Request resolution changes as pages become available.
+  // A front-page option may refresh WordPress's rewrite hash; every other routing field stays bound.
   expected.routing.routes=after.routing.routes;
   if(op.kind==='option'&&(op.entityId==='show_on_front'||op.entityId==='page_on_front')&&!same(before.options[op.entityId],op.desired?.value)&&same(after.options[op.entityId],op.desired?.value)&&typeof after.routing.rewriteRulesHash==='string'&&after.routing.rewriteRulesHash.length>0)expected.routing.rewriteRulesHash=after.routing.rewriteRulesHash;
   if(!same(comparable(expected),comparable(after)))throw new Error('unexpected live changes during mutation readback');
