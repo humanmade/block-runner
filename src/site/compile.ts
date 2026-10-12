@@ -5,6 +5,7 @@ import { validateThemeJson } from '../theme/theme-json.js';
 import { findThemeReferenceIssues } from '../theme/references.js';
 import type { ThemeMarkupFile } from '../theme/folders.js';
 import { parseThemeJsonSettings } from '../tokens/resolver.js';
+import { canonicalJson } from '../proof/receipt.js';
 import type { BlockRunnerConfig, IntentNode, IntentTree, ReportItem, WpBlock } from '../types.js';
 import { buildSiteThemeAssets } from './assets.js';
 import { validateSiteIntent } from './input.js';
@@ -71,16 +72,20 @@ export async function compileThemeDocuments(
   const assets = preparedAssets.files;
   const inventory = inventoryFiles([...themeFiles, ...assets]);
   const targetBindings = usedBindings(intent, options.attachmentBindings, new Set(compiled.documents.filter((document) => document.kind !== 'page').map((document) => document.id)));
+  const targetBindingFingerprint = hashTargetContext(targetBindings, options.themeAssetBaseUrl);
   const artifact: ThemeArtifact = {
     sourceIntent: intent,
     sourceAssets: source.assets,
+    targetBindings,
+    targetBindingFingerprint,
+    ...(options.themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl: options.themeAssetBaseUrl } : {}),
     themeFiles,
     pendingPageBindings: intent.assetUses.filter((use) => use.documentId.startsWith('page:')
       && assetRole(intent, use.assetId) === 'attachment'
       && !options.attachmentBindings?.[use.assetId]),
     diagnostics,
     inventory,
-    artifactIdentity: hashJson({ sourceIdentity: source.sourceIdentity, sourceAssets: sourceAssetIdentity(source), targetBindings, themeFiles: inventory }),
+    artifactIdentity: hashJson({ sourceIdentity: source.sourceIdentity, sourceAssets: sourceAssetIdentity(source), targetBindingFingerprint, themeFiles: inventory }),
   };
   return { ok: true, artifact, diagnostics };
 }
@@ -121,13 +126,14 @@ export async function compileSite(
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const assets = preparedAssets.files;
   const targetBindings = usedBindings(intent, options.attachmentBindings);
-  const targetBindingFingerprint = hashJson(targetBindings);
+  const targetBindingFingerprint = hashTargetContext(targetBindings, options.themeAssetBaseUrl);
   const inventory = inventoryFiles([...themeFiles, ...assets]);
   const site: CompiledSite = {
     sourceIntent: intent,
     sourceAssets: source.assets,
     targetBindings,
     targetBindingFingerprint,
+    ...(options.themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl: options.themeAssetBaseUrl } : {}),
     themeFiles,
     pages,
     assets,
@@ -496,6 +502,13 @@ function hasFailures(items: ReportItem[]): boolean {
 
 function hashJson(value: unknown): string {
   return createHash('sha256').update(JSON.stringify(value)).digest('hex');
+}
+
+function hashTargetContext(bindings: Record<string, SiteAttachmentBinding>, themeAssetBaseUrl?: string): string {
+  return createHash('sha256').update(canonicalJson({
+    attachmentBindings: bindings,
+    ...(themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl } : {}),
+  })).digest('hex');
 }
 
 function isSingleLineHeader(value: string): boolean {

@@ -158,4 +158,35 @@ describe('site compiler', () => {
     expect(theme.ok).toBe(true);
     if (theme.ok) expect(theme.artifact.pendingPageBindings).toEqual(full.assetUses);
   });
+
+  it('retains theme target bindings and the supplied public theme URL in its identity', async () => {
+    const input = JSON.parse(await readFile(intentPath, 'utf8')) as SiteIntent;
+    input.parts.header!.body.blocks[0]!.children!.push({
+      block: 'core/image',
+      attrs: { id: 0, url: '', alt: 'Theme-owned image' },
+    });
+    input.assetUses.push({ documentId: 'part:header', nodePath: [0, 2], attribute: 'attrs.id', assetId: 'home-hero' });
+    const prepared = await prepareSiteSource(input, fixtureRoot);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+
+    const options = {
+      attachmentBindings: { 'home-hero': { id: 731, url: 'https://media.example.test/hero.png' } },
+      themeAssetBaseUrl: 'https://themes.example.test/sample-studio/',
+    };
+    const first = await compileThemeDocuments(prepared.source, options);
+    const changedBinding = await compileThemeDocuments(prepared.source, {
+      ...options,
+      attachmentBindings: { 'home-hero': { id: 731, url: 'https://media.example.test/other.png' } },
+    });
+    expect(first.ok).toBe(true);
+    expect(changedBinding.ok).toBe(true);
+    if (first.ok && changedBinding.ok) {
+      expect(first.artifact.targetBindings).toEqual(options.attachmentBindings);
+      expect(first.artifact.themeAssetBaseUrl).toBe(options.themeAssetBaseUrl);
+      expect(first.artifact.targetBindingFingerprint).toMatch(/^[a-f0-9]{64}$/);
+      expect(first.artifact.targetBindingFingerprint).not.toBe(changedBinding.artifact.targetBindingFingerprint);
+      expect(first.artifact.artifactIdentity).not.toBe(changedBinding.artifact.artifactIdentity);
+    }
+  });
 });
