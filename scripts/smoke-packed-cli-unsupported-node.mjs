@@ -1,15 +1,16 @@
 #!/usr/bin/env node
 /**
- * Exercise published CLI and library entry points on the last unsupported Node
- * 20 patch. The packed artifact must reject it before production dependencies load.
+ * Exercise published CLI and library entry points on the last previously
+ * supported Node 20 floor. The packed artifact must reject it before production
+ * dependencies load.
  */
 import { spawnSync } from 'node:child_process';
 import { mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const unsupportedNode = '20.18.1';
-const expectedMessage = 'block-runner requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0; found v' + unsupportedNode + '.';
+const unsupportedNode = '20.19.0';
+const expectedMessage = 'block-runner requires Node.js ^22.13.0 || >=24.0.0; found v' + unsupportedNode + '.';
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 const packDirectory = mkdtempSync(path.join(tmpdir(), 'block-runner-pack-'));
 const consumer = mkdtempSync(path.join(tmpdir(), 'block-runner-consumer-'));

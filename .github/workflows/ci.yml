@@ -175,10 +175,9 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # engines.node: ^20.19.0 || ^22.13.0 || >=24.0.0. These are its exact
-        # lowest releases; the 21.x and 23.x lines are intentionally unsupported
-        # by the resolved jsdom graph.
-        node: [20.19.0, 22.13.0, 24.0.0]
+        # engines.node: ^22.13.0 || >=24.0.0. These are its exact lowest
+        # releases; Node 20, 21, and 23 are intentionally unsupported.
+        node: [22.13.0, 24.0.0]
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
@@ -195,7 +194,7 @@ jobs:
       - name: Smoke the packed CLI in a clean engine-strict consumer
         run: npm run smoke:package
       - name: Reject unsupported Node before packed CLI dependencies load
-        if: matrix.node == '20.19.0'
+        if: matrix.node == '22.13.0'
         run: npm run smoke:package:unsupported-node
 
   package-boundary:
