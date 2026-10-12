@@ -43,6 +43,11 @@ describe('site compiler', () => {
     expect(first.site.themeFiles).toEqual(second.site.themeFiles);
     expect(first.site.pages).toEqual(second.site.pages);
     expect(first.site.inventory).toEqual(second.site.inventory);
+    expect(first.site.inventory).toEqual(first.site.themeFiles.map((file) => ({
+      path: file.path,
+      sha256: file.sha256,
+      size: file.bytes.byteLength,
+    })));
 
     const template = new TextDecoder().decode(first.site.themeFiles.find((file) => file.path === 'templates/index.html')!.bytes);
     expect(template).toContain('<!-- wp:post-content /-->');
@@ -156,7 +161,16 @@ describe('site compiler', () => {
     if (!prepared.ok) return;
     const theme = await compileThemeDocuments(prepared.source);
     expect(theme.ok).toBe(true);
-    if (theme.ok) expect(theme.artifact.pendingPageBindings).toEqual(full.assetUses);
+    if (theme.ok) {
+      expect(theme.artifact.pendingPageBindings).toEqual(full.assetUses);
+      expect(theme.artifact.themeFiles.map((file) => file.path)).toContain('assets/styles/site.css');
+      expect(theme.artifact.themeFiles.map((file) => file.path)).toContain('functions.php');
+      expect(theme.artifact.inventory).toEqual(theme.artifact.themeFiles.map((file) => ({
+        path: file.path,
+        sha256: file.sha256,
+        size: file.bytes.byteLength,
+      })));
+    }
   });
 
   it('retains theme target bindings and the supplied public theme URL in its identity', async () => {
@@ -175,6 +189,7 @@ describe('site compiler', () => {
       themeAssetBaseUrl: 'https://themes.example.test/sample-studio/',
     };
     const first = await compileThemeDocuments(prepared.source, options);
+    const completeSite = await compileSite(prepared.source, options);
     const changedBinding = await compileThemeDocuments(prepared.source, {
       ...options,
       attachmentBindings: { 'home-hero': { id: 731, url: 'https://media.example.test/other.png' } },
@@ -187,6 +202,17 @@ describe('site compiler', () => {
       expect(first.artifact.targetBindingFingerprint).toMatch(/^[a-f0-9]{64}$/);
       expect(first.artifact.targetBindingFingerprint).not.toBe(changedBinding.artifact.targetBindingFingerprint);
       expect(first.artifact.artifactIdentity).not.toBe(changedBinding.artifact.artifactIdentity);
+    }
+    expect(completeSite.ok).toBe(true);
+    if (completeSite.ok) {
+      expect(completeSite.site.themeFiles.map((file) => file.path)).toContain('assets/styles/site.css');
+      expect(completeSite.site.themeFiles.map((file) => file.path)).toContain('functions.php');
+      expect(completeSite.site.assets.map((file) => file.path)).toEqual(['assets/styles/site.css', 'functions.php']);
+      expect(completeSite.site.inventory).toEqual(completeSite.site.themeFiles.map((file) => ({
+        path: file.path,
+        sha256: file.sha256,
+        size: file.bytes.byteLength,
+      })));
     }
   });
 });

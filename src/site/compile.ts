@@ -64,13 +64,15 @@ export async function compileThemeDocuments(
   const diagnostics = [...compiled.diagnostics, ...await themeChecks(intent, compiled.documents)];
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
 
-  const themeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
+  const generatedThemeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const preparedAssets = buildSiteThemeAssets(source);
   diagnostics.push(...assetDiagnostics(preparedAssets.diagnostics, intent.siteId));
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const assets = preparedAssets.files;
-  const inventory = inventoryFiles([...themeFiles, ...assets]);
+  const themeFiles = completeThemeFiles(generatedThemeFiles, assets, diagnostics);
+  if (hasFailures(diagnostics)) return { ok: false, diagnostics };
+  const inventory = inventoryFiles(themeFiles);
   const targetBindings = usedBindings(intent, options.attachmentBindings, new Set(compiled.documents.filter((document) => document.kind !== 'page').map((document) => document.id)));
   const targetBindingFingerprint = hashTargetContext(targetBindings, options.themeAssetBaseUrl);
   const artifact: ThemeArtifact = {
@@ -106,7 +108,7 @@ export async function compileSite(
   const diagnostics = [...compiled.diagnostics, ...await themeChecks(intent, compiled.documents)];
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
 
-  const themeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
+  const generatedThemeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const pages: CompiledSitePage[] = compiled.documents.flatMap((document) => {
     if (!document.page) return [];
@@ -125,9 +127,11 @@ export async function compileSite(
   diagnostics.push(...assetDiagnostics(preparedAssets.diagnostics, intent.siteId));
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const assets = preparedAssets.files;
+  const themeFiles = completeThemeFiles(generatedThemeFiles, assets, diagnostics);
+  if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const targetBindings = usedBindings(intent, options.attachmentBindings);
   const targetBindingFingerprint = hashTargetContext(targetBindings, options.themeAssetBaseUrl);
-  const inventory = inventoryFiles([...themeFiles, ...assets]);
+  const inventory = inventoryFiles(themeFiles);
   const site: CompiledSite = {
     sourceIntent: intent,
     sourceAssets: source.assets,
@@ -393,6 +397,16 @@ function assetDiagnostics(
 function inventoryFiles(files: SiteFile[]): Array<{ path: string; sha256: string; size: number }> {
   return files.map((file) => ({ path: file.path, sha256: file.sha256, size: file.bytes.byteLength }))
     .sort((left, right) => left.path.localeCompare(right.path));
+}
+
+function completeThemeFiles(generated: SiteFile[], assets: SiteFile[], diagnostics: ReportItem[]): SiteFile[] {
+  const files = [...generated, ...assets];
+  const seen = new Set<string>();
+  for (const file of files) {
+    if (seen.has(file.path)) diagnostics.push(invalid('theme', 'duplicate-output-path', `theme output path ${file.path} is declared more than once`));
+    seen.add(file.path);
+  }
+  return files.sort((left, right) => left.path.localeCompare(right.path));
 }
 
 function usedBindings(
