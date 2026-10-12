@@ -131,6 +131,7 @@ export interface CompiledSite {
   sourceAssets: PreparedSiteAsset[];
   targetBindings: Record<string, SiteAttachmentBinding>;
   targetBindingFingerprint: string;
+  themeAssetBaseUrl?: string;
   themeFiles: SiteFile[];
   pages: CompiledSitePage[];
   assets: SiteFile[];
@@ -143,6 +144,9 @@ export interface CompiledSite {
 export interface ThemeArtifact {
   sourceIntent: SiteIntent;
   sourceAssets: PreparedSiteAsset[];
+  targetBindings: Record<string, SiteAttachmentBinding>;
+  targetBindingFingerprint: string;
+  themeAssetBaseUrl?: string;
   themeFiles: SiteFile[];
   pendingPageBindings: SiteAssetUse[];
   diagnostics: ReportItem[];

@@ -11,9 +11,9 @@ const DEFAULT_CONFIG_FILES = [
   'block-runner.config.json',
 ];
 
-export async function loadConfig(options: CommonOptions & { config?: BlockRunnerConfig } = {}): Promise<BlockRunnerConfig> {
+export async function loadConfig(options: CommonOptions & { config?: BlockRunnerConfig; isolateConfig?: boolean } = {}): Promise<BlockRunnerConfig> {
   const explicitConfig = options.configPath ? await readConfigFile(options.configPath) : undefined;
-  const discoveredConfig = explicitConfig ?? (await discoverConfig());
+  const discoveredConfig = explicitConfig ?? (options.isolateConfig ? undefined : await discoverConfig());
   return mergeConfig(options.config ?? discoveredConfig ?? {}, options);
 }
 
