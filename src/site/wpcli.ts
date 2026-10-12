@@ -113,6 +113,7 @@ foreach (array('do_parse_request','request','query_vars','parse_request','parse_
   }
 }
 $resolve = function($route) use ($cachedRules) {
+  foreach (explode('/',trim($route,'/')) as $segment) if ($segment !== sanitize_title_with_dashes($segment,'','save')) return array('route'=>$route,'kind'=>'unsupported','matchedRule'=>null,'queryFingerprint'=>hash('sha256',$route),'reason'=>'route segment is not a canonical WordPress slug');
   $saved = array(); foreach (array('wp','wp_query','wp_the_query','post','wp_rewrite') as $key) $saved[$key] = array_key_exists($key,$GLOBALS) ? array(true,$GLOBALS[$key]) : array(false,null);
   $savedServer = $_SERVER; $savedGet = $_GET; $savedPost = $_POST;
   $savedDispatch = $GLOBALS['wp_filter']['parse_request'] ?? null;
