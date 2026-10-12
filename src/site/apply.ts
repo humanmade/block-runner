@@ -132,7 +132,10 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       let attempted=false;
       try {
         attempted=true;
-        if(op.kind==='attachment') await importPlannedSiteAttachment({plan,source:input.source,assetId:op.entityId,wp:options,authority:{token:boundary.token,journalPath},readTransport:transports.read,mutationTransport:transports.mutate});
+        if(op.kind==='attachment') {
+          try { await importPlannedSiteAttachment({plan,source:input.source,assetId:op.entityId,wp:options,authority:{token:boundary.token,journalPath},readTransport:transports.read,mutationTransport:transports.mutate}); }
+          catch(error) { if(error instanceof Error && !(error instanceof SiteMediaImportOutcomeUnknown))attempted=false; throw error; }
+        }
         else {
           const result=await call({action:'mutate',step,operation:op,before:live,stateHash:managedStateHash(op.desired!)});
           if(result.status==='refused'){attempted=false;throw new Error('fixed WordPress boundary refused before mutation');}
@@ -145,7 +148,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
         if(entity) record.after=entity;else record.value=live.options[op.entityId];
         if(op.kind==='option')for(const completed of journal!.steps){if(completed.after?.kind==='page'){const actual=live.entities.find(item=>item.id===completed.after!.id);if(actual)completed.after=structuredClone(actual);}}
         step.status='completed';journal!.currentStep={...step};await save();await mark('started',entity?{key,id:entity.id}:undefined);journal!.observed=live;await save();
-      } catch(error) { if(op.kind==='attachment' && error instanceof Error && !(error instanceof SiteMediaImportOutcomeUnknown))attempted=false; if(attempted){step.status='outcome_unknown';journal!.currentStep={...step};journal!.status='outcome_unknown';await save();try{await mark('outcome_unknown');}catch{/* Keep durable uncertainty even when target is unavailable. */}} else { journal!.steps.pop(); delete journal!.currentStep; await save(); await mark('started'); journal!.observed=live; await save(); }throw error; }
+      } catch(error) { if(attempted){step.status='outcome_unknown';journal!.currentStep={...step};journal!.status='outcome_unknown';await save();try{await mark('outcome_unknown');}catch{/* Keep durable uncertainty even when target is unavailable. */}} else { journal!.steps.pop(); delete journal!.currentStep; await save(); await mark('started'); journal!.observed=live; await save(); }throw error; }
     };
     let attachments=observedAttachmentBindings(input,live);
     let patternBindings=Object.fromEntries(live.entities.filter(entity=>entity.kind==='pattern'&&entity.ownership.some(owner=>owner.siteId===plan.siteId&&owner.lastAppliedHash===managedStateHash(entity.state))).map(entity=>[entity.ownership[0]!.entityId,entity.id]));
