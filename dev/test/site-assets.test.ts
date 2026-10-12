@@ -84,6 +84,23 @@ describe('site theme assets', () => {
     }
   });
 
+  it('does not generate executable PHP when a site declares no theme stylesheet', async () => {
+    const root = await setup();
+    try {
+      const intent = JSON.parse(await readFile(intentPath, 'utf8')) as any;
+      intent.assets = intent.assets.filter((asset: { role: string }) => asset.role === 'attachment');
+      const prepared = await prepareSiteSource(intent, root);
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) return;
+
+      const result = buildSiteThemeAssets(prepared.source);
+      expect(result.diagnostics).toEqual([]);
+      expect(result.files).toEqual([]);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('refuses unlicensed fonts and CSS declarations aimed at attachment assets', async () => {
     const intent = JSON.parse(await readFile(intentPath, 'utf8')) as any;
     intent.assets.push({ id: 'font', path: 'fonts/font.woff2', kind: 'font', role: 'theme-file' });

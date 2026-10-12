@@ -33,9 +33,9 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
     }
     const outputPath = `assets/${declaration.path}`;
     const collisionKey = outputPath.toLowerCase();
-    const previous = outputPaths.get(collisionKey);
+    const previous = [...outputPaths.entries()].find(([existing]) => collisionKey === existing || collisionKey.startsWith(`${existing}/`) || existing.startsWith(`${collisionKey}/`));
     if (previous) {
-      diagnostics.push(issue(`${at}/path`, 'duplicate-theme-path', `theme asset destination collides with "${previous}"`));
+      diagnostics.push(issue(`${at}/path`, 'duplicate-theme-path', `theme asset destination collides with "${previous[1]}"`));
       continue;
     }
     outputPaths.set(collisionKey, declaration.path);
@@ -92,6 +92,14 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
     }
     files.push(siteFile(outputPath, bytes));
     if (declaration.kind === 'font' && declaration.fontLicense) {
+      const noticePath = `${outputPath}.LICENSE.txt`;
+      const noticeKey = noticePath.toLowerCase();
+      const collision = [...outputPaths.entries()].find(([existing]) => noticeKey === existing || noticeKey.startsWith(`${existing}/`) || existing.startsWith(`${noticeKey}/`));
+      if (collision) {
+        diagnostics.push(issue(`${at}/fontLicense/notice`, 'duplicate-theme-path', `font notice destination collides with "${collision[1]}"`));
+        continue;
+      }
+      outputPaths.set(noticeKey, noticePath);
       const notice = [
         `Ownership: ${declaration.fontLicense.ownership}`,
         `License: ${declaration.fontLicense.license}`,
@@ -165,6 +173,11 @@ function rewriteStylesheet(
     const targetPath = declarationMap.get(reference.url);
     if (!targetPath) {
       diagnostics.push(issue(diagnosticPath, 'undeclared-css-url', `CSS URL "${reference.url}" has no explicit theme asset declaration`));
+      continue;
+    }
+    const target = assetsById.get(declarations.find(({ url }) => url === reference.url)?.assetId ?? '');
+    if (!target || (reference.kind === 'font') !== (target.kind === 'font')) {
+      diagnostics.push(issue(diagnosticPath, 'css-asset-kind', `CSS URL "${reference.url}" does not map to a compatible declared asset kind`));
       continue;
     }
     referenceCounts.set(reference.url, (referenceCounts.get(reference.url) ?? 0) + 1);
