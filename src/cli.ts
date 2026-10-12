@@ -38,6 +38,8 @@ import { validateThemeJson } from './theme/theme-json.js';
 import { findThemeReferenceIssues } from './theme/references.js';
 import { compileSite, compileThemeDocuments } from './site/compile.js';
 import { planSite } from './site/plan.js';
+import { applySite } from './site/apply.js';
+import type { SitePlan } from './site/plan-types.js';
 import { prepareSiteSource } from './site/input.js';
 import { writeCompiledSite } from './site/write.js';
 import type { SiteAttachmentBinding } from './site/types.js';
@@ -118,8 +120,11 @@ interface ProofCliOptions {
   markup?: string;
   input?: string;
   receiptDir?: string;
+  out?: string;
   wpEnvConfig?: string;
   theme?: string;
+  site?: string;
+  siteNegativeControl?: 'missing-content' | 'broken-asset' | 'wrong-target' | 'accordion-mismatch' | 'broken-mobile';
   run?: boolean;
   keepEnvironment?: boolean;
   json?: boolean;
@@ -251,6 +256,24 @@ siteCommand.command('compile <intentOrStdin>')
     console.log(`Artifact: ${written.artifactType === 'theme' ? 'theme-only; page bindings remain pending' : 'compiled site'}`);
     console.log(`Files: ${written.files.length}`);
     console.log('WordPress installation and runtime proof have not run.');
+  });
+
+siteCommand.command('apply <planFile>')
+  .description('Apply an exactly confirmed site plan with durable mutation evidence.')
+  .requiredOption('--confirm <hash>', 'exact plan confirmation hash')
+  .requiredOption('--source <intent-or-bundle>', 're-read the planned source and declared asset bytes')
+  .requiredOption('--journal <file>', 'private durable local journal; reuse this path for replay or recovery')
+  .requiredOption('--wp-path <path>', 'local WordPress installation path')
+  .option('--asset-root <dir>', 'declared asset root for raw intent')
+  .option('--wp-url <url>', 'explicit target URL')
+  .option('--wp-binary <path>', 'local WP-CLI executable')
+  .option('--wp-user <id-or-login>', 'WordPress principal')
+  .option('--strict', 'fail compilation on warnings')
+  .action(async (planFile: string, options: import('./site/apply.js').SiteApplyOptions) => {
+    const file = await readStableRegularFile(path.resolve(planFile), 'plan changed while reading');
+    const result = await applySite(JSON.parse(file.content.toString('utf8')) as SitePlan, options);
+    console.log(JSON.stringify(result,null,2));
+    if (result.status !== 'completed') process.exitCode = 1;
   });
 
 siteCommand.command('plan <intentOrBundle>')
@@ -593,7 +616,7 @@ plugin
 program
   .command('proof [pluginZip]')
   .description('Run a WordPress proof profile and write a content-addressed receipt.')
-  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES.filter((name) => name !== 'theme') as unknown as string[]).default('full'))
+  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES.filter((name) => name !== 'theme' && name !== 'site') as unknown as string[]).default('full'))
   .option('--fixture <path>', 'JSON fixture with block name, editable fields, and proof assertions')
   .option('--artifact <path>', 'confirmed JSON artifact contract (SHA-256 and capabilities) for capability-scoped claims')
   .option('--markup <path>', 'generated block markup for the headless validation gate')
@@ -601,13 +624,18 @@ program
   .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
   .option('--wp-env-config <path>', 'wp-env configuration (default: proof/wp-env.json)')
   .option('--theme <directory>', 'prove local theme templates and parts through a real Site Editor save')
+  .option('--site <bundle>', 'prove an explicitly published five-page site fixture in an owned sandbox')
+  .option('--out <path>', 'alias for --receipt-dir')
+  .addOption(new Option('--site-negative-control <control>', 'seed a controlled fixture failure; site proof only').choices(['missing-content', 'broken-asset', 'wrong-target', 'accordion-mismatch', 'broken-mobile']))
   .option('--no-run', 'only produce a blocked receipt; do not start Docker or Playwright')
   .option('--keep-environment', 'leave wp-env running after the proof')
   .option('--json', 'emit the complete receipt result as JSON')
   .action(async (pluginZip: string | undefined, options: ProofCliOptions) => {
     const profile = options.profile ?? 'full';
+    if (options.siteNegativeControl && !options.site) program.error('error: site negative controls require --site');
+    if (options.site && (options.theme || pluginZip)) program.error('error: --site is exclusive with --theme and plugin ZIP');
     if (options.theme && pluginZip) program.error('error: proof accepts either a plugin ZIP or --theme, not both');
-    if (!options.theme && !pluginZip) program.error('error: proof needs a plugin ZIP or --theme <directory>');
+    if (!options.site && !options.theme && !pluginZip) program.error('error: proof needs a plugin ZIP or --theme <directory>');
     if (profile === 'theme' && !options.theme) program.error('error: the theme proof profile is selected by --theme');
     if (!isProofProfileName(profile)) {
       program.error(`error: unsupported proof profile ${JSON.stringify(profile)}`);
@@ -620,15 +648,17 @@ program
       options.input ? readFile(options.input) : undefined,
     ]);
     const result = await runProof({
-      profile: options.theme ? 'theme' : profile,
+      profile: options.site ? 'site' : options.theme ? 'theme' : profile,
       pluginZip,
       theme: options.theme,
+      site: options.site,
+      siteNegativeControl: options.siteNegativeControl,
       fixture,
       artifact,
       markup,
       input,
       inputPath: options.input,
-      outputDir: options.receiptDir,
+      outputDir: options.receiptDir ?? options.out,
       wpEnvConfig: options.wpEnvConfig,
       execute: options.run,
       keepEnvironment: options.keepEnvironment,
