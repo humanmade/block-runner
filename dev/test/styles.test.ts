@@ -503,6 +503,34 @@ describe('styling — relaxed (default)', () => {
     expect(report.output).not.toContain('"padding"');
     expect(warningsOf(report.items).join('\n')).not.toContain('padding');
   });
+
+  it('reports class CSS lost inside a Custom HTML fallback while retaining its inline CSS', async () => {
+    const report = await convert(
+      `<style>.ink{color:red}</style><x-widget><span class="ink" style="font-weight:700">label</span></x-widget>`,
+    );
+
+    expect(report.output).toContain('class="ink"');
+    expect(report.output).toContain('font-weight:700');
+    expect(warningsOf(report.items)).toContainEqual(
+      expect.stringContaining('color: red in .ink dropped — the <style> element is stripped'),
+    );
+    expect(warningsOf(report.items).join('\n')).not.toContain('font-weight');
+  });
+
+  it('rescues fallback descendant class rules in authored order with cascade priority intact', async () => {
+    const report = await convert(
+      `<style>.tile{color:red !important;max-width:9px}.tile{max-height:10px}</style><x-widget><span class="tile" style="color:blue">one</span><span class="tile">two</span></x-widget>`,
+      { styling: 'open' },
+    );
+
+    expect(report.output).toContain('class="tile"');
+    expect(report.output).toContain('color:blue');
+    expect(report.sidecarCss).toBe(
+      '.tile { color:red !important; max-width:9px }\n.tile { max-height:10px }\n',
+    );
+    expect(warningsOf(report.items).join('\n')).not.toContain('color: red');
+    expect(report.sidecarCss!.match(/max-width:9px/g)).toHaveLength(1);
+  });
 });
 
 describe('styling — unattributable CSS', () => {
