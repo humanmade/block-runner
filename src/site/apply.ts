@@ -42,6 +42,7 @@ function assertTransition(before:SiteSnapshot,after:SiteSnapshot,op:SitePlanOper
   for(const page of expected.entities.filter(item=>item.kind==='page'))page.route=nativePageRoute(page,expected);
   // Request resolution changes as pages become available; routing configuration itself remains bound.
   expected.routing.routes=after.routing.routes;
+  if(op.kind==='option'&&(op.entityId==='show_on_front'||op.entityId==='page_on_front')&&!same(before.options[op.entityId],op.desired?.value)&&same(after.options[op.entityId],op.desired?.value)&&typeof after.routing.rewriteRulesHash==='string'&&after.routing.rewriteRulesHash.length>0)expected.routing.rewriteRulesHash=after.routing.rewriteRulesHash;
   if(!same(comparable(expected),comparable(after)))throw new Error('unexpected live changes during mutation readback');
 }
 /** Confirmed database-only apply. Readback detects conflicts; it does not exclude human writes. */
@@ -111,7 +112,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     if(journal.currentStep && (journal.currentStep.status!=='completed'||!same(comparable(live),comparable(journal.observed)))) {
       const pending=journal.steps.find(item=>item.step.key===journal!.currentStep!.key);
       if(!pending) throw new Error('started journal has no exact step evidence');
-      try { const entity=prove(pending,live); assertTransition(journal.observed,live,pending.operation,entity); if(entity) pending.after=entity; pending.step.status='completed'; journal.currentStep={...pending.step}; await save(); await mark('started',entity?{key:pending.step.key,id:entity.id}:undefined); journal.observed=live; await save(); }
+      try { const entity=prove(pending,live); assertTransition(journal.observed,live,pending.operation,entity); if(entity) pending.after=entity; if(pending.operation.kind==='option'&&(pending.operation.entityId==='show_on_front'||pending.operation.entityId==='page_on_front'))for(const completed of journal.steps){if(completed.step.status==='completed'&&completed.after?.kind==='page'){const actual=live.entities.find(item=>item.kind==='page'&&item.id===completed.after!.id);if(actual)completed.after.route=nativePageRoute(actual,live);}} pending.step.status='completed'; journal.currentStep={...pending.step}; await save(); await mark('started',entity?{key:pending.step.key,id:entity.id}:undefined); journal.observed=live; await save(); }
       catch { journal.status='outcome_unknown'; await save(); throw new Error('outcome_unknown: insufficient ownership/readback proof; no mutation may be retried'); }
     }
     for(const completed of journal.steps.filter(item=>item.step.status==='completed')) prove(completed,live);
