@@ -266,7 +266,7 @@ export const PROOF_PROFILES: Readonly<Record<ProofProfileName, ProofProfile>> = 
   }),
   theme: Object.freeze({
     name: 'theme',
-    requiredGates: ['theme_activation', 'theme_roundtrip', 'environment_observation', 'php_logs'],
+    requiredGates: ['theme_activation', 'theme_roundtrip', 'environment_observation', 'php_logs'] as const satisfies readonly ProofGateId[],
     optionalGates: [],
   }),
 });

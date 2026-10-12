@@ -111,6 +111,7 @@ interface ProofCliOptions {
   input?: string;
   receiptDir?: string;
   wpEnvConfig?: string;
+  theme?: string;
   run?: boolean;
   keepEnvironment?: boolean;
   json?: boolean;
@@ -409,20 +410,24 @@ plugin
   });
 
 program
-  .command('proof <pluginZip>')
+  .command('proof [pluginZip]')
   .description('Run a WordPress proof profile and write a content-addressed receipt.')
-  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES as unknown as string[]).default('full'))
+  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES.filter((name) => name !== 'theme') as unknown as string[]).default('full'))
   .option('--fixture <path>', 'JSON fixture with block name, editable fields, and proof assertions')
   .option('--artifact <path>', 'confirmed JSON artifact contract (SHA-256 and capabilities) for capability-scoped claims')
   .option('--markup <path>', 'generated block markup for the headless validation gate')
   .option('--input <path>', 'reviewed generator input to pin as evidence (required for a passing proof)')
   .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
   .option('--wp-env-config <path>', 'wp-env configuration (default: proof/wp-env.json)')
+  .option('--theme <directory>', 'prove local theme templates and parts through a real Site Editor save')
   .option('--no-run', 'only produce a blocked receipt; do not start Docker or Playwright')
   .option('--keep-environment', 'leave wp-env running after the proof')
   .option('--json', 'emit the complete receipt result as JSON')
-  .action(async (pluginZip: string, options: ProofCliOptions) => {
+  .action(async (pluginZip: string | undefined, options: ProofCliOptions) => {
     const profile = options.profile ?? 'full';
+    if (options.theme && pluginZip) program.error('error: proof accepts either a plugin ZIP or --theme, not both');
+    if (!options.theme && !pluginZip) program.error('error: proof needs a plugin ZIP or --theme <directory>');
+    if (profile === 'theme' && !options.theme) program.error('error: the theme proof profile is selected by --theme');
     if (!isProofProfileName(profile)) {
       program.error(`error: unsupported proof profile ${JSON.stringify(profile)}`);
       return;
@@ -434,8 +439,9 @@ program
       options.input ? readFile(options.input) : undefined,
     ]);
     const result = await runProof({
-      profile,
+      profile: options.theme ? 'theme' : profile,
       pluginZip,
+      theme: options.theme,
       fixture,
       artifact,
       markup,

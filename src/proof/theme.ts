@@ -1,5 +1,7 @@
+import { createHash } from 'node:crypto';
 import { cp, lstat, mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { homedir } from 'node:os';
 import { discoverThemeMarkupFiles } from '../theme/folders.js';
 import type { EvidenceStore } from './receipt.js';
 
@@ -55,7 +57,7 @@ export function compareThemeMarkup(source: string, saved: string, themeSlug: str
 
 /** Remove only the matching top-level theme attribute from core/template-part comment JSON. */
 export function removeThemeAttributes(markup: string, themeSlug: string): string {
-  return markup.replace(/<!--\s*wp:core\/template-part\b([^]*?)-->/g, (comment, body: string) => {
+  return markup.replace(/<!--\s*wp:(?:core\/)?template-part\b([^]*?)-->/g, (comment, body: string) => {
     const objectStart = body.indexOf('{');
     if (objectStart < 0) return comment;
     const objectEnd = jsonObjectEnd(body, objectStart);
@@ -70,6 +72,8 @@ export function removeThemeAttributes(markup: string, themeSlug: string): string
 
 export async function prepareThemeProof(themeDirectory: string, evidence: EvidenceStore): Promise<PreparedThemeProof> {
   const root = path.resolve(themeDirectory);
+  const rootStats = await lstat(root);
+  if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) throw new Error(`Theme proof needs a direct local theme directory: ${root}`);
   const stylePath = path.join(root, 'style.css');
   const style = await readFile(stylePath, 'utf8');
   const header = /^\/\*([\s\S]*?)\*\//.exec(style)?.[1] ?? '';
@@ -89,6 +93,13 @@ export async function prepareThemeProof(themeDirectory: string, evidence: Eviden
     manifestFiles.push({ file, sha256: evidenceRef.sha256, bytes: evidenceRef.bytes });
   }
   const manifest = { files: manifestFiles };
+  for (const file of files) {
+    const bytes = Buffer.from(file.content, 'utf8');
+    const pinned = manifestFiles.find((entry) => entry.file === file.file);
+    if (!pinned || pinned.sha256 !== `sha256:${createHash('sha256').update(bytes).digest('hex')}`) {
+      throw new Error(`Theme source changed while the proof snapshot was being captured: ${file.file}`);
+    }
+  }
   const manifestBytes = Buffer.from(JSON.stringify(manifest), 'utf8');
   const snapshotEvidence = await evidence.put(manifestBytes, { mediaType: 'application/json' });
   return {
@@ -115,7 +126,7 @@ export function effectiveWpEnvConfig(config: ThemeWpEnvConfig): {
     core: process.env.WP_ENV_CORE ?? stringValue(development.core) ?? stringValue(config.core),
     plugins: stringArray(development.plugins) ?? stringArray(config.plugins) ?? [],
     themes: stringArray(development.themes) ?? stringArray(config.themes) ?? [],
-    mappings: recordStrings(development.mappings) ?? recordStrings(config.mappings) ?? {},
+    mappings: { ...(recordStrings(config.mappings) ?? {}), ...(recordStrings(development.mappings) ?? {}) },
   };
 }
 
@@ -138,32 +149,35 @@ export function themePreflightFailure(theme: PreparedThemeProof, config: ThemeWp
 
 export async function writeThemeRuntimeConfig(
   sourceConfig: ThemeWpEnvConfig,
-  sourceConfigPath: string,
+  _sourceConfigPath: string,
   prepared: PreparedThemeProof,
   stagedTheme: string,
   outputPath: string,
 ): Promise<void> {
   const effective = effectiveWpEnvConfig(sourceConfig);
   const config: ThemeWpEnvConfig = structuredClone(sourceConfig);
-  config.themes = [...effective.themes.map((source) => resolveLocalSource(source, path.dirname(sourceConfigPath))), stagedTheme];
+  config.themes = [...effective.themes.map((source) => resolveLocalSource(source, process.cwd())), stagedTheme];
   config.phpVersion = effective.phpVersion;
   config.core = effective.core;
   config.mappings = {
-    ...effective.mappings,
-    [`/var/www/html/wp-content/themes/${prepared.slug}`]: stagedTheme,
+    ...Object.fromEntries(Object.entries(effective.mappings).map(([destination, source]) => [
+      destination,
+      resolveLocalSource(source, process.cwd()),
+    ])),
   };
   if (config.env?.development) {
     config.env.development = {
       ...config.env.development,
       phpVersion: effective.phpVersion,
       core: effective.core,
-      plugins: effective.plugins.map((source) => resolveLocalSource(source, path.dirname(sourceConfigPath))),
+      plugins: effective.plugins.map((source) => resolveLocalSource(source, process.cwd())),
       themes: config.themes,
       mappings: config.mappings,
     };
   } else {
-    config.plugins = effective.plugins.map((source) => resolveLocalSource(source, path.dirname(sourceConfigPath)));
+    config.plugins = effective.plugins.map((source) => resolveLocalSource(source, process.cwd()));
   }
+  await mkdir(path.dirname(outputPath), { recursive: true });
   await writeFile(outputPath, `${JSON.stringify(config, null, 2)}\n`, 'utf8');
 }
 
@@ -171,23 +185,32 @@ export async function copyThemeSnapshot(prepared: PreparedThemeProof, destinatio
   await mkdir(path.dirname(destination), { recursive: true });
   await cp(prepared.root, destination, {
     recursive: true,
-    filter: (source) => !['.git', 'node_modules', 'vendor'].includes(path.basename(source)),
+    filter: (source) => path.basename(source) !== '.git',
   });
+  const copied = await listThemeFiles(destination);
+  if (copied.length !== prepared.manifest.files.length) throw new Error('The staged theme tree differs from its pinned source file inventory.');
+  for (const file of prepared.manifest.files) {
+    const bytes = await readFile(path.join(destination, file.file));
+    const hash = `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+    if (bytes.byteLength !== file.bytes || hash !== file.sha256) throw new Error(`The staged theme bytes differ from the pinned source: ${file.file}`);
+  }
 }
 
 export async function pinLocalPluginDirectories(plugins: readonly string[], baseDirectory: string, evidence: EvidenceStore): Promise<unknown[]> {
   const result = [];
   for (const source of plugins) {
-    const directory = path.resolve(baseDirectory, source);
+    const directory = resolveLocalSource(source, baseDirectory);
     const manifest = [];
-    for (const file of await listThemeFiles(directory)) {
-      const bytes = await readFile(path.join(directory, file));
+    const stats = await lstat(directory);
+    const files = stats.isFile() ? [path.basename(directory)] : await listThemeFiles(directory);
+    for (const file of files) {
+      const bytes = await readFile(stats.isFile() ? directory : path.join(directory, file));
       const reference = await evidence.put(bytes, { mediaType: 'application/octet-stream' });
       manifest.push({ file, sha256: reference.sha256, bytes: reference.bytes });
     }
     const manifestBytes = Buffer.from(JSON.stringify({ files: manifest }), 'utf8');
     const snapshot = await evidence.put(manifestBytes, { mediaType: 'application/json' });
-    result.push({ path: directory, ...snapshot });
+    result.push({ localPath: directory, ...snapshot });
   }
   return result;
 }
@@ -196,7 +219,7 @@ async function listThemeFiles(root: string): Promise<string[]> {
   const files: string[] = [];
   const visit = async (directory: string): Promise<void> => {
     for (const entry of await readdir(directory, { withFileTypes: true })) {
-      if (['.git', 'node_modules', 'vendor'].includes(entry.name)) continue;
+      if (entry.name === '.git') continue;
       const fullPath = path.join(directory, entry.name);
       const stats = await lstat(fullPath);
       if (stats.isSymbolicLink()) throw new Error(`Theme proof cannot snapshot symlinked input: ${path.relative(root, fullPath)}`);
@@ -325,6 +348,7 @@ function isLocalSource(value: string): boolean {
   return value.startsWith('.') || value.startsWith('~') || path.isAbsolute(value);
 }
 
-function resolveLocalSource(value: string, baseDirectory: string): string {
+export function resolveLocalSource(value: string, baseDirectory: string): string {
+  if (value.startsWith('~/')) return path.resolve(homedir(), value.slice(2));
   return path.isAbsolute(value) ? value : path.resolve(baseDirectory, value);
 }

@@ -152,6 +152,8 @@ These are page-content conversion results, not measurements of registered-block 
 
 The bundled `context` command uses Wesper **0.4.1**. See the [site-context reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#site-context-from-wesper) for what the manifest supplies and its limitations.
 
+For a real WordPress Site Editor save check of a local block theme, run `block-runner proof --theme <theme-directory> --wp-env-config <wp-env.json>`. The config supplies PHP and local dependency plugins; the proof pins the theme source, then checks each template and part through editor serialization and a fresh REST read.
+
 ## License
 
 GPL-2.0-or-later.
