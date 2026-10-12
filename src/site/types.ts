@@ -17,6 +17,19 @@ export interface SitePatternIntent {
   body: IntentTree;
 }
 
+export interface SiteSyncedPatternDefinition {
+  title: string;
+  body: IntentTree;
+}
+
+export interface SiteSyncedPatternUse {
+  /** `page:<id>` or `synced-pattern:<id>`. */
+  documentId: string;
+  nodePath: number[];
+  patternId: string;
+  content?: Record<string, Record<string, unknown>>;
+}
+
 export interface SitePageIntent {
   /** Stable logical identity within `siteId`; independent of route and content. */
   id: string;
@@ -48,7 +61,7 @@ export interface SiteAssetIntent {
 export type SiteAssetAttribute = 'url' | 'attrs.url' | 'attrs.src' | 'attrs.id';
 
 export interface SiteAssetUse {
-  /** `page:<id>`, `template:<name>`, `part:<name>`, or `pattern:<name>`. */
+  /** `page:<id>`, `template:<name>`, `part:<name>`, `pattern:<name>`, or `synced-pattern:<id>`. */
   documentId: string;
   /** Child indices from the document's `blocks` array, for example `[0, 1]`. */
   nodePath: number[];
@@ -67,6 +80,8 @@ export interface SiteIntent {
   parts: Record<string, SiteDocumentIntent>;
   /** Keys are safe stable file keys used when a pattern file is emitted. */
   patterns: Record<string, SitePatternIntent>;
+  /** Optional database-owned reusable patterns, kept distinct from static theme patterns. */
+  syncedPatterns?: { version: 1; definitions: Record<string, SiteSyncedPatternDefinition>; uses: SiteSyncedPatternUse[] };
   pages: SitePageIntent[];
   assets: SiteAssetIntent[];
   assetUses: SiteAssetUse[];
@@ -128,6 +143,17 @@ export interface SiteAttachmentBinding {
   imageSizes?: Readonly<Record<string, { url: string; width: number; height: number }>>;
 }
 
+export interface CompiledSiteSyncedPattern {
+  id: string;
+  title: string;
+  content?: string;
+  body: IntentTree;
+  pendingUses: SiteSyncedPatternUse[];
+  pendingBindings: SiteAssetUse[];
+  diagnostics: ReportItem[];
+  ok: boolean;
+}
+
 /** Successful, fully bound result of compiling the complete site. */
 export interface CompiledSite {
   sourceIntent: SiteIntent;
@@ -137,6 +163,7 @@ export interface CompiledSite {
   themeAssetBaseUrl?: string;
   themeFiles: SiteFile[];
   pages: CompiledSitePage[];
+  syncedPatterns: CompiledSiteSyncedPattern[];
   assets: SiteFile[];
   diagnostics: ReportItem[];
   inventory: Array<{ path: string; sha256: string; size: number }>;
@@ -151,6 +178,7 @@ export interface ThemeArtifact {
   targetBindingFingerprint: string;
   themeAssetBaseUrl?: string;
   themeFiles: SiteFile[];
+  syncedPatterns: CompiledSiteSyncedPattern[];
   pendingPageBindings: SiteAssetUse[];
   diagnostics: ReportItem[];
   inventory: Array<{ path: string; sha256: string; size: number }>;

@@ -32,7 +32,7 @@ function source(sha256: string): PreparedSiteSource {
   return { sourceIntent, assetRoot: '/assets', assets: [{ ...sourceIntent.assets[0]!, sha256, bytes: new Uint8Array([1]) }], sourceIdentity: 'source', unresolvedAssetUses: [] };
 }
 function theme(input: PreparedSiteSource): ThemeArtifact {
-  return { sourceIntent: input.sourceIntent, sourceAssets: input.assets, targetBindings: {}, targetBindingFingerprint: 'bindings', themeFiles: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'theme' };
+  return { sourceIntent: input.sourceIntent, sourceAssets: input.assets, targetBindings: {}, targetBindingFingerprint: 'bindings', themeFiles: [], syncedPatterns: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'theme' };
 }
 const compiledPages = [{ id: 'home', route: '/', title: 'Home', template: 'index', content: '', status: 'draft' as const, diagnostics: [] }];
 

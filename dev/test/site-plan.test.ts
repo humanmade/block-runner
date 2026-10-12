@@ -17,7 +17,7 @@ import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../
 function source(): PreparedSiteSource {
   return { sourceIntent: { version:1, siteId:'sample', homePageId:'home', theme:{slug:'sample',title:'Sample',themeJson:{version:3}}, templates:{index:{body:{blocks:[{block:'core/paragraph',text:'Index'}]}}}, parts:{}, patterns:{}, pages:[{id:'home',route:'/',title:'Home',template:'index',status:'draft',body:{blocks:[{block:'core/paragraph',text:'Hello'}]}}], assets:[], assetUses:[] }, assetRoot:'/assets',assets:[],sourceIdentity:'source-hash',unresolvedAssetUses:[] };
 }
-function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,targetBindings:{},targetBindingFingerprint:'binding-hash',themeFiles:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
+function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,targetBindings:{},targetBindingFingerprint:'binding-hash',themeFiles:[],syncedPatterns:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
 function pages(): CompiledSitePage[] {return [{id:'home',route:'/',title:'Home',template:'index',status:'draft',content:'<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->',diagnostics:[]}];}
 function snapshot(): SiteSnapshot {return {target:{homeUrl:'https://example.test',siteUrl:'https://example.test/wp',blogId:2},runtime:{wordpress:'7.1',php:'8.4.26'},principal:{userId:7,capabilities:{edit_pages:true,edit_others_pages:true,manage_options:true,edit_theme_options:true,publish_pages:true,upload_files:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/wp/wp-content/themes/sample',inventory:[]},routing:{permalinkStructure:'/%postname%/',rewriteRulesHash:'rules-hash',routes:[]},entities:[],overrides:[],navigation:[],options:{show_on_front:'posts',page_on_front:0},siteRecord:null};}
 function owned(): SiteEntity {const state={content:pages()[0]!.content,title:'Home',slug:'home',parentId:0,template:'index',status:'draft'};return {id:14,kind:'page',route:'/',state,ownership:[{version:1,siteId:'sample',entityId:'home',kind:'page',lastAppliedHash:managedStateHash(state)}]};}
@@ -28,6 +28,7 @@ describe('read-only local WP-CLI edge',()=>{
     const calls: Array<{executable:string,args:string[]}> = [];
     const result=await readSiteSnapshot({wpPath:'/tmp/wp path;$(touch nope)',wpUrl:'https://example.test/sub',wpUser:'editor',wpBinary:'/tmp/wp binary'},'sample',async(executable,args)=>{calls.push({executable,args});return JSON.stringify(snapshot());});
     expect(result.target.blogId).toBe(2);
+    expect(calls[0]!.args.at(-1)).toContain("'edit_posts','edit_others_posts','publish_posts','publish_blocks','edit_published_posts'");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.executable).toBe('/tmp/wp binary');
     expect(calls[0]!.args.slice(0,4)).toEqual(['--path=/tmp/wp path;$(touch nope)','--url=https://example.test/sub','--user=editor','eval']);
