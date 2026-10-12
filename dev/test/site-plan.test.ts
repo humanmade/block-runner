@@ -5,7 +5,7 @@ import { hashBytes } from '../../src/publication.js';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { describe, expect, it } from 'vitest';
 import { readSiteSnapshot, siteRecordOption } from '../../src/site/wpcli.js';
-import { managedStateHash, reconcileSitePlan, readSitePlanInput } from '../../src/site/plan.js';
+import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings } from '../../src/site/plan.js';
 import type { SiteSnapshot, SiteEntity } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../src/site/types.js';
 
@@ -95,5 +95,17 @@ describe('source and retained bundle boundaries',()=>{
     expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(prepared.source.sourceIdentity);
     await writeFile(path.join(root,'site.intent.json'),Buffer.from('corrupt'));await expect(readSitePlanInput(root)).rejects.toThrow('retained bundle bytes differ');
     const linked=path.join(root,'linked');await symlink(root,linked);await expect(readSitePlanInput(linked)).rejects.toThrow('symlinks');
+  });
+});
+
+describe('destination attachment bindings',()=>{
+  it('checks exact numeric identity, URL and bytes without title or basename matching',()=>{
+    const input=source();input.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment',sha256:'aaa',bytes:new Uint8Array()}];
+    const observed=snapshot();observed.entities=[{id:22,kind:'attachment',route:null,state:{sha256:'aaa',url:'https://example.test/uploads/photo.png'},ownership:[]}];
+    const retained={source:input,retainedBindings:{photo:{id:22,url:'https://example.test/uploads/photo.png'}}};
+    expect(observedAttachmentBindings(retained,observed)).toEqual(retained.retainedBindings);
+    observed.entities[0]!.state.sha256='changed';expect(()=>observedAttachmentBindings(retained,observed)).toThrow('destination bytes');
+    observed.entities=[];expect(()=>observedAttachmentBindings(retained,observed)).toThrow('absent');
+    expect(()=>observedAttachmentBindings({...retained,retainedThemeAssetBaseUrl:'https://old-target.test/theme'},snapshot())).toThrow('different target');
   });
 });

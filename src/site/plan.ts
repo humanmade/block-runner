@@ -17,7 +17,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   const intent = source.sourceIntent;
   if (!/^7\.1(?:\.|$)/.test(snapshot.runtime.wordpress)) issue('/target/runtime', 'runtime-mismatch', 'WordPress 7.1 is required');
   if (snapshot.theme.slug !== intent.theme.slug) issue('/target/theme', 'theme-mismatch', 'activate the explicitly deployed intended theme before planning');
-  if (hashCanonicalJson(snapshot.theme.inventory) !== hashCanonicalJson(theme.inventory)) issue('/target/theme/inventory', 'theme-bytes-mismatch', 'installed theme files differ from the independently compiled theme artifact');
+  if (hashCanonicalJson([...snapshot.theme.inventory].sort((a,b)=>a.path.localeCompare(b.path))) !== hashCanonicalJson([...theme.inventory].sort((a,b)=>a.path.localeCompare(b.path)))) issue('/target/theme/inventory', 'theme-bytes-mismatch', 'installed theme files differ from the independently compiled theme artifact');
   const capabilities = ['edit_pages', 'edit_others_pages', 'manage_options', 'edit_theme_options'];
   if (intent.pages.some(page => page.status === 'publish')) capabilities.push('publish_pages');
   if (source.assets.some(asset => asset.role === 'attachment')) capabilities.push('upload_files');
@@ -171,4 +171,23 @@ async function assertSafePath(file: string): Promise<void> {
     current = path.join(current,component);
     if ((await lstat(current)).isSymbolicLink()) throw new Error('site input path cannot contain symlinks');
   }
+}
+
+/** Retained numeric bindings are accepted only after observing their exact destination bytes. */
+export function observedAttachmentBindings(input: SitePlanInput, snapshot: SiteSnapshot): Record<string, SiteAttachmentBinding> {
+  if (input.retainedThemeAssetBaseUrl !== undefined && input.retainedThemeAssetBaseUrl !== snapshot.theme.assetBaseUrl) throw new Error('retained theme asset base URL belongs to a different target');
+  const result: Record<string, SiteAttachmentBinding> = {};
+  for (const asset of input.source.assets.filter(item=>item.role === 'attachment')) {
+    const retained = input.retainedBindings[asset.id];
+    const candidates = snapshot.entities.filter(entity=>entity.kind === 'attachment' && entity.ownership.some(meta=>meta.siteId===input.source.sourceIntent.siteId && meta.entityId===asset.id));
+    if (candidates.length > 1) throw new Error(`duplicate logical attachment ownership for ${asset.id}`);
+    const observed = retained ? snapshot.entities.find(entity=>entity.kind==='attachment' && entity.id===retained.id) : candidates[0];
+    if (!observed) { if (retained) throw new Error(`retained attachment binding ${asset.id} is absent on the observed target`); continue; }
+    if (observed.state.sha256 !== asset.sha256 || typeof observed.state.url !== 'string' || (retained && observed.state.url !== retained.url)) throw new Error(`attachment binding ${asset.id} differs from observed destination bytes or URL`);
+    const url = new URL(observed.state.url);
+    if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('attachment URL contains unsupported identity or secret fields');
+    result[asset.id] = { id: observed.id, url: observed.state.url };
+  }
+  for (const id of Object.keys(input.retainedBindings)) if (!input.source.assets.some(asset=>asset.id===id && asset.role==='attachment')) throw new Error(`retained binding ${id} has no declared attachment asset`);
+  return result;
 }
