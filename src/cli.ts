@@ -36,6 +36,11 @@ import { formatTextReport } from './report/text.js';
 import { discoverThemeMarkupFiles, isThemeDirectory, type ThemeMarkupFile } from './theme/folders.js';
 import { validateThemeJson } from './theme/theme-json.js';
 import { findThemeReferenceIssues } from './theme/references.js';
+import { compileSite, compileThemeDocuments } from './site/compile.js';
+import { prepareSiteSource } from './site/input.js';
+import { writeCompiledSite } from './site/write.js';
+import type { SiteAttachmentBinding } from './site/types.js';
+import { readStableRegularFile } from './publication.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -117,6 +122,16 @@ interface ProofCliOptions {
   json?: boolean;
 }
 
+interface SiteCompileCliOptions {
+  out: string;
+  assetRoot: string;
+  bindings?: string;
+  themeAssetBaseUrl?: string;
+  themeOnly?: boolean;
+  strict?: boolean;
+  json?: boolean;
+}
+
 const program = new Command();
 
 program
@@ -155,6 +170,73 @@ addTokenOptions(
   });
 
 const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
+
+program.command('site')
+  .description('Compile and safely publish a whole-site bundle.')
+  .command('compile <intentOrStdin>')
+  .description('Compile a site intent into a new source bundle and installable theme.')
+  .requiredOption('--out <new-bundle-dir>', 'new directory for the retained source and compiled bundle')
+  .requiredOption('--asset-root <dir>', 'explicit root for declared source assets')
+  .option('--bindings <path>', 'JSON file containing caller-supplied attachment bindings keyed by asset ID')
+  .option('--theme-asset-base-url <url>', 'explicit target theme URL used by theme-document attachment references')
+  .option('--theme-only', 'publish the fully gated theme while page-owned attachment bindings remain pending')
+  .option('--strict', 'fail on strict warnings')
+  .option('--json', 'emit a machine-readable compile result')
+  .action(async (intentOrStdin: string, options: SiteCompileCliOptions) => {
+    const intentPath = intentOrStdin === '-' ? undefined : path.resolve(intentOrStdin);
+    const intentText = intentPath ? await readRegularJsonText(intentPath) : await readStdin();
+    let intent: unknown;
+    try {
+      intent = JSON.parse(intentText);
+    } catch (error) {
+      throw new Error(`site intent is not valid JSON: ${error instanceof Error ? error.message : String(error)}`);
+    }
+    const assetRoot = path.resolve(options.assetRoot);
+    const prepared = await prepareSiteSource(intent, assetRoot);
+    if (!prepared.ok) {
+      emitSiteCompileFailure(prepared.diagnostics, options.json === true);
+      process.exitCode = 1;
+      return;
+    }
+
+    const attachmentBindings = options.bindings ? await readAttachmentBindings(path.resolve(options.bindings)) : undefined;
+    const compileOptions = {
+      attachmentBindings,
+      themeAssetBaseUrl: options.themeAssetBaseUrl,
+      strict: options.strict,
+    };
+    const compiled = options.themeOnly
+      ? await compileThemeDocuments(prepared.source, compileOptions)
+      : await compileSite(prepared.source, compileOptions);
+    if (!compiled.ok) {
+      emitSiteCompileFailure(compiled.diagnostics, options.json === true);
+      process.exitCode = 1;
+      return;
+    }
+
+    const artifact = 'site' in compiled ? compiled.site : compiled.artifact;
+    const written = await writeCompiledSite(options.out, prepared.source, artifact);
+    const result = {
+      ok: true,
+      command: 'site compile',
+      artifactType: written.artifactType,
+      directory: written.directory,
+      files: written.files,
+      sourceIdentity: prepared.source.sourceIdentity,
+      artifactIdentity: artifact.artifactIdentity,
+      diagnostics: compiled.diagnostics,
+      ...('artifact' in compiled ? { pendingPageBindings: compiled.artifact.pendingPageBindings } : {}),
+      runtimeProof: 'not-run',
+    };
+    if (options.json) {
+      console.log(JSON.stringify(result, null, 2));
+      return;
+    }
+    console.log(`Bundle: ${written.directory}`);
+    console.log(`Artifact: ${written.artifactType === 'theme' ? 'theme-only; page bindings remain pending' : 'compiled site'}`);
+    console.log(`Files: ${written.files.length}`);
+    console.log('WordPress installation and runtime proof have not run.');
+  });
 
 addTokenOptions(
   addWpCredentialOptions(
@@ -634,6 +716,51 @@ async function main(): Promise<void> {
     console.error(error instanceof Error ? error.message : String(error));
     process.exitCode = 2;
   }
+}
+
+function emitSiteCompileFailure(diagnostics: unknown[], json: boolean): void {
+  const report = { ok: false, command: 'site compile', diagnostics, filesWritten: false };
+  if (json) console.log(JSON.stringify(report, null, 2));
+  else {
+    console.error('Site compilation failed; no bundle was published.');
+    for (const diagnostic of diagnostics) console.error(`- ${formatSiteDiagnostic(diagnostic)}`);
+  }
+}
+
+function formatSiteDiagnostic(diagnostic: unknown): string {
+  if (!diagnostic || typeof diagnostic !== 'object') return String(diagnostic);
+  const value = diagnostic as { path?: unknown; code?: unknown; message?: unknown };
+  return [value.path, value.code, value.message].filter((part) => typeof part === 'string').join(': ');
+}
+
+async function readRegularJsonText(file: string): Promise<string> {
+  try {
+    return (await readStableRegularFile(file, 'input must be a stable regular file')).content.toString('utf8');
+  } catch (error) {
+    throw new Error(`Could not read site intent ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+async function readAttachmentBindings(file: string): Promise<Readonly<Record<string, SiteAttachmentBinding>>> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(await readRegularJsonText(file));
+  } catch (error) {
+    throw new Error(`Could not read attachment bindings ${file}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+  if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+    throw new Error(`Attachment bindings ${file} must contain an object keyed by asset ID`);
+  }
+  for (const [assetId, binding] of Object.entries(parsed)) {
+    if (!assetId || !binding || typeof binding !== 'object' || Array.isArray(binding)
+      || !Number.isSafeInteger((binding as SiteAttachmentBinding).id)
+      || (binding as SiteAttachmentBinding).id < 1
+      || typeof (binding as SiteAttachmentBinding).url !== 'string'
+      || !(binding as SiteAttachmentBinding).url.trim()) {
+      throw new Error(`Attachment binding ${JSON.stringify(assetId)} must have a positive integer id and non-empty URL`);
+    }
+  }
+  return parsed as Record<string, SiteAttachmentBinding>;
 }
 
 function routeDirectAuthorInvocation(argv: string[]): void {
