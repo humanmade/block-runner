@@ -39,7 +39,7 @@ interface ThemeJsonSettings {
 }
 
 export function parseThemeJsonSettings(settings: ThemeJsonSettings | undefined): ResolvedTokens {
-  const tokens: ResolvedTokens = { colors: {}, gradients: {}, fonts: {}, fontSizes: {}, spacing: {} };
+  const tokens: ResolvedTokens = { colors: {}, fonts: {}, fontSizes: {}, spacing: {} };
   if (!settings || typeof settings !== 'object') {
     return tokens;
   }
@@ -51,7 +51,7 @@ export function parseThemeJsonSettings(settings: ThemeJsonSettings | undefined):
   }
   for (const entry of presetEntries(settings.color?.gradients)) {
     if (isRecord(entry) && typeof entry.slug === 'string' && entry.slug && typeof entry.gradient === 'string' && entry.gradient) {
-      tokens.gradients![entry.slug] = entry.gradient;
+      (tokens.gradients ??= {})[entry.slug] = entry.gradient;
     }
   }
   for (const entry of presetEntries(settings.typography?.fontFamilies)) {
@@ -74,7 +74,7 @@ export function parseThemeJsonSettings(settings: ThemeJsonSettings | undefined):
 }
 
 export function emptyTokens(): ResolvedTokens {
-  return { colors: {}, gradients: {}, fonts: {}, fontSizes: {}, spacing: {} };
+  return { colors: {}, fonts: {}, fontSizes: {}, spacing: {} };
 }
 
 function presetEntries(value: unknown): unknown[] {
