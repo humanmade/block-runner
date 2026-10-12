@@ -131,7 +131,7 @@ addTokenOptions(
 )
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
-    const inputs = await readInputs(globOrStdin);
+    const inputs = await readInputs(globOrStdin, { allowTheme: true });
     const report = (inputs.some((input) => input.theme) || await isThemeDirectory(globOrStdin))
       ? await validateThemeInputs(inputs, apiOptions)
       : aggregateReports('validate', await Promise.all(inputs.map((input) => validate(input.content, {
@@ -223,7 +223,7 @@ addTokenOptions(
   .option('--write', 'write canonicalized block theme files in place')
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
-    const inputs = await readInputs(globOrStdin);
+    const inputs = await readInputs(globOrStdin, { allowTheme: true });
     if (options.write && !inputs.some((input) => input.theme) && !await isThemeDirectory(globOrStdin)) {
       throw new Error('--write is only available for a block theme directory');
     }
@@ -670,7 +670,7 @@ function normalizeOptions(options: CliOptions): CommonOptions {
 
 async function readInputs(
   target: string,
-  options: { allowInline?: boolean; allowRawInline?: boolean } = {},
+  options: { allowInline?: boolean; allowRawInline?: boolean; allowTheme?: boolean } = {},
 ): Promise<CliInput[]> {
   if (target === '-') {
     return [{ path: '<stdin>', content: await readStdin() }];
@@ -678,14 +678,14 @@ async function readInputs(
 
   if (existsSync(target)) {
     const stats = await stat(target);
-    if (stats.isDirectory()) {
+    if (stats.isDirectory() && options.allowTheme) {
       if (!await isThemeDirectory(target)) {
         throw new Error(`Directory is not a block theme: ${target}`);
       }
       const files = await discoverThemeMarkupFiles(target);
       return files.map((theme) => ({ path: theme.path, content: theme.markup, theme }));
     }
-    if (!stats.isFile()) throw new Error(`Input is not a regular file: ${target}`);
+    if (!stats.isFile() && !stats.isDirectory()) throw new Error(`Input is not a regular file: ${target}`);
     return [{ path: target, content: await readFile(target, 'utf8') }];
   }
 
@@ -822,6 +822,7 @@ async function validateThemeInputs(inputs: CliInput[], options: CommonOptions): 
     const report = theme.skipReason
       ? skippedThemeFileReport('validate', theme)
       : await validate(theme.markup, { ...options, sourcePath: input.path });
+    shiftThemeSourceLocations(report, theme.header?.raw);
     results.push({ report, file: theme.file });
   }
   return themeAggregate('validate', results);
@@ -842,6 +843,7 @@ async function fixThemeInputs(
     }
 
     const report = await canonicalize(theme.markup, { ...options, sourcePath: theme.path });
+    shiftThemeSourceLocations(report, theme.header?.raw);
     let changed = false;
     if (write && report.ok) {
       const output = `${theme.header?.raw ?? ''}${report.output ?? theme.markup}`;
@@ -876,12 +878,26 @@ function skippedThemeFileReport(command: 'validate' | 'fix', theme: ThemeMarkupF
       status: 'warning',
       reason: unsafe
         ? 'Theme file is a symbolic link or non-regular target; it was not read or rewritten.'
-        : 'Pattern contains PHP beyond its leading metadata header; PHP was not executed or rewritten.',
+        : 'Pattern contains PHP beyond its leading metadata header; block validation was skipped and PHP was not executed or rewritten.',
       source: { path: theme.path },
       code: unsafe ? 'theme-unsafe-target' : 'pattern-php-body',
     }],
     ...(command === 'fix' ? { output: theme.content } : {}),
   };
+}
+
+function shiftThemeSourceLocations(report: BlockRunnerReport, prefix = ''): void {
+  if (!prefix) return;
+  const lineBreaks = prefix.match(/\r\n|\r|\n/g)?.length ?? 0;
+  const lastLine = prefix.split(/\r\n|\r|\n/).at(-1)?.length ?? 0;
+  for (const item of report.items) {
+    if (!item.source) continue;
+    if (item.source.offset !== undefined) item.source.offset += prefix.length;
+    if (item.source.htmlLine !== undefined) {
+      if (item.source.htmlLine === 1 && item.source.htmlColumn !== undefined) item.source.htmlColumn += lastLine;
+      item.source.htmlLine += lineBreaks;
+    }
+  }
 }
 
 function themeAggregate(

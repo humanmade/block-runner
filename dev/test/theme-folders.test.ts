@@ -26,22 +26,30 @@ describe('block theme folders', () => {
     const report = JSON.parse(result.stdout) as {
       summary: { blocks: number; warnings: number };
       files: Array<{ file: string; blocks: number; invalid: number; warnings: number }>;
+      items: Array<{ reason: string }>;
     };
 
     expect(result.code).toBe(0);
     expect(report.files.map(({ file }) => file)).toEqual([
       'parts/footer.html', 'parts/header.html', 'patterns/callout.php', 'patterns/dynamic.php',
-      'templates/index.html', 'templates/nested/UPPER.HTML', 'templates/single.html',
+      'templates/index.html', 'templates/nested/UPPER.HTML', 'templates/node_modules/hidden/ignored.html', 'templates/single.html',
     ]);
     expect(report.files.find(({ file }) => file === 'patterns/callout.php')).toMatchObject({ blocks: 3, invalid: 0 });
     expect(report.files.find(({ file }) => file === 'patterns/dynamic.php')).toMatchObject({ blocks: 0, invalid: 0, warnings: 1 });
     expect(report.summary.warnings).toBeGreaterThanOrEqual(1);
+    expect(report.items.some(({ reason }) => reason.includes('block validation was skipped'))).toBe(true);
 
     const text = await runCli(['validate', project]);
     expect(text.stdout).toContain('file=patterns/dynamic.php blocks=0 invalid=0 warnings=1');
   });
 
   it('writes canonical files atomically, preserves PHP headers, skips PHP bodies and is idempotent', async () => {
+    const pristine = await copiedTheme('valid-theme');
+    const pristineFix = await runCli(['fix', pristine, '--write', '--json']);
+    const pristineReport = JSON.parse(pristineFix.stdout) as { files: Array<{ changed?: boolean }> };
+    expect(pristineFix.code).toBe(0);
+    expect(pristineReport.files.every(({ changed }) => changed === false)).toBe(true);
+
     const project = await copiedTheme('valid-theme');
     const templatePath = path.join(project, 'templates', 'index.html');
     const patternPath = path.join(project, 'patterns', 'callout.php');
@@ -49,11 +57,12 @@ describe('block theme folders', () => {
     const dynamicPath = path.join(project, 'patterns', 'dynamic.php');
     const originalTemplate = await readFile(templatePath, 'utf8');
     const originalPattern = await readFile(patternPath, 'utf8');
-    const headerEnd = originalPattern.indexOf('?>') + 2;
-    const header = originalPattern.slice(0, headerEnd);
+    const closeTagEnd = originalPattern.indexOf('?>') + 2;
+    const originalHeader = originalPattern.slice(0, closeTagEnd);
+    const header = `\uFEFF  \r\n${originalHeader}  \r\n`;
     const dynamic = await readFile(dynamicSource, 'utf8');
     await writeFile(templatePath, `\n${originalTemplate}`);
-    await writeFile(patternPath, `${header}\n${originalPattern.slice(header.length)}`);
+    await writeFile(patternPath, `${header}${originalPattern.slice(closeTagEnd)}`);
     await writeFile(dynamicPath, dynamic);
     await chmod(templatePath, 0o640);
     const dynamicBefore = await readFile(dynamicPath, 'utf8');
@@ -117,6 +126,45 @@ describe('block theme folders', () => {
     expect(report.files.find(({ file }) => file === 'templates/index.html')).toMatchObject({ changed: false, warnings: 1 });
     expect(report.items.some(({ code }) => code === 'theme-unsafe-target')).toBe(true);
     expect(await readFile(externalPath, 'utf8')).toBe(external);
+  });
+
+  it('warns when a theme discovery root is a symlink', async () => {
+    const project = await copiedTheme('valid-theme');
+    const templates = path.join(project, 'templates');
+    const realTemplates = path.join(project, 'templates-original');
+    await rename(templates, realTemplates);
+    await symlink(realTemplates, templates, 'dir');
+
+    const result = await runCli(['validate', project, '--json']);
+    const report = JSON.parse(result.stdout) as {
+      files: Array<{ file: string; blocks: number; warnings: number }>;
+      items: Array<{ code?: string; reason: string }>;
+    };
+
+    expect(result.code).toBe(0);
+    expect(report.files.find(({ file }) => file === 'templates/')).toMatchObject({ blocks: 0, warnings: 1 });
+    expect(report.items.some(({ code }) => code === 'theme-unsafe-target')).toBe(true);
+  });
+
+  it('shifts pattern validation locations back across the preserved PHP header', async () => {
+    const project = await copiedTheme('valid-theme');
+    const patternPath = path.join(project, 'patterns', 'callout.php');
+    const original = await readFile(patternPath, 'utf8');
+    const invalid = original.replace('<h2 class=', '<h3 class=');
+    await writeFile(patternPath, invalid);
+    const headerLength = original.indexOf('<!-- wp:');
+    const expectedOffset = invalid.indexOf('<!-- wp:heading');
+    const expectedLine = invalid.slice(0, expectedOffset).split(/\r\n|\r|\n/).length;
+
+    const result = await runCli(['validate', project, '--json']);
+    const report = JSON.parse(result.stdout) as {
+      items: Array<{ block?: string; source?: { path?: string; offset?: number; htmlLine?: number } }>;
+    };
+    const finding = report.items.find(({ block }) => block === 'core/heading');
+
+    expect(result.code).toBe(1);
+    expect(headerLength).toBeGreaterThan(0);
+    expect(finding?.source).toMatchObject({ path: patternPath, offset: expectedOffset, htmlLine: expectedLine });
   });
 });
 

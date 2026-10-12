@@ -29,8 +29,8 @@ export async function isThemeDirectory(directory: string): Promise<boolean> {
   }
 
   return entries.some((entry) =>
-    (entry.name === 'theme.json' && entry.isFile())
-    || (['templates', 'parts', 'patterns'].includes(entry.name) && entry.isDirectory()),
+    (entry.name === 'theme.json' && (entry.isFile() || entry.isSymbolicLink()))
+    || (['templates', 'parts', 'patterns'].includes(entry.name) && (entry.isDirectory() || entry.isSymbolicLink())),
   );
 }
 
@@ -54,9 +54,19 @@ export async function discoverThemeMarkupFiles(directory: string): Promise<Theme
     } catch {
       continue;
     }
-    if (!rootStats.isDirectory()) continue;
+    if (rootStats.isSymbolicLink() || !rootStats.isDirectory()) {
+      files.push({
+        path: rootPath,
+        file: `${root.directory}/`,
+        kind: root.kind,
+        content: '',
+        markup: '',
+        skipReason: 'theme-unsafe-target',
+      });
+      continue;
+    }
 
-    for (const filePath of await recursiveFiles(rootPath, root.extension, root.kind !== 'pattern')) {
+    for (const filePath of await recursiveFiles(rootPath, root.extension, root.kind !== 'pattern', root.kind === 'pattern')) {
       const relativePath = path.relative(directory, filePath).split(path.sep).join('/');
       const targetStats = await lstat(filePath);
       if (targetStats.isSymbolicLink() || !targetStats.isFile()) {
@@ -85,14 +95,20 @@ export async function discoverThemeMarkupFiles(directory: string): Promise<Theme
   return files.sort((left, right) => left.file.localeCompare(right.file));
 }
 
-async function recursiveFiles(directory: string, extension: string, caseInsensitive: boolean): Promise<string[]> {
+async function recursiveFiles(
+  directory: string,
+  extension: string,
+  caseInsensitive: boolean,
+  skipWordPressDirectories: boolean,
+): Promise<string[]> {
   const entries = (await readdir(directory, { withFileTypes: true })).sort((left, right) => left.name.localeCompare(right.name));
   const files: string[] = [];
   for (const entry of entries) {
-    if (entry.name.startsWith('.') || ['CVS', 'node_modules', 'vendor', 'bower_components'].includes(entry.name)) continue;
+    if (skipWordPressDirectories
+      && (entry.name.startsWith('.') || ['CVS', 'node_modules', 'vendor', 'bower_components'].includes(entry.name))) continue;
     const filePath = path.join(directory, entry.name);
     if (entry.isDirectory()) {
-      files.push(...await recursiveFiles(filePath, extension, caseInsensitive));
+      files.push(...await recursiveFiles(filePath, extension, caseInsensitive, skipWordPressDirectories));
     } else if ((entry.isFile() || entry.isSymbolicLink())
       && (caseInsensitive ? path.extname(entry.name).toLowerCase() === extension : path.extname(entry.name) === extension)) {
       files.push(filePath);
@@ -102,7 +118,7 @@ async function recursiveFiles(directory: string, extension: string, caseInsensit
 }
 
 function splitPatternHeader(content: string): { header?: ThemePatternHeader; markup: string } {
-  const match = /^(\uFEFF?<\?php[\t \r\n]*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r\n|\r|\n|$)|\#[^\r\n]*(?:\r\n|\r|\n|$))[\t \r\n]*)*\?>)/.exec(content);
+  const match = /^((?:\uFEFF)?[\t \r\n]*<\?php[\t \r\n]*(?:(?:\/\*[\s\S]*?\*\/|\/\/[^\r\n]*(?:\r\n|\r|\n|$)|\#[^\r\n]*(?:\r\n|\r|\n|$))[\t \r\n]*)*\?>[\t ]*(?:\r\n|\r|\n)?)/.exec(content);
   if (!match) return { markup: content };
 
   const raw = match[1]!;
