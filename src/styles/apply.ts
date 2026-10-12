@@ -185,8 +185,8 @@ export function applyElementStyles(input: ApplyStylesInput): StyleLedgerEntry[] 
 
 /**
  * The walker claims a Custom HTML fallback at its outer element and intentionally does not walk
- * descendants. Their inline declarations nevertheless survive verbatim, so account every one
- * here rather than leaving nested styles (and their asset-bearing values) invisible to authoring.
+ * descendants. Inline declarations survive verbatim in its markup, but class declarations live in
+ * the stripped `<style>` element and need to remain eligible for the open-rung sidecar.
  */
 function customHtmlStyles(root: Element, input: ApplyStylesInput): StyleLedgerEntry[] {
   const entries: StyleLedgerEntry[] = [];
@@ -203,13 +203,19 @@ function customHtmlStyles(root: Element, input: ApplyStylesInput): StyleLedgerEn
         reason: 'preserved verbatim in the Custom HTML fallback',
       })),
       ...overridden.map(overriddenEntry),
-      ...declarations.map<StyleLedgerEntry>((declaration) => ({
-        ...declaration,
-        outcome: 'consumed',
-        reason: declaration.origin
-          ? 'preserved by the authored selector in the Custom HTML fallback'
-          : 'preserved inline in the Custom HTML fallback',
-      })),
+      ...declarations.map<StyleLedgerEntry>((declaration) =>
+        declaration.origin
+          ? {
+              ...declaration,
+              outcome: 'dropped',
+              reason: 'the <style> element is stripped — the class survives but its stylesheet does not',
+            }
+          : {
+              ...declaration,
+              outcome: 'consumed',
+              reason: 'preserved inline in the Custom HTML fallback',
+            },
+      ),
     );
   }
   return entries;
