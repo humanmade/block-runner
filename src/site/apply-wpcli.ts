@@ -15,10 +15,14 @@ export type SiteApplyRequest =
 export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{status: string; id?: number}> {
   if (!wp.wpPath || [wp.wpPath,wp.wpUrl,wp.wpUser,wp.wpBinary].some(value=>value?.includes('\0'))) throw new Error('invalid WP-CLI selection');
   const args = [`--path=${wp.wpPath}`, ...(wp.wpUrl ? [`--url=${wp.wpUrl}`] : []), ...(wp.wpUser ? [`--user=${wp.wpUser}`] : []), 'eval', script(boundary,request)];
-  const output = transport ? await transport(wp.wpBinary ?? 'wp',args) : (await run(wp.wpBinary ?? 'wp',args,{encoding:'utf8',maxBuffer:1024*1024})).stdout;
-  const result = JSON.parse(output) as {status:string;id?:number};
-  if (!['complete','refused','outcome_unknown'].includes(result.status)) throw new Error('invalid apply boundary readback');
-  return result;
+  let output: string;
+  try { output = transport ? await transport(wp.wpBinary ?? 'wp',args) : (await run(wp.wpBinary ?? 'wp',args,{encoding:'utf8',maxBuffer:1024*1024})).stdout; }
+  catch { throw new Error('WP-CLI site apply transport failed; preserve operation evidence and inspect the selected local installation'); }
+  try {
+    const result = JSON.parse(output) as {status:string;id?:number};
+    if (!result || !['complete','refused','outcome_unknown'].includes(result.status)) throw new Error();
+    return result;
+  } catch { throw new Error('WP-CLI site apply returned invalid boundary readback; preserve operation evidence'); }
 }
 function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string {
   const encoded = Buffer.from(JSON.stringify({ ...boundary, request, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
