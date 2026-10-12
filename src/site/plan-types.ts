@@ -22,6 +22,7 @@ export interface SiteSnapshot {
   runtime: { wordpress: string; php: string };
   principal: { userId: number; capabilities: Record<string, boolean> };
   theme: { slug: string; assetBaseUrl: string; inventory: Array<{ path: string; sha256: string; size: number }> };
+  routing: { permalinkStructure: string; rewriteRulesHash: string | null; unsupportedReason?: string; routes: Array<{ route: string; kind: 'available' | 'singular' | 'reserved' | 'unsupported'; postId?: number; postType?: string; matchedRule: string | null; queryFingerprint: string; reason?: string }> };
   entities: SiteEntity[];
   overrides: Array<{ id: number; kind: string; theme: string[]; content: string }>;
   navigation: Array<{ id: number; content: string; status: string }>;

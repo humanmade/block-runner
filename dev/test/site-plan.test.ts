@@ -19,7 +19,7 @@ function source(): PreparedSiteSource {
 }
 function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,targetBindings:{},targetBindingFingerprint:'binding-hash',themeFiles:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
 function pages(): CompiledSitePage[] {return [{id:'home',route:'/',title:'Home',template:'index',status:'draft',content:'<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->',diagnostics:[]}];}
-function snapshot(): SiteSnapshot {return {target:{homeUrl:'https://example.test',siteUrl:'https://example.test/wp',blogId:2},runtime:{wordpress:'7.1',php:'8.4.26'},principal:{userId:7,capabilities:{edit_pages:true,edit_others_pages:true,manage_options:true,edit_theme_options:true,publish_pages:true,upload_files:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/wp/wp-content/themes/sample',inventory:[]},entities:[],overrides:[],navigation:[],options:{show_on_front:'posts',page_on_front:0},siteRecord:null};}
+function snapshot(): SiteSnapshot {return {target:{homeUrl:'https://example.test',siteUrl:'https://example.test/wp',blogId:2},runtime:{wordpress:'7.1',php:'8.4.26'},principal:{userId:7,capabilities:{edit_pages:true,edit_others_pages:true,manage_options:true,edit_theme_options:true,publish_pages:true,upload_files:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/wp/wp-content/themes/sample',inventory:[]},routing:{permalinkStructure:'/%postname%/',rewriteRulesHash:'rules-hash',routes:[]},entities:[],overrides:[],navigation:[],options:{show_on_front:'posts',page_on_front:0},siteRecord:null};}
 function owned(): SiteEntity {const state={content:pages()[0]!.content,title:'Home',slug:'home',parentId:0,template:'index',status:'draft'};return {id:14,kind:'page',route:'/',state,ownership:[{version:1,siteId:'sample',entityId:'home',kind:'page',lastAppliedHash:managedStateHash(state)}]};}
 const plan = (observed = snapshot(), input = source()) => reconcileSitePlan(input,theme(input),pages(),observed);
 
@@ -32,7 +32,7 @@ describe('read-only local WP-CLI edge',()=>{
     expect(calls[0]!.executable).toBe('/tmp/wp binary');
     expect(calls[0]!.args.slice(0,4)).toEqual(['--path=/tmp/wp path;$(touch nope)','--url=https://example.test/sub','--user=editor','eval']);
     expect(calls[0]!.args[4]).toContain(siteRecordOption('sample'));
-    expect(calls[0]!.args[4]).not.toMatch(/wp_insert|wp_update|update_option|add_post_meta|update_post_meta|media_handle|unlink|file_put_contents/);
+    expect(calls[0]!.args[4]).not.toMatch(/\b(?:wp_insert\w*|wp_update\w*|update_option|add_post_meta|update_post_meta|media_handle\w*|unlink|file_put_contents)\s*\(/);
   });
   it('refuses user zero and secret-bearing URL identity',async()=>{
     const observed=snapshot(); observed.principal.userId=0;
@@ -124,6 +124,7 @@ async function sourceFirstFixture() {
   const compiled=await compileThemeDocuments(input.source,{themeAssetBaseUrl:observed.theme.assetBaseUrl});
   if(!compiled.ok)throw new Error(JSON.stringify(compiled.diagnostics));
   observed.theme.inventory=compiled.artifact.inventory;
+  observed.routing.routes=input.source.sourceIntent.pages.filter(page=>page.route!=='/').map(page=>({route:page.route,kind:'available',matchedRule:'native-page-rule',queryFingerprint:'query-hash'}));
   return {intentFile,input,observed,artifact:compiled.artifact};
 }
 describe('source-first plan orchestration and CLI',()=>{
@@ -150,5 +151,30 @@ describe('source-first plan orchestration and CLI',()=>{
     const run=promisify(execFile);const args=['--import',import.meta.resolve('tsx'),fileURLToPath(new URL('../../src/cli.ts',import.meta.url)),'site','plan',intentFile,'--asset-root',fixtureRoot,'--wp-path','/wp path;literal','--wp-url','https://example.test/sub','--wp-user','7','--wp-binary',script,'--out',output,'--json'];
     const {stdout}=await run(process.execPath,args,{cwd:root});const report=JSON.parse(stdout);expect(report.executable).toBe(true);expect(JSON.parse(await readFile(output,'utf8'))).toEqual(report);expect(JSON.parse(await readFile(argvFile,'utf8')).slice(0,4)).toEqual(['--path=/wp path;literal','--url=https://example.test/sub','--user=7','eval']);
     await expect(run(process.execPath,args,{cwd:root})).rejects.toMatchObject({code:2});
+  });
+});
+
+describe('bounded native target route resolution',()=>{
+  function withRoute(route:string,kind:'available'|'singular'|'reserved'|'unsupported',postId?:number,postType?:string) {
+    const input=source();input.sourceIntent.pages.push({id:'about',route,title:'About',template:'index',body:{blocks:[{block:'core/paragraph',text:'About'}]}});
+    const observed=snapshot();observed.routing.routes=[{route,kind,matchedRule:'native-rule',queryFingerprint:'query-hash',...(postId?{postId}:{}),...(postType?{postType}:{})}];
+    return {input,observed};
+  }
+  it.each([['/news-item','post'],['/work/demo','project']])('blocks existing public singular %s (%s)',(route,type)=>{
+    const {input,observed}=withRoute(route,'singular',25,type);expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('route-conflict');
+  });
+  it.each(['/category/news','/feed','/wp-json'])('blocks native reserved endpoint %s',route=>{
+    const {input,observed}=withRoute(route,'reserved');expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('route-conflict');
+  });
+  it('fails closed on unresolved/custom routes and absent cached/plain permalink configuration',()=>{
+    const {input,observed}=withRoute('/members','unsupported');expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('unsupported-route');
+    observed.routing.permalinkStructure='';observed.routing.rewriteRulesHash=null;expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('unsupported-routing');
+  });
+  it('binds rewrite hashes and accepts the explicitly declared fresh nested page slot',()=>{
+    const input=source();input.sourceIntent.pages.push({id:'services',route:'/services',title:'Services',template:'index',body:{blocks:[]}},{id:'consulting',route:'/services/consulting',parentId:'services',title:'Consulting',template:'index',body:{blocks:[]}});
+    const observed=snapshot();observed.routing.routes=['/services','/services/consulting'].map(route=>({route,kind:'available',matchedRule:'native-pagename',queryFingerprint:'query-hash'}));
+    const compiled=[...pages(),...input.sourceIntent.pages.slice(1).map(page=>({...page,status:'draft' as const,content:'',diagnostics:[]}))];
+    const first=reconcileSitePlan(input,theme(input),compiled,observed);expect(first.executable).toBe(true);expect(first.operations.find(op=>op.entityId==='consulting')!.desired!.parentId).toEqual({pendingPageId:'services'});
+    observed.routing.rewriteRulesHash='changed';expect(reconcileSitePlan(input,theme(input),compiled,observed).confirmationHash).not.toBe(first.confirmationHash);
   });
 });

@@ -40,6 +40,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     }
   };
   for (const tree of trees) visit(tree.body.blocks);
+  if (snapshot.routing.unsupportedReason || !snapshot.routing.permalinkStructure || !snapshot.routing.rewriteRulesHash) issue('/target/routing', 'unsupported-routing', snapshot.routing.unsupportedReason ?? 'cached pretty-permalink routing is required');
   const owned = new Map<string, SiteEntity>();
   const ids = new Set<number>();
   for (const entity of snapshot.entities) {
@@ -84,6 +85,11 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     const routePrefix = page.route === '/' ? '/' : (page.route.slice(0, page.route.lastIndexOf('/')) || '/');
     if (routePrefix !== parentRoute) issue(`/pages/${page.id}/route`, 'route-parent-mismatch', 'route prefix must match the explicitly declared parent route; inferred parents are unsupported');
     const existing = owned.get(key);
+    if (page.route !== '/') {
+      const resolved = snapshot.routing.routes.find(route=>route.route===page.route);
+      if (!resolved || resolved.kind==='unsupported') issue(`/pages/${page.id}/route`, 'unsupported-route', resolved?.reason ?? 'route has no native resolution snapshot');
+      else if (resolved.kind==='reserved' || (resolved.kind==='singular' && resolved.postId!==existing?.id)) issue(`/pages/${page.id}/route`, 'route-conflict', 'route resolves to a reserved endpoint or an existing unowned post/entity');
+    }
     const occupied = snapshot.entities.find(entity => entity.kind === 'page' && normalizeRoute(entity.route) === normalizeRoute(page.route) && entity.id !== existing?.id);
     if (occupied) issue(`/pages/${page.id}/route`, 'route-conflict', `route is occupied by page ID ${occupied.id}; no adoption is permitted`);
     const pendingBindings = intent.assetUses.filter(use => use.documentId === key && !owned.has(`attachment:${use.assetId}`) && !bindings[use.assetId] && source.assets.some(asset=>asset.id===use.assetId && asset.role==='attachment'));
@@ -205,7 +211,7 @@ export interface SitePlanOptions extends SiteWpCliOptions { assetRoot?: string; 
 /** Source-first orchestration reads WordPress once and never publishes or mutates it. */
 export async function planSite(inputPath: string, options: SitePlanOptions, transport?: SiteReadTransport): Promise<SitePlan> {
   const input = await readSitePlanInput(inputPath, options.assetRoot);
-  const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport);
+  const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport, input.source.sourceIntent.pages.map(page=>page.route));
   const bindings = observedAttachmentBindings(input, observed);
   const compileOptions = { attachmentBindings: bindings, themeAssetBaseUrl: observed.theme.assetBaseUrl, strict: options.strict };
   const theme = await compileThemeDocuments(input.source, compileOptions);
