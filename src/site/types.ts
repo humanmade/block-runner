@@ -25,8 +25,11 @@ export interface SitePageIntent {
   parentId?: string;
   template: string;
   body: IntentTree;
-  status: 'draft' | 'publish' | 'private' | 'pending';
+  /** Omitted input defaults to draft during source preparation. */
+  status?: SitePageStatus;
 }
+
+export type SitePageStatus = 'draft' | 'publish' | 'private' | 'pending';
 
 export interface SiteAssetIntent {
   /** Stable logical identity independent of the source filename. */
@@ -53,6 +56,8 @@ export interface SiteAssetUse {
 export interface SiteIntent {
   version: 1;
   siteId: string;
+  /** Explicit logical identity of the page at `/`. */
+  homePageId: string;
   theme: SiteThemeIntent;
   templates: Record<string, SiteDocumentIntent>;
   parts: Record<string, SiteDocumentIntent>;
@@ -97,8 +102,9 @@ export interface CompiledSitePage {
   title: string;
   parentId?: string;
   template: string;
-  body: IntentTree;
-  status: SitePageIntent['status'];
+  /** Finalized Gutenberg serialization produced from the source page body. */
+  content: string;
+  status: SitePageStatus;
   diagnostics: ReportItem[];
 }
 
@@ -108,11 +114,18 @@ export interface SiteFile {
   sha256: string;
 }
 
+export interface SiteAttachmentBinding {
+  /** WordPress attachment ID supplied by the caller or an adapter. */
+  id: number;
+  url: string;
+  observedSize?: { width?: number; height?: number; bytes?: number };
+}
+
 /** Successful, fully bound result of compiling the complete site. */
 export interface CompiledSite {
   sourceIntent: SiteIntent;
   sourceAssets: PreparedSiteAsset[];
-  targetBindings: Record<string, number>;
+  targetBindings: Record<string, SiteAttachmentBinding>;
   targetBindingFingerprint: string;
   themeFiles: SiteFile[];
   pages: CompiledSitePage[];

@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
-import { lstat, readFile, realpath, stat } from 'node:fs/promises';
+import { lstat } from 'node:fs/promises';
 import path from 'node:path';
+import { readStableRegularFile } from '../publication.js';
 import type { IntentNode, IntentTree } from '../types.js';
 import type {
   PreparedSiteAsset,
@@ -23,11 +24,9 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
   const validated = validateSiteIntent(input, diagnostics);
   if (!validated) return { ok: false, diagnostics };
 
-  let canonicalRoot: string;
+  const canonicalRoot = path.resolve(assetRoot);
   try {
-    canonicalRoot = await realpath(assetRoot);
-    const rootStat = await stat(canonicalRoot);
-    if (!rootStat.isDirectory()) throw new Error('asset root is not a directory');
+    await inspectPathChain(canonicalRoot, undefined);
   } catch (error) {
     diagnostics.push({ path: '/assetRoot', code: 'asset-root', message: errorMessage(error) });
     return { ok: false, diagnostics };
@@ -40,17 +39,13 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
     try {
       const absolutePath = path.resolve(canonicalRoot, ...declaration.path.split('/'));
       if (!isWithin(canonicalRoot, absolutePath)) throw new Error('path escapes the asset root');
-      const beforePath = await lstat(absolutePath);
-      if (!beforePath.isFile() && !beforePath.isSymbolicLink()) throw new Error('asset is not a regular file');
-      const actualPath = await realpath(absolutePath);
-      if (!isWithin(canonicalRoot, actualPath)) throw new Error('asset resolves outside the asset root');
-      const before = await stat(actualPath);
-      if (!before.isFile()) throw new Error('asset is not a regular file');
-      const bytes = await readFile(actualPath);
-      const after = await stat(actualPath);
-      if (!sameFileSnapshot(before, after) || bytes.byteLength !== after.size) {
+      const beforeChain = await inspectPathChain(canonicalRoot, declaration.path);
+      const stable = await readStableRegularFile(absolutePath, 'asset changed or is not a regular file');
+      const afterChain = await inspectPathChain(canonicalRoot, declaration.path);
+      if (!samePathChain(beforeChain, afterChain) || stable.content.byteLength !== afterChain.at(-1)?.size) {
         throw new Error('asset changed while it was being prepared');
       }
+      const bytes = stable.content;
       assets.push({
         id: declaration.id,
         path: declaration.path,
@@ -89,9 +84,10 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
     return undefined;
   }
 
-  checkKeys(input, ['version', 'siteId', 'theme', 'templates', 'parts', 'patterns', 'pages', 'assets', 'assetUses'], '', diagnostics);
+  checkKeys(input, ['version', 'siteId', 'homePageId', 'theme', 'templates', 'parts', 'patterns', 'pages', 'assets', 'assetUses'], '', diagnostics);
   if (input.version !== 1) diagnostics.push(issue('/version', 'unsupported-version', 'only site intent version 1 is supported'));
   if (!isSafeSlug(input.siteId)) diagnostics.push(issue('/siteId', 'unsafe-id', 'siteId must be a lowercase URL-safe identifier'));
+  if (!isSafeSlug(input.homePageId)) diagnostics.push(issue('/homePageId', 'unsafe-id', 'homePageId must name a declared page'));
 
   const theme = input.theme;
   if (!isRecord(theme)) {
@@ -121,6 +117,11 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
         diagnostics.push(issue(`/pages/${index}/template`, 'unknown-template', `unknown template "${pages[index]!.template}"`));
       }
     }
+  }
+  if (pages && isSafeSlug(input.homePageId)) {
+    const homeIndex = pages.findIndex((page) => page.id === input.homePageId);
+    if (homeIndex === -1) diagnostics.push(issue('/homePageId', 'unknown-home-page', `unknown home page "${input.homePageId}"`));
+    else if (pages[homeIndex]?.route !== '/') diagnostics.push(issue('/homePageId', 'home-route-required', 'homePageId must identify the page whose route is "/"'));
   }
 
   if (templates && parts && patterns && pages && uses && assets) {
@@ -160,6 +161,7 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
   return {
     version: 1,
     siteId: input.siteId as string,
+    homePageId: input.homePageId as string,
     theme: theme as SiteIntent['theme'],
     templates,
     parts,
@@ -251,11 +253,11 @@ function validatePages(value: unknown, diagnostics: SiteInputDiagnostic[]): Site
     if (!nonEmptyString(page.title)) diagnostics.push(issue(`${current}/title`, 'string-required', 'page title must be a non-empty string'));
     if (page.parentId !== undefined && !isSafeSlug(page.parentId)) diagnostics.push(issue(`${current}/parentId`, 'unsafe-id', 'parentId must be a lowercase page id'));
     if (!isSafeSlug(page.template)) diagnostics.push(issue(`${current}/template`, 'unsafe-name', 'template must be a lowercase template name'));
-    if (page.status !== 'draft' && page.status !== 'publish' && page.status !== 'private' && page.status !== 'pending') {
-      diagnostics.push(issue(`${current}/status`, 'status-required', 'page status must be declared as draft, publish, private, or pending'));
+    if (page.status !== undefined && page.status !== 'draft' && page.status !== 'publish' && page.status !== 'private' && page.status !== 'pending') {
+      diagnostics.push(issue(`${current}/status`, 'invalid-status', 'page status must be draft, publish, private, or pending'));
     }
     const body = validateTree(page.body, `${current}/body`, diagnostics);
-    if (isSafeSlug(page.id) && typeof page.route === 'string' && isSafeRoute(page.route) && nonEmptyString(page.title) && isSafeSlug(page.template) && body && ['draft', 'publish', 'private', 'pending'].includes(String(page.status))) {
+    if (isSafeSlug(page.id) && typeof page.route === 'string' && isSafeRoute(page.route) && nonEmptyString(page.title) && isSafeSlug(page.template) && body && (page.status === undefined || ['draft', 'publish', 'private', 'pending'].includes(String(page.status)))) {
       pages.push({
         id: page.id,
         route: page.route,
@@ -263,7 +265,7 @@ function validatePages(value: unknown, diagnostics: SiteInputDiagnostic[]): Site
         ...(typeof page.parentId === 'string' ? { parentId: page.parentId } : {}),
         template: page.template,
         body,
-        status: page.status as SiteIntent['pages'][number]['status'],
+        status: (page.status ?? 'draft') as SiteIntent['pages'][number]['status'],
       });
     }
   }
@@ -496,8 +498,54 @@ function isWithin(root: string, target: string): boolean {
   return relative === '' || (!relative.startsWith(`..${path.sep}`) && relative !== '..' && !path.isAbsolute(relative));
 }
 
-function sameFileSnapshot(before: Awaited<ReturnType<typeof stat>>, after: Awaited<ReturnType<typeof stat>>): boolean {
-  return before.dev === after.dev && before.ino === after.ino && before.size === after.size && before.mtimeMs === after.mtimeMs;
+interface PathSnapshot {
+  path: string;
+  dev: number;
+  ino: number;
+  mode: number;
+  size: number;
+  mtimeMs: number;
+  ctimeMs: number;
+}
+
+async function inspectPathChain(root: string, relative?: string): Promise<PathSnapshot[]> {
+  const target = relative === undefined ? root : path.resolve(root, ...relative.split('/'));
+  if (relative !== undefined && !isWithin(root, target)) throw new Error('path escapes the asset root');
+  const parsedRoot = path.parse(target).root;
+  const components = target.slice(parsedRoot.length).split(path.sep).filter(Boolean);
+  const paths = [parsedRoot];
+  let current = parsedRoot;
+  for (const component of components) {
+    current = path.join(current, component);
+    paths.push(current);
+  }
+  const snapshots: PathSnapshot[] = [];
+  for (let index = 0; index < paths.length; index += 1) {
+    const currentPath = paths[index]!;
+    const info = await lstat(currentPath);
+    const isFinal = index === paths.length - 1;
+    if (info.isSymbolicLink()) throw new Error('symlinks are not allowed in asset root or asset path');
+    if (isFinal && relative === undefined && !info.isDirectory()) throw new Error('asset root is not a directory');
+    if (isFinal && relative !== undefined && !info.isFile()) throw new Error('asset is not a regular file');
+    if (!isFinal && !info.isDirectory()) throw new Error('asset path contains a non-directory component');
+    snapshots.push({
+      path: currentPath,
+      dev: Number(info.dev),
+      ino: Number(info.ino),
+      mode: Number(info.mode),
+      size: Number(info.size),
+      mtimeMs: Number(info.mtimeMs),
+      ctimeMs: Number(info.ctimeMs),
+    });
+  }
+  return snapshots;
+}
+
+function samePathChain(before: PathSnapshot[], after: PathSnapshot[]): boolean {
+  return before.length === after.length && before.every((snapshot, index) => {
+    const next = after[index];
+    return next !== undefined && snapshot.path === next.path && snapshot.dev === next.dev && snapshot.ino === next.ino && snapshot.mode === next.mode && snapshot.size === next.size && snapshot.mtimeMs === next.mtimeMs && snapshot.ctimeMs === next.ctimeMs;
+  });
 }
 
 function issue(pathName: string, code: string, message: string): SiteInputDiagnostic {

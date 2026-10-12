@@ -1,6 +1,7 @@
 {
   "version": 1,
   "siteId": "sample-studio",
+  "homePageId": "home",
   "theme": {
     "slug": "sample-studio",
     "title": "Sample Studio",
@@ -97,7 +98,7 @@
     }
   ],
   "assets": [
-    { "id": "home-hero", "path": "media/hero.svg", "kind": "image", "role": "attachment" },
+    { "id": "home-hero", "path": "media/hero.png", "kind": "image", "role": "attachment" },
     { "id": "site-styles", "path": "styles/site.css", "kind": "stylesheet", "role": "theme-file" }
   ],
   "assetUses": [
