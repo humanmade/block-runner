@@ -86,6 +86,61 @@ describe('convert', () => {
     expect(report.items.some((item) => item.reason.includes('Custom HTML fallback'))).toBe(true);
   });
 
+  it('selects one exact authored static page and reports source-only export limits', async () => {
+    const report = await convert(
+      `<x-dc>\n` +
+        `  <helmet>kept metadata</helmet>\n` +
+        `  <sc-if data-dc-static>\n` +
+        `    <section data-document-role="page" data-canvas-width="1200" data-canvas-height="800">\n` +
+        `      <canvas>fallback child</canvas>\n` +
+        `      <span>{{title}}</span>\n` +
+        `    </section>\n` +
+        `  </sc-if>\n` +
+        `  <div data-canvas-width="1200" data-canvas-height="800">runtime page</div>\n` +
+        `  <aside>kept sibling</aside>\n` +
+        `</x-dc>`,
+      { sourcePath: 'export.html' },
+    );
+
+    expect(report.output).toContain('data-document-role="page"');
+    expect(report.output).toContain('fallback child');
+    expect(report.output).toContain('kept metadata');
+    expect(report.output).toContain('kept sibling');
+    expect(report.output).not.toContain('runtime page');
+    expect(report.items).toContainEqual(expect.objectContaining({
+      status: 'warning',
+      reason: 'authored static alternative selected; runtime behavior is not carried',
+      source: expect.objectContaining({ path: 'export.html', htmlLine: 1 }),
+    }));
+    expect(report.items).toContainEqual(expect.objectContaining({
+      status: 'warning',
+      reason: 'unresolved {{...}} binding remains in authored markup',
+      source: expect.objectContaining({ path: 'export.html', htmlLine: 6 }),
+    }));
+    expect(report.items).toContainEqual(expect.objectContaining({
+      status: 'warning',
+      reason: 'canvas pixels are runtime-managed; authored fallback children are preserved',
+      source: expect.objectContaining({ path: 'export.html', htmlLine: 5 }),
+    }));
+  });
+
+  it('preserves ambiguous exports and leaves ordinary markup unchanged', async () => {
+    const ambiguous = await convert(
+      `<x-dc><sc-if data-dc-static><section data-document-role="page" data-canvas-width="900" data-canvas-height="600">static</section></sc-if>` +
+        `<div data-canvas-width="900" data-canvas-height="600">first</div><div data-canvas-width="900" data-canvas-height="600">second</div></x-dc>`,
+    );
+    expect(ambiguous.output).toContain('static');
+    expect(ambiguous.output).toContain('first');
+    expect(ambiguous.output).toContain('second');
+    expect(ambiguous.items).toContainEqual(expect.objectContaining({
+      reason: 'authored static alternative is ambiguous; original export markup was preserved',
+    }));
+
+    const ordinary = await convert('<main><p>ordinary template</p><canvas>plain fallback</canvas><span>{{plain}}</span></main>');
+    expect(ordinary.output).toContain('ordinary template');
+    expect(ordinary.items.some((item) => /authored static alternative|runtime-managed|unresolved \{\{/.test(item.reason))).toBe(false);
+  });
+
   it('reports explain attribution without counting explain entries as warnings', async () => {
     const report = await convert('<p>Hello</p>', {
       explain: true,
