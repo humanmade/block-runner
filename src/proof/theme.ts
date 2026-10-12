@@ -27,6 +27,7 @@ export interface ThemeWpEnvConfig {
   core?: string | null;
   port?: number;
   autoPort?: boolean;
+  testsEnvironment?: boolean;
   config?: Record<string, unknown>;
   plugins?: string[];
   themes?: string[];
@@ -116,6 +117,11 @@ export async function prepareThemeProof(themeDirectory: string, evidence: Eviden
   };
 }
 
+function developmentOverrides(config: ThemeWpEnvConfig): Record<string, unknown> {
+  // wp-env ignores the entire env block when only the development environment runs.
+  return config.testsEnvironment === false ? {} : config.env?.development ?? {};
+}
+
 export function effectiveWpEnvConfig(config: ThemeWpEnvConfig): {
   phpVersion: string | undefined;
   core: string | undefined;
@@ -123,7 +129,7 @@ export function effectiveWpEnvConfig(config: ThemeWpEnvConfig): {
   themes: string[];
   mappings: Record<string, string>;
 } {
-  const development = config.env?.development ?? {};
+  const development = developmentOverrides(config);
   return {
     phpVersion: process.env.WP_ENV_PHP_VERSION ?? stringValue(development.phpVersion) ?? stringValue(config.phpVersion),
     core: process.env.WP_ENV_CORE ?? stringValue(development.core) ?? stringValue(config.core),
@@ -134,7 +140,7 @@ export function effectiveWpEnvConfig(config: ThemeWpEnvConfig): {
 }
 
 export function effectiveWpEnvPort(config: ThemeWpEnvConfig, environment: NodeJS.ProcessEnv = process.env): number {
-  const development = config.env?.development ?? {};
+  const development = developmentOverrides(config);
   if (config.autoPort === true) throw new Error('Theme proof cannot safely target wp-env while autoPort may change the runtime URL.');
   const raw = environment.WP_ENV_PORT ?? development.port ?? config.port ?? 8888;
   const port = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
@@ -146,7 +152,7 @@ export function effectiveWpEnvPort(config: ThemeWpEnvConfig, environment: NodeJS
 
 export function effectiveWpEnvUrl(config: ThemeWpEnvConfig, environment: NodeJS.ProcessEnv = process.env): string {
   const port = effectiveWpEnvPort(config, environment);
-  const development = config.env?.development ?? {};
+  const development = developmentOverrides(config);
   const developmentConfig = isPlainRecord(development.config) ? development.config : {};
   const rootConfig = isPlainRecord(config.config) ? config.config : {};
   const home = developmentConfig.WP_HOME ?? rootConfig.WP_HOME;
@@ -201,7 +207,7 @@ export async function writeThemeRuntimeConfig(
       resolveLocalSource(source, process.cwd()),
     ])),
   };
-  if (config.env?.development) {
+  if (config.testsEnvironment !== false && config.env?.development) {
     config.env.development = {
       ...config.env.development,
       phpVersion: effective.phpVersion,
