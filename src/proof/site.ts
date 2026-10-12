@@ -194,7 +194,7 @@ export async function runSiteProof(input: {
     const work = await mkdtemp(path.join(site.root, '.site-proof-'));
     const configPath = path.join(work, 'config.json');
     const outputPath = path.join(work, 'result.json');
-    await writeFile(configPath, JSON.stringify({ baseUrl: input.baseUrl, runtimeMarker: marker, theme: theme.slug, pages: compiled.pages.map((page) => ({ ...page, wpId: ids[page.id] })), intent: site.source.sourceIntent, screenshotDirectory: work, themeAssetBaseUrl, principalId, themeAssets: compiled.assets.map((file) => file.path), cssProperties: site.source.assets.filter((asset) => asset.kind === 'stylesheet').flatMap((asset) => [...Buffer.from(asset.bytes).toString().matchAll(/(--[a-zA-Z0-9-]+)\s*:\s*([^;}]+)/g)].map((match) => ({ name: match[1], value: match[2]!.trim() }))) }));
+    await writeFile(configPath, JSON.stringify({ baseUrl: input.baseUrl, runtimeMarker: marker, theme: theme.slug, pages: compiled.pages.map((page) => ({ ...page, wpId: ids[page.id] })), intent: site.source.sourceIntent, screenshotDirectory: work, themeAssetBaseUrl, principalId, themeAssets: compiled.assets.filter((file) => file.path.startsWith('assets/')).map((file) => file.path), cssProperties: site.source.assets.filter((asset) => asset.kind === 'stylesheet').flatMap((asset) => [...Buffer.from(asset.bytes).toString().matchAll(/(--[a-zA-Z0-9-]+)\s*:\s*([^;}]+)/g)].map((match) => ({ name: match[1], value: match[2]!.trim() }))) }));
     const command = await input.command(process.execPath, [input.helper, '--config', configPath, '--out', outputPath]);
     await evidence.putJson(command);
     const report = JSON.parse(await readFile(outputPath, 'utf8'));

@@ -88,6 +88,42 @@ describe('controlled site proof', () => {
     expect(cleanup).toContain('wp_trash_post');
     expect(cleanup).not.toContain('wp_delete');
   });
+  it('accepts optional editor readiness only for the exact current entity', async () => {
+    // @ts-expect-error The bundled helper is a standalone ESM script.
+    const { mountedEditorTargetReady } = await import('../../scripts/proof-site-playwright.mjs');
+    const previous = Object.getOwnPropertyDescriptor(globalThis, 'wp');
+    let editor: Record<string, unknown> = { getCurrentPostId: () => 81 };
+    Object.defineProperty(globalThis, 'wp', { configurable: true, value: { blocks: { serialize: () => '' }, data: { select: () => editor } } });
+    try {
+      expect(mountedEditorTargetReady(81)).toBe(true);
+      expect(mountedEditorTargetReady(82)).toBe(false);
+      editor = { getCurrentPostId: () => 81, isEditorReady: () => false };
+      expect(mountedEditorTargetReady(81)).toBe(false);
+      editor = { getCurrentPostId: () => 'sample-studio//footer', isEditorReady: () => true };
+      expect(mountedEditorTargetReady('sample-studio//footer')).toBe(true);
+      expect(mountedEditorTargetReady('sample-studio//header')).toBe(false);
+    } finally {
+      if (previous) Object.defineProperty(globalThis, 'wp', previous);
+      else Reflect.deleteProperty(globalThis, 'wp');
+    }
+  });
+  it.each(['Close', 'Get started'])('dismisses the observed native guide with %s through its UI', async (buttonName) => {
+    // @ts-expect-error The bundled helper is a standalone ESM script.
+    const { dismissSiteEditorGuides } = await import('../../scripts/proof-site-playwright.mjs');
+    let visible = true;
+    const click = vi.fn(async () => { visible = false; });
+    const guide = {
+      isVisible: async () => visible,
+      getByRole: (_role: string, options: { name: RegExp }) => ({ isVisible: async () => options.name.test(buttonName), click }),
+      waitFor: vi.fn(async () => { expect(visible).toBe(false); }),
+    };
+    const filter = vi.fn((_options: { hasText: RegExp }) => ({ first: () => guide }));
+    expect(await dismissSiteEditorGuides({ getByRole: () => ({ filter }) })).toBe(true);
+    expect(filter.mock.calls[0]![0]?.hasText.test('Welcome to the editor')).toBe(true);
+    expect(filter.mock.calls[0]![0]?.hasText.test('Delete this page')).toBe(false);
+    expect(click).toHaveBeenCalledOnce();
+    expect(guide.waitFor).toHaveBeenCalledWith({ state: 'hidden' });
+  });
   it('retains a helper timeout and actual URL with a failure capture request', async () => {
     // @ts-expect-error The bundled helper is a standalone ESM script.
     const { recordSiteHelperFailure } = await import('../../scripts/proof-site-playwright.mjs');
@@ -138,6 +174,11 @@ describe('controlled site proof', () => {
       },
       command: async (_command, args) => {
         browserCalls++;
+        if (browserCalls === 2) {
+          const config = JSON.parse(await readFile(args[args.indexOf('--config') + 1]!, 'utf8'));
+          expect(config.themeAssets).toContain('assets/styles/site.css');
+          expect(config.themeAssets).not.toContain('functions.php');
+        }
         const report = browserCalls === 1 ? { runtimeBinding: { verified: true }, principal: { id: 1 } } : { gates: Object.fromEntries(SITE_PROOF_GATES.map((gate) => [gate, { status: gate === (negativeControl ? { 'missing-content': 'site_content', 'broken-asset': 'site_assets', 'broken-mobile': 'site_navigation' }[negativeControl] : undefined) ? 'fail' : 'pass' }])) };
         await writeFile(args[args.indexOf('--out') + 1]!, JSON.stringify(report));
         return commandResult();
@@ -145,6 +186,7 @@ describe('controlled site proof', () => {
     });
     expect(browserCalls).toBe(2);
     expect(identities).toHaveLength(1);
+    expect(result.theme?.manifest.files.some((file) => file.file === 'functions.php')).toBe(true);
     if (!negativeControl) expect(Object.hasOwn(identities[0], 'negativeControl')).toBe(false);
     expect(result.gates.site_cleanup?.status).toBe('pass');
     if (negativeControl) expect(result.gates[({ 'missing-content': 'site_content', 'broken-asset': 'site_assets', 'broken-mobile': 'site_navigation' } as const)[negativeControl]]?.status).toBe('fail');

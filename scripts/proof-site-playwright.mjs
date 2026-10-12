@@ -38,13 +38,30 @@ async function login(page, baseUrl) {
   await page.locator('#user_pass').fill(process.env.WP_PASSWORD ?? 'password');
   await Promise.all([page.waitForURL((url) => !url.pathname.endsWith('/wp-login.php'), { waitUntil: 'domcontentloaded' }), page.locator('#wp-submit').click()]);
 }
+export function mountedEditorTargetReady(expectedId) {
+  const wp = globalThis.wp;
+  const editor = wp?.data?.select('core/editor');
+  return Boolean(wp?.blocks?.serialize && editor?.getCurrentPostId?.() === expectedId
+    && (typeof editor.isEditorReady !== 'function' || editor.isEditorReady()));
+}
+export async function dismissSiteEditorGuides(page) {
+  const guide = page.getByRole('dialog').filter({ hasText: /Welcome to the editor|Edit your site/ }).first();
+  if (!await guide.isVisible()) return false;
+  const close = guide.getByRole('button', { name: /^Close$/ });
+  if (await close.isVisible()) await close.click();
+  else await guide.getByRole('button', { name: /^Get started$/ }).click();
+  await guide.waitFor({ state: 'hidden' });
+  return true;
+}
+
 async function editAndReopen(page, input, target, onSaved = () => {}) {
   const part = target.kind === 'part';
   const url = part ? `${input.baseUrl}/wp-admin/site-editor.php?${new URLSearchParams({ postType: 'wp_template_part', postId: `${input.theme}//${target.slug}`, canvas: 'edit' })}` : `${input.baseUrl}/wp-admin/post.php?post=${target.wpId}&action=edit`;
   const restPath = part ? `/wp/v2/template-parts/${input.theme}//${target.slug}?context=edit` : `/wp/v2/pages/${target.wpId}?context=edit`;
   await page.goto(url, { waitUntil: 'domcontentloaded' });
-  await page.waitForFunction(() => Boolean(globalThis.wp?.blocks?.serialize && globalThis.wp?.data?.select('core/editor')?.isEditorReady?.()));
+  await page.waitForFunction(mountedEditorTargetReady, part ? `${input.theme}//${target.slug}` : target.wpId);
   const canvas = await waitForDeclaredMount(page, names(target.body.blocks));
+  await dismissSiteEditorGuides(page);
   let originalRaw;
   if (part) {
     const original = await page.evaluate(async (route) => globalThis.wp.apiFetch({ path: route }), restPath);
