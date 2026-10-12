@@ -815,7 +815,7 @@ async function collectEnvironmentPins(
     options.pluginZip ? pinFile(path.resolve(options.pluginZip), evidence).catch(() => undefined) : undefined,
     preparedTheme ? preparedTheme.snapshot : pinInput(options, evidence),
     collectWordPressPackagePins(packageLock).catch(() => ({})),
-    readWpEnvPins(wpEnvConfig).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
+    readWpEnvPins(wpEnvConfig, Boolean(options.theme)).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
   ]);
   const packages = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
 
@@ -869,9 +869,15 @@ async function collectWordPressPackagePins(lockFile: string): Promise<Record<str
   return pins;
 }
 
-async function readWpEnvPins(file: string): Promise<{ coreSource: string; phpVersion: string }> {
+async function readWpEnvPins(file: string, themeProfile = false): Promise<{ coreSource: string; phpVersion: string }> {
   const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
   if (!isRecord(parsed)) return { coreSource: 'unobserved', phpVersion: 'unobserved' };
+  if (!themeProfile) {
+    return {
+      coreSource: typeof parsed.core === 'string' ? parsed.core : 'unobserved',
+      phpVersion: typeof parsed.phpVersion === 'string' ? parsed.phpVersion : 'unobserved',
+    };
+  }
   const effective = effectiveWpEnvConfig(parsed as ThemeWpEnvConfig);
   return {
     coreSource: effective.core ?? 'unobserved',

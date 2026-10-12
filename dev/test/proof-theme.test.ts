@@ -80,6 +80,22 @@ describe('theme Site Editor proof profile', () => {
     expect(runtime.env.development.plugins).toEqual([dependency]);
   });
 
+  it('retains top-level configuration pins for existing plugin profiles', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-config-'));
+    const config = path.join(root, 'wp-env.json');
+    await writeFile(config, JSON.stringify({
+      core: 'WordPress/WordPress#7.1', phpVersion: '8.3',
+      env: { development: { core: 'WordPress/WordPress#6.9', phpVersion: '8.4' } },
+    }));
+    const result = await runProof({
+      profile: 'headless', input: 'original profile', wpEnvConfig: config,
+      outputDir: path.join(root, 'receipts'),
+      gateRunner: async () => ({ status: 'blocked', reason: 'Configuration-pin control only.' }),
+    });
+    expect(result.receipt.environment.wordpress.coreSource).toBe('WordPress/WordPress#7.1');
+    expect(result.receipt.environment.php.requestedVersion).toBe('8.3');
+  });
+
   it('blocks an unsupported Requires PHP before calling the command runner', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-theme-preflight-'));
     const theme = path.join(root, 'fixture-theme');
