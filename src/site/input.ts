@@ -362,51 +362,9 @@ function validateTree(value: unknown, pathName: string, diagnostics: SiteInputDi
     return undefined;
   }
   checkKeys(value, ['blocks'], pathName, diagnostics);
-  const blocks: IntentNode[] = [];
-  for (let index = 0; index < value.blocks.length; index += 1) {
-    const node = validateNode(value.blocks[index], `${pathName}/blocks/${index}`, diagnostics);
-    if (node) blocks.push(node);
-  }
-  return { blocks };
-}
-
-function validateNode(value: unknown, pathName: string, diagnostics: SiteInputDiagnostic[]): IntentNode | undefined {
-  if (!isRecord(value)) {
-    diagnostics.push(issue(pathName, 'object-required', 'intent node must be an object'));
-    return undefined;
-  }
-  checkKeys(value, ['block', 'text', 'url', 'alt', 'level', 'citation', 'items', 'rows', 'attrs', 'children'], pathName, diagnostics);
-  if (typeof value.block !== 'string' || value.block.length === 0 || !/^[a-z0-9-]+\/[a-z0-9-]+$/.test(value.block)) {
-    diagnostics.push(issue(`${pathName}/block`, 'block-required', 'block must be a namespaced block name'));
-    return undefined;
-  }
-  if (value.attrs !== undefined && !isRecord(value.attrs)) diagnostics.push(issue(`${pathName}/attrs`, 'object-required', 'attrs must be an object'));
-  if (value.children !== undefined && !Array.isArray(value.children)) diagnostics.push(issue(`${pathName}/children`, 'array-required', 'children must be an array'));
-  const children: IntentNode[] | undefined = Array.isArray(value.children)
-    ? value.children.map((child, index) => validateNode(child, `${pathName}/children/${index}`, diagnostics)).filter((child): child is IntentNode => child !== undefined)
-    : undefined;
-  const node: IntentNode = { block: value.block };
-  for (const key of ['text', 'url', 'alt', 'citation'] as const) {
-    if (value[key] !== undefined) {
-      if (typeof value[key] !== 'string') diagnostics.push(issue(`${pathName}/${key}`, 'string-required', `${key} must be a string`));
-      else node[key] = value[key];
-    }
-  }
-  if (value.level !== undefined) {
-    if (typeof value.level !== 'number' || !Number.isInteger(value.level) || value.level < 1 || value.level > 6) diagnostics.push(issue(`${pathName}/level`, 'invalid-level', 'level must be an integer from 1 to 6'));
-    else node.level = value.level;
-  }
-  if (value.items !== undefined) {
-    if (!Array.isArray(value.items) || value.items.some((item) => typeof item !== 'string')) diagnostics.push(issue(`${pathName}/items`, 'string-array-required', 'items must be an array of strings'));
-    else node.items = value.items as string[];
-  }
-  if (value.rows !== undefined) {
-    if (!Array.isArray(value.rows) || value.rows.some((row) => !Array.isArray(row) || row.some((cell) => typeof cell !== 'string'))) diagnostics.push(issue(`${pathName}/rows`, 'string-grid-required', 'rows must be an array of string arrays'));
-    else node.rows = value.rows as string[][];
-  }
-  if (isRecord(value.attrs)) node.attrs = value.attrs;
-  if (children !== undefined) node.children = children;
-  return node;
+  // Preserve native intent trees verbatim. The document compiler/finalizer owns their detailed
+  // validity; this boundary consumes only the tree root for references and asset-use paths.
+  return value as unknown as IntentTree;
 }
 
 function collectTrees(
@@ -436,8 +394,10 @@ function checkDocumentReferences(
     const basePath = kind === 'page'
       ? `/pages/${pageIndex}/body`
       : `/${kind === 'template' ? 'templates' : kind === 'part' ? 'parts' : 'patterns'}/${escapePointer(name!)}/body`;
-    const visit = (nodes: IntentNode[], pathParts: number[]): void => {
-      nodes.forEach((node, index) => {
+    const visit = (nodes: unknown[], pathParts: number[]): void => {
+      nodes.forEach((candidate, index) => {
+        if (!isRecord(candidate)) return;
+        const node = candidate as unknown as IntentNode;
         const current = [...pathParts, index];
         if (node.block === 'core/template-part' && typeof node.attrs?.slug === 'string' && !Object.hasOwn(parts, node.attrs.slug)) {
           diagnostics.push(issue(`${basePath}${nodePath(current)}`, 'unknown-template-part', `unknown template part "${node.attrs.slug}"`));
@@ -445,7 +405,7 @@ function checkDocumentReferences(
         if (node.block === 'core/pattern' && typeof node.attrs?.slug === 'string' && !Object.values(patterns).some((pattern) => pattern.slug === node.attrs?.slug)) {
           diagnostics.push(issue(`${basePath}${nodePath(current)}`, 'unknown-pattern', `unknown pattern "${node.attrs.slug}"`));
         }
-        if (node.children) visit(node.children, current);
+        if (Array.isArray(node.children)) visit(node.children, current);
       });
     };
     visit(tree.blocks, []);
@@ -460,12 +420,12 @@ function nodePath(indices: number[]): string {
 function nodeAtPath(tree: IntentTree, indices: number[]): IntentNode | undefined {
   const first = indices[0];
   if (first === undefined) return undefined;
-  let node = tree.blocks[first];
+  let candidate: unknown = tree.blocks[first];
   for (const index of indices.slice(1)) {
-    if (!node?.children) return undefined;
-    node = node.children[index];
+    if (!isRecord(candidate) || !Array.isArray(candidate.children)) return undefined;
+    candidate = candidate.children[index];
   }
-  return node;
+  return isRecord(candidate) && typeof candidate.block === 'string' ? candidate as unknown as IntentNode : undefined;
 }
 
 function checkKeys(value: Record<string, unknown>, allowed: string[], pathName: string, diagnostics: SiteInputDiagnostic[]): void {

@@ -56,12 +56,14 @@ describe('site intent contract', () => {
     input.pages[0].body = { blocks: [] };
     input.assetUses = [];
     input.pages[1].body.blocks[0].attrs = { futureNativeAttribute: { value: 7 } };
+    input.pages[1].body.blocks[0].futureNodeField = { retained: true };
     const result = await prepareSiteSource(input, fixtureRoot);
 
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     expect(result.source.sourceIntent.pages[0]?.body).toEqual({ blocks: [] });
     expect(result.source.sourceIntent.pages[1]?.body.blocks[0]?.attrs).toEqual({ futureNativeAttribute: { value: 7 } });
+    expect((result.source.sourceIntent.pages[1]?.body.blocks[0] as unknown as Record<string, unknown>).futureNodeField).toEqual({ retained: true });
   });
 
   it('defaults omitted publication status to draft', async () => {
