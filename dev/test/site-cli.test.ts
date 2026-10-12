@@ -80,7 +80,7 @@ describe('site compile CLI', () => {
       'site', 'compile', intentPath, '--asset-root', fixtureRoot, '--out', output, '--theme-only', '--json',
     ], project);
 
-    expect(result.code).toBe(0);
+    expect(result.code, result.stderr || result.stdout).toBe(0);
     const report = JSON.parse(result.stdout) as { diagnostics: Array<{ reason?: string }> };
     expect(report.diagnostics.some(({ reason }) => reason?.includes('styling "open" does not apply'))).toBe(false);
     expect(await readFile(path.join(output, 'theme/theme.json'), 'utf8')).not.toContain('configOnly');
