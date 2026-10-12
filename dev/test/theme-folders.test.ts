@@ -45,6 +45,7 @@ describe('block theme folders', () => {
     expect(text.stdout).toContain('file=patterns/dynamic.php blocks=0 invalid=0 warnings=1');
   });
 
+  // Four separate CLI cold starts each boot Gutenberg; CI needs a combined budget.
   it('writes canonical files atomically, preserves PHP headers, skips PHP bodies and is idempotent', async () => {
     const pristine = await copiedTheme('valid-theme');
     const pristineFix = await runCli(['fix', pristine, '--write', '--json']);
@@ -91,7 +92,7 @@ describe('block theme folders', () => {
     const textWrite = await runCli(['fix', project, '--write']);
     expect(textWrite.code).toBe(0);
     expect(textWrite.stdout).toContain('changed: templates/index.html');
-  });
+  }, 60_000);
 
   it('rejects --write for a single file and rejects an output-path conflict', async () => {
     const project = await copiedTheme('valid-theme');

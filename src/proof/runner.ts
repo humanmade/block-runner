@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { access, copyFile, mkdir, mkdtemp, readFile, writeFile } from 'node:fs/promises';
+import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import process from 'node:process';
@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createRequire } from 'node:module';
 import { validate } from '../gate/validate.js';
+import { canonicalize } from '../gate/canonicalize.js';
 import { PROOF_IMAGE_BASE64 } from './fixture-image.js';
 import {
   PROOF_CLAIM_NAMES,
@@ -23,6 +24,18 @@ import {
   type ProofRequirementClaim,
   type ProofRequirementReport,
 } from './profiles.js';
+import {
+  compareThemeMarkup,
+  copyThemeSnapshot,
+  effectiveWpEnvConfig,
+  pinLocalPluginDirectories,
+  prepareThemeProof,
+  resolveLocalSource,
+  themePreflightFailure,
+  writeThemeRuntimeConfig,
+  type PreparedThemeProof,
+  type ThemeWpEnvConfig,
+} from './theme.js';
 import {
   EvidenceStore,
   ReceiptWriter,
@@ -43,6 +56,7 @@ const packageJson = JSON.parse(readFileSync(path.join(projectRoot, 'package.json
 const defaultWpEnvConfig = path.join(projectRoot, 'proof', 'wp-env.json');
 const bundledProofDependencyPins = path.join(projectRoot, 'proof', 'dependency-pins.json');
 const playwrightHelper = path.join(projectRoot, 'scripts', 'proof-playwright.mjs');
+const themePlaywrightHelper = path.join(projectRoot, 'scripts', 'proof-theme-playwright.mjs');
 const stagedZipDirectory = path.join(projectRoot, '.block-runner-proof-stage');
 // Keep staging outside uploads: a nested Docker mount can create its parent as
 // root on a fresh Linux host, preventing WordPress from creating media folders.
@@ -59,6 +73,7 @@ const PROOF_TOOLING = [
   'pngjs',
 ] as const;
 const BROWSER_PROOF_TOOLING = PROOF_TOOLING.slice(0, 4);
+const THEME_PROOF_TOOLING = ['@wordpress/env', '@playwright/test'] as const;
 const RUNTIME_OBSERVATION_COMMANDS = [
   'php',
   'database',
@@ -357,6 +372,8 @@ export interface ProofRunOptions {
   profile?: ProofProfileName;
   /** Built, installable static-plugin archive. Runtime profiles require it. */
   pluginZip?: string;
+  /** Local block theme to prove through Site Editor template/part saves. */
+  theme?: string;
   /** Confirmed artifact capability contract. Capability-scoped claims bind it to pluginZip. */
   artifact?: ProofArtifactContract;
   /** Generator input bytes or a path to its reviewed input. */
@@ -414,7 +431,7 @@ export interface ProofEnvironment {
   };
   php: { requestedVersion: string; version: string };
   database: { engine: 'mysql' | 'mariadb'; image: string; version: string };
-  theme: { name: string; version: string; fileHash: string };
+  theme: { name: string; version: string; fileHash: string; requiresPhp?: string };
   browser: { engine: 'chromium'; playwright: string; revision: string; version: string };
   node: { version: string };
   /** Exact, integrity-pinned direct @wordpress/* dependencies. */
@@ -468,7 +485,7 @@ interface PreparedSyncedPattern {
  * a `blocked` gate, never a false green result.
  */
 export async function runProof(options: ProofRunOptions): Promise<ProofRunResult> {
-  const profile = options.profile ?? 'full';
+  const profile = options.theme ? 'theme' : options.profile ?? 'full';
   if (!(profile in PROOF_PROFILES)) {
     throw new TypeError(`Unknown proof profile: ${String(profile)}`);
   }
@@ -477,11 +494,30 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   const receiptWriter = new ReceiptWriter(outputDir);
   const evidence = receiptWriter.evidence;
   const wpEnvConfig = path.resolve(options.wpEnvConfig ?? defaultWpEnvConfig);
-  const environment = await collectEnvironmentPins(options, evidence, wpEnvConfig);
+  let preparedTheme: PreparedThemeProof | undefined;
+  let themeConfig: ThemeWpEnvConfig | undefined;
+  let localDependencies: unknown[] = [];
+  let preflightError: string | undefined;
+  if (options.theme) {
+    try {
+      preparedTheme = await prepareThemeProof(options.theme, evidence);
+      themeConfig = JSON.parse(await readFile(wpEnvConfig, 'utf8')) as ThemeWpEnvConfig;
+      preflightError = themePreflightFailure(preparedTheme, themeConfig);
+      if (!preflightError) {
+        const dependencies = effectiveWpEnvConfig(themeConfig).plugins;
+        localDependencies = await pinLocalPluginDirectories(dependencies, process.cwd(), evidence);
+      }
+    } catch (error) {
+      preflightError = error instanceof Error ? error.message : String(error);
+    }
+  }
+  const environment = await collectEnvironmentPins(options, evidence, wpEnvConfig, preparedTheme);
   // Resolve the declared claim before any adapter or Docker work begins. This is
   // retained even for blocked runs so a missing fixture cannot masquerade as N/A.
-  const requirements = reportProofRequirements(profile, options.artifact, environment.plugin.zip?.sha256, options.fixture);
-  const runtime = createRuntime(options, environment, wpEnvConfig, evidence, requirements.requiredGates);
+  const requirements = profile === 'theme'
+    ? { ...reportThemeProofRequirements(preparedTheme, preflightError, environment), localDependencies }
+    : reportProofRequirements(profile, options.artifact, environment.plugin.zip?.sha256, options.fixture);
+  const runtime = createRuntime(options, environment, wpEnvConfig, evidence, requirements.requiredGates, preparedTheme, themeConfig);
   // A supplied gate adapter owns its own proof environment. Otherwise report
   // an unavailable package before any profile's runtime gate can reach Docker.
   const unavailable = options.gateRunner ? [] : unavailableProofTooling(profile);
@@ -508,7 +544,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
       };
       const artifactError = requirements.missingInputs.find((reason) => reason.startsWith('Capability-scoped proof')
         || reason.startsWith('Confirmed artifact') || reason.startsWith('Pattern-verified proof'));
-      const configurationError = artifactError ?? missingProofConfiguration(context);
+      const configurationError = preflightError ?? artifactError ?? (profile === 'theme' ? missingThemeConfiguration(context, preparedTheme) : missingProofConfiguration(context));
       const unverifiedResult = gate !== 'headless_validation' && toolingError
         ? { status: 'blocked' as const, reason: toolingError }
         : configurationError
@@ -519,7 +555,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
           ? await options.gateRunner(context)
           : await runtime.run(context);
       const result = gate === 'environment_observation' && unverifiedResult?.status === 'pass'
-        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence)
+        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence, profile === 'theme')
         : unverifiedResult;
       records.push(await asRecord(gate, result, context, startedAt));
     }
@@ -736,8 +772,9 @@ async function enforceEnvironmentObservation(
   result: ProofGateResult,
   environment: ProofEnvironment,
   evidenceStore: EvidenceStore,
+  themeProfile = false,
 ): Promise<ProofGateResult> {
-  const unobserved = await requiredRuntimeObservationFailures(environment, evidenceStore);
+  const unobserved = await requiredRuntimeObservationFailures(environment, evidenceStore, themeProfile);
   const observationEvidence = environment.observations;
   const evidence = observationEvidence
     ? dedupeEvidence([...(result.evidence ?? []), observationEvidence])
@@ -762,6 +799,7 @@ async function collectEnvironmentPins(
   options: ProofRunOptions,
   evidence: EvidenceStore,
   wpEnvConfig: string,
+  preparedTheme?: PreparedThemeProof,
 ): Promise<ProofEnvironment> {
   // npm deliberately excludes a package's package-lock.json from its tarball.
   // Source and CI runs use the full root lock; packed consumers instead pin the
@@ -775,9 +813,9 @@ async function collectEnvironmentPins(
     pinFile(packageLock, evidence).catch(() => undefined),
     pinFile(wpEnvConfig, evidence),
     options.pluginZip ? pinFile(path.resolve(options.pluginZip), evidence).catch(() => undefined) : undefined,
-    pinInput(options, evidence),
+    preparedTheme ? preparedTheme.snapshot : pinInput(options, evidence),
     collectWordPressPackagePins(packageLock).catch(() => ({})),
-    readWpEnvPins(wpEnvConfig).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
+    readWpEnvPins(wpEnvConfig, Boolean(options.theme)).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
   ]);
   const packages = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
 
@@ -803,7 +841,9 @@ async function collectEnvironmentPins(
     },
     php: { requestedVersion: wpEnvPins.phpVersion, version: 'unobserved' },
     database: { engine: 'mysql', image: 'unobserved', version: 'unobserved' },
-    theme: { name: 'unobserved', version: 'unobserved', fileHash: 'unobserved' },
+    theme: preparedTheme
+      ? { name: preparedTheme.slug, version: preparedTheme.version, fileHash: 'unobserved', ...(preparedTheme.requiresPhp ? { requiresPhp: preparedTheme.requiresPhp } : {}) }
+      : { name: 'unobserved', version: 'unobserved', fileHash: 'unobserved' },
     browser: {
       engine: 'chromium',
       playwright: packages['@playwright/test'] ?? 'unresolved',
@@ -829,13 +869,49 @@ async function collectWordPressPackagePins(lockFile: string): Promise<Record<str
   return pins;
 }
 
-async function readWpEnvPins(file: string): Promise<{ coreSource: string; phpVersion: string }> {
+async function readWpEnvPins(file: string, themeProfile = false): Promise<{ coreSource: string; phpVersion: string }> {
   const parsed: unknown = JSON.parse(await readFile(file, 'utf8'));
   if (!isRecord(parsed)) return { coreSource: 'unobserved', phpVersion: 'unobserved' };
+  if (!themeProfile) {
+    return {
+      coreSource: typeof parsed.core === 'string' ? parsed.core : 'unobserved',
+      phpVersion: typeof parsed.phpVersion === 'string' ? parsed.phpVersion : 'unobserved',
+    };
+  }
+  const effective = effectiveWpEnvConfig(parsed as ThemeWpEnvConfig);
   return {
-    coreSource: typeof parsed.core === 'string' ? parsed.core : 'unobserved',
-    phpVersion: typeof parsed.phpVersion === 'string' ? parsed.phpVersion : 'unobserved',
+    coreSource: effective.core ?? 'unobserved',
+    phpVersion: effective.phpVersion ?? 'unobserved',
   };
+}
+
+function reportThemeProofRequirements(
+  theme: PreparedThemeProof | undefined,
+  preflightError: string | undefined,
+  environment: ProofEnvironment,
+): ProofRequirementReport {
+  const missingInputs = [
+    ...(!theme ? [preflightError ?? 'Theme proof requires a readable local theme directory.'] : []),
+    ...(preflightError && theme ? [preflightError] : []),
+  ];
+  return {
+    profile: 'theme',
+    artifact: { status: 'not_requested' },
+    requiredGates: [...PROOF_PROFILES.theme.requiredGates],
+    claims: [],
+    expectedEnvironment: [
+      'pinned theme source snapshot',
+      `WordPress ${REQUIRED_WORDPRESS_VERSION}, caller-selected PHP, local dependency plugins, MySQL, and Chromium observations`,
+    ],
+    missingInputs,
+  };
+}
+
+function missingThemeConfiguration(context: ProofGateContext, theme: PreparedThemeProof | undefined): string | undefined {
+  if (!theme) return 'Theme proof requires a readable local theme directory.';
+  if (!context.environment.input) return 'Theme proof receipt is missing its content-addressed source snapshot.';
+  if (context.gate === 'theme_roundtrip' && theme.files.length === 0) return 'Theme proof found no templates or template parts to round-trip.';
+  return undefined;
 }
 
 async function pinInput(options: ProofRunOptions, evidence: EvidenceStore): Promise<ProofFilePin | undefined> {
@@ -866,7 +942,10 @@ function createRuntime(
   wpEnvConfig: string,
   evidence: EvidenceStore,
   requiredGates: readonly ProofGateId[],
+  preparedTheme?: PreparedThemeProof,
+  sourceThemeConfig?: ThemeWpEnvConfig,
 ): { run: (context: ProofGateContext) => Promise<ProofGateResult>; stop: () => Promise<void> } {
+  const selectedProfile = preparedTheme ? 'theme' : options.profile ?? 'full';
   let environmentStarted = false;
   let staticPluginDeactivated = false;
   let deactivationEvidence: EvidenceReference | undefined;
@@ -877,10 +956,14 @@ function createRuntime(
   let publication: ProofPublication | undefined;
   let preparedPattern: PreparedSyncedPattern | undefined;
   let startupFailure: ProofGateResult | undefined;
+  let effectiveRuntimeConfig = wpEnvConfig;
+  let stagedThemeDirectory: string | undefined;
+  let runtimeThemeConfig: string | undefined;
+  let themeStageRoot: string | undefined;
   const command = options.commandRunner ?? runCommand;
 
   const wpEnv = async (args: string[], phase = `wp-env:${args.slice(0, 3).join(' ')}`): Promise<ProofCommandResult> => {
-    const result = await command('npx', ['--no-install', 'wp-env', `--config=${wpEnvConfig}`, ...args], {
+    const result = await command('npx', ['--no-install', 'wp-env', `--config=${effectiveRuntimeConfig}`, ...args], {
       cwd: projectRoot,
       timeoutMs: args[0] === 'start' ? PROOF_COMMAND_TIMEOUTS.wpEnvStart : PROOF_COMMAND_TIMEOUTS.wpEnv,
       phase,
@@ -892,13 +975,13 @@ function createRuntime(
   const start = async (): Promise<ProofGateResult> => {
     if (environmentStarted) return { status: 'pass', reason: 'Pinned wp-env is already running.' };
     if (startupFailure) return startupFailure;
-    const unavailable = unavailableProofTooling(options.profile ?? 'full');
+    const unavailable = unavailableProofTooling(selectedProfile);
     if (unavailable.length > 0) {
-      startupFailure = { status: 'blocked', reason: unavailableProofToolingMessage(options.profile ?? 'full', unavailable) };
+      startupFailure = { status: 'blocked', reason: unavailableProofToolingMessage(selectedProfile, unavailable) };
       return startupFailure;
     }
     if (options.execute === false) return { status: 'blocked', reason: 'Proof execution was disabled.' };
-    if (!options.pluginZip) return { status: 'blocked', reason: 'Runtime proof requires --plugin-zip.' };
+    if (!options.pluginZip && !preparedTheme) return { status: 'blocked', reason: 'Runtime proof requires --plugin-zip or --theme.' };
     // A browser is a separate, opt-in Playwright download. Check for it before
     // Docker starts so a missing local browser produces an actionable setup
     // diagnostic instead of a later generic browser-proof failure. Command
@@ -907,6 +990,21 @@ function createRuntime(
     if (!options.commandRunner && unavailableChromiumBrowser()) {
       startupFailure = { status: 'blocked', reason: unavailableChromiumBrowserMessage() };
       return startupFailure;
+    }
+    if (preparedTheme && sourceThemeConfig) {
+      try {
+        const stageParent = path.join(projectRoot, '.block-runner-theme-stage');
+        await mkdir(stageParent, { recursive: true });
+        themeStageRoot = await mkdtemp(path.join(stageParent, `${preparedTheme.snapshot.sha256.slice(7)}-`));
+        stagedThemeDirectory = path.join(themeStageRoot, preparedTheme.slug);
+        await copyThemeSnapshot(preparedTheme, stagedThemeDirectory);
+        runtimeThemeConfig = path.join(themeStageRoot, 'wp-env.theme-proof.json');
+        await writeThemeRuntimeConfig(sourceThemeConfig, wpEnvConfig, preparedTheme, stagedThemeDirectory, runtimeThemeConfig);
+        effectiveRuntimeConfig = runtimeThemeConfig;
+      } catch (error) {
+        startupFailure = { status: 'blocked', reason: `Could not stage the pinned theme source/config: ${error instanceof Error ? error.message : String(error)}` };
+        return startupFailure;
+      }
     }
     const docker = await command('docker', ['info', '--format', '{{.ServerVersion}}'], {
       cwd: projectRoot,
@@ -922,11 +1020,8 @@ function createRuntime(
       };
       return startupFailure;
     }
-    const staged = await stagePluginZip();
-    if (staged.status !== 'pass') {
-      startupFailure = staged;
-      return startupFailure;
-    }
+    const staged = preparedTheme ? { status: 'pass' as const } : await stagePluginZip();
+    if (staged.status !== 'pass') { startupFailure = staged; return startupFailure; }
     const result = await wpEnv(['start'], 'wp-env-start');
     const log = await logged(result);
     if (result.exitCode !== 0) {
@@ -1230,7 +1325,31 @@ function createRuntime(
           ? { status: 'pass', evidence: [...(staged.evidence ?? []), log, ...(metadata.evidence ?? [])], details: metadata.details }
           : { status: metadata.status, reason: metadata.reason, evidence: [...(staged.evidence ?? []), log, ...(metadata.evidence ?? [])], details: metadata.details };
       }
-      if (context.gate === 'plugin_activation') {
+    if (context.gate === 'theme_activation' && preparedTheme) {
+      const activated = await wpEnv(['run', 'cli', 'wp', 'theme', 'activate', preparedTheme.slug]);
+      const activationLog = await logged(activated);
+      if (activated.exitCode !== 0) return { status: 'fail', reason: `WordPress could not activate local theme ${preparedTheme.slug}.`, evidence: [activationLog] };
+      await collectObservedRuntimePins(wpEnv, command, environment, evidence);
+      const dependencySources = sourceThemeConfig ? effectiveWpEnvConfig(sourceThemeConfig).plugins : [];
+      const dependencySlugs = dependencySources.map((source) => {
+        const absolute = resolveLocalSource(source, process.cwd());
+        return path.extname(absolute).toLowerCase() === '.php' ? path.basename(absolute, '.php') : path.basename(absolute);
+      });
+      const deps64 = Buffer.from(JSON.stringify(dependencySlugs), 'utf8').toString('base64');
+      const php = `require_once ABSPATH . 'wp-admin/includes/plugin.php'; $deps = json_decode(base64_decode('${deps64}'), true); $active = (array) get_option('active_plugins', array()); $matches = array(); foreach (get_plugins() as $file => $plugin) { $slug = dirname($file); if ($slug === '.' || $slug === '') { $slug = basename($file, '.php'); } if (in_array($slug, $deps, true)) { $matches[] = array('slug' => $slug, 'file' => $file, 'active' => in_array($file, $active, true)); } } echo json_encode(array('dependencies' => $matches, 'theme' => get_stylesheet()));`;
+      const { result: dependencyResult, evidence: dependencyLog } = await wp(php);
+      let dependencyObservation: unknown;
+      try { dependencyObservation = JSON.parse(dependencyResult.stdout.trim()); } catch { dependencyObservation = { raw: dependencyResult.stdout }; }
+      const activeDependencies = isRecord(dependencyObservation) && Array.isArray(dependencyObservation.dependencies)
+        ? dependencyObservation.dependencies as Array<{ slug?: string; active?: boolean }>
+        : [];
+      const dependenciesPassed = dependencySlugs.every((slug) => activeDependencies.some((plugin) => plugin.slug === slug && plugin.active));
+      const details = { theme: preparedTheme.slug, dependencySources, dependencySlugs, dependencyObservation, dependenciesPassed };
+      return dependencyResult.exitCode === 0 && dependenciesPassed
+        ? { status: 'pass', evidence: [activationLog, dependencyLog], details }
+        : { status: 'fail', reason: 'Theme activated, but one or more caller-provided local dependency plugins are not active.', evidence: [activationLog, dependencyLog], details };
+    }
+    if (context.gate === 'plugin_activation') {
         if (!context.fixture?.blockName) return { status: 'blocked', reason: 'Plugin activation needs fixture.blockName to resolve its slug.' };
         const plugin = pluginSlugFor(context.fixture);
         const result = await wpEnv(['run', 'cli', 'wp', 'plugin', 'is-active', plugin]);
@@ -1271,7 +1390,7 @@ function createRuntime(
       }
 
       if (context.gate === 'environment_observation') {
-        const unobserved = await requiredRuntimeObservationFailures(environment, evidence);
+        const unobserved = await requiredRuntimeObservationFailures(environment, evidence, selectedProfile === 'theme');
         return unobserved.length === 0
           ? {
             status: 'pass',
@@ -1284,6 +1403,71 @@ function createRuntime(
             details: { unobserved },
             ...(environment.observations ? { evidence: [environment.observations] } : {}),
           };
+      }
+
+      if (context.gate === 'theme_roundtrip' && preparedTheme) {
+        const result = await runThemeBrowserProof(preparedTheme, themePlaywrightHelper, command, options, sourceThemeConfig);
+        const log = await logged(result.command);
+        if (!result.report) return { status: 'blocked', reason: 'Site Editor theme save proof did not produce a report.', evidence: [log] };
+        const browserObservation = result.report.browser;
+        if (isRecord(browserObservation)) {
+          if (typeof browserObservation.version === 'string') environment.browser.version = browserObservation.version;
+          if (typeof browserObservation.revision === 'string') environment.browser.revision = browserObservation.revision;
+        }
+        const files = Array.isArray(result.report.files) ? result.report.files as Array<Record<string, unknown>> : [];
+        const expectedByName = new Map(preparedTheme.files.map((file) => [file.file, file]));
+        const reportByName = new Map(files.map((file) => [String(file.file ?? ''), file]));
+        const exactFileSet = files.length === preparedTheme.files.length
+          && reportByName.size === files.length
+          && preparedTheme.files.every((file) => reportByName.has(file.file))
+          && files.every((file) => expectedByName.has(String(file.file ?? '')));
+        const comparedFiles = exactFileSet ? await Promise.all(preparedTheme.files.map(async (expected) => {
+          const actual = reportByName.get(expected.file)!;
+          const fixedSource = await canonicalize(expected.content);
+          const fixedMarkup = fixedSource.output ?? expected.content;
+          const loaded = typeof actual.loadedRaw === 'string'
+            ? compareThemeMarkup(expected.content, actual.loadedRaw, preparedTheme!.slug)
+            : undefined;
+          const saved = typeof actual.savedRaw === 'string'
+            ? compareThemeMarkup(expected.content, actual.savedRaw, preparedTheme!.slug)
+            : undefined;
+          const fixed = typeof actual.savedRaw === 'string'
+            ? compareThemeMarkup(fixedMarkup, actual.savedRaw, preparedTheme!.slug)
+            : undefined;
+          const serialized = typeof actual.editorSave === 'object' && actual.editorSave !== null
+            && typeof (actual.editorSave as Record<string, unknown>).serialized === 'string'
+            && typeof actual.savedRaw === 'string'
+            ? compareExactMarkup((actual.editorSave as Record<string, unknown>).serialized as string, actual.savedRaw)
+            : undefined;
+          const passed = actual.status === 'pass' && loaded?.equal === true && saved?.equal === true && serialized?.equal === true;
+          if (loaded) actual.sourceLoadComparison = loaded;
+          if (saved) actual.sourceComparison = saved;
+          if (fixed) actual.fixComparison = fixed;
+          if (serialized) actual.editorRestComparison = serialized;
+          actual.status = passed ? 'pass' : 'fail';
+          if (!passed) {
+            actual.reason = loaded?.equal !== true
+              ? 'Loaded source entity differed from the source file after removing only the matching theme attribute.'
+              : saved?.equal !== true
+                ? 'Saved REST content differed from the source after removing only the matching theme attribute.'
+                : serialized?.equal !== true
+                  ? 'Fresh REST content.raw differed from the editor serialization saved through core data.'
+                  : actual.reason ?? 'Browser proof did not confirm source loading and persistence.';
+            const firstDifferenceByte = loaded?.firstDifferenceByte ?? saved?.firstDifferenceByte ?? serialized?.firstDifferenceByte;
+            if (firstDifferenceByte !== undefined) actual.firstDifferenceByte = firstDifferenceByte;
+          }
+          return actual;
+        })) : [];
+        result.report.files = comparedFiles;
+        const reportEvidence = await evidence.putJson(result.report);
+        const passed = result.command.exitCode === 0 && exactFileSet && comparedFiles.every((file) => file.status === 'pass');
+        const completedWithDifferences = exactFileSet && comparedFiles.some((file) => file.status === 'fail');
+        return {
+          status: passed ? 'pass' : completedWithDifferences ? 'fail' : 'blocked',
+          reason: passed ? undefined : completedWithDifferences ? 'One or more theme templates or parts changed during a Site Editor save.' : 'Site Editor theme save proof did not produce a complete unique per-file result.',
+          evidence: [log, reportEvidence],
+          details: result.report,
+        };
       }
 
       // Deactivation is intentionally after the frontend/browser snapshot. The checks distinguish
@@ -1334,9 +1518,67 @@ function createRuntime(
     },
     async stop() {
       if (environmentStarted && !options.keepEnvironment) await wpEnv(['stop']).catch(() => undefined);
+      if (!options.keepEnvironment && themeStageRoot) await rm(themeStageRoot, { recursive: true, force: true }).catch(() => undefined);
       // Keep the staged ZIP and browser work alongside the receipt until the
       // caller explicitly cleans its proof artifacts. Failed runs need these too.
     },
+  };
+}
+
+async function runThemeBrowserProof(
+  theme: PreparedThemeProof,
+  helper: string,
+  command: ProofCommandRunner,
+  options: ProofRunOptions,
+  wpEnvConfig?: ThemeWpEnvConfig,
+): Promise<{ command: ProofCommandResult; report?: Record<string, unknown> }> {
+  try {
+    await access(helper, fsConstants.R_OK);
+  } catch {
+    return { command: commandFailure(process.execPath, new Error('Bundled Site Editor theme proof helper is unavailable.')) };
+  }
+  const workRoot = path.resolve(options.outputDir ?? 'proof-receipts');
+  await mkdir(workRoot, { recursive: true });
+  const work = await mkdtemp(path.join(workRoot, 'theme-browser-'));
+  const configPath = path.join(work, 'proof.json');
+  const reportPath = path.join(work, 'result.json');
+  const files = [];
+  for (const file of theme.files) {
+    const fixed = await canonicalize(file.content);
+    files.push({ file: file.file, kind: file.kind, content: file.content, fix: fixed.output ?? file.content });
+  }
+  const development = wpEnvConfig?.env?.development ?? {};
+  const port = Number(process.env.WP_ENV_PORT ?? development.port ?? 8888);
+  await writeFile(configPath, JSON.stringify({ theme: theme.slug, files, baseUrl: `http://localhost:${port}` }), 'utf8');
+  const result = await command(process.execPath, [helper, '--config', configPath, '--out', reportPath], {
+    cwd: projectRoot,
+    timeoutMs: PROOF_COMMAND_TIMEOUTS.browser,
+    phase: 'browser-theme-save',
+  });
+  try {
+    const report = JSON.parse(await readFile(reportPath, 'utf8')) as Record<string, unknown>;
+    return { command: result, report };
+  } catch (error) {
+    return { command: { ...result, exitCode: null, stderr: `${result.stderr}\nCould not read theme browser report: ${error instanceof Error ? error.message : String(error)}` } };
+  }
+}
+
+function compareExactMarkup(expected: string, actual: string): {
+  equal: boolean;
+  firstDifferenceByte?: number;
+  expectedBytes: number;
+  actualBytes: number;
+} {
+  const left = Buffer.from(expected, 'utf8');
+  const right = Buffer.from(actual, 'utf8');
+  let offset = 0;
+  while (offset < left.length && offset < right.length && left[offset] === right[offset]) offset++;
+  const equal = offset === left.length && offset === right.length;
+  return {
+    equal,
+    ...(equal ? {} : { firstDifferenceByte: offset }),
+    expectedBytes: left.length,
+    actualBytes: right.length,
   };
 }
 
@@ -1524,6 +1766,7 @@ async function observePluginMetadata(
 async function requiredRuntimeObservationFailures(
   environment: ProofEnvironment,
   evidenceStore: EvidenceStore,
+  themeProfile = false,
 ): Promise<string[]> {
   const failures: string[] = [];
   const missing = (value: string | undefined): boolean => !value || value === 'unobserved' || value === 'unresolved';
@@ -1545,27 +1788,33 @@ async function requiredRuntimeObservationFailures(
     requirePin('generator.packageLock', environment.generator.packageLock),
     requirePin('wordpress.wpEnvConfig', environment.wordpress.wpEnvConfig),
     requirePin('input', environment.input),
-    requirePin('plugin.zip', environment.plugin.zip),
+    ...(themeProfile ? [] : [requirePin('plugin.zip', environment.plugin.zip)]),
   ]);
   if (missing(environment.generator.package)) failures.push('generator.package');
   if (!isReleaseVersion(environment.generator.version)) failures.push('generator.version');
   if (environment.wordpress.requestedVersion !== REQUIRED_WORDPRESS_VERSION) failures.push('wordpress.requestedVersion');
   if (environment.wordpress.coreSource !== REQUIRED_WORDPRESS_CORE_SOURCE) failures.push('wordpress.coreSource');
-  if (environment.php.requestedVersion !== REQUIRED_PHP_SERIES) failures.push('php.requestedVersion');
+  if (themeProfile
+    ? !/^\d+\.\d+(?:\.\d+)?$/.test(environment.php.requestedVersion)
+    : environment.php.requestedVersion !== REQUIRED_PHP_SERIES) failures.push('php.requestedVersion');
   if (!['mysql', 'mariadb'].includes(environment.database.engine)) failures.push('database.engine');
   if (environment.browser.engine !== 'chromium') failures.push('browser.engine');
   if (!isExactSemver(environment.wordpress.wpEnv)) failures.push('wordpress.wpEnv');
   if (!isExactSemver(environment.browser.playwright)) failures.push('browser.playwright');
   if (!/^v\d+\.\d+\.\d+$/.test(environment.node.version)) failures.push('node.version');
 
-  if (missing(environment.plugin.slug)) failures.push('plugin.slug');
-  if (missing(environment.plugin.name)) failures.push('plugin.name');
-  if (!isReleaseVersion(environment.plugin.version)) failures.push('plugin.version');
-  if (missing(environment.plugin.file)) failures.push('plugin.file');
+  if (!themeProfile) {
+    if (missing(environment.plugin.slug)) failures.push('plugin.slug');
+    if (missing(environment.plugin.name)) failures.push('plugin.name');
+    if (!isReleaseVersion(environment.plugin.version)) failures.push('plugin.version');
+    if (missing(environment.plugin.file)) failures.push('plugin.file');
+  }
   if (!isExactWordPressVersion(environment.wordpress.version)) failures.push('wordpress.version');
   if (!isSha256Address(environment.wordpress.coreHash)) failures.push('wordpress.coreHash');
   if (!isSha256Address(environment.wordpress.dockerImage)) failures.push('wordpress.dockerImage');
-  if (!isRequiredPhpVersion(environment.php.version)) failures.push('php.version');
+  if (themeProfile
+    ? !/^\d+\.\d+\.\d+$/.test(environment.php.version)
+    : !isRequiredPhpVersion(environment.php.version)) failures.push('php.version');
   if (!isSha256Address(environment.database.image)) failures.push('database.image');
   if (!isDatabaseVersion(environment.database.version)) failures.push('database.version');
   if (!isThemeName(environment.theme.name)) failures.push('theme.name');
@@ -1586,6 +1835,12 @@ async function requiredRuntimeObservationFailures(
     if (environment.database.image !== observed.database.image) failures.push('observations.databaseImage.value');
     if (environment.theme.name !== observed.theme.name || environment.theme.version !== observed.theme.version) failures.push('observations.theme.value');
     if (environment.theme.fileHash !== observed.theme.fileHash) failures.push('observations.themeHash.value');
+    if (themeProfile) {
+      if (observed.theme.name !== environment.theme.name) failures.push('observations.theme.name');
+      if (!versionAtLeast(observed.php.version, environment.theme.requiresPhp ?? '0.0')) failures.push('php.requiresPhp');
+      const requested = environment.php.requestedVersion.split('.').slice(0, 2).join('.');
+      if (observed.php.version.split('.').slice(0, 2).join('.') !== requested) failures.push('php.requestedVersion');
+    }
     if (environment.wordpress.version !== observed.wordpress.version) failures.push('observations.wordpress.value');
     if (environment.wordpress.coreHash !== observed.wordpress.coreHash) failures.push('observations.coreHash.value');
     if (environment.wordpress.dockerImage !== observed.wordpress.dockerImage) failures.push('observations.wordpressImage.value');
@@ -1741,7 +1996,17 @@ function parseActiveTheme(value: string): { name: string; version: string } | un
 }
 
 function parsePhpVersion(value: string): string | undefined {
-  return isRequiredPhpVersion(value) ? value : undefined;
+  return /^\d+\.\d+\.\d+$/.test(value) ? value : undefined;
+}
+
+function versionAtLeast(value: string, minimum: string): boolean {
+  const left = value.split('.').map(Number);
+  const right = minimum.split('.').map(Number);
+  for (let index = 0; index < Math.max(left.length, right.length); index++) {
+    const difference = (left[index] ?? 0) - (right[index] ?? 0);
+    if (difference !== 0) return difference > 0;
+  }
+  return true;
 }
 
 function parseDatabaseVersion(value: string): string | undefined {
@@ -1978,6 +2243,7 @@ function proofToolingInstallCommand(profile: ProofProfileName): string {
 }
 
 function proofToolingForProfile(profile: ProofProfileName): readonly (typeof PROOF_TOOLING)[number][] {
+  if (profile === 'theme') return THEME_PROOF_TOOLING;
   // `runtime` has historically required the browser proof toolchain for its
   // registry observations. Keep that contract for its capability alias `built`.
   if (profile === 'headless' || profile === 'generated') return [];

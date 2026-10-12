@@ -47,6 +47,8 @@ export const PROOF_GATE_IDS = [
   'static_deactivation_assets',
   'static_deactivation_editor_controls',
   'pattern_overrides',
+  'theme_activation',
+  'theme_roundtrip',
   'visual_regression',
   'accessibility_editor',
   'accessibility_frontend',
@@ -56,7 +58,7 @@ export const PROOF_GATE_IDS = [
 export type ProofGateId = (typeof PROOF_GATE_IDS)[number];
 export type GateId = ProofGateId;
 
-export const PROOF_PROFILE_NAMES = ['headless', 'runtime', 'editor', 'full', 'generated', 'built', 'editor-verified', 'fidelity-checked', 'pattern-verified'] as const;
+export const PROOF_PROFILE_NAMES = ['headless', 'runtime', 'editor', 'full', 'generated', 'built', 'editor-verified', 'fidelity-checked', 'pattern-verified', 'theme'] as const;
 
 export type ProofProfileName = (typeof PROOF_PROFILE_NAMES)[number];
 export type ProfileName = ProofProfileName;
@@ -94,6 +96,7 @@ export interface ProofRequirementReport {
   claims: readonly ProofRequirementClaim[];
   expectedEnvironment: readonly string[];
   missingInputs: readonly string[];
+  localDependencies?: readonly unknown[];
 }
 
 /**
@@ -259,6 +262,11 @@ export const PROOF_PROFILES: Readonly<Record<ProofProfileName, ProofProfile>> = 
   full: Object.freeze({
     name: 'full',
     requiredGates: fullGates,
+    optionalGates: [],
+  }),
+  theme: Object.freeze({
+    name: 'theme',
+    requiredGates: ['theme_activation', 'theme_roundtrip', 'environment_observation', 'php_logs'] as const satisfies readonly ProofGateId[],
     optionalGates: [],
   }),
 });
