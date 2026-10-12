@@ -115,8 +115,11 @@ interface ProofCliOptions {
   markup?: string;
   input?: string;
   receiptDir?: string;
+  out?: string;
   wpEnvConfig?: string;
   theme?: string;
+  site?: string;
+  siteNegativeControl?: 'missing-content' | 'broken-asset' | 'wrong-target' | 'accordion-mismatch' | 'broken-mobile';
   run?: boolean;
   keepEnvironment?: boolean;
   json?: boolean;
@@ -495,7 +498,7 @@ plugin
 program
   .command('proof [pluginZip]')
   .description('Run a WordPress proof profile and write a content-addressed receipt.')
-  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES.filter((name) => name !== 'theme') as unknown as string[]).default('full'))
+  .addOption(new Option('--profile <profile>', 'historical profile or capability claim').choices(PROOF_PROFILE_NAMES.filter((name) => name !== 'theme' && name !== 'site') as unknown as string[]).default('full'))
   .option('--fixture <path>', 'JSON fixture with block name, editable fields, and proof assertions')
   .option('--artifact <path>', 'confirmed JSON artifact contract (SHA-256 and capabilities) for capability-scoped claims')
   .option('--markup <path>', 'generated block markup for the headless validation gate')
@@ -503,13 +506,18 @@ program
   .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
   .option('--wp-env-config <path>', 'wp-env configuration (default: proof/wp-env.json)')
   .option('--theme <directory>', 'prove local theme templates and parts through a real Site Editor save')
+  .option('--site <bundle>', 'prove an explicitly published five-page site fixture in an owned sandbox')
+  .option('--out <path>', 'alias for --receipt-dir')
+  .addOption(new Option('--site-negative-control <control>', 'seed a controlled fixture failure; site proof only').choices(['missing-content', 'broken-asset', 'wrong-target', 'accordion-mismatch', 'broken-mobile']))
   .option('--no-run', 'only produce a blocked receipt; do not start Docker or Playwright')
   .option('--keep-environment', 'leave wp-env running after the proof')
   .option('--json', 'emit the complete receipt result as JSON')
   .action(async (pluginZip: string | undefined, options: ProofCliOptions) => {
     const profile = options.profile ?? 'full';
+    if (options.siteNegativeControl && !options.site) program.error('error: site negative controls require --site');
+    if (options.site && (options.theme || pluginZip)) program.error('error: --site is exclusive with --theme and plugin ZIP');
     if (options.theme && pluginZip) program.error('error: proof accepts either a plugin ZIP or --theme, not both');
-    if (!options.theme && !pluginZip) program.error('error: proof needs a plugin ZIP or --theme <directory>');
+    if (!options.site && !options.theme && !pluginZip) program.error('error: proof needs a plugin ZIP or --theme <directory>');
     if (profile === 'theme' && !options.theme) program.error('error: the theme proof profile is selected by --theme');
     if (!isProofProfileName(profile)) {
       program.error(`error: unsupported proof profile ${JSON.stringify(profile)}`);
@@ -522,15 +530,17 @@ program
       options.input ? readFile(options.input) : undefined,
     ]);
     const result = await runProof({
-      profile: options.theme ? 'theme' : profile,
+      profile: options.site ? 'site' : options.theme ? 'theme' : profile,
       pluginZip,
       theme: options.theme,
+      site: options.site,
+      siteNegativeControl: options.siteNegativeControl,
       fixture,
       artifact,
       markup,
       input,
       inputPath: options.input,
-      outputDir: options.receiptDir,
+      outputDir: options.receiptDir ?? options.out,
       wpEnvConfig: options.wpEnvConfig,
       execute: options.run,
       keepEnvironment: options.keepEnvironment,

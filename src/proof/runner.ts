@@ -1,3 +1,4 @@
+import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, type PreparedSiteProof, type SiteProofGate } from './site.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs';
@@ -375,6 +376,9 @@ export interface ProofRunOptions {
   pluginZip?: string;
   /** Local block theme to prove through Site Editor template/part saves. */
   theme?: string;
+  /** Controlled five-page site bundle; fixture deployment only. */
+  site?: string;
+  siteNegativeControl?: 'missing-content' | 'broken-asset' | 'wrong-target' | 'accordion-mismatch' | 'broken-mobile';
   /** Confirmed artifact capability contract. Capability-scoped claims bind it to pluginZip. */
   artifact?: ProofArtifactContract;
   /** Generator input bytes or a path to its reviewed input. */
@@ -486,7 +490,7 @@ interface PreparedSyncedPattern {
  * a `blocked` gate, never a false green result.
  */
 export async function runProof(options: ProofRunOptions): Promise<ProofRunResult> {
-  const profile = options.theme ? 'theme' : options.profile ?? 'full';
+  const profile = options.site ? 'site' : options.theme ? 'theme' : options.profile ?? 'full';
   if (!(profile in PROOF_PROFILES)) {
     throw new TypeError(`Unknown proof profile: ${String(profile)}`);
   }
@@ -496,12 +500,14 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   const evidence = receiptWriter.evidence;
   const wpEnvConfig = path.resolve(options.wpEnvConfig ?? defaultWpEnvConfig);
   let preparedTheme: PreparedThemeProof | undefined;
+  let preparedSite: PreparedSiteProof | undefined;
   let themeConfig: ThemeWpEnvConfig | undefined;
   let localDependencies: unknown[] = [];
   let preflightError: string | undefined;
-  if (options.theme) {
+  if (options.theme || options.site) {
     try {
-      preparedTheme = await prepareThemeProof(options.theme, evidence);
+      if (options.site) { preparedSite = await prepareSiteProof(options.site, evidence); preparedTheme = preparedSite.theme; }
+      else preparedTheme = await prepareThemeProof(options.theme!, evidence);
       themeConfig = JSON.parse(await readFile(wpEnvConfig, 'utf8')) as ThemeWpEnvConfig;
       preflightError = themePreflightFailure(preparedTheme, themeConfig);
       if (!preflightError) {
@@ -515,10 +521,10 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
   const environment = await collectEnvironmentPins(options, evidence, wpEnvConfig, preparedTheme);
   // Resolve the declared claim before any adapter or Docker work begins. This is
   // retained even for blocked runs so a missing fixture cannot masquerade as N/A.
-  const requirements = profile === 'theme'
-    ? { ...reportThemeProofRequirements(preparedTheme, preflightError, environment), localDependencies }
+  const requirements = profile === 'theme' || profile === 'site'
+    ? { ...reportThemeProofRequirements(preparedTheme, preflightError, environment), profile, requiredGates: PROOF_PROFILES[profile].requiredGates, localDependencies }
     : reportProofRequirements(profile, options.artifact, environment.plugin.zip?.sha256, options.fixture);
-  const runtime = createRuntime(options, environment, wpEnvConfig, evidence, requirements.requiredGates, preparedTheme, themeConfig);
+  const runtime = createRuntime(options, environment, wpEnvConfig, evidence, requirements.requiredGates, preparedTheme, themeConfig, preparedSite);
   // A supplied gate adapter owns its own proof environment. Otherwise report
   // an unavailable package before any profile's runtime gate can reach Docker.
   const unavailable = options.gateRunner ? [] : unavailableProofTooling(profile);
@@ -545,7 +551,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
       };
       const artifactError = requirements.missingInputs.find((reason) => reason.startsWith('Capability-scoped proof')
         || reason.startsWith('Confirmed artifact') || reason.startsWith('Pattern-verified proof'));
-      const configurationError = preflightError ?? artifactError ?? (profile === 'theme' ? missingThemeConfiguration(context, preparedTheme) : missingProofConfiguration(context));
+      const configurationError = preflightError ?? artifactError ?? ((profile === 'theme' || profile === 'site') ? missingThemeConfiguration(context, preparedTheme) : missingProofConfiguration(context));
       const unverifiedResult = gate !== 'headless_validation' && toolingError
         ? { status: 'blocked' as const, reason: toolingError }
         : configurationError
@@ -556,7 +562,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
           ? await options.gateRunner(context)
           : await runtime.run(context);
       const result = gate === 'environment_observation' && unverifiedResult?.status === 'pass'
-        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence, profile === 'theme')
+        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence, profile === 'theme' || profile === 'site')
         : unverifiedResult;
       records.push(await asRecord(gate, result, context, startedAt));
     }
@@ -816,7 +822,7 @@ async function collectEnvironmentPins(
     options.pluginZip ? pinFile(path.resolve(options.pluginZip), evidence).catch(() => undefined) : undefined,
     preparedTheme ? preparedTheme.snapshot : pinInput(options, evidence),
     collectWordPressPackagePins(packageLock).catch(() => ({})),
-    readWpEnvPins(wpEnvConfig, Boolean(options.theme)).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
+    readWpEnvPins(wpEnvConfig, Boolean(options.theme || options.site)).catch(() => ({ coreSource: 'unobserved', phpVersion: 'unobserved' })),
   ]);
   const packages = { ...(packageJson.dependencies ?? {}), ...(packageJson.devDependencies ?? {}) };
 
@@ -945,8 +951,9 @@ function createRuntime(
   requiredGates: readonly ProofGateId[],
   preparedTheme?: PreparedThemeProof,
   sourceThemeConfig?: ThemeWpEnvConfig,
+  preparedSite?: PreparedSiteProof,
 ): { run: (context: ProofGateContext) => Promise<ProofGateResult>; stop: () => Promise<void> } {
-  const selectedProfile = preparedTheme ? 'theme' : options.profile ?? 'full';
+  const selectedProfile = preparedSite ? 'site' : preparedTheme ? 'theme' : options.profile ?? 'full';
   let environmentStarted = false;
   let staticPluginDeactivated = false;
   let deactivationEvidence: EvidenceReference | undefined;
@@ -961,6 +968,7 @@ function createRuntime(
   let stagedThemeDirectory: string | undefined;
   let runtimeThemeConfig: string | undefined;
   let themeStageRoot: string | undefined;
+  let siteResults: Partial<Record<SiteProofGate, ProofGateResult>> | undefined;
   const command = options.commandRunner ?? runCommand;
 
   const wpEnv = async (args: string[], phase = `wp-env:${args.slice(0, 3).join(' ')}`): Promise<ProofCommandResult> => {
@@ -1313,6 +1321,25 @@ function createRuntime(
       const started = await start();
       if (started.status !== 'pass') return started;
 
+      if (preparedSite && SITE_PROOF_GATES.includes(context.gate as SiteProofGate)) {
+        if (!siteResults) {
+          if (!stagedThemeDirectory || !sourceThemeConfig) return { status: 'blocked', reason: 'Site proof requires the owned staged theme and effective config.' };
+          const result = await runSiteProof({
+            site: preparedSite, negativeControl: options.siteNegativeControl, stagedTheme: stagedThemeDirectory,
+            baseUrl: effectiveWpEnvUrl(sourceThemeConfig), helper: path.join(projectRoot, 'scripts', 'proof-site-playwright.mjs'), evidence,
+            wp: async (php) => wpEnv(['run', 'cli', 'wp', 'eval', php]),
+            command: async (name, args) => command(name, args, { cwd: projectRoot, timeoutMs: PROOF_COMMAND_TIMEOUTS.browser, phase: 'browser-site-proof' }),
+          });
+          siteResults = result.gates;
+          if (result.theme && preparedTheme) Object.assign(preparedTheme, result.theme);
+          if (isRecord(result.browser) && typeof result.browser.version === 'string' && typeof result.browser.revision === 'string') {
+            environment.browser.version = result.browser.version;
+            environment.browser.revision = result.browser.revision;
+          }
+          await collectObservedRuntimePins(wpEnv, command, environment, evidence);
+        }
+        return siteResults[context.gate as SiteProofGate] ?? { status: 'blocked', reason: 'Site gate result missing.' };
+      }
       if (context.gate === 'zip_installation') {
         const staged = await stagePluginZip();
         if (staged.status !== 'pass') return staged;
@@ -1391,7 +1418,7 @@ function createRuntime(
       }
 
       if (context.gate === 'environment_observation') {
-        const unobserved = await requiredRuntimeObservationFailures(environment, evidence, selectedProfile === 'theme');
+        const unobserved = await requiredRuntimeObservationFailures(environment, evidence, selectedProfile === 'theme' || selectedProfile === 'site');
         return unobserved.length === 0
           ? {
             status: 'pass',
@@ -1407,7 +1434,7 @@ function createRuntime(
       }
 
       if (context.gate === 'theme_roundtrip' && preparedTheme) {
-        return runThemeRoundtripWithRuntimeMarker(preparedTheme, themePlaywrightHelper, command, options, sourceThemeConfig, wpEnv, logged, evidence, environment);
+        return runThemeRoundtripWithRuntimeMarker(preparedTheme, preparedSite ? path.join(projectRoot, 'scripts', 'proof-site-playwright.mjs') : themePlaywrightHelper, command, options, sourceThemeConfig, wpEnv, logged, evidence, environment);
       }
 
       // Deactivation is intentionally after the frontend/browser snapshot. The checks distinguish
@@ -2308,7 +2335,7 @@ function proofToolingInstallCommand(profile: ProofProfileName): string {
 }
 
 function proofToolingForProfile(profile: ProofProfileName): readonly (typeof PROOF_TOOLING)[number][] {
-  if (profile === 'theme') return THEME_PROOF_TOOLING;
+  if (profile === 'theme' || profile === 'site') return THEME_PROOF_TOOLING;
   // `runtime` has historically required the browser proof toolchain for its
   // registry observations. Keep that contract for its capability alias `built`.
   if (profile === 'headless' || profile === 'generated') return [];
