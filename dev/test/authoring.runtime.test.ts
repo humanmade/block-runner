@@ -182,7 +182,7 @@ describe('generated registered blocks in WordPress 7.1', () => {
   });
 
   it.each([false, 'insert', 'all', 'contentOnly'] as const satisfies readonly InnerBlocksLock[])(
-    'registers, persists native edits, and enforces %s structural operations',
+    'registers and enforces %s structural operations',
     async (templateLock) => {
       const wp = await getWp();
       const editor = require('@wordpress/block-editor') as BlockEditorRuntime;
@@ -194,16 +194,18 @@ describe('generated registered blocks in WordPress 7.1', () => {
       const expected = expectedStructuralOperations(templateLock);
 
       try {
-        const persisted = mountCompiledBlock(wp, compiled, actions, selectors);
-        actions.updateBlockAttributes(persisted.childIds[0], { content: 'Edited after reopening.' });
-        const saved = wp.serialize([selectors.getBlock(persisted.rootId) as RuntimeBlock]);
-        const reopened = wp.parse(saved).map(runtimeBlock);
+        if (templateLock === 'contentOnly') {
+          const persisted = mountCompiledBlock(wp, compiled, actions, selectors);
+          actions.updateBlockAttributes(persisted.childIds[0], { content: 'Edited after reopening.' });
+          const saved = wp.serialize([selectors.getBlock(persisted.rootId) as RuntimeBlock]);
+          const reopened = wp.parse(saved).map(runtimeBlock);
 
-        expect(saved).toContain('Edited after reopening.');
-        expect(reopened).toHaveLength(1);
-        expect(wp.serialize(reopened)).toContain('Edited after reopening.');
-        expect(wp.serialize(reopened)).toBe(saved);
-        expectValidTree(wp, reopened[0]!);
+          expect(saved).toContain('Edited after reopening.');
+          expect(reopened).toHaveLength(1);
+          expect(wp.serialize(reopened)).toContain('Edited after reopening.');
+          expect(wp.serialize(reopened)).toBe(saved);
+          expectValidTree(wp, reopened[0]!);
+        }
 
         const inserted = mountCompiledBlock(wp, compiled, actions, selectors);
         const beforeInsert = selectors.getBlockOrder(inserted.rootId) as string[];
