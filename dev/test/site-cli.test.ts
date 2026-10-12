@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, stat } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,7 +12,7 @@ const intentPath = path.join(fixtureRoot, 'site.intent.json');
 
 describe('site compile CLI', () => {
   it('requires an explicit asset root before reading or publishing a bundle', async () => {
-    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-site-cli-'));
+    const project = await mkdtemp(path.join(await realpath(tmpdir()), 'block-runner-site-cli-'));
     const output = path.join(project, 'bundle');
     const result = await runCli(['site', 'compile', intentPath, '--out', output, '--theme-only', '--json'], project);
 
@@ -22,7 +22,7 @@ describe('site compile CLI', () => {
   });
 
   it('publishes theme-only output with pending page bindings and no runtime-proof claim', async () => {
-    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-site-cli-'));
+    const project = await mkdtemp(path.join(await realpath(tmpdir()), 'block-runner-site-cli-'));
     const output = path.join(project, 'bundle');
     const result = await runCli([
       'site', 'compile', intentPath, '--asset-root', fixtureRoot, '--out', output, '--theme-only', '--json',
@@ -45,7 +45,7 @@ describe('site compile CLI', () => {
   });
 
   it('refuses full-site publication when required attachment bindings are missing', async () => {
-    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-site-cli-'));
+    const project = await mkdtemp(path.join(await realpath(tmpdir()), 'block-runner-site-cli-'));
     const output = path.join(project, 'bundle');
     const result = await runCli([
       'site', 'compile', intentPath, '--asset-root', fixtureRoot, '--out', output, '--json',

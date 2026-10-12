@@ -116,14 +116,16 @@ function buildBundleFiles(source: PreparedSiteSource, artifact: CompiledSite | T
   const compiledRecord = 'pendingPageBindings' in artifact
     ? {
       type: 'theme', artifactIdentity: artifact.artifactIdentity, sourceIdentity: source.sourceIdentity,
-      targetBindings: 'targetBindings' in artifact ? artifact.targetBindings : {},
-      targetBindingFingerprint: 'targetBindingFingerprint' in artifact ? artifact.targetBindingFingerprint : '',
+      targetBindings: artifact.targetBindings,
+      targetBindingFingerprint: artifact.targetBindingFingerprint,
+      ...(artifact.themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl: artifact.themeAssetBaseUrl } : {}),
       pendingPageBindings: artifact.pendingPageBindings, diagnostics: artifact.diagnostics,
       inventory: artifact.inventory,
     }
     : {
       type: 'site', artifactIdentity: artifact.artifactIdentity, sourceIdentity: source.sourceIdentity,
       targetBindings: artifact.targetBindings, targetBindingFingerprint: artifact.targetBindingFingerprint,
+      ...(artifact.themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl: artifact.themeAssetBaseUrl } : {}),
       pages: artifact.pages, diagnostics: artifact.diagnostics, inventory: artifact.inventory,
     };
   const sorted = sortBundleFiles(files);
@@ -218,7 +220,8 @@ function assertArtifactSource(source: PreparedSiteSource, artifact: CompiledSite
     const compiled = compiledAssets.get(asset.id);
     return !compiled || compiled.sha256 !== asset.sha256 || compiled.path !== asset.path || !Buffer.from(compiled.bytes).equals(Buffer.from(asset.bytes));
   })) throw new Error('compiled artifact does not retain the exact prepared source assets');
-  if (!artifact.artifactIdentity || !Array.isArray(artifact.themeFiles) || ('assets' in artifact && !Array.isArray(artifact.assets))) {
+  if (!artifact.artifactIdentity || !artifact.targetBindingFingerprint || !artifact.targetBindings
+    || !Array.isArray(artifact.themeFiles) || ('assets' in artifact && !Array.isArray(artifact.assets))) {
     throw new Error('compiled artifact is incomplete');
   }
 }

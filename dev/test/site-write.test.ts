@@ -80,6 +80,9 @@ describe('site bundle publication', () => {
       const themeArtifact = {
         sourceIntent: source.sourceIntent,
         sourceAssets: source.assets,
+        targetBindings: {},
+        targetBindingFingerprint: 'theme-bindings-test',
+        themeAssetBaseUrl: 'https://example.test/wp-content/themes/sample-studio',
         themeFiles: [file('style.css', 'body { color: #20201e; }')],
         pendingPageBindings,
         diagnostics: [],
@@ -92,6 +95,11 @@ describe('site bundle publication', () => {
       const record = JSON.parse(await readFile(path.join(output, 'site.manifest.json'), 'utf8'));
       expect(record.type).toBe('theme');
       expect(record.pendingPageBindings).toEqual(pendingPageBindings);
+      expect(record).toMatchObject({
+        targetBindings: {},
+        targetBindingFingerprint: 'theme-bindings-test',
+        themeAssetBaseUrl: 'https://example.test/wp-content/themes/sample-studio',
+      });
     } finally {
       await rm(root, { recursive: true, force: true });
     }
