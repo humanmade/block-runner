@@ -5,7 +5,18 @@
     "color": {
       "defaultPalette": false,
       "defaultGradients": false,
-      "palette": "wrong type",
+      "palette": [
+        {
+          "slug": "base",
+          "name": "Base",
+          "color": "#ffffff"
+        },
+        {
+          "slug": "ink",
+          "name": "Ink",
+          "color": "#111111"
+        }
+      ],
       "gradients": [
         {
           "slug": "sunrise",
@@ -40,6 +51,9 @@
           "size": "1rem"
         }
       ]
+    },
+    "layout": {
+      "contentSize": 42
     }
   },
   "templateParts": [
