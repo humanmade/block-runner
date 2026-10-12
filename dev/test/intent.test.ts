@@ -2,7 +2,7 @@ import path from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
-import { assemble, realize, validate } from '../../src/index.js';
+import { assemble, convert, realize, validate } from '../../src/index.js';
 import { getWp } from '../../src/headless/wp.js';
 import * as media from '../../src/media/resolver.js';
 import type { IntentNode } from '../../src/types.js';
@@ -10,6 +10,51 @@ import type { IntentNode } from '../../src/types.js';
 const FIXTURES = path.join(path.dirname(fileURLToPath(import.meta.url)), 'fixtures');
 
 describe('intent assembly', () => {
+  it.each([
+    '<svg viewBox="0 0 10 10" aria-label="München"><title>東京 &amp; München</title>\n<path d="M0 0 L10 10"></path></svg>',
+    '<form action="/subscribe" method="post"><label>Email <input name="email" type="email"></label>\n<button type="submit">Subscribe</button></form>',
+  ])('preserves localized Custom HTML through both producers: %s', async (html) => {
+    const wp = await getWp();
+    const fromConversion = await convert(html, { sourcePath: 'fragment.html' });
+    expect(fromConversion.ok).toBe(true);
+    expect(fromConversion.items).toContainEqual(expect.objectContaining({
+      block: 'core/html', status: 'warning', reason: expect.stringContaining('Custom HTML fallback'),
+      source: expect.objectContaining({ path: 'fragment.html' }),
+    }));
+    expect((await convert(html, { strict: true })).ok).toBe(false);
+
+    for (const node of [
+      { block: 'core/html', attrs: { content: html, metadata: { name: 'Widget' } } },
+      { block: 'core/html', text: html, attrs: { content: 'Overridden', metadata: { name: 'Widget' } } },
+    ]) {
+      const report = await realize(JSON.stringify({ blocks: [node] }));
+      expect(report.ok).toBe(true);
+      expect(report.summary).toMatchObject({ blocks: 1, valid: 1, invalid: 0, warnings: 0 });
+      expect(wp.serialize(await assemble([node]))).toBe(report.output);
+      expect(wp.parse(report.output!)[0].attributes.metadata).toEqual({ name: 'Widget' });
+      for (const output of [report.output!, fromConversion.output!]) {
+        expect(output).toContain(`-->\n${html}\n<!-- /wp:html -->`);
+        expect(wp.serialize(wp.parse(output))).toBe(output);
+        expect((await validate(output)).ok).toBe(true);
+      }
+    }
+  });
+
+  it('rejects malformed Custom HTML content and retains dropped-attribute diagnostics', async () => {
+    for (const content of [null, 42, {}, []]) {
+      await expect(assemble([{ block: 'core/html', attrs: { content } }])).rejects.toThrow('expected a string');
+      expect((await realize(JSON.stringify({ blocks: [{ block: 'core/html', attrs: { content } }] }))).ok).toBe(false);
+    }
+    const report = await realize(JSON.stringify({ blocks: [{
+      block: 'core/html', text: '<svg></svg>', attrs: { madeUp: true },
+    }] }), { sourcePath: 'intent.json' });
+    expect(report.ok).toBe(true);
+    expect(report.items).toContainEqual(expect.objectContaining({
+      code: 'intent-attribute-dropped', block: 'core/html',
+      details: { intentPath: 'blocks[0].attrs["madeUp"]', attribute: 'madeUp' },
+    }));
+  });
+
   it('preserves the native styles and headerless table taught in the shipped guide', async () => {
     const guide = await readFile(new URL('../../skills/block-runner/references/ASSEMBLE.md', import.meta.url), 'utf8');
     const example = guide.match(/### Native styles and layout[\s\S]*?```json\n([\s\S]*?)\n```/);

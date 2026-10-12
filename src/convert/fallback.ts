@@ -10,12 +10,12 @@ import type { WpBlock, WpModules } from '../types.js';
  * that silently discards the very markup it exists to preserve.
  *
  * Fallbacks are the safety net for everything we cannot convert, so losing their payload is the
- * worst failure this codebase can have: output that looks clean and lied about it (md/00 §5).
+ * worst failure this codebase can have: output that looks clean while discarding its input.
  * The attribute is still set, for editors that read it; `innerContent` is what actually
  * survives serialization.
  */
-export function createHtmlFallback(wp: WpModules, html: string): WpBlock {
-  const block = wp.createBlock('core/html', { content: html }, []) as WpBlock & {
+export function createHtmlFallback(wp: WpModules, html: string, attrs: Record<string, unknown> = {}): WpBlock {
+  const block = wp.createBlock('core/html', { ...attrs, content: html }, []) as WpBlock & {
     innerContent?: unknown[];
     originalContent?: string;
   };
