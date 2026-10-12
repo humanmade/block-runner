@@ -178,3 +178,13 @@ describe('bounded native target route resolution',()=>{
     observed.routing.rewriteRulesHash='changed';expect(reconcileSitePlan(input,theme(input),compiled,observed).confirmationHash).not.toBe(first.confirmationHash);
   });
 });
+
+describe('native page-slot pagination boundary',()=>{
+  it('accepts the reported empty native pagination slot and blocks a reserved pagination result',()=>{
+    const observed=snapshot();
+    const input=source();input.sourceIntent.pages.push({id:'about',route:'/about',title:'About',template:'index',body:{blocks:[]}});
+    observed.routing.routes=[{route:'/about',kind:'available',matchedRule:'(.?.+?)(?:/([0-9]+))?/?$',queryFingerprint:'empty-page-native-query'}];
+    const compiled=[...pages(),{id:'about',route:'/about',title:'About',template:'index',status:'draft' as const,content:'',diagnostics:[]}];expect(reconcileSitePlan(input,theme(input),compiled,observed).executable).toBe(true);
+    observed.routing.routes[0]!.kind='reserved';observed.routing.routes[0]!.reason='native page pagination endpoint';expect(reconcileSitePlan(input,theme(input),compiled,observed).conflicts.map(item=>item.code)).toContain('route-conflict');
+  });
+});
