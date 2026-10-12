@@ -6,6 +6,7 @@ import { findThemeReferenceIssues } from '../theme/references.js';
 import type { ThemeMarkupFile } from '../theme/folders.js';
 import { parseThemeJsonSettings } from '../tokens/resolver.js';
 import type { BlockRunnerConfig, IntentNode, IntentTree, ReportItem, WpBlock } from '../types.js';
+import { buildSiteThemeAssets } from './assets.js';
 import { validateSiteIntent } from './input.js';
 import type {
   CompiledSite,
@@ -58,13 +59,16 @@ export async function compileThemeDocuments(
   const unavailable = unresolvedThemeBindings(intent, options, false);
   if (unavailable.length > 0) return { ok: false, diagnostics: unavailable };
 
-  const compiled = await compileDocuments(source, intent, options, { allowPendingPageBindings: true });
+  const compiled = await compileDocuments(source, intent, options, { allowPendingPageBindings: true, includePages: false });
   const diagnostics = [...compiled.diagnostics, ...await themeChecks(intent, compiled.documents)];
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
 
   const themeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
-  const assets = themeAssets(source);
+  const preparedAssets = buildSiteThemeAssets(source);
+  diagnostics.push(...assetDiagnostics(preparedAssets.diagnostics, intent.siteId));
+  if (hasFailures(diagnostics)) return { ok: false, diagnostics };
+  const assets = preparedAssets.files;
   const inventory = inventoryFiles([...themeFiles, ...assets]);
   const targetBindings = usedBindings(intent, options.attachmentBindings, new Set(compiled.documents.filter((document) => document.kind !== 'page').map((document) => document.id)));
   const artifact: ThemeArtifact = {
@@ -93,7 +97,7 @@ export async function compileSite(
   const unavailable = unresolvedThemeBindings(intent, options, true);
   if (unavailable.length > 0) return { ok: false, diagnostics: unavailable };
 
-  const compiled = await compileDocuments(source, intent, options, { allowPendingPageBindings: false });
+  const compiled = await compileDocuments(source, intent, options, { allowPendingPageBindings: false, includePages: true });
   const diagnostics = [...compiled.diagnostics, ...await themeChecks(intent, compiled.documents)];
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
 
@@ -112,7 +116,10 @@ export async function compileSite(
       diagnostics: document.report,
     }];
   });
-  const assets = themeAssets(source);
+  const preparedAssets = buildSiteThemeAssets(source);
+  diagnostics.push(...assetDiagnostics(preparedAssets.diagnostics, intent.siteId));
+  if (hasFailures(diagnostics)) return { ok: false, diagnostics };
+  const assets = preparedAssets.files;
   const targetBindings = usedBindings(intent, options.attachmentBindings);
   const targetBindingFingerprint = hashJson(targetBindings);
   const inventory = inventoryFiles([...themeFiles, ...assets]);
@@ -141,9 +148,9 @@ async function compileDocuments(
   source: PreparedSiteSource,
   intent: SiteIntent,
   options: CompileSiteOptions,
-  settings: { allowPendingPageBindings: boolean },
+  settings: { allowPendingPageBindings: boolean; includePages: boolean },
 ): Promise<{ documents: CompiledDocument[]; diagnostics: ReportItem[] }> {
-  const documents = documentInputs(intent);
+  const documents = documentInputs(intent).filter((document) => settings.includePages || document.kind !== 'page');
   const diagnostics: ReportItem[] = [];
   const output: CompiledDocument[] = [];
   for (const document of documents) {
@@ -168,6 +175,9 @@ async function compileDocuments(
     });
     const mapped = mapReport(report.items, document.id, sourceLabel(intent.siteId, document.id), body);
     diagnostics.push(...mapped);
+    if (!report.ok && !mapped.some((item) => item.status === 'invalid')) {
+      diagnostics.push(invalid(document.id, 'document-finalization-failed', 'required document failed finalization; see its warnings for details'));
+    }
     const markup = report.output ?? '';
     if (document.kind === 'pattern' && /<\?(?:php\b|=)?/i.test(markup)) {
       diagnostics.push(invalid(document.id, 'pattern-php-body', 'pattern body contains PHP and cannot be emitted as a static pattern'));
@@ -362,12 +372,16 @@ function validatePreparedSource(source: PreparedSiteSource): { ok: true; intent:
   return { ok: true, intent };
 }
 
-function themeAssets(source: PreparedSiteSource): SiteFile[] {
-  return source.assets.filter((asset) => asset.role === 'theme-file').map((asset) => ({
-    path: `assets/${asset.path}`,
-    bytes: new Uint8Array(asset.bytes),
-    sha256: asset.sha256,
-  })).sort((left, right) => left.path.localeCompare(right.path));
+function assetDiagnostics(
+  entries: Array<{ path: string; code: string; message: string }>,
+  siteId: string,
+): ReportItem[] {
+  return entries.map((entry) => ({
+    status: 'invalid',
+    code: entry.code,
+    reason: entry.message,
+    source: { path: `site://${siteId}${entry.path}` },
+  }));
 }
 
 function inventoryFiles(files: SiteFile[]): Array<{ path: string; sha256: string; size: number }> {

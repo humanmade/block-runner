@@ -1,9 +1,12 @@
-import { readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { compileSite, compileThemeDocuments } from '../../src/site/compile.js';
 import { prepareSiteSource } from '../../src/site/input.js';
 import type { SiteIntent } from '../../src/site/types.js';
+import * as intentModule from '../../src/intent/index.js';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent', import.meta.url));
 const intentPath = fileURLToPath(new URL('./fixtures/site-intent/site.intent.json', import.meta.url));
@@ -56,6 +59,19 @@ describe('site compiler', () => {
     if (result.ok) expect(result.site.pages[0]).toMatchObject({ id: 'home', content: '', status: 'publish', diagnostics: [] });
   });
 
+  it('keeps Gutenberg native attribute order in finalized page markup', async () => {
+    const source = await prepareAssetFreeIntent((intent) => {
+      intent.pages[1]!.body.blocks.unshift({
+        block: 'core/group',
+        attrs: { tagName: 'section', layout: { type: 'constrained' }, className: 'ordered' },
+      });
+    });
+    const result = await compileSite(source);
+    expect(result.ok).toBe(true);
+    if (result.ok) expect(result.site.pages.find((page) => page.id === 'about')?.content)
+      .toContain('<!-- wp:group {"tagName":"section","className":"ordered","layout":{"type":"constrained"}} -->');
+  });
+
   it('reports an unknown native block against its source document and emits no partial site', async () => {
     const source = await prepareAssetFreeIntent((intent) => {
       intent.parts.header!.body.blocks[0]!.block = 'core/not-a-registered-block';
@@ -67,6 +83,64 @@ describe('site compiler', () => {
     ]));
   });
 
+  it('does not load a write-capable project config or invoke fetch during compilation', async () => {
+    const source = await prepareAssetFreeIntent((intent) => {
+      intent.pages[1]!.body.blocks.push({ block: 'core/image', attrs: { url: 'https://assets.example.test/photo.png' } });
+    });
+    const temporaryDirectory = await mkdtemp(path.join(tmpdir(), 'block-runner-site-compile-'));
+    const previousDirectory = process.cwd();
+    const previousFetch = globalThis.fetch;
+    let fetchCalls = 0;
+    globalThis.fetch = async () => {
+      fetchCalls += 1;
+      return new Response('{}', { status: 200 });
+    };
+    try {
+      await writeFile(path.join(temporaryDirectory, 'block-runner.config.mjs'), [
+        'globalThis.__siteCompilerConfigLoaded = true;',
+        'export default { media: { resolver: "rest" }, tokens: { resolver: "rest" } };',
+      ].join('\n'));
+      delete (globalThis as typeof globalThis & { __siteCompilerConfigLoaded?: boolean }).__siteCompilerConfigLoaded;
+      process.chdir(temporaryDirectory);
+      const result = await compileSite(source);
+      expect(result.ok).toBe(true);
+      expect((globalThis as typeof globalThis & { __siteCompilerConfigLoaded?: boolean }).__siteCompilerConfigLoaded).toBeUndefined();
+      expect(fetchCalls).toBe(0);
+    } finally {
+      process.chdir(previousDirectory);
+      globalThis.fetch = previousFetch;
+      delete (globalThis as typeof globalThis & { __siteCompilerConfigLoaded?: boolean }).__siteCompilerConfigLoaded;
+      await rm(temporaryDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it('fails the site when strict finalization fails with a warning-only producer report', async () => {
+    const source = await prepareAssetFreeIntent();
+    const original = intentModule.realize;
+    const spy = vi.spyOn(intentModule, 'realize').mockImplementation(async (rawIntent, options) => {
+      if (options?.sourcePath?.endsWith('/page:about')) {
+        return {
+          ok: false,
+          command: 'assemble',
+          summary: { blocks: 1, valid: 1, invalid: 0, warnings: 1 },
+          items: [{ status: 'warning', reason: 'strict media resolution warning', source: { path: options?.sourcePath } }],
+          output: '<!-- wp:paragraph --><p>About</p><!-- /wp:paragraph -->',
+        };
+      }
+      return original(rawIntent, options);
+    });
+    try {
+      const result = await compileSite(source, { strict: true });
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ status: 'warning', reason: 'strict media resolution warning' }),
+        expect.objectContaining({ status: 'invalid', code: 'document-finalization-failed', details: { documentId: 'page:about' } }),
+      ]));
+    } finally {
+      spy.mockRestore();
+    }
+  });
+
   it('rejects static pattern header injection and reports pending page media in theme-only output', async () => {
     const injected = await prepareAssetFreeIntent((intent) => {
       intent.patterns['featured-services']!.title = 'Featured */ ?><?php echo 1; ?>';
@@ -76,6 +150,7 @@ describe('site compiler', () => {
     if (!rejected.ok) expect(rejected.diagnostics).toContainEqual(expect.objectContaining({ code: 'unsafe-pattern-header', status: 'invalid' }));
 
     const full = JSON.parse(await readFile(intentPath, 'utf8')) as SiteIntent;
+    full.pages[0]!.body.blocks[0]!.block = 'core/not-a-registered-block';
     const prepared = await prepareSiteSource(full, fixtureRoot);
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
