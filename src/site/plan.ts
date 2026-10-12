@@ -56,6 +56,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
       || (ownership.assetSha256 !== undefined && !/^[a-f0-9]{64}$/.test(ownership.assetSha256))) issue(`/target/entities/${entity.id}`, 'invalid-ownership', 'ownership metadata is incomplete or inconsistent');
     else if (!baselineMatches) issue(`/target/entities/${entity.id}`, 'managed-state-changed', 'current managed fields differ from the complete last-applied baseline');
     if (entity.kind === 'attachment') {
+      if (entity.postStatus !== 'inherit') issue(`/target/entities/${entity.id}`, 'unavailable-owned-attachment', 'only inherited attachments are available for exact owned media reuse');
       const sha256 = ownership.assetSha256 ?? (baselineMatches && typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
       if (!sha256 || !/^[a-f0-9]{64}$/.test(sha256) || (ownership.assetSha256 !== undefined && entity.state.sha256 !== sha256)) {
         issue(`/target/entities/${entity.id}`, 'invalid-attachment-version', 'owned attachment has no verified original-byte version');
@@ -226,7 +227,7 @@ export function observedAttachmentBindings(input: SitePlanInput, snapshot: SiteS
     if (!observed) { if (retained) throw new Error(`retained attachment binding ${asset.id} is absent on the observed target`); continue; }
     const exactOwner = observed.ownership.some(meta=>meta.siteId===input.source.sourceIntent.siteId && meta.entityId===asset.id
       && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(observed.state) ? observed.state.sha256 : undefined)) === asset.sha256);
-    if (!exactOwner || observed.state.sha256 !== asset.sha256 || typeof observed.attachment?.url !== 'string' || (retained && observed.attachment?.url !== retained.url)) throw new Error(`attachment binding ${asset.id} differs from exact owned destination bytes or URL`);
+    if (observed.postStatus !== 'inherit' || !exactOwner || observed.state.sha256 !== asset.sha256 || typeof observed.attachment?.url !== 'string' || (retained && observed.attachment?.url !== retained.url)) throw new Error(`attachment binding ${asset.id} is unavailable or differs from exact owned destination bytes or URL`);
     const url = new URL(observed.attachment!.url!);
     if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('attachment URL contains unsupported identity or secret fields');
     result[asset.id] = { id: observed.id, url: observed.attachment!.url!, ...(observed.attachment!.linkUrl ? { attachmentPageUrl: observed.attachment!.linkUrl } : {}),

@@ -46,7 +46,9 @@ function validateSnapshot(value: SiteSnapshot): void {
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('snapshot URL contains unsupported identity or secret fields');
   }
   for (const entity of value.entities) {
-    if (entity.kind !== 'attachment' || !entity.attachment) continue;
+    if (entity.kind !== 'attachment') continue;
+    if (!entity.attachment) throw new Error('snapshot attachment has no native metadata');
+    if (typeof entity.postStatus !== 'string' || entity.postStatus.length === 0) throw new Error('snapshot attachment has no observed WordPress post status');
     for (const url of [entity.attachment.url, ...Object.values(entity.attachment.sizes ?? {}).map(size => size.url)]) {
       if (url === null || url === undefined) continue;
       const parsed = new URL(url);
@@ -106,7 +108,7 @@ foreach ($posts as $post) {
     $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'linkUrl'=>get_attachment_link($post->ID) ?: null,'currentFileSha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null,'sizes'=>$sizes);
   }
   $meta = get_post_meta($post->ID, '${SITE_OWNERSHIP_META}', false);
-  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'ownership'=>$meta);
+  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'postStatus'=>$post->post_status,'ownership'=>$meta);
   if ($attachment) $entity['attachment'] = $attachment;
   $entities[] = $entity;
 }

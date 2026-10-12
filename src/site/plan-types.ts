@@ -16,6 +16,8 @@ export interface SiteEntity {
   kind: 'page' | 'attachment' | 'pattern';
   route: string | null;
   state: Record<string, unknown>;
+  /** Observed WordPress post status, kept outside managed state for legacy attachment hashes. */
+  postStatus?: string;
   attachment?: {
     url: string | null;
     linkUrl?: string | null;
@@ -36,7 +38,12 @@ export interface SiteSnapshot {
   overrides: Array<{ id: number; kind: string; theme: string[]; content: string }>;
   navigation: Array<{ id: number; content: string; status: string }>;
   options: Record<string, unknown>;
-  siteRecord: { version: 1; siteId: string; entities: Record<string, number>; options: Record<string, { lastAppliedValue: unknown }>; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed' } | null } | null;
+  siteRecord: { version: 1; siteId: string; entities: Record<string, number>; options: Record<string, { lastAppliedValue: unknown }>; operation: {
+    token: string;
+    planHash: string;
+    status: 'started' | 'outcome_unknown' | 'completed';
+    currentStep?: { key: string; kind: 'attachment'; entityId: string; assetSha256: string; status: 'started' | 'completed' | 'outcome_unknown' };
+  } | null } | null;
 }
 export interface SitePlanOperation {
   action: 'create' | 'update' | 'retain' | 'set-option';
