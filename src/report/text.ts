@@ -28,6 +28,14 @@ export function formatTextReport(report: BlockRunnerReport): string {
     }
   }
 
+  if (report.files) {
+    for (const file of report.files) {
+      lines.push(`file=${file.file} blocks=${file.blocks} invalid=${file.invalid} warnings=${file.warnings}`);
+    }
+    const changed = report.files.filter((file) => file.changed).map((file) => file.file);
+    if (changed.length > 0) lines.push(`changed: ${changed.join(', ')}`);
+  }
+
   return lines.join('\n');
 }
 
