@@ -101,7 +101,7 @@ describe('source and retained bundle boundaries',()=>{
 describe('destination attachment bindings',()=>{
   it('checks exact numeric identity, URL and bytes without title or basename matching',()=>{
     const input=source();input.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment',sha256:'aaa',bytes:new Uint8Array()}];
-    const observed=snapshot();observed.entities=[{id:22,kind:'attachment',route:null,state:{sha256:'aaa',url:'https://example.test/uploads/photo.png'},ownership:[]}];
+    const observed=snapshot();observed.entities=[{id:22,kind:'attachment',route:null,state:{sha256:'aaa'},attachment:{url:'https://example.test/uploads/photo.png',currentFileSha256:'scaled',width:100,height:100},ownership:[]}];
     const retained={source:input,retainedBindings:{photo:{id:22,url:'https://example.test/uploads/photo.png'}}};
     expect(observedAttachmentBindings(retained,observed)).toEqual(retained.retainedBindings);
     observed.entities[0]!.state.sha256='changed';expect(()=>observedAttachmentBindings(retained,observed)).toThrow('destination bytes');

@@ -1,4 +1,4 @@
-import type { IntentTree } from '../types.js';
+import type { IntentTree, ReportItem } from '../types.js';
 import type { SiteAssetUse, SiteInputDiagnostic } from './types.js';
 
 export interface SiteTarget { homeUrl: string; siteUrl: string; blogId: number }
@@ -14,6 +14,7 @@ export interface SiteEntity {
   kind: 'page' | 'attachment' | 'pattern';
   route: string | null;
   state: Record<string, unknown>;
+  attachment?: { url: string | null; currentFileSha256: string | null; width: number | null; height: number | null };
   ownership: SiteOwnership[];
 }
 export interface SiteSnapshot {
@@ -37,6 +38,7 @@ export interface SitePlanOperation {
   pendingBindings?: SiteAssetUse[];
   body?: IntentTree;
   requiresFinalization?: boolean;
+  externalBinding?: boolean;
 }
 export interface SitePlan {
   version: 1;
@@ -48,6 +50,7 @@ export interface SitePlan {
   snapshotFingerprint: string;
   operations: SitePlanOperation[];
   conflicts: SiteInputDiagnostic[];
+  diagnostics: ReportItem[];
   executable: boolean;
   confirmationHash: string;
 }

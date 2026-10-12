@@ -10,8 +10,9 @@ export function managedStateHash(state: Record<string, unknown>): string { retur
 export function entityFingerprint(entity: SiteEntity): string { return hashCanonicalJson(entity); }
 
 /** Pure reconciliation. It never adopts a numeric entity by title, route, or filename. */
-export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifact, pages: CompiledSitePage[], snapshot: SiteSnapshot): SitePlan {
+export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifact, pages: CompiledSitePage[], snapshot: SiteSnapshot, bindings: Record<string, SiteAttachmentBinding> = {}, previewDiagnostics: import('../types.js').ReportItem[] = []): SitePlan {
   const conflicts: SiteInputDiagnostic[] = [];
+  const diagnostics = [...theme.diagnostics, ...pages.flatMap(page=>page.diagnostics), ...previewDiagnostics];
   const operations: SitePlanOperation[] = [];
   const issue = (path: string, code: string, message: string): void => { conflicts.push({ path, code, message }); };
   const intent = source.sourceIntent;
@@ -60,10 +61,14 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   for (const asset of source.assets.filter(asset => asset.role === 'attachment').sort((a,b) => a.id.localeCompare(b.id))) {
     const key = `attachment:${asset.id}`; desiredKeys.add(key);
     const existing = owned.get(key);
+    const external = !existing && bindings[asset.id];
+    const boundEntity = external ? snapshot.entities.find(entity=>entity.id===external.id && entity.kind==='attachment') : undefined;
+    if (external && (!boundEntity || boundEntity.state.sha256 !== asset.sha256 || boundEntity.attachment?.url !== external.url)) issue(`/assets/${asset.id}`, 'binding-target-mismatch', 'attachment binding does not match exact observed destination identity and bytes');
     const desired = { sha256: asset.sha256 };
     if (existing && existing.state.sha256 !== asset.sha256) issue(`/assets/${asset.id}`, 'attachment-bytes-changed', 'attachment replacement is unsupported; declare a new logical attachment identity');
     operations.push(existing
       ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: existing.id, beforeFingerprint: entityFingerprint(existing) }
+      : external ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: external.id, externalBinding: true, ...(boundEntity ? { beforeFingerprint: entityFingerprint(boundEntity) } : {}) }
       : { action: 'create', kind: 'attachment', entityId: asset.id, desired });
   }
   const pageIds = new Map([...owned.entries()].filter(([key]) => key.startsWith('page:')).map(([key,entity]) => [key.slice(5), entity.id]));
@@ -78,7 +83,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     const existing = owned.get(key);
     const occupied = snapshot.entities.find(entity => entity.kind === 'page' && normalizeRoute(entity.route) === normalizeRoute(page.route) && entity.id !== existing?.id);
     if (occupied) issue(`/pages/${page.id}/route`, 'route-conflict', `route is occupied by page ID ${occupied.id}; no adoption is permitted`);
-    const pendingBindings = intent.assetUses.filter(use => use.documentId === key && !owned.has(`attachment:${use.assetId}`) && source.assets.some(asset=>asset.id===use.assetId && asset.role==='attachment'));
+    const pendingBindings = intent.assetUses.filter(use => use.documentId === key && !owned.has(`attachment:${use.assetId}`) && !bindings[use.assetId] && source.assets.some(asset=>asset.id===use.assetId && asset.role==='attachment'));
     const output = compiled.get(page.id);
     if (!output && pendingBindings.length === 0) issue(`/pages/${page.id}/body`, 'uncompiled-page', 'page has no finalized content and no declared pending bindings');
     const pendingParent = page.parentId && !pageIds.has(page.parentId);
@@ -106,7 +111,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     if (hashCanonicalJson(snapshot.options[name]) !== hashCanonicalJson(value)) operations.push({ action: 'set-option', kind: 'option', entityId: name, beforeFingerprint: hashCanonicalJson(snapshot.options[name]), desired: { value, previousValue: snapshot.options[name] } });
   }
   const body = { version: 1 as const, siteId: intent.siteId, sourceIdentity: source.sourceIdentity, artifactIdentity: theme.artifactIdentity,
-    assets: source.assets.map(({id,path,sha256})=>({id,path,sha256})), snapshot, snapshotFingerprint: hashCanonicalJson(snapshot), operations, conflicts, executable: conflicts.length === 0 };
+    assets: source.assets.map(({id,path,sha256})=>({id,path,sha256})), snapshot, snapshotFingerprint: hashCanonicalJson(snapshot), operations, conflicts, diagnostics, executable: conflicts.length === 0 };
   return { ...body, confirmationHash: hashCanonicalJson(body) };
 }
 function normalizeRoute(route: string | null): string { return (route ?? '').replace(/\/$/, '').toLowerCase(); }
@@ -183,10 +188,10 @@ export function observedAttachmentBindings(input: SitePlanInput, snapshot: SiteS
     if (candidates.length > 1) throw new Error(`duplicate logical attachment ownership for ${asset.id}`);
     const observed = retained ? snapshot.entities.find(entity=>entity.kind==='attachment' && entity.id===retained.id) : candidates[0];
     if (!observed) { if (retained) throw new Error(`retained attachment binding ${asset.id} is absent on the observed target`); continue; }
-    if (observed.state.sha256 !== asset.sha256 || typeof observed.state.url !== 'string' || (retained && observed.state.url !== retained.url)) throw new Error(`attachment binding ${asset.id} differs from observed destination bytes or URL`);
-    const url = new URL(observed.state.url);
+    if (observed.state.sha256 !== asset.sha256 || typeof observed.attachment?.url !== 'string' || (retained && observed.attachment?.url !== retained.url)) throw new Error(`attachment binding ${asset.id} differs from observed destination bytes or URL`);
+    const url = new URL(observed.attachment!.url!);
     if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('attachment URL contains unsupported identity or secret fields');
-    result[asset.id] = { id: observed.id, url: observed.state.url };
+    result[asset.id] = { id: observed.id, url: observed.attachment!.url! };
   }
   for (const id of Object.keys(input.retainedBindings)) if (!input.source.assets.some(asset=>asset.id===id && asset.role==='attachment')) throw new Error(`retained binding ${id} has no declared attachment asset`);
   return result;

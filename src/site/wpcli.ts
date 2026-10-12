@@ -61,19 +61,27 @@ foreach ($posts as $post) {
   if ($post->post_type === 'wp_navigation') { $navigation[] = array('id'=>(int)$post->ID,'content'=>$post->post_content,'status'=>$post->post_status); continue; }
   $kind = $post->post_type === 'page' ? 'page' : ($post->post_type === 'attachment' ? 'attachment' : 'pattern');
   $state = array('content'=>$post->post_content, 'title'=>$post->post_title, 'status'=>$post->post_status);
-  $route = null;
+  $route = null; $attachment = null;
   if ($kind === 'page') {
     $state['slug'] = $post->post_name; $state['parentId'] = (int)$post->post_parent;
     $state['template'] = (string)get_post_meta($post->ID, '_wp_page_template', true);
-    $route = '/' . trim(get_page_uri($post->ID), '/');
+    $homePath = rtrim((string)parse_url(home_url(), PHP_URL_PATH), '/');
+    $permalink = get_permalink($post->ID);
+    $permalinkPath = (string)parse_url($permalink, PHP_URL_PATH);
+    $route = parse_url($permalink, PHP_URL_QUERY) ? '/' . trim(get_page_uri($post->ID), '/') : '/' . trim(substr($permalinkPath, strlen($homePath)), '/');
     if ((int)get_option('page_on_front') === (int)$post->ID && get_option('show_on_front') === 'page') $route = '/';
   }
   if ($kind === 'attachment') {
     $file = get_attached_file($post->ID);
-    $state = array('sha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null, 'url'=>wp_get_attachment_url($post->ID));
+    $original = wp_get_original_image_path($post->ID); if (!$original) $original = $file;
+    $metadata = wp_get_attachment_metadata($post->ID);
+    $state = array('sha256'=>($original && is_file($original) && !is_link($original)) ? hash_file('sha256',$original) : null);
+    $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'currentFileSha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null);
   }
   $meta = get_post_meta($post->ID, '${SITE_OWNERSHIP_META}', false);
-  $entities[] = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'ownership'=>$meta);
+  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'ownership'=>$meta);
+  if ($attachment) $entity['attachment'] = $attachment;
+  $entities[] = $entity;
 }
 $root = get_stylesheet_directory(); $inventory = array();
 $iterator = new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root, FilesystemIterator::SKIP_DOTS));
