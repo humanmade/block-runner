@@ -1,0 +1,8 @@
+{
+  "wordpressVersion": "7.1",
+  "source": "https://github.com/WordPress/WordPress/tree/7.1",
+  "retrievedOn": "2026-10-12",
+  "sha256": "7adec2a120f3740c9c0dfcba286727dbeb91299eb0fc059828169955a6ac31f1",
+  "capture": "WP_Block_Type_Registry::get_instance()->get_all_registered(), core namespace; public registration metadata only; no active plugins",
+  "purpose": "Server-side core attribute schemas supplied before Gutenberg registration, matching the editor bootstrap."
+}
