@@ -124,6 +124,8 @@ export const {
 export { prepareSiteSource } from './site/input.js';
 export { compileSite, compileThemeDocuments } from './site/compile.js';
 export type { CompileSiteOptions, CompileSiteResult, CompileThemeDocumentsResult } from './site/compile.js';
+export { SiteWriteError, writeCompiledSite } from './site/write.js';
+export type { SiteWriteOptions, SiteWriteResult } from './site/write.js';
 
 export type * from './index-implementation.js';
 export type * from './site/types.js';
