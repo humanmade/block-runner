@@ -191,6 +191,8 @@ export interface SitePlanInput {
   source: PreparedSiteSource;
   retainedBindings: Record<string, SiteAttachmentBinding>;
   retainedThemeAssetBaseUrl?: string;
+  sourceIntentState?: 'unreconciled';
+  artifactIdentity?: string;
 }
 
 /** Read either an explicit source file or the retained source of a stable compiled bundle. */
@@ -214,11 +216,13 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
   const manifestBytes = await read('site.manifest.json');
   const manifest = JSON.parse(manifestBytes.toString('utf8')) as {
     formatVersion: number; siteId: string; sourceIdentity: string;
+    artifactIdentity?: string; sourceIntentState?: string;
     sourceAssets: Array<{id:string;path:string;sha256:string;size:number;kind:string;role:string}>;
     bundleFiles: Array<{path:string;sha256:string;size:number}>;
     targetBindings: Record<string,SiteAttachmentBinding>; themeAssetBaseUrl?: string;
   };
-  if (manifest.formatVersion !== 1 || !Array.isArray(manifest.bundleFiles) || !Array.isArray(manifest.sourceAssets) || !manifest.targetBindings) throw new Error('invalid retained site manifest');
+  if (manifest.formatVersion !== 1 || !Array.isArray(manifest.bundleFiles) || !Array.isArray(manifest.sourceAssets) || !manifest.targetBindings
+    || (manifest.sourceIntentState !== undefined && manifest.sourceIntentState !== 'unreconciled')) throw new Error('invalid retained site manifest');
   const paths = new Set<string>();
   for (const entry of manifest.bundleFiles) {
     if (paths.has(entry.path)) throw new Error('duplicate retained bundle path'); paths.add(entry.path);
@@ -237,7 +241,9 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
   if (hashCanonicalJson(assets) !== hashCanonicalJson(manifest.sourceAssets)) throw new Error('retained source asset inventory differs from bundle manifest');
   if (source.assets.some(asset=>!paths.has(`source/assets/${asset.path}`))) throw new Error('retained manifest omits declared source asset bytes');
   if (!(await read('site.manifest.json')).equals(manifestBytes)) throw new Error('retained manifest changed while reading bundle');
-  return { source, retainedBindings: manifest.targetBindings, ...(manifest.themeAssetBaseUrl !== undefined ? {retainedThemeAssetBaseUrl:manifest.themeAssetBaseUrl} : {}) };
+  return { source, retainedBindings: manifest.targetBindings, ...(manifest.themeAssetBaseUrl !== undefined ? {retainedThemeAssetBaseUrl:manifest.themeAssetBaseUrl} : {}),
+    ...(manifest.sourceIntentState === 'unreconciled' ? { sourceIntentState: 'unreconciled' as const } : {}),
+    ...(typeof manifest.artifactIdentity === 'string' ? { artifactIdentity: manifest.artifactIdentity } : {}) };
 }
 
 async function assertSafePath(file: string): Promise<void> {
@@ -280,6 +286,22 @@ export interface SitePlanOptions extends SiteWpCliOptions { assetRoot?: string; 
 export async function planSite(inputPath: string, options: SitePlanOptions, transport?: SiteReadTransport): Promise<SitePlan> {
   const input = await readSitePlanInput(inputPath, options.assetRoot);
   const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport, input.source.sourceIntent.pages.map(page=>page.route));
+  if (input.sourceIntentState === 'unreconciled') {
+    const body = {
+      version: 1 as const,
+      siteId: input.source.sourceIntent.siteId,
+      sourceIdentity: input.source.sourceIdentity,
+      artifactIdentity: input.artifactIdentity ?? '',
+      assets: input.source.assets.map(asset => ({ id: asset.id, path: asset.path, sha256: asset.sha256 })),
+      snapshot: observed,
+      snapshotFingerprint: hashCanonicalJson(observed),
+      operations: [],
+      conflicts: [{ path: '/source', code: 'source-intent-out-of-date', message: 'This generated bundle contains adopted theme markup while its original SiteIntent remains unchanged; reconcile the source intent before planning destination writes.' }],
+      diagnostics: [],
+      executable: false,
+    };
+    return { ...body, confirmationHash: hashCanonicalJson(body) };
+  }
   const bindings = observedAttachmentBindings(input, observed);
   const patternBindings = observedPatternBindings(input.source.sourceIntent.siteId, observed);
   const compileOptions = { attachmentBindings: bindings, patternBindings, themeAssetBaseUrl: observed.theme.assetBaseUrl, strict: options.strict };

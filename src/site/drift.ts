@@ -101,6 +101,10 @@ export async function inspectSiteDrift(bundlePath: string, options: SiteDriftOpt
     findings: [],
   };
   const add = (finding: SiteDriftFinding): void => { report.findings.push(finding); };
+  if (input.sourceIntentState === 'unreconciled') {
+    add({ kind: 'inspection', status: 'equivalent-override', code: 'source-intent-out-of-date',
+      message: 'This generated bundle includes adopted theme markup; its retained source intent and design assets are unchanged and require developer reconciliation before planning.' });
+  }
   if (snapshot.siteRecord?.operation && (snapshot.siteRecord.operation.status !== 'completed'
     || (snapshot.siteRecord.operation.currentStep && snapshot.siteRecord.operation.currentStep.status !== 'completed'))) {
     add({ kind: 'inspection', status: 'blocked', code: 'outstanding-operation', message: 'An operation is started or has an unknown outcome; reconcile it before drift can be reported clean.' });
