@@ -43,12 +43,12 @@ function selectAuthoredStaticAlternatives(dom: JSDOM, warnings: ReportItem[], so
   const document = dom.window.document;
   const exportRoots: Element[] = [];
   for (const wrapper of [...document.querySelectorAll('x-dc')]) {
+    exportRoots.push(wrapper);
     const children = [...wrapper.children];
     const branches = children.filter((element) =>
       element.tagName.toLowerCase() === 'sc-if' && element.hasAttribute('data-dc-static'),
     );
     if (branches.length === 0) continue;
-    exportRoots.push(wrapper);
 
     const warn = (reason: string) => warnings.push({
       block: 'input',

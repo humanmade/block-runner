@@ -141,6 +141,26 @@ describe('convert', () => {
     expect(ordinary.items.some((item) => /authored static alternative|runtime-managed|unresolved \{\{/.test(item.reason))).toBe(false);
   });
 
+  it('reports bindings and canvas limits in an x-dc export without a static branch', async () => {
+    const report = await convert(
+      `<x-dc><section data-accent="{{accent}}"><canvas>fallback child</canvas></section><aside>kept</aside></x-dc>`,
+      { sourcePath: 'runtime-export.html' },
+    );
+
+    expect(report.output).toContain('data-accent="{{accent}}"');
+    expect(report.output).toContain('fallback child');
+    expect(report.output).toContain('kept');
+    expect(report.items).toContainEqual(expect.objectContaining({
+      reason: 'unresolved {{...}} binding remains in authored markup',
+      source: expect.objectContaining({ path: 'runtime-export.html', htmlLine: 1 }),
+    }));
+    expect(report.items).toContainEqual(expect.objectContaining({
+      reason: 'canvas pixels are runtime-managed; authored fallback children are preserved',
+      source: expect.objectContaining({ path: 'runtime-export.html', htmlLine: 1 }),
+    }));
+    expect(report.items.some((item) => item.reason.includes('authored static alternative'))).toBe(false);
+  });
+
   it('reports explain attribution without counting explain entries as warnings', async () => {
     const report = await convert('<p>Hello</p>', {
       explain: true,
