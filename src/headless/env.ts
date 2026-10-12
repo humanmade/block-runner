@@ -1,6 +1,7 @@
 import { createRequire } from 'node:module';
 import { JSDOM, VirtualConsole } from 'jsdom';
 import { HeadlessBootError, WpModules } from '../types.js';
+import coreDefinitions from './vendor/wordpress-core-blocks.7.1.json';
 
 let bootPromise: Promise<WpModules> | undefined;
 let booted: WpModules | undefined;
@@ -17,12 +18,19 @@ export function bootHeadlessWordPressSync(): WpModules {
     installDomGlobals();
 
     const require = createRequire(import.meta.url);
-    const { blockLibrary, blocks } = withMutedWordPressConsole(() => ({
-      blockLibrary: require('@wordpress/block-library') as {
-        registerCoreBlocks: () => void;
-      },
-      blocks: require('@wordpress/blocks') as WpModules,
-    }));
+    const { blockLibrary, blocks } = withMutedWordPressConsole(() => {
+      const registry = require('@wordpress/blocks') as WpModules & {
+        unstable__bootstrapServerSideBlockDefinitions: (definitions: Record<string, unknown>) => void;
+      };
+      // WordPress seeds PHP support attributes before the JS library registers its blocks.
+      registry.unstable__bootstrapServerSideBlockDefinitions(coreDefinitions);
+      return {
+        blockLibrary: require('@wordpress/block-library') as {
+          registerCoreBlocks: () => void;
+        },
+        blocks: require('@wordpress/blocks') as WpModules,
+      };
+    });
 
     withMutedWordPressConsole(() => {
       blockLibrary.registerCoreBlocks();
