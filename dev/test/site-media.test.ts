@@ -14,7 +14,7 @@ const nextHash = 'b'.repeat(64);
 function state(sha256: string) { return { sha256 }; }
 function attachment(id: number, sha256: string, logicalId = 'hero'): SiteEntity {
   const managed = state(sha256);
-  return { id, kind: 'attachment', route: null, state: managed,
+  return { id, kind: 'attachment', route: null, state: managed, postStatus: 'inherit',
     attachment: { url: `https://example.test/uploads/${id}.jpg`, currentFileSha256: sha256, width: 1200, height: 800 },
     ownership: [{ version: 1, siteId: 'sample', entityId: logicalId, kind: 'attachment', assetSha256: sha256, lastAppliedHash: managedStateHash(managed) }] };
 }
@@ -67,6 +67,14 @@ describe('owned attachment versions', () => {
     const changed = attachment(23, oldHash);
     changed.state.sha256 = nextHash;
     expect(reconcileSitePlan(source(nextHash), theme(source(nextHash)), compiledPages, snapshot([changed])).conflicts.map(item => item.code)).toContain('managed-state-changed');
+  });
+
+  it('does not reuse owned attachments that are trashed or otherwise unavailable', () => {
+    const trashed = attachment(31, oldHash);
+    trashed.postStatus = 'trash';
+    const result = reconcileSitePlan(source(oldHash), theme(source(oldHash)), compiledPages, snapshot([trashed]));
+    expect(result.executable).toBe(false);
+    expect(result.conflicts.map(item => item.code)).toContain('unavailable-owned-attachment');
   });
 
   it('uses hash-qualified ownership keys', () => {
