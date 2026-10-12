@@ -9,11 +9,16 @@ import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatte
 import type { SiteSnapshot } from '../../src/site/plan-types.js';
 import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from '../../src/site/apply-wpcli.js';
 import { siteRecordOption } from '../../src/site/wpcli.js';
-async function fixture(extra?: 'media'|'patterns') {
+function phpAssociateEmptyObjects(value:unknown):unknown {
+ if(Array.isArray(value))return value.map(phpAssociateEmptyObjects);
+ if(value&&typeof value==='object'){const entries=Object.entries(value);return entries.length?Object.fromEntries(entries.map(([key,item])=>[key,phpAssociateEmptyObjects(item)])):[];}
+ return value;
+}
+async function fixture(extra?: 'media'|'patterns',normalizeMarkerEmptyObjects=false) {
  const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-apply-'));
  const source=path.join(root,'source.json');
- await writeFile(source,JSON.stringify({version:1,siteId:'sample',homePageId:'home',theme:{slug:'sample',title:'Sample',themeJson:{version:3}},templates:{index:{body:{blocks:[{block:'core/post-content'}]}}},parts:{},patterns:{},pages:[{id:'home',route:'/',title:'Home',template:'index',body:{blocks:[{block:'core/paragraph',text:'Hello'}]}}],assets:[],assetUses:[]}));
- if(extra){const intent=JSON.parse(await readFile(source,'utf8'));if(extra==='media'){await copyFile(new URL('./fixtures/site-intent/media/hero.png',import.meta.url),path.join(root,'hero.png'));intent.assets=[{id:'hero',path:'hero.png',role:'attachment',kind:'image'}];intent.pages[0].body.blocks=[{block:'core/image',attrs:{id:0}}];intent.assetUses=[{documentId:'page:home',nodePath:[0],attribute:'attrs.id',assetId:'hero'}];}else{intent.syncedPatterns={version:1,definitions:{hero:{title:'Hero',body:{blocks:[{block:'core/paragraph',text:'Shared'}]}}},uses:[{documentId:'page:home',nodePath:[0],patternId:'hero'}]};intent.pages[0].body.blocks=[{block:'core/block'}];}await writeFile(source,JSON.stringify(intent));}
+ await writeFile(source,JSON.stringify({version:1,siteId:'sample',homePageId:'home',theme:{slug:'sample',title:'Sample',themeJson:{version:3}},templates:{index:{body:{blocks:[{block:'core/post-content'}]}}},parts:{},patterns:{},pages:[{id:'home',route:'/',title:'Home',template:'index',body:{blocks:[{block:'core/paragraph',text:'Hello',...(normalizeMarkerEmptyObjects?{attrs:{}}:{})}]}}],assets:[],assetUses:[]}));
+ if(extra){const intent=JSON.parse(await readFile(source,'utf8'));if(extra==='media'){await copyFile(new URL('./fixtures/site-intent/media/hero.png',import.meta.url),path.join(root,'hero.png'));intent.assets=[{id:'hero',path:'hero.png',role:'attachment',kind:'image'}];intent.pages[0].body.blocks=normalizeMarkerEmptyObjects?[{block:'core/paragraph',text:'Hello',attrs:{}},{block:'core/image',attrs:{id:0}}]:[{block:'core/image',attrs:{id:0}}];intent.assetUses=[{documentId:'page:home',nodePath:[normalizeMarkerEmptyObjects?1:0],attribute:'attrs.id',assetId:'hero'}];}else{intent.syncedPatterns={version:1,definitions:{hero:{title:'Hero',body:{blocks:[{block:'core/paragraph',text:'Shared'}]}}},uses:[{documentId:'page:home',nodePath:[0],patternId:'hero'}]};intent.pages[0].body.blocks=[{block:'core/block'}];}await writeFile(source,JSON.stringify(intent));}
  const input=await readSitePlanInput(source,root);
  const live:SiteSnapshot={target:{homeUrl:'https://example.test',siteUrl:'https://example.test',blogId:1},runtime:{wordpress:'7.1',php:'8.4'},principal:{userId:7,capabilities:{edit_pages:true,edit_others_pages:true,manage_options:true,edit_theme_options:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/theme',inventory:[]},routing:{permalinkStructure:'/%postname%/',rewriteRulesHash:'rules',routes:[]},entities:[],overrides:[],navigation:[],options:{show_on_front:'posts',page_on_front:0},siteRecord:null};
  if(extra==='patterns')Object.assign(live.principal.capabilities,{edit_posts:true,edit_others_posts:true,publish_posts:true,publish_blocks:true,edit_published_posts:true});
@@ -31,7 +36,7 @@ async function fixture(extra?: 'media'|'patterns') {
   requests.push(r);
   if(r.action==='lock'){if(lock)return JSON.stringify({status:'refused'});lock=e.token;}
   else if(r.action==='unlock'){if(lock!==e.token)return JSON.stringify({status:'refused'});lock=null;}
-  else if(r.action==='marker') {if(fault==='marker'&&r.operation.currentStep?.status==='completed'){fault='none';return JSON.stringify({status:'refused'});}live.siteRecord??={version:1,siteId:'sample',entities:{},options:{},operation:null};live.siteRecord.operation=structuredClone(r.operation);if(r.index)live.siteRecord.entities[r.index.key]=r.index.id;}
+  else if(r.action==='marker') {if(fault==='marker'&&r.operation.currentStep?.status==='completed'){fault='none';return JSON.stringify({status:'refused'});}live.siteRecord??={version:1,siteId:'sample',entities:{},options:{},operation:null};live.siteRecord.operation=(normalizeMarkerEmptyObjects?phpAssociateEmptyObjects(r.operation):structuredClone(r.operation)) as typeof r.operation;if(r.index)live.siteRecord.entities[r.index.key]=r.index.id;}
   else if(r.action==='mutate') {
    const journal=JSON.parse(await readFile(options.journal,'utf8'));expect(journal.currentStep).toEqual(r.step);expect(live.siteRecord!.operation!.currentStep).toEqual(r.step);
    mutations++;
@@ -79,6 +84,13 @@ describe('confirmed database apply',()=>{
   const f=await fixture();const first=await applySite(f.plan,f.options,f.transports);expect(first.status).toBe('completed');expect(first.steps.map(item=>item.step.key)).toEqual(['page:home','option:show_on_front','option:page_on_front']);expect(f.count()).toBe(3);
   await writeFile(f.source,'source no longer present');expect(await applySite(f.plan,f.options,f.transports)).toEqual(first);expect(f.count()).toBe(3);
   f.live.entities[0]!.state.template='human';await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('after-state');expect(f.count()).toBe(3);
+ });
+ it('keeps finalized page authority exact when PHP normalizes empty pending attrs objects',async()=>{
+  const f=await fixture('media',true);const pending=f.plan.operations.find(op=>op.kind==='page')!;expect(JSON.stringify(pending.body)).toContain('"attrs":{}');
+  const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('completed');
+  const pageStep=result.steps.find(item=>item.step.kind==='page')!;expect(pageStep.operation).toMatchObject({kind:'page',entityId:'home',desired:{title:'Home',slug:'home',parentId:0,template:'index',status:'draft'}});
+  for(const field of ['body','pendingBindings','pendingPatternUses','requiresFinalization'])expect(pageStep.operation).not.toHaveProperty(field);
+  const entity=f.live.entities.find(item=>item.kind==='page')!;expect(entity.state).toEqual(pageStep.operation.desired);expect(entity.ownership).toHaveLength(1);expect(entity.ownership[0]).toMatchObject({siteId:'sample',entityId:'home',kind:'page',lastAppliedHash:managedStateHash(entity.state)});
  });
  it('accepts the native rewrite cache change caused by a changed front-page option',async()=>{const f=await fixture();f.setRouteMutation('front');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('completed');expect(f.live.routing.rewriteRulesHash).toBe('rules-after-page_on_front');expect(f.count()).toBe(3);});
  it('does not accept a rewrite cache change when a page write leaves front-page options unchanged',async()=>{const f=await fixture();f.setRouteMutation('page');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(f.live.options).toEqual({show_on_front:'posts',page_on_front:0});expect(f.live.routing.rewriteRulesHash).toBe('rules-after-page-change');expect(f.count()).toBe(1);});
