@@ -54,6 +54,7 @@
     "scripts/prune-wp-vips.mjs",
     "scripts/proof-playwright.mjs",
     "scripts/proof-theme-playwright.mjs",
+    "scripts/proof-site-playwright.mjs",
     "proof/dependency-pins.json",
     "proof/wp-env.json"
   ],

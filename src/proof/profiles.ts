@@ -49,7 +49,7 @@ export const PROOF_GATE_IDS = [
   'pattern_overrides',
   'theme_activation',
   'theme_roundtrip',
-  'site_fixture', 'site_content', 'site_routes', 'site_assets', 'site_frontend_styles', 'site_editor_styles', 'site_navigation', 'site_page_edit', 'site_part_edit', 'site_cleanup',
+  'site_fixture', 'site_content', 'site_routes', 'site_assets', 'site_frontend_styles', 'site_editor_styles', 'site_navigation', 'site_page_edit', 'site_part_edit', 'site_cleanup', 'site_runtime_errors',
   'visual_regression',
   'accessibility_editor',
   'accessibility_frontend',
@@ -267,7 +267,7 @@ export const PROOF_PROFILES: Readonly<Record<ProofProfileName, ProofProfile>> = 
   }),
   site: Object.freeze({
     name: 'site',
-    requiredGates: ['theme_activation', 'site_fixture', 'theme_roundtrip', 'site_content', 'site_routes', 'site_assets', 'site_frontend_styles', 'site_editor_styles', 'site_navigation', 'site_page_edit', 'site_part_edit', 'site_cleanup', 'environment_observation', 'php_logs'] as const satisfies readonly ProofGateId[],
+    requiredGates: ['theme_activation', 'site_fixture', 'theme_roundtrip', 'site_content', 'site_routes', 'site_assets', 'site_frontend_styles', 'site_editor_styles', 'site_navigation', 'site_page_edit', 'site_part_edit', 'site_cleanup', 'site_runtime_errors', 'environment_observation', 'php_logs'] as const satisfies readonly ProofGateId[],
     optionalGates: [],
   }),
   theme: Object.freeze({

@@ -18,11 +18,14 @@ export async function waitForDeclaredMount(page, expectedNames) {
     const expected = new Map();
     for (const name of names) expected.set(name, (expected.get(name) ?? 0) + 1);
     return [...expected].every(([name, count]) => all.filter((block) => block.name === name).length === count)
-      && all.every((block) => block.name !== 'core/accordion' || (block.innerBlocks ?? []).every((child) => child.name !== 'core/accordion-heading' || child.attributes?.iconPosition === block.attributes?.iconPosition))
+      && all.every((block) => block.name !== 'core/accordion' || flatten(block.innerBlocks ?? []).every((child) => child.name !== 'core/accordion-heading' || child.attributes?.iconPosition === block.attributes?.iconPosition))
       && wp.data.select('core/editor')?.getEditedPostContent?.() === wp.blocks.serialize(blocks);
   }, expectedNames);
   const canvas = page.frame({ name: 'editor-canvas' }) ?? page;
-  for (const name of new Set(expectedNames)) await canvas.locator(`[data-type="${name}"]`).first().waitFor({ state: 'attached' });
+  for (const name of new Set(expectedNames)) {
+    const count = expectedNames.filter((expected) => expected === name).length;
+    await canvas.waitForFunction(({ name, count }) => document.querySelectorAll(`.block-editor-block-list__block[data-type="${name}"]`).length === count, { name, count });
+  }
   return canvas;
 }
 const names = (blocks) => blocks.flatMap((block) => [block.block, ...names(block.children ?? [])]);
@@ -60,29 +63,28 @@ async function editAndReopen(page, input, target, onSaved = () => {}) {
   }
   await page.waitForFunction(() => !globalThis.wp.data.select('core/editor').isSavingPost());
   const raw = await page.evaluate(async (restPath) => globalThis.wp.apiFetch({ path: restPath }), restPath);
-  if (part && raw.source === 'custom' && Number(raw.wp_id) > 0) onSaved(Number(raw.wp_id));
+  if (part && raw.source === 'custom' && Number(raw.wp_id) > 0) onSaved(Number(raw.wp_id), raw.content?.raw);
   if (raw.content?.raw !== mounted.serialized || !raw.content.raw.includes(target.newText)) throw new Error('UI save did not persist the mounted bytes');
   await page.goto(url, { waitUntil: 'domcontentloaded' });
   await page.waitForFunction((text) => globalThis.wp?.data?.select('core/editor')?.getEditedPostContent?.()?.includes(text), target.newText);
   return { mounted, savedRaw: raw.content.raw, restPath, overrideId: raw.wp_id, reopened: true };
 }
-export async function proveControlledThemeFile(page, theme, file, baseUrl) {
-  const wrapped = new Proxy(page, { get(target, property) {
-    if (property === 'evaluate') return async (action, argument) => {
-      if (String(action).includes('requestAnimationFrame')) {
-        const expected = await target.evaluate((content) => {
-          const flatten = (items) => items.flatMap((block) => [block.name, ...flatten(block.innerBlocks ?? [])]);
-          return flatten(globalThis.wp.blocks.parse(content));
-        }, file.content);
-        await waitForDeclaredMount(target, expected);
-        return;
-      }
-      return target.evaluate(action, argument);
-    };
-    const value = target[property];
-    return typeof value === 'function' ? value.bind(target) : value;
-  } });
-  return proveFile(wrapped, theme, file, baseUrl);
+export async function proveControlledThemeFile(page, theme, file, baseUrl, onOverride = () => {}) {
+  return proveFile(page, theme, file, baseUrl, {
+    awaitMounted: async (mountedPage, source) => {
+      const expected = await mountedPage.evaluate((content) => {
+        const flatten = (items) => items.flatMap((block) => [block.name, ...flatten(block.innerBlocks ?? [])]);
+        return flatten(globalThis.wp.blocks.parse(content));
+      }, source.content);
+      await waitForDeclaredMount(mountedPage, expected);
+    },
+    cleanupOverride: async ({ page: mountedPage, restPath, id, entityType, result }) => {
+      const current = await mountedPage.evaluate(async (route) => globalThis.wp.apiFetch({ path: route }), restPath);
+      if (current.source !== 'custom' || Number(current.wp_id) !== id || current.content?.raw !== result.savedRaw) throw new Error('Override ownership changed before recoverable cleanup');
+      onOverride({ id, content: current.content.raw, postType: entityType });
+      return { deferredRecoverableTrash: true, id };
+    },
+  });
 }
 async function main() {
   const args = process.argv.slice(2);
@@ -93,7 +95,7 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.setDefaultTimeout(25_000);
-  const report = { gates: {}, screenshots: [], files: [], browser: { engine: 'chromium', version: browser.version(), revision: /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved' } };
+  const report = { gates: {}, screenshots: [], files: [], recoverableOverrides: [], browser: { engine: 'chromium', version: browser.version(), revision: /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved' } };
   const errors = [];
   page.on('pageerror', (error) => errors.push(error.message));
   const gate = async (id, action) => {
@@ -101,17 +103,19 @@ async function main() {
     catch (error) { report.gates[id] = { status: 'fail', reason: String(error) }; }
   };
   let partOverride;
+  let partOverrideContent;
   try {
     await login(page, input.baseUrl);
     await page.goto(`${input.baseUrl}/wp-admin/site-editor.php?canvas=edit`);
     await page.waitForFunction(() => Boolean(globalThis.wp?.apiFetch));
     const settings = await page.evaluate(async () => globalThis.wp.apiFetch({ path: '/wp/v2/settings?context=edit' }));
     const principal = await page.evaluate(async () => globalThis.wp.apiFetch({ path: '/wp/v2/users/me?context=edit' }));
+    report.principal = { id: principal.id, manageOptions: principal.capabilities?.manage_options === true };
     const verified = await runAfterRuntimeVerification(settings, input.runtimeMarker, async () => {
-      if (!principal.capabilities?.manage_options) throw new Error('Authenticated browser principal cannot manage fixture options');
+      if (!principal.capabilities?.manage_options || (input.principalId && principal.id !== input.principalId)) throw new Error('Authenticated browser principal cannot manage fixture options');
       if (input.verifyOnly) return;
       if (input.files) {
-        for (const file of input.files) report.files.push(await proveControlledThemeFile(page, input.theme, file, input.baseUrl));
+        for (const file of input.files) report.files.push(await proveControlledThemeFile(page, input.theme, file, input.baseUrl, (override) => report.recoverableOverrides.push(override)));
         return;
       }
       await gate('site_routes', async () => {
@@ -144,7 +148,7 @@ async function main() {
         if (!images.length || images.some((image) => !image.loaded)) throw new Error('Native media did not load');
         const themeAssets = [];
         for (const asset of input.themeAssets ?? []) {
-          const url = `${input.baseUrl}/wp-content/themes/${input.theme}/${asset}`;
+          const url = `${input.themeAssetBaseUrl}/${asset}`;
           const response = await page.request.get(url);
           if (response.status() !== 200) throw new Error(`Declared theme asset failed: ${asset}`);
           themeAssets.push({ url, status: response.status() });
@@ -218,7 +222,7 @@ async function main() {
         const body = input.intent.parts.footer.body;
         const oldText = texts(body.blocks).at(-1);
         const newText = `${oldText} Shared proof edit.`;
-        const result = await editAndReopen(page, input, { kind: 'part', slug: 'footer', body, oldText, newText }, (id) => { partOverride = id; });
+        const result = await editAndReopen(page, input, { kind: 'part', slug: 'footer', body, oldText, newText }, (id, content) => { partOverride = id; partOverrideContent = content; });
         partOverride = result.overrideId;
         for (const item of input.pages) {
           await page.goto(`${input.baseUrl}${item.route}`);
@@ -230,7 +234,7 @@ async function main() {
     report.runtimeBinding = { verified: verified && principal.capabilities?.manage_options === true };
     if (input.verifyOnly && !report.runtimeBinding.verified) process.exitCode = 1;
     if (!verified) for (const id of ['site_content', 'site_routes', 'site_assets', 'site_frontend_styles', 'site_editor_styles', 'site_navigation', 'site_page_edit', 'site_part_edit']) report.gates[id] = { status: 'fail', reason: 'Wrong runtime marker; zero fixture editor writes' };
-    if (errors.length) report.gates.site_content = { status: 'fail', reason: 'Browser runtime errors', details: errors };
+    if (!input.files && !input.verifyOnly) report.gates.site_runtime_errors = { status: errors.length ? 'fail' : 'pass', reason: errors.length ? 'Browser runtime errors' : undefined, details: errors };
   } finally {
     if (partOverride) {
       try {
@@ -238,12 +242,9 @@ async function main() {
         await page.waitForFunction(() => Boolean(globalThis.wp?.apiFetch));
         const settings = await page.evaluate(async () => globalThis.wp.apiFetch({ path: '/wp/v2/settings?context=edit' }));
         if (settings.description !== input.runtimeMarker) throw new Error('Marker changed before shared override cleanup');
-        await page.evaluate(async ({ theme, id }) => {
-          const route = `/wp/v2/template-parts/${theme}//footer`;
-          const current = await globalThis.wp.apiFetch({ path: `${route}?context=edit` });
-          if (current.source !== 'custom' || Number(current.wp_id) !== Number(id)) throw new Error('Shared override ownership changed; preserved');
-          await globalThis.wp.apiFetch({ path: route, method: 'DELETE', data: { force: true } });
-        }, { theme: input.theme, id: partOverride });
+        const current = await page.evaluate(async (theme) => globalThis.wp.apiFetch({ path: `/wp/v2/template-parts/${theme}//footer?context=edit` }), input.theme);
+        if (current.source !== 'custom' || Number(current.wp_id) !== partOverride || current.content?.raw !== partOverrideContent) throw new Error('Shared override ownership changed; preserved');
+        report.recoverableOverrides.push({ id: partOverride, content: partOverrideContent, postType: 'wp_template_part' });
       } catch (error) { report.gates.site_part_edit = { status: 'fail', reason: String(error) }; }
     }
     await browser.close();

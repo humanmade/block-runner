@@ -1,4 +1,4 @@
-import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, type PreparedSiteProof, type SiteProofGate } from './site.js';
+import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, type PreparedSiteProof, type SiteProofGate, siteTrashOverridesPhp } from './site.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs';
@@ -510,6 +510,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
       else preparedTheme = await prepareThemeProof(options.theme!, evidence);
       themeConfig = JSON.parse(await readFile(wpEnvConfig, 'utf8')) as ThemeWpEnvConfig;
       preflightError = themePreflightFailure(preparedTheme, themeConfig);
+      if (options.site && !/^8\.4(?:\.|$)/.test(effectiveWpEnvConfig(themeConfig).phpVersion ?? '')) preflightError = 'Site proof requires the controlled PHP 8.4 runtime.';
       if (!preflightError) {
         const dependencies = effectiveWpEnvConfig(themeConfig).plugins;
         localDependencies = await pinLocalPluginDirectories(dependencies, process.cwd(), evidence);
@@ -1327,7 +1328,7 @@ function createRuntime(
           const result = await runSiteProof({
             site: preparedSite, negativeControl: options.siteNegativeControl, stagedTheme: stagedThemeDirectory,
             baseUrl: effectiveWpEnvUrl(sourceThemeConfig), helper: path.join(projectRoot, 'scripts', 'proof-site-playwright.mjs'), evidence,
-            wp: async (php) => wpEnv(['run', 'cli', 'wp', 'eval', php]),
+            wp: async (php, userId) => wpEnv(['run', 'cli', 'wp', ...(userId ? [`--user=${userId}`] : []), 'eval', php]),
             command: async (name, args) => command(name, args, { cwd: projectRoot, timeoutMs: PROOF_COMMAND_TIMEOUTS.browser, phase: 'browser-site-proof' }),
           });
           siteResults = result.gates;
@@ -1499,6 +1500,7 @@ async function runThemeBrowserProof(
   options: ProofRunOptions,
   wpEnvConfig: ThemeWpEnvConfig | undefined,
   runtimeMarker: string,
+  wpEnv: (args: string[]) => Promise<ProofCommandResult>,
 ): Promise<{ command: ProofCommandResult; report?: Record<string, unknown> }> {
   try {
     await access(helper, fsConstants.R_OK);
@@ -1529,6 +1531,13 @@ async function runThemeBrowserProof(
   });
   try {
     const report = JSON.parse(await readFile(reportPath, 'utf8')) as Record<string, unknown>;
+    if (options.site && Array.isArray(report.recoverableOverrides) && report.recoverableOverrides.length) {
+      const principal = isRecord(report.principal) ? Number(report.principal.id) : 0;
+      if (!Number.isInteger(principal) || principal < 1) throw new Error('Missing observed principal for recoverable theme override cleanup');
+      const cleanup = await wpEnv(['run', 'cli', 'wp', `--user=${principal}`, 'eval', siteTrashOverridesPhp(runtimeMarker, report.recoverableOverrides as Array<{ id: number; content: string; postType: string }>)]);
+      report.recoverableCleanup = cleanup;
+      if (cleanup.exitCode !== 0 || JSON.parse(cleanup.stdout.trim()).preserved.length) return { command: { ...result, exitCode: 1, stderr: `${result.stderr} Recoverable override cleanup failed` }, report };
+    }
     return { command: result, report };
   } catch (error) {
     return { command: { ...result, exitCode: null, stderr: `${result.stderr}\nCould not read theme browser report: ${error instanceof Error ? error.message : String(error)}` } };
@@ -1562,7 +1571,7 @@ async function runThemeRoundtripWithRuntimeMarker(
     if (markerSet.exitCode !== 0) {
       result = { status: 'blocked', reason: 'Could not bind the browser to this run’s wp-env site before saving templates.', evidence: [markerSetEvidence] };
     } else {
-      const browserResult = await runThemeBrowserProof(theme, helper, command, options, wpEnvConfig, marker);
+      const browserResult = await runThemeBrowserProof(theme, helper, command, options, wpEnvConfig, marker, wpEnv);
       const browserEvidence = await logged(browserResult.command);
       if (!browserResult.report) {
         result = { status: 'blocked', reason: 'Site Editor theme save proof did not produce a report.', evidence: [browserEvidence] };
