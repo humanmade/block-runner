@@ -1,9 +1,7 @@
-import { execFile } from 'node:child_process';
-import { promisify } from 'node:util';
+import { spawn } from 'node:child_process';
 import { siteRecordOption, SITE_OWNERSHIP_META, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { managedStateHash } from './plan.js';
 import type { SiteSnapshot, SiteApplyStep, SitePlanOperation } from './plan-types.js';
-const run = promisify(execFile);
 export interface SiteApplyBoundary {
   siteId: string; planHash: string; token: string; target: SiteSnapshot['target']; principal: SiteSnapshot['principal']; theme: SiteSnapshot['theme'];
 }
@@ -14,9 +12,13 @@ export type SiteApplyRequest =
 /** Only fixed operations are exposed. A transport error after invocation has uncertain effects. */
 export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{status: string; id?: number}> {
   if (!wp.wpPath || [wp.wpPath,wp.wpUrl,wp.wpUser,wp.wpBinary].some(value=>value?.includes('\0'))) throw new Error('invalid WP-CLI selection');
-  const args = [`--path=${wp.wpPath}`, ...(wp.wpUrl ? [`--url=${wp.wpUrl}`] : []), ...(wp.wpUser ? [`--user=${wp.wpUser}`] : []), 'eval', script(boundary,request)];
+  const selection = [`--path=${wp.wpPath}`, ...(wp.wpUrl ? [`--url=${wp.wpUrl}`] : []), ...(wp.wpUser ? [`--user=${wp.wpUser}`] : [])];
   let output: string;
-  try { output = transport ? await transport(wp.wpBinary ?? 'wp',args) : (await run(wp.wpBinary ?? 'wp',args,{encoding:'utf8',maxBuffer:1024*1024})).stdout; }
+  try {
+    output = transport
+      ? await transport(wp.wpBinary ?? 'wp',[...selection,'eval',script(boundary,request)])
+      : await runWithInput(wp.wpBinary ?? 'wp',[...selection,'eval-file','-'],`<?php\n${script(boundary,request)}`);
+  }
   catch { throw new Error('WP-CLI site apply transport failed; preserve operation evidence and inspect the selected local installation'); }
   try {
     const result = JSON.parse(output) as {status:string;id?:number};
@@ -24,6 +26,40 @@ export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBo
     return result;
   } catch { throw new Error('WP-CLI site apply returned invalid boundary readback; preserve operation evidence'); }
 }
+
+function runWithInput(executable: string, args: string[], input: string): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'] });
+    let output = '';
+    let settled = false;
+    const fail = () => {
+      if (settled) return;
+      settled = true;
+      child.kill();
+      reject(new Error('WP-CLI site apply process failed'));
+    };
+    child.on('error', fail);
+    child.stdin.on('error', fail);
+    child.stdout.on('error', fail);
+    child.stdout.setEncoding('utf8');
+    child.stdout.on('data', (chunk: string) => {
+      if (settled) return;
+      output += chunk;
+      if (Buffer.byteLength(output) > 1024 * 1024) fail();
+    });
+    child.on('close', code => {
+      if (settled) return;
+      if (code !== 0) {
+        fail();
+        return;
+      }
+      settled = true;
+      resolve(output);
+    });
+    try { child.stdin.end(input); } catch { fail(); }
+  });
+}
+
 function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string {
   const encoded = Buffer.from(JSON.stringify({ ...boundary, request, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
   return `
