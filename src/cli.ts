@@ -34,6 +34,7 @@ import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from
 import { renderAuthoringPreview } from './authoring/preview.js';
 import { formatTextReport } from './report/text.js';
 import { discoverThemeMarkupFiles, isThemeDirectory, type ThemeMarkupFile } from './theme/folders.js';
+import { validateThemeJson } from './theme/theme-json.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -132,12 +133,21 @@ addTokenOptions(
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
     const inputs = await readInputs(globOrStdin, { allowTheme: true });
-    const report = (inputs.some((input) => input.theme) || await isThemeDirectory(globOrStdin))
-      ? await validateThemeInputs(inputs, apiOptions)
-      : aggregateReports('validate', await Promise.all(inputs.map((input) => validate(input.content, {
+    const directThemeJson = inputs.length === 1 && inputs[0]?.path
+      && path.basename(inputs[0].path) === 'theme.json'
+      && path.resolve(globOrStdin) === path.resolve(inputs[0].path);
+    let report: BlockRunnerReport;
+    if (directThemeJson) {
+      const input = inputs[0]!;
+      report = validateThemeJson(input.content, input.path!, 'validate').report;
+    } else if (inputs.some((input) => input.theme) || await isThemeDirectory(globOrStdin)) {
+      report = await validateThemeInputs(inputs, apiOptions, globOrStdin);
+    } else {
+      report = aggregateReports('validate', await Promise.all(inputs.map((input) => validate(input.content, {
         ...apiOptions,
         sourcePath: input.path,
       }))));
+    }
     await emit(report, options);
     process.exitCode = report.ok ? 0 : 1;
   });
@@ -234,7 +244,7 @@ addTokenOptions(
     ensureSingleOutputTarget(inputs, options);
     let report: BlockRunnerReport;
     if (isThemeInput) {
-      report = await fixThemeInputs(inputs, apiOptions, options.write === true);
+      report = await fixThemeInputs(inputs, apiOptions, options.write === true, globOrStdin);
     } else {
       const reports = await Promise.all(inputs.map((input) => canonicalize(input.content, {
         ...apiOptions,
@@ -814,7 +824,11 @@ function pinnedBlockRunnerRuntime(): string {
   return `npx -y block-runner@${packageVersion}`;
 }
 
-async function validateThemeInputs(inputs: CliInput[], options: CommonOptions): Promise<BlockRunnerReport> {
+async function validateThemeInputs(
+  inputs: CliInput[],
+  options: CommonOptions,
+  themeRoot?: string,
+): Promise<BlockRunnerReport> {
   const results: Array<{ report: BlockRunnerReport; file: string }> = [];
   for (const input of inputs) {
     const theme = input.theme;
@@ -825,6 +839,13 @@ async function validateThemeInputs(inputs: CliInput[], options: CommonOptions): 
     shiftThemeSourceLocations(report, theme.header?.raw);
     results.push({ report, file: theme.file });
   }
+  if (themeRoot) {
+    const themeJsonPath = path.join(themeRoot, 'theme.json');
+    if (existsSync(themeJsonPath)) {
+      const checked = validateThemeJson(await readFile(themeJsonPath, 'utf8'), themeJsonPath, 'validate');
+      results.push({ report: checked.report, file: 'theme.json' });
+    }
+  }
   return themeAggregate('validate', results);
 }
 
@@ -832,6 +853,7 @@ async function fixThemeInputs(
   inputs: CliInput[],
   options: CommonOptions,
   write: boolean,
+  themeRoot?: string,
 ): Promise<BlockRunnerReport> {
   const results: Array<{ report: BlockRunnerReport; file: string; changed?: boolean }> = [];
   for (const input of inputs) {
@@ -864,6 +886,13 @@ async function fixThemeInputs(
       }
     }
     results.push({ report, file: theme.file, changed });
+  }
+  if (themeRoot) {
+    const themeJsonPath = path.join(themeRoot, 'theme.json');
+    if (existsSync(themeJsonPath)) {
+      const checked = validateThemeJson(await readFile(themeJsonPath, 'utf8'), themeJsonPath, 'fix');
+      results.push({ report: checked.report, file: 'theme.json', changed: false });
+    }
   }
   return themeAggregate('fix', results);
 }
