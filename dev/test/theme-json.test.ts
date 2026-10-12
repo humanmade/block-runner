@@ -69,6 +69,10 @@ describe('theme.json schema validation', () => {
     expect(errors.every(({ source }) => source?.path === themeJsonPath)).toBe(true);
     expect(errors.map(({ details }) => details?.pointer).sort()).toEqual(['/settings/layout/contentSize', '/unexpectedKey']);
 
+    const text = await runCli(['validate', themeJsonPath]);
+    expect(text.stdout).toContain('invalid');
+    expect(text.stdout).not.toContain('warning:');
+
     const fix = await runCli(['fix', project, '--write', '--json']);
     expect(fix.code).toBe(1);
     expect(await readFile(themeJsonPath, 'utf8')).toBe(original);

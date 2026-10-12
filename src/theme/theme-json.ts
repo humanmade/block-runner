@@ -22,7 +22,6 @@ export function validateThemeJson(content: string, file: string, command: Comman
         summary: { blocks: 0, valid: 0, invalid: 1, warnings: 0 },
         items: [{
           status: 'invalid',
-          severity: 'warning',
           reason: `theme.json is malformed JSON: ${reason}`,
           source: { path: file },
           code: 'theme-json-schema',
@@ -38,7 +37,6 @@ export function validateThemeJson(content: string, file: string, command: Comman
       const pointer = errorPointer(error);
       items.push({
         status: 'invalid',
-        severity: 'warning',
         reason: `JSON pointer ${pointer || '/'} ${error.message ?? 'is invalid'}`,
         source: { path: file, selector: pointer },
         details: { pointer, keyword: error.keyword },
