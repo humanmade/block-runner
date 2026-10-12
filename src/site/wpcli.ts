@@ -52,6 +52,9 @@ function snapshotScript(siteId: string, desiredRoutes: string[]): string {
   const option = JSON.stringify(siteRecordOption(siteId));
   const routes = Buffer.from(JSON.stringify(desiredRoutes.filter(route=>route!=='/'))).toString('base64');
   return `
+// This process terminates after inspection; restoring core cron would spawn a write at shutdown.
+if (defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON) throw new Exception('alternate cron bootstrap is unsupported for read-only site planning');
+remove_action('shutdown','_wp_cron');
 $capabilities = array();
 foreach (array('edit_pages','publish_pages','edit_others_pages','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
 $entities = array(); $overrides = array(); $navigation = array();
