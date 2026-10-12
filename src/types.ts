@@ -45,11 +45,22 @@ export interface ReportSummary {
   warnings: number;
 }
 
+/** Compact result for one authored file in a block theme folder. */
+export interface ThemeFileReport {
+  file: string;
+  blocks: number;
+  invalid: number;
+  warnings: number;
+  changed?: boolean;
+}
+
 export interface BlockRunnerReport {
   ok: boolean;
   command: CommandName;
   summary: ReportSummary;
   items: ReportItem[];
+  /** Present only when validate/fix was given a block theme directory. */
+  files?: ThemeFileReport[];
   /** Exact source identity for the registered-block HTML authoring pass, when available. */
   source?: import('./authoring/schema.js').AuthoringSource;
   /**

@@ -49,6 +49,15 @@ The JSON report includes `ok`, block counts, warnings and source locations. Revi
 | Create a reusable named block from a design | `author` | A plan and generated block source; preview and confirm before writing |
 | Check or repair existing block markup | `validate` / `fix` | A report or canonicalised markup |
 
+For a block theme, pass its directory to check each discovered template, part and pattern. Pattern
+PHP metadata headers are preserved and excluded from block counts; patterns with PHP in the body
+are reported and skipped. `fix --write` canonicalises eligible files in place:
+
+```sh
+npx --no-install block-runner validate ./my-theme
+npx --no-install block-runner fix ./my-theme --write
+```
+
 For straightforward HTML, start with `convert`. For a design that needs interpretation, an agent can choose the block structure and send it to CLI `assemble`. Both page-content routes finish with media resolution, theme-token handling and validation. Neither creates a registered block's source files.
 
 ### Registered-block authoring

@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 import { createRequire } from 'node:module';
+import { randomUUID } from 'node:crypto';
 import { existsSync } from 'node:fs';
-import { lstat, readFile, readdir, writeFile } from 'node:fs/promises';
+import { lstat, open, readFile, readdir, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import process from 'node:process';
@@ -32,6 +33,7 @@ import { classifyRegisteredBlockRegeneration } from './authoring/regeneration.js
 import { hashAuthoringPlan, serializeAuthoringPlan, validateAuthoringPlan } from './authoring/schema.js';
 import { renderAuthoringPreview } from './authoring/preview.js';
 import { formatTextReport } from './report/text.js';
+import { discoverThemeMarkupFiles, isThemeDirectory, type ThemeMarkupFile } from './theme/folders.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -46,6 +48,13 @@ interface CliOptions extends CommonOptions {
   title?: string;
   category?: string;
   outDir?: string;
+  write?: boolean;
+}
+
+interface CliInput {
+  path?: string;
+  content: string;
+  theme?: ThemeMarkupFile;
 }
 
 interface ContextCliOptions {
@@ -122,16 +131,13 @@ addTokenOptions(
 )
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
-    const inputs = await readInputs(globOrStdin);
-    const reports = await Promise.all(
-      inputs.map((input) =>
-        validate(input.content, {
-          ...apiOptions,
-          sourcePath: input.path,
-        }),
-      ),
-    );
-    const report = aggregateReports('validate', reports);
+    const inputs = await readInputs(globOrStdin, { allowTheme: true });
+    const report = (inputs.some((input) => input.theme) || await isThemeDirectory(globOrStdin))
+      ? await validateThemeInputs(inputs, apiOptions)
+      : aggregateReports('validate', await Promise.all(inputs.map((input) => validate(input.content, {
+        ...apiOptions,
+        sourcePath: input.path,
+      }))));
     await emit(report, options);
     process.exitCode = report.ok ? 0 : 1;
   });
@@ -214,20 +220,29 @@ addTokenOptions(
     addSharedOptions(program.command('fix <globOrStdin>').description('Canonicalize Gutenberg block markup.')),
   ),
 )
+  .option('--write', 'write canonicalized block theme files in place')
   .action(async (globOrStdin: string, options: CliOptions) => {
     const apiOptions = normalizeOptions(options);
-    const inputs = await readInputs(globOrStdin);
+    const inputs = await readInputs(globOrStdin, { allowTheme: true });
+    if (options.write && !inputs.some((input) => input.theme) && !await isThemeDirectory(globOrStdin)) {
+      throw new Error('--write is only available for a block theme directory');
+    }
+    if (options.write && options.out) {
+      throw new Error('--write cannot be combined with --out');
+    }
+    const isThemeInput = inputs.some((input) => input.theme) || await isThemeDirectory(globOrStdin);
     ensureSingleOutputTarget(inputs, options);
-    const reports = await Promise.all(
-      inputs.map((input) =>
-        canonicalize(input.content, {
-          ...apiOptions,
-          sourcePath: input.path,
-        }),
-      ),
-    );
-    const report = aggregateReports('fix', reports);
-    report.output = reports.map((item) => item.output ?? '').join('\n');
+    let report: BlockRunnerReport;
+    if (isThemeInput) {
+      report = await fixThemeInputs(inputs, apiOptions, options.write === true);
+    } else {
+      const reports = await Promise.all(inputs.map((input) => canonicalize(input.content, {
+        ...apiOptions,
+        sourcePath: input.path,
+      })));
+      report = aggregateReports('fix', reports);
+      report.output = reports.map((item) => item.output ?? '').join('\n');
+    }
     await emit(report, options, inputs);
     process.exitCode = report.ok ? 0 : 1;
   });
@@ -655,13 +670,22 @@ function normalizeOptions(options: CliOptions): CommonOptions {
 
 async function readInputs(
   target: string,
-  options: { allowInline?: boolean; allowRawInline?: boolean } = {},
-): Promise<Array<{ path?: string; content: string }>> {
+  options: { allowInline?: boolean; allowRawInline?: boolean; allowTheme?: boolean } = {},
+): Promise<CliInput[]> {
   if (target === '-') {
     return [{ path: '<stdin>', content: await readStdin() }];
   }
 
   if (existsSync(target)) {
+    const stats = await stat(target);
+    if (stats.isDirectory() && options.allowTheme) {
+      if (!await isThemeDirectory(target)) {
+        throw new Error(`Directory is not a block theme: ${target}`);
+      }
+      const files = await discoverThemeMarkupFiles(target);
+      return files.map((theme) => ({ path: theme.path, content: theme.markup, theme }));
+    }
+    if (!stats.isFile() && !stats.isDirectory()) throw new Error(`Input is not a regular file: ${target}`);
     return [{ path: target, content: await readFile(target, 'utf8') }];
   }
 
@@ -788,6 +812,140 @@ function shellDisplay(value: string): string {
 
 function pinnedBlockRunnerRuntime(): string {
   return `npx -y block-runner@${packageVersion}`;
+}
+
+async function validateThemeInputs(inputs: CliInput[], options: CommonOptions): Promise<BlockRunnerReport> {
+  const results: Array<{ report: BlockRunnerReport; file: string }> = [];
+  for (const input of inputs) {
+    const theme = input.theme;
+    if (!theme) continue;
+    const report = theme.skipReason
+      ? skippedThemeFileReport('validate', theme)
+      : await validate(theme.markup, { ...options, sourcePath: input.path });
+    shiftThemeSourceLocations(report, theme.header?.raw);
+    results.push({ report, file: theme.file });
+  }
+  return themeAggregate('validate', results);
+}
+
+async function fixThemeInputs(
+  inputs: CliInput[],
+  options: CommonOptions,
+  write: boolean,
+): Promise<BlockRunnerReport> {
+  const results: Array<{ report: BlockRunnerReport; file: string; changed?: boolean }> = [];
+  for (const input of inputs) {
+    const theme = input.theme;
+    if (!theme) continue;
+    if (theme.skipReason) {
+      results.push({ report: skippedThemeFileReport('fix', theme), file: theme.file, changed: false });
+      continue;
+    }
+
+    const report = await canonicalize(theme.markup, { ...options, sourcePath: theme.path });
+    shiftThemeSourceLocations(report, theme.header?.raw);
+    let changed = false;
+    if (write && report.ok) {
+      const output = `${theme.header?.raw ?? ''}${report.output ?? theme.markup}`;
+      if (output !== theme.content) {
+        try {
+          await writeThemeFileAtomically(theme.path, theme.content, output);
+          changed = true;
+        } catch (error) {
+          report.ok = false;
+          report.summary.warnings += 1;
+          report.items.push({
+            status: 'warning',
+            reason: `File was not written: ${error instanceof Error ? error.message : String(error)}`,
+            source: { path: theme.path },
+            code: 'theme-write-refused',
+          });
+        }
+      }
+    }
+    results.push({ report, file: theme.file, changed });
+  }
+  return themeAggregate('fix', results);
+}
+
+function skippedThemeFileReport(command: 'validate' | 'fix', theme: ThemeMarkupFile): BlockRunnerReport {
+  const unsafe = theme.skipReason === 'theme-unsafe-target';
+  return {
+    ok: true,
+    command,
+    summary: { blocks: 0, valid: 0, invalid: 0, warnings: 1 },
+    items: [{
+      status: 'warning',
+      reason: unsafe
+        ? 'Theme file is a symbolic link or non-regular target; it was not read or rewritten.'
+        : 'Pattern contains PHP beyond its leading metadata header; block validation was skipped and PHP was not executed or rewritten.',
+      source: { path: theme.path },
+      code: unsafe ? 'theme-unsafe-target' : 'pattern-php-body',
+    }],
+    ...(command === 'fix' ? { output: theme.content } : {}),
+  };
+}
+
+function shiftThemeSourceLocations(report: BlockRunnerReport, prefix = ''): void {
+  if (!prefix) return;
+  const lineBreaks = prefix.match(/\r\n|\r|\n/g)?.length ?? 0;
+  const lastLine = prefix.split(/\r\n|\r|\n/).at(-1)?.length ?? 0;
+  for (const item of report.items) {
+    if (!item.source) continue;
+    if (item.source.offset !== undefined) item.source.offset += prefix.length;
+    if (item.source.htmlLine !== undefined) {
+      if (item.source.htmlLine === 1 && item.source.htmlColumn !== undefined) item.source.htmlColumn += lastLine;
+      item.source.htmlLine += lineBreaks;
+    }
+  }
+}
+
+function themeAggregate(
+  command: 'validate' | 'fix',
+  results: Array<{ report: BlockRunnerReport; file: string; changed?: boolean }>,
+): BlockRunnerReport {
+  const report = aggregateReports(command, results.map((result) => result.report));
+  report.files = results.map(({ report: fileReport, file, changed }) => ({
+    file,
+    blocks: fileReport.summary.blocks,
+    invalid: fileReport.summary.invalid,
+    warnings: fileReport.summary.warnings,
+    ...(command === 'fix' ? { changed: changed ?? false } : {}),
+  }));
+  return report;
+}
+
+async function writeThemeFileAtomically(target: string, expected: string, content: string): Promise<void> {
+  const originalStats = await lstat(target);
+  if (originalStats.isSymbolicLink() || !originalStats.isFile()) {
+    throw new Error('target is not a regular file');
+  }
+  if (await readFile(target, 'utf8') !== expected) {
+    throw new Error('target changed after discovery');
+  }
+
+  const temporary = path.join(path.dirname(target), `.${path.basename(target)}.${randomUUID()}.tmp`);
+  let handle;
+  try {
+    handle = await open(temporary, 'wx', originalStats.mode & 0o7777);
+    await handle.writeFile(content, 'utf8');
+    await handle.chmod(originalStats.mode & 0o7777);
+    await handle.close();
+    handle = undefined;
+
+    const currentStats = await lstat(target);
+    if (currentStats.isSymbolicLink() || !currentStats.isFile()) {
+      throw new Error('target is not a regular file');
+    }
+    if (await readFile(target, 'utf8') !== expected) {
+      throw new Error('target changed before atomic replacement');
+    }
+    await rename(temporary, target);
+  } catch (error) {
+    await handle?.close().catch(() => undefined);
+    await unlink(temporary).catch(() => undefined);
+    throw error;
+  }
 }
 
 function parsePreviewWidth(value: string | undefined): number | undefined {
