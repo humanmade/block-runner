@@ -17,7 +17,7 @@ import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../
 function source(): PreparedSiteSource {
   return { sourceIntent: { version:1, siteId:'sample', homePageId:'home', theme:{slug:'sample',title:'Sample',themeJson:{version:3}}, templates:{index:{body:{blocks:[{block:'core/paragraph',text:'Index'}]}}}, parts:{}, patterns:{}, pages:[{id:'home',route:'/',title:'Home',template:'index',status:'draft',body:{blocks:[{block:'core/paragraph',text:'Hello'}]}}], assets:[], assetUses:[] }, assetRoot:'/assets',assets:[],sourceIdentity:'source-hash',unresolvedAssetUses:[] };
 }
-function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,targetBindings:{},targetBindingFingerprint:'binding-hash',themeFiles:[],syncedPatterns:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
+function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,targetBindings:{},targetBindingFingerprint:'binding-hash',themeFiles:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
 function pages(): CompiledSitePage[] {return [{id:'home',route:'/',title:'Home',template:'index',status:'draft',content:'<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->',diagnostics:[]}];}
 function snapshot(): SiteSnapshot {return {target:{homeUrl:'https://example.test',siteUrl:'https://example.test/wp',blogId:2},runtime:{wordpress:'7.1',php:'8.4.26'},principal:{userId:7,capabilities:{edit_pages:true,edit_others_pages:true,manage_options:true,edit_theme_options:true,publish_pages:true,upload_files:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/wp/wp-content/themes/sample',inventory:[]},routing:{permalinkStructure:'/%postname%/',rewriteRulesHash:'rules-hash',routes:[]},entities:[],overrides:[],navigation:[],options:{show_on_front:'posts',page_on_front:0},siteRecord:null};}
 function owned(): SiteEntity {const state={content:pages()[0]!.content,title:'Home',slug:'home',parentId:0,template:'index',status:'draft'};return {id:14,kind:'page',route:'/',state,ownership:[{version:1,siteId:'sample',entityId:'home',kind:'page',lastAppliedHash:managedStateHash(state)}]};}
@@ -32,7 +32,6 @@ describe('read-only local WP-CLI edge',()=>{
     expect(calls[0]!.executable).toBe('/tmp/wp binary');
     expect(calls[0]!.args.slice(0,4)).toEqual(['--path=/tmp/wp path;$(touch nope)','--url=https://example.test/sub','--user=editor','eval']);
     expect(calls[0]!.args[4]).toContain(siteRecordOption('sample'));
-    expect(calls[0]!.args[4]).toContain("'edit_posts','edit_others_posts','publish_posts','publish_blocks','edit_published_posts'");
     expect(calls[0]!.args[4]).not.toMatch(/\b(?:wp_insert\w*|wp_update\w*|update_option|add_post_meta|update_post_meta|media_handle\w*|unlink|file_put_contents)\s*\(/);
   });
   it('refuses user zero and secret-bearing URL identity',async()=>{
@@ -107,9 +106,12 @@ describe('source and retained bundle boundaries',()=>{
 describe('destination attachment bindings',()=>{
   it('checks exact numeric identity, URL and bytes without title or basename matching',()=>{
     const input=source();input.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment',sha256:'aaa',bytes:new Uint8Array()}];
-    const state={sha256:'aaa'};const observed=snapshot();observed.entities=[{id:22,kind:'attachment',route:null,state,attachment:{url:'https://example.test/uploads/photo.png',linkUrl:'https://example.test/photo/',currentFileSha256:'scaled',width:100,height:100,sizes:{full:{url:'https://example.test/uploads/photo.png',width:100,height:100}}},ownership:[{version:1,siteId:'sample',entityId:'photo',kind:'attachment',assetSha256:'aaa',lastAppliedHash:managedStateHash(state)}]}];
+    const state={sha256:'aaa'};const observed=snapshot();observed.entities=[{id:22,kind:'attachment',route:null,state,postStatus:'inherit',attachment:{url:'https://example.test/uploads/photo.png',linkUrl:'https://example.test/photo/',currentFileSha256:'scaled',width:100,height:100,sizes:{full:{url:'https://example.test/uploads/photo.png',width:100,height:100}}},ownership:[{version:1,siteId:'sample',entityId:'photo',kind:'attachment',assetSha256:'aaa',lastAppliedHash:managedStateHash(state)}]}];
     const retained={source:input,retainedBindings:{photo:{id:22,url:'https://example.test/uploads/photo.png'}}};
     expect(observedAttachmentBindings(retained,observed)).toMatchObject({photo:{...retained.retainedBindings.photo,attachmentPageUrl:'https://example.test/photo/',observedSize:{width:100,height:100},imageSizes:{full:{url:'https://example.test/uploads/photo.png',width:100,height:100}}}});
+    observed.entities[0]!.postStatus='trash';
+    expect(()=>observedAttachmentBindings(retained,observed)).toThrow('unavailable');
+    observed.entities[0]!.postStatus='inherit';
     observed.entities[0]!.state.sha256='changed';expect(()=>observedAttachmentBindings(retained,observed)).toThrow('destination bytes');
     observed.entities=[];expect(()=>observedAttachmentBindings(retained,observed)).toThrow('absent');
     expect(()=>observedAttachmentBindings({...retained,retainedThemeAssetBaseUrl:'https://old-target.test/theme'},snapshot())).toThrow('different target');

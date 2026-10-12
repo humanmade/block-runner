@@ -46,7 +46,9 @@ function validateSnapshot(value: SiteSnapshot): void {
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('snapshot URL contains unsupported identity or secret fields');
   }
   for (const entity of value.entities) {
-    if (entity.kind !== 'attachment' || !entity.attachment) continue;
+    if (entity.kind !== 'attachment') continue;
+    if (!entity.attachment) throw new Error('snapshot attachment has no native metadata');
+    if (typeof entity.postStatus !== 'string' || entity.postStatus.length === 0) throw new Error('snapshot attachment has no observed WordPress post status');
     for (const url of [entity.attachment.url, ...Object.values(entity.attachment.sizes ?? {}).map(size => size.url)]) {
       if (url === null || url === undefined) continue;
       const parsed = new URL(url);
@@ -71,7 +73,7 @@ function snapshotScript(siteId: string, desiredRoutes: string[]): string {
 if (defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON) throw new Exception('alternate cron bootstrap is unsupported for read-only site planning');
 remove_action('shutdown','_wp_cron');
 $capabilities = array();
-foreach (array('edit_pages','publish_pages','edit_others_pages','edit_posts','edit_others_posts','publish_posts','publish_blocks','edit_published_posts','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
+foreach (array('edit_pages','publish_pages','edit_others_pages','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
 $entities = array(); $overrides = array(); $navigation = array();
 $posts = get_posts(array('post_type'=>array('page','attachment','wp_block','wp_template','wp_template_part','wp_navigation'), 'post_status'=>array('publish','future','draft','pending','private','trash','inherit','auto-draft'), 'numberposts'=>-1, 'orderby'=>'ID', 'order'=>'ASC', 'suppress_filters'=>true));
 foreach ($posts as $post) {
@@ -106,7 +108,7 @@ foreach ($posts as $post) {
     $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'linkUrl'=>get_attachment_link($post->ID) ?: null,'currentFileSha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null,'sizes'=>$sizes);
   }
   $meta = get_post_meta($post->ID, '${SITE_OWNERSHIP_META}', false);
-  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'ownership'=>$meta);
+  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'postStatus'=>$post->post_status,'ownership'=>$meta);
   if ($attachment) $entity['attachment'] = $attachment;
   $entities[] = $entity;
 }
