@@ -164,14 +164,14 @@ describe('generated registered blocks in WordPress 7.1', () => {
     const compiled = compileAuthoringPlan(planFor('all'));
     let settings: Record<string, unknown> | undefined;
     const Edit = await loadGeneratedComponent(compiled, 'edit.js', {
-        '@wordpress/block-editor': {
-          useBlockProps: () => ({}),
-          useInnerBlocksProps: (props: Record<string, unknown>, options: Record<string, unknown>) => {
-            settings = options;
-            return props;
-          },
+      '@wordpress/block-editor': {
+        useBlockProps: () => ({}),
+        useInnerBlocksProps: (props: Record<string, unknown>, options: Record<string, unknown>) => {
+          settings = options;
+          return props;
         },
-      });
+      },
+    });
 
     Edit();
     expect(settings).toEqual({
