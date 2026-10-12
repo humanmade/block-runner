@@ -12,7 +12,8 @@ export function entityFingerprint(entity: SiteEntity): string { return hashCanon
 /** Pure reconciliation. It never adopts a numeric entity by title, route, or filename. */
 export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifact, pages: CompiledSitePage[], snapshot: SiteSnapshot, bindings: Record<string, SiteAttachmentBinding> = {}, previewDiagnostics: import('../types.js').ReportItem[] = []): SitePlan {
   const conflicts: SiteInputDiagnostic[] = [];
-  const diagnostics = [...theme.diagnostics, ...pages.flatMap(page=>page.diagnostics), ...previewDiagnostics];
+  // Reports contain optional fields set to undefined; retain their JSON representation in plans.
+  const diagnostics = JSON.parse(JSON.stringify([...theme.diagnostics, ...pages.flatMap(page=>page.diagnostics), ...previewDiagnostics])) as import('../types.js').ReportItem[];
   const operations: SitePlanOperation[] = [];
   const issue = (path: string, code: string, message: string): void => { conflicts.push({ path, code, message }); };
   const intent = source.sourceIntent;
