@@ -20,7 +20,7 @@ async function fixture(extra?: 'media'|'patterns') {
  const theme=await compileThemeDocuments(input.source,{themeAssetBaseUrl:live.theme.assetBaseUrl});if(!theme.ok)throw new Error('invalid fixture theme');live.theme.inventory=theme.artifact.inventory;
  const pages=await compileSitePageDocuments(input.source);const patterns=await compileSiteSyncedPatterns(input.source,{themeAssetBaseUrl:live.theme.assetBaseUrl});const plan=reconcileSitePlan(input.source,theme.artifact,pages.pages,structuredClone(live),{},pages.diagnostics,patterns);
  const options:SiteApplyOptions={source,assetRoot:root,confirm:plan.confirmationHash,journal:path.join(root,'journal.json'),wpPath:'/wp'};
- let lock:string|null=null;let fault:'none'|'unknown'|'owned'|'changed'|'noowner'|'readback'|'source'|'marker'|'mediareadback'|'secret'='none';let mutations=0;
+ let lock:string|null=null;let fault:'none'|'unknown'|'owned'|'frontowned'|'changed'|'noowner'|'readback'|'source'|'marker'|'mediareadback'|'secret'='none';let routeMutation:'none'|'front'|'page'|'front-permalink'|'front-unsupported'='none';let mutations=0;
  let readFailure=false;let mediaReadCountdown=0;
  const requests:SiteApplyRequest[]=[];
  const transports={read:async()=>{if(mediaReadCountdown>0&&--mediaReadCountdown===0)throw new Error('ordinary snapshot error after completed media helper');if(readFailure){readFailure=false;throw new Error('readback unavailable');}return JSON.stringify(live);},mutate:async(_executable:string,args:string[])=>{
@@ -37,18 +37,20 @@ async function fixture(extra?: 'media'|'patterns') {
    if(fault==='unknown')throw new Error('lost response');
    if(fault==='secret')throw new Error('third-party bootstrap SENTINEL_PRIVATE_WP_CREDENTIAL');
    const op=r.operation;
-   if(op.kind==='option'){live.options[op.entityId]=op.desired!.value;live.siteRecord!.options[op.entityId]={lastAppliedValue:op.desired!.value};}
+   if(op.kind==='option'){live.options[op.entityId]=op.desired!.value;live.siteRecord!.options[op.entityId]={lastAppliedValue:op.desired!.value};if(routeMutation.startsWith('front')&&(op.entityId==='show_on_front'||op.entityId==='page_on_front')){live.routing.rewriteRulesHash=`rules-after-${op.entityId}`;if(routeMutation==='front-permalink')live.routing.permalinkStructure='/%category%/%postname%/';if(routeMutation==='front-unsupported')live.routing.unsupportedReason='changed by another writer';}}
    else {const entity={id:op.id??(op.kind==='pattern'?20:22),kind:op.kind,route:op.kind==='page'?'/home':null,state:structuredClone(op.desired!),postStatus:String(op.desired!.status),ownership:[{version:1 as const,siteId:'sample',entityId:op.entityId,kind:op.kind,lastAppliedHash:managedStateHash(op.desired!)}]};live.entities=live.entities.filter(item=>item.id!==entity.id);live.entities.push(entity);live.siteRecord!.entities[r.step.key]=entity.id;}
+   if(routeMutation==='page'&&op.kind==='page')live.routing.rewriteRulesHash='rules-after-page-change';
    for(const page of live.entities.filter(item=>item.kind==='page'))page.route=live.options.show_on_front==='page'&&live.options.page_on_front===page.id?'/':`/${page.state.slug}`;
    if(fault==='noowner'&&op.kind==='page')live.entities.find(item=>item.kind==='page')!.ownership=[];
    if(fault==='readback'){fault='none';readFailure=true;}
    if(fault==='owned'){fault='none';throw new Error('created before response');}
+   if(fault==='frontowned'&&op.kind==='option'&&op.entityId==='page_on_front'){fault='none';throw new Error('front option changed before response');}
    if(fault==='changed' && op.kind==='page')live.entities[0]!.state.status='private';
    return JSON.stringify({status:'complete',...(op.kind!=='option'?{id:op.id??(op.kind==='pattern'?20:22)}:{})});
   }
   return JSON.stringify({status:'complete'});
  }};
- return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},count:()=>mutations,setLock:()=>{lock='stale';}};
+ return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:()=>{lock='stale';}};
 }
 describe('confirmed database apply',()=>{
  it('creates once, reads back every field and explicit options, then replays before obsolete before-state',async()=>{
@@ -56,6 +58,10 @@ describe('confirmed database apply',()=>{
   await writeFile(f.source,'source no longer present');expect(await applySite(f.plan,f.options,f.transports)).toEqual(first);expect(f.count()).toBe(3);
   f.live.entities[0]!.state.template='human';await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('after-state');expect(f.count()).toBe(3);
  });
+ it('accepts the native rewrite cache change caused by a changed front-page option',async()=>{const f=await fixture();f.setRouteMutation('front');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('completed');expect(f.live.routing.rewriteRulesHash).toBe('rules-after-page_on_front');expect(f.count()).toBe(3);});
+ it('does not accept a rewrite cache change when a page write leaves front-page options unchanged',async()=>{const f=await fixture();f.setRouteMutation('page');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(f.live.options).toEqual({show_on_front:'posts',page_on_front:0});expect(f.live.routing.rewriteRulesHash).toBe('rules-after-page-change');expect(f.count()).toBe(1);});
+ it.each(['front-permalink','front-unsupported'] as const)('keeps other routing fields bound during %s',async(change)=>{const f=await fixture();f.setRouteMutation(change);const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(f.live.routing.rewriteRulesHash).toBe('rules-after-show_on_front');expect(f.count()).toBe(2);});
+ it('recovers an interrupted front-option readback and refreshes only completed page routes',async()=>{const f=await fixture();f.setRouteMutation('front');f.setFault('frontowned');expect((await applySite(f.plan,f.options,f.transports)).status).toBe('outcome_unknown');expect(f.live.entities[0]!.route).toBe('/');expect(f.live.routing.rewriteRulesHash).toBe('rules-after-page_on_front');const resumed=await applySite(f.plan,f.options,f.transports);expect(resumed.status).toBe('completed');expect(resumed.steps.find(item=>item.step.kind==='page')!.after!.route).toBe('/');expect(f.count()).toBe(3);});
  it.each(['confirm','target','state','source'] as const)('refuses changed %s before a mutation',async(kind)=>{
   const f=await fixture();if(kind==='confirm')f.options.confirm='wrong';if(kind==='target')f.live.target.blogId=2;if(kind==='state')f.live.options.page_on_front=55;if(kind==='source')await writeFile(f.source,'{}');
   await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow();expect(f.count()).toBe(0);expect(f.requests.filter(item=>item.action==='mutate')).toHaveLength(0);
