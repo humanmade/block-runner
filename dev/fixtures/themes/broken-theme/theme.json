@@ -1,0 +1,58 @@
+{
+  "$schema": "https://schemas.wp.org/wp/7.1/theme.json",
+  "version": 3,
+  "settings": {
+    "color": {
+      "defaultPalette": false,
+      "defaultGradients": false,
+      "palette": "wrong type",
+      "gradients": [
+        {
+          "slug": "sunrise",
+          "name": "Sunrise",
+          "gradient": "linear-gradient(90deg,#f06,#fa0)"
+        }
+      ]
+    },
+    "typography": {
+      "defaultFontSizes": false,
+      "fontSizes": [
+        {
+          "slug": "large",
+          "name": "Large",
+          "size": "2rem"
+        }
+      ],
+      "fontFamilies": [
+        {
+          "slug": "system",
+          "name": "System",
+          "fontFamily": "system-ui,sans-serif"
+        }
+      ]
+    },
+    "spacing": {
+      "defaultSpacingSizes": false,
+      "spacingSizes": [
+        {
+          "slug": "small",
+          "name": "Small",
+          "size": "1rem"
+        }
+      ]
+    }
+  },
+  "templateParts": [
+    {
+      "name": "header",
+      "area": "header",
+      "title": "Header"
+    },
+    {
+      "name": "footer",
+      "area": "footer",
+      "title": "Footer"
+    }
+  ],
+  "unexpectedKey": true
+}
