@@ -122,6 +122,7 @@ foreach ($iterator as $file) {
 }
 usort($inventory, function($a,$b){return strcmp($a['path'],$b['path']);});
 $record = get_option(${option}, null);
+if (is_array($record)) { $record['entities'] = (object)($record['entities'] ?? array()); $record['options'] = (object)($record['options'] ?? array()); }
 $desiredRoutes = json_decode(base64_decode('${routes}'), true);
 $cachedRules = get_option('rewrite_rules');
 $routing = array('permalinkStructure'=>(string)get_option('permalink_structure'),'rewriteRulesHash'=>is_array($cachedRules) && $cachedRules ? hash('sha256',wp_json_encode($cachedRules)) : null,'routes'=>array());

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { siteRecordOption, SITE_OWNERSHIP_META, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
+import { managedStateHash } from './plan.js';
 import type { SiteSnapshot, SiteApplyStep, SitePlanOperation } from './plan-types.js';
 const run = promisify(execFile);
 export interface SiteApplyBoundary {
@@ -8,7 +9,7 @@ export interface SiteApplyBoundary {
 }
 export type SiteApplyRequest =
   | { action: 'lock' | 'unlock' }
-  | { action: 'marker'; index?: { key: string; id: number }; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed'; target: SiteSnapshot['target']; principalId: number; currentStep?: SiteApplyStep } }
+  | { action: 'marker'; index?: { key: string; id: number }; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed'; target: SiteSnapshot['target']; principalId: number; currentStep?: SiteApplyStep; stepEvidence?: { operation: SitePlanOperation; beforeState: unknown } } }
   | { action: 'mutate'; step: SiteApplyStep; operation: SitePlanOperation; before: SiteSnapshot; stateHash: string };
 /** Only fixed operations are exposed. A transport error after invocation has uncertain effects. */
 export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{status: string; id?: number}> {
@@ -20,7 +21,7 @@ export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBo
   return result;
 }
 function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string {
-  const encoded = Buffer.from(JSON.stringify({ ...boundary, request, option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
+  const encoded = Buffer.from(JSON.stringify({ ...boundary, request, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
   return `
 $e=json_decode(base64_decode('${encoded}'),true); $r=$e['request']; $attempted=false;
 $same=function($a,$b) use (&$same) { if (is_array($a) && is_array($b)) { if(count($a)!==count($b)) return false; foreach($a as $k=>$v) if(!array_key_exists($k,$b)||!$same($v,$b[$k])) return false; return true; } return $a===$b; };
@@ -49,7 +50,7 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
   }
   $marker=is_array($record)?($record['operation']??null):null;
   if(!$marker || ($marker['token']??null)!==$e['token'] || ($marker['planHash']??null)!==$e['planHash'] || ($marker['status']??null)!=='started' || !$same($marker['currentStep']??null,$r['step'])) return array('status'=>'refused');
-  $op=$r['operation']; $desired=$op['desired']; $kind=$op['kind']; $id=$op['id']??null;
+  $op=$r['operation']; if(!$same($marker['stepEvidence']['operation']??null,$op))return array('status'=>'refused'); $desired=$op['desired']; $kind=$op['kind']; $id=$op['id']??null;
   if($kind==='option') {
    if(!in_array($op['entityId'],array('show_on_front','page_on_front'),true) || !$same($op['entityId']==='page_on_front'?(int)get_option($op['entityId']):get_option($op['entityId']),$r['before']['options'][$op['entityId']])) return array('status'=>'refused');
    $attempted=true; update_option($op['entityId'],$desired['value']);
@@ -60,6 +61,8 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
   $type=$kind==='page'?'page':'wp_block';
   if($id) {
    $baseline=null; foreach($r['before']['entities'] as $entity) if($entity['id']===$id) $baseline=$entity;
+   $owners=$baseline['ownership']??array(); $owner=count($owners)===1?$owners[0]:null;
+   if(!$owner || ($owner['version']??null)!==1 || ($owner['siteId']??null)!==$e['siteId'] || ($owner['entityId']??null)!==$op['entityId'] || ($owner['kind']??null)!==$kind || ($owner['lastAppliedHash']??null)!==$e['beforeStateHash'])return array('status'=>'refused');
    $p=get_post($id); if(!$baseline || !$p || $p->post_type!==$type || !$same($state($p),$baseline['state']) || !$same(get_post_meta($id,'${SITE_OWNERSHIP_META}',false),$baseline['ownership'])) return array('status'=>'refused');
   } else {
    foreach(get_posts(array('post_type'=>$type,'post_status'=>array('publish','draft','private','pending','trash','future','auto-draft'),'numberposts'=>-1)) as $p) {

@@ -45,6 +45,7 @@ export interface SiteSnapshot {
     target?: SiteTarget;
     principalId?: number;
     currentStep?: SiteApplyStep;
+    stepEvidence?: { operation: SitePlanOperation; beforeState: unknown };
   } | null } | null;
 }
 export interface SitePlanOperation {
