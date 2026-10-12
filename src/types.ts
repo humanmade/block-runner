@@ -325,6 +325,8 @@ export interface TokenConfig {
 
 export interface ResolvedTokens {
   colors: Record<string, string>;
+  /** Gradient presets are optional for caller-provided resolver implementations. */
+  gradients?: Record<string, string>;
   fonts: Record<string, string>;
   fontSizes: Record<string, string>;
   spacing: Record<string, string>;
