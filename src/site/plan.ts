@@ -1,3 +1,5 @@
+import { compileThemeDocuments, compileSitePageDocuments } from './compile.js';
+import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { hashBytes, readStableRegularFile } from '../publication.js';
@@ -196,4 +198,41 @@ export function observedAttachmentBindings(input: SitePlanInput, snapshot: SiteS
   }
   for (const id of Object.keys(input.retainedBindings)) if (!input.source.assets.some(asset=>asset.id===id && asset.role==='attachment')) throw new Error(`retained binding ${id} has no declared attachment asset`);
   return result;
+}
+
+export interface SitePlanOptions extends SiteWpCliOptions { assetRoot?: string; strict?: boolean }
+
+/** Source-first orchestration reads WordPress once and never publishes or mutates it. */
+export async function planSite(inputPath: string, options: SitePlanOptions, transport?: SiteReadTransport): Promise<SitePlan> {
+  const input = await readSitePlanInput(inputPath, options.assetRoot);
+  const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport);
+  const bindings = observedAttachmentBindings(input, observed);
+  const compileOptions = { attachmentBindings: bindings, themeAssetBaseUrl: observed.theme.assetBaseUrl, strict: options.strict };
+  const theme = await compileThemeDocuments(input.source, compileOptions);
+  if (!theme.ok) throw new Error(theme.diagnostics.map(item=>`${item.source?.path ?? 'source'}: ${item.code ?? item.status}: ${item.reason}`).join('\n'));
+  // Check every explicit media ID against this exact destination before invoking the native gate.
+  const intent = input.source.sourceIntent;
+  const trees = [
+    ...Object.entries(intent.templates).map(([id,value])=>({id:`template:${id}`,body:value.body})),
+    ...Object.entries(intent.parts).map(([id,value])=>({id:`part:${id}`,body:value.body})),
+    ...Object.entries(intent.patterns).map(([id,value])=>({id:`pattern:${id}`,body:value.body})),
+    ...intent.pages.map(page=>({id:`page:${page.id}`,body:page.body})),
+  ];
+  const check = (nodes: import('../types.js').IntentNode[], documentId: string, parent: number[]): void => {
+    nodes.forEach((node,index)=>{
+      const at = [...parent,index];
+      if ((node.block==='core/image' || node.block==='core/cover') && typeof node.attrs?.id === 'number') {
+        const declared = intent.assetUses.some(use=>use.documentId===documentId && use.nodePath.join('.')===at.join('.') && intent.assets.some(asset=>asset.id===use.assetId && asset.role==='attachment'));
+        const entity = observed.entities.find(item=>item.kind==='attachment' && item.id===node.attrs!.id);
+        const url = node.url ?? node.attrs.url;
+        // Zero on an explicit asset-use field is caller source, never a destination binding.
+        if (!(node.attrs.id === 0 && declared) && (!entity || (typeof url === 'string' && url !== entity.attachment?.url))) throw new Error('inline media ID or URL does not match the observed destination');
+      }
+      if (node.children) check(node.children,documentId,at);
+    });
+  };
+  for (const document of trees) check(document.body.blocks,document.id,[]);
+  const inspected = await compileSitePageDocuments(input.source, compileOptions);
+  if (!inspected.ok) throw new Error(inspected.diagnostics.filter(item=>item.status==='invalid').map(item=>`${item.source?.path ?? 'source'}: ${item.code ?? item.status}: ${item.reason}`).join('\n'));
+  return reconcileSitePlan(input.source, theme.artifact, inspected.pages, observed, bindings, inspected.diagnostics);
 }

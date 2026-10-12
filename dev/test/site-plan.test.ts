@@ -1,18 +1,23 @@
-import { mkdtemp, mkdir, writeFile, symlink, realpath } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { fileURLToPath } from 'node:url';
+import { compileThemeDocuments } from '../../src/site/compile.js';
+import { writeCompiledSite } from '../../src/site/write.js';
+import { mkdtemp, mkdir, writeFile, symlink, realpath, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { hashBytes } from '../../src/publication.js';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { describe, expect, it } from 'vitest';
 import { readSiteSnapshot, siteRecordOption } from '../../src/site/wpcli.js';
-import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings } from '../../src/site/plan.js';
+import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings, planSite } from '../../src/site/plan.js';
 import type { SiteSnapshot, SiteEntity } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../src/site/types.js';
 
 function source(): PreparedSiteSource {
   return { sourceIntent: { version:1, siteId:'sample', homePageId:'home', theme:{slug:'sample',title:'Sample',themeJson:{version:3}}, templates:{index:{body:{blocks:[{block:'core/paragraph',text:'Index'}]}}}, parts:{}, patterns:{}, pages:[{id:'home',route:'/',title:'Home',template:'index',status:'draft',body:{blocks:[{block:'core/paragraph',text:'Hello'}]}}], assets:[], assetUses:[] }, assetRoot:'/assets',assets:[],sourceIdentity:'source-hash',unresolvedAssetUses:[] };
 }
-function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,themeFiles:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
+function theme(input = source()): ThemeArtifact { return {sourceIntent:input.sourceIntent,sourceAssets:input.assets,targetBindings:{},targetBindingFingerprint:'binding-hash',themeFiles:[],pendingPageBindings:[],diagnostics:[],inventory:[],artifactIdentity:'theme-hash'}; }
 function pages(): CompiledSitePage[] {return [{id:'home',route:'/',title:'Home',template:'index',status:'draft',content:'<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->',diagnostics:[]}];}
 function snapshot(): SiteSnapshot {return {target:{homeUrl:'https://example.test',siteUrl:'https://example.test/wp',blogId:2},runtime:{wordpress:'7.1',php:'8.4.26'},principal:{userId:7,capabilities:{edit_pages:true,edit_others_pages:true,manage_options:true,edit_theme_options:true,publish_pages:true,upload_files:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/wp/wp-content/themes/sample',inventory:[]},entities:[],overrides:[],navigation:[],options:{show_on_front:'posts',page_on_front:0},siteRecord:null};}
 function owned(): SiteEntity {const state={content:pages()[0]!.content,title:'Home',slug:'home',parentId:0,template:'index',status:'draft'};return {id:14,kind:'page',route:'/',state,ownership:[{version:1,siteId:'sample',entityId:'home',kind:'page',lastAppliedHash:managedStateHash(state)}]};}
@@ -107,5 +112,43 @@ describe('destination attachment bindings',()=>{
     observed.entities[0]!.state.sha256='changed';expect(()=>observedAttachmentBindings(retained,observed)).toThrow('destination bytes');
     observed.entities=[];expect(()=>observedAttachmentBindings(retained,observed)).toThrow('absent');
     expect(()=>observedAttachmentBindings({...retained,retainedThemeAssetBaseUrl:'https://old-target.test/theme'},snapshot())).toThrow('different target');
+  });
+});
+
+const fixtureRoot=fileURLToPath(new URL('./fixtures/site-intent/',import.meta.url));
+async function sourceFirstFixture() {
+  const intentFile=path.join(fixtureRoot,'site.intent.json');
+  const input=await readSitePlanInput(intentFile,fixtureRoot);
+  const observed=snapshot();observed.theme.slug=input.source.sourceIntent.theme.slug;
+  observed.theme.assetBaseUrl=`https://example.test/wp/wp-content/themes/${observed.theme.slug}`;
+  const compiled=await compileThemeDocuments(input.source,{themeAssetBaseUrl:observed.theme.assetBaseUrl});
+  if(!compiled.ok)throw new Error(JSON.stringify(compiled.diagnostics));
+  observed.theme.inventory=compiled.artifact.inventory;
+  return {intentFile,input,observed,artifact:compiled.artifact};
+}
+describe('source-first plan orchestration and CLI',()=>{
+  it('plans a first install with original pending media, finalized other pages and zero WP writes',async()=>{
+    const {intentFile,observed}=await sourceFirstFixture();const calls:string[][]=[];
+    const result=await planSite(intentFile,{assetRoot:fixtureRoot,wpPath:'/wp',wpUser:'7',strict:true},async(_,args)=>{calls.push(args);return JSON.stringify(observed);});
+    expect(result.executable).toBe(true);expect(calls).toHaveLength(1);expect(calls[0]![1]).toBe('--user=7');
+    const home=result.operations.find(op=>op.kind==='page'&&op.entityId==='home')!;
+    expect(home).toMatchObject({action:'create',requiresFinalization:true});expect(home.desired).not.toHaveProperty('content');expect(home).not.toHaveProperty('id');expect(home.body).toEqual((await readSitePlanInput(intentFile,fixtureRoot)).source.sourceIntent.pages[0]!.body);
+    expect(result.operations.find(op=>op.kind==='page'&&op.entityId==='about')!.desired!.content).toContain('thoughtful studio');
+    const again=await planSite(intentFile,{assetRoot:fixtureRoot,wpPath:'/wp',wpUser:'7',strict:true},async()=>JSON.stringify(observed));expect(again.confirmationHash).toBe(result.confirmationHash);
+  });
+  it('uses the actual retained theme-only bundle and rejects pending theme media or undeclared page media',async()=>{
+    const {input,observed,artifact}=await sourceFirstFixture();const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-integrated-'));const bundle=path.join(root,'bundle');await writeCompiledSite(bundle,input.source,artifact);
+    expect((await planSite(bundle,{wpPath:'/wp'},async()=>JSON.stringify(observed))).executable).toBe(true);
+    const sourceInput=source().sourceIntent;sourceInput.assets=[{id:'photo',path:'photo.png',role:'attachment',kind:'image'}];sourceInput.templates.index!.body.blocks=[{block:'core/image',url:'photo.png'}];sourceInput.assetUses=[{documentId:'template:index',nodePath:[0],attribute:'url',assetId:'photo'}];await writeFile(path.join(root,'photo.png'),await readFile(path.join(fixtureRoot,'media/hero.png')));const file=path.join(root,'intent.json');await writeFile(file,JSON.stringify(sourceInput));
+    await expect(planSite(file,{wpPath:'/wp',assetRoot:root},async()=>JSON.stringify(snapshot()))).rejects.toThrow('attachment-binding-required');
+    sourceInput.templates.index!.body.blocks=[{block:'core/post-content'}];sourceInput.assetUses=[];sourceInput.pages[0]!.body.blocks=[{block:'core/image',url:'undeclared.png'}];await writeFile(file,JSON.stringify(sourceInput));
+    await expect(planSite(file,{wpPath:'/wp',assetRoot:root},async()=>JSON.stringify(snapshot()))).rejects.toThrow('undeclared-media-reference');
+  });
+  it('registers one site command, passes selected target/principal argv, and emits a new confirmation-bound file',async()=>{
+    const {intentFile,observed}=await sourceFirstFixture();const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-cli-'));const output=path.join(root,'plan.json');const script=path.join(root,'wp binary');const argvFile=path.join(root,'argv.json');
+    await writeFile(script,`#!/usr/bin/env node\nrequire('node:fs').writeFileSync(${JSON.stringify(argvFile)},JSON.stringify(process.argv.slice(2)));process.stdout.write(${JSON.stringify(JSON.stringify(observed))});\n`,{mode:0o755});
+    const run=promisify(execFile);const args=['--import',import.meta.resolve('tsx'),fileURLToPath(new URL('../../src/cli.ts',import.meta.url)),'site','plan',intentFile,'--asset-root',fixtureRoot,'--wp-path','/wp path;literal','--wp-url','https://example.test/sub','--wp-user','7','--wp-binary',script,'--out',output,'--json'];
+    const {stdout}=await run(process.execPath,args,{cwd:root});const report=JSON.parse(stdout);expect(report.executable).toBe(true);expect(JSON.parse(await readFile(output,'utf8'))).toEqual(report);expect(JSON.parse(await readFile(argvFile,'utf8')).slice(0,4)).toEqual(['--path=/wp path;literal','--url=https://example.test/sub','--user=7','eval']);
+    await expect(run(process.execPath,args,{cwd:root})).rejects.toMatchObject({code:2});
   });
 });
