@@ -1,4 +1,5 @@
 import { describe, expect, it } from 'vitest';
+import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { compileSitePageDocuments } from '../../src/site/compile.js';
 import { attachmentVersionKey, bindNativeImage, declaredEmbedAspectRatio } from '../../src/site/media.js';
@@ -119,6 +120,48 @@ describe('native media metadata before Gutenberg finalization', () => {
     expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
     expect(result.pages[0]!.content).toContain('src="https://example.test/large.jpg"');
     expect(result.pages[0]!.content).toContain('"sizeSlug":"large"');
+  });
+
+  it.each([
+    [{ sizeSlug: 42 }, 'non-empty native size name'],
+    [{ linkDestination: 'download' }, 'linkDestination is unsupported'],
+    [{ linkDestination: 'none', href: 'https://example.test/image' }, 'contradicts linkDestination none'],
+    [{ linkDestination: 'custom' }, 'requires an explicit href'],
+    [{ linkDestination: 'custom', href: '/relative' }, 'HTTP(S) URL without credentials'],
+    [{ linkDestination: 'custom', href: 'https://user:pass@example.test/image' }, 'HTTP(S) URL without credentials'],
+  ])('rejects known-invalid authored image settings while the attachment binding is pending', async (attrs, reason) => {
+    const input = source(oldHash);
+    const bytes = new Uint8Array([1]);
+    input.assets[0]!.bytes = bytes;
+    input.assets[0]!.sha256 = createHash('sha256').update(bytes).digest('hex');
+    input.sourceIntent.templates = { index: { body: { blocks: [{ block: 'core/post-content' }] } } };
+    input.sourceIntent.pages[0]!.body.blocks = [{ block: 'core/image', url: 'source/hero.jpg', attrs: { id: 0, ...attrs } }];
+    input.sourceIntent.assetUses = [{ documentId: 'page:home', nodePath: [0], attribute: 'attrs.id', assetId: 'hero' }];
+
+    const result = await compileSitePageDocuments(input);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({
+      status: 'invalid', code: 'attachment-image-metadata', reason: expect.stringContaining(reason),
+      source: { path: 'site://page:home' }, details: { documentId: 'page:home', nodePath: [0] },
+    }));
+  });
+
+  it.each([
+    { linkDestination: 'media' },
+    { linkDestination: 'attachment' },
+    { linkDestination: 'custom', href: 'https://example.test/custom' },
+  ])('keeps valid pending image link settings available for later metadata binding', async (attrs) => {
+    const input = source(oldHash);
+    const bytes = new Uint8Array([1]);
+    input.assets[0]!.bytes = bytes;
+    input.assets[0]!.sha256 = createHash('sha256').update(bytes).digest('hex');
+    input.sourceIntent.templates = { index: { body: { blocks: [{ block: 'core/post-content' }] } } };
+    input.sourceIntent.pages[0]!.body.blocks = [{ block: 'core/image', url: 'source/hero.jpg', attrs: { id: 0, ...attrs } }];
+    input.sourceIntent.assetUses = [{ documentId: 'page:home', nodePath: [0], attribute: 'attrs.id', assetId: 'hero' }];
+
+    const result = await compileSitePageDocuments(input);
+    expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
+    expect(result.pendingPages).toHaveLength(1);
   });
 
   it('accepts only a positive caller-declared embed ratio', () => {
