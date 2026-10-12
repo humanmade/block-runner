@@ -42,7 +42,9 @@ export interface SiteSnapshot {
     token: string;
     planHash: string;
     status: 'started' | 'outcome_unknown' | 'completed';
-    currentStep?: { key: string; kind: 'attachment'; entityId: string; assetSha256: string; status: 'started' | 'completed' | 'outcome_unknown' };
+    target?: SiteTarget;
+    principalId?: number;
+    currentStep?: SiteApplyStep;
   } | null } | null;
 }
 export interface SitePlanOperation {
@@ -71,4 +73,10 @@ export interface SitePlan {
   diagnostics: ReportItem[];
   executable: boolean;
   confirmationHash: string;
+}
+
+/** Exact authority for one bounded mutation; attachment shape remains the media contract. */
+export interface SiteApplyStep {
+  key: string; kind: SiteEntity['kind'] | 'option'; entityId: string; assetSha256?: string;
+  status: 'started' | 'completed' | 'outcome_unknown';
 }

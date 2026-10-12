@@ -38,6 +38,8 @@ import { validateThemeJson } from './theme/theme-json.js';
 import { findThemeReferenceIssues } from './theme/references.js';
 import { compileSite, compileThemeDocuments } from './site/compile.js';
 import { planSite } from './site/plan.js';
+import { applySite } from './site/apply.js';
+import type { SitePlan } from './site/plan-types.js';
 import { prepareSiteSource } from './site/input.js';
 import { writeCompiledSite } from './site/write.js';
 import type { SiteAttachmentBinding } from './site/types.js';
@@ -238,6 +240,24 @@ siteCommand.command('compile <intentOrStdin>')
     console.log(`Artifact: ${written.artifactType === 'theme' ? 'theme-only; page bindings remain pending' : 'compiled site'}`);
     console.log(`Files: ${written.files.length}`);
     console.log('WordPress installation and runtime proof have not run.');
+  });
+
+siteCommand.command('apply <planFile>')
+  .description('Apply an exactly confirmed site plan with durable mutation evidence.')
+  .requiredOption('--confirm <hash>', 'exact plan confirmation hash')
+  .requiredOption('--source <intent-or-bundle>', 're-read the planned source and declared asset bytes')
+  .requiredOption('--journal <file>', 'private durable local journal; reuse this path for replay or recovery')
+  .requiredOption('--wp-path <path>', 'local WordPress installation path')
+  .option('--asset-root <dir>', 'declared asset root for raw intent')
+  .option('--wp-url <url>', 'explicit target URL')
+  .option('--wp-binary <path>', 'local WP-CLI executable')
+  .option('--wp-user <id-or-login>', 'WordPress principal')
+  .option('--strict', 'fail compilation on warnings')
+  .action(async (planFile: string, options: import('./site/apply.js').SiteApplyOptions) => {
+    const file = await readStableRegularFile(path.resolve(planFile), 'plan changed while reading');
+    const result = await applySite(JSON.parse(file.content.toString('utf8')) as SitePlan, options);
+    console.log(JSON.stringify(result,null,2));
+    if (result.status !== 'completed') process.exitCode = 1;
   });
 
 siteCommand.command('plan <intentOrBundle>')
