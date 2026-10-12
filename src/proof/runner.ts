@@ -555,7 +555,7 @@ export async function runProof(options: ProofRunOptions): Promise<ProofRunResult
           ? await options.gateRunner(context)
           : await runtime.run(context);
       const result = gate === 'environment_observation' && unverifiedResult?.status === 'pass'
-        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence)
+        ? await enforceEnvironmentObservation(unverifiedResult, environment, evidence, profile === 'theme')
         : unverifiedResult;
       records.push(await asRecord(gate, result, context, startedAt));
     }
@@ -772,8 +772,9 @@ async function enforceEnvironmentObservation(
   result: ProofGateResult,
   environment: ProofEnvironment,
   evidenceStore: EvidenceStore,
+  themeProfile = false,
 ): Promise<ProofGateResult> {
-  const unobserved = await requiredRuntimeObservationFailures(environment, evidenceStore);
+  const unobserved = await requiredRuntimeObservationFailures(environment, evidenceStore, themeProfile);
   const observationEvidence = environment.observations;
   const evidence = observationEvidence
     ? dedupeEvidence([...(result.evidence ?? []), observationEvidence])
@@ -1402,6 +1403,11 @@ function createRuntime(
         const result = await runThemeBrowserProof(preparedTheme, themePlaywrightHelper, command, options, sourceThemeConfig);
         const log = await logged(result.command);
         if (!result.report) return { status: 'blocked', reason: 'Site Editor theme save proof did not produce a report.', evidence: [log] };
+        const browserObservation = result.report.browser;
+        if (isRecord(browserObservation)) {
+          if (typeof browserObservation.version === 'string') environment.browser.version = browserObservation.version;
+          if (typeof browserObservation.revision === 'string') environment.browser.revision = browserObservation.revision;
+        }
         const files = Array.isArray(result.report.files) ? result.report.files as Array<Record<string, unknown>> : [];
         const expectedByName = new Map(preparedTheme.files.map((file) => [file.file, file]));
         const reportByName = new Map(files.map((file) => [String(file.file ?? ''), file]));

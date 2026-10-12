@@ -18,7 +18,8 @@ const browser = await chromium.launch({ headless: true });
 const page = await browser.newPage({ baseURL: input.baseUrl });
 page.setDefaultTimeout(20_000);
 page.setDefaultNavigationTimeout(20_000);
-const report = { theme: input.theme, browser: { engine: 'chromium', version: browser.version() }, files: [] };
+const revision = /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved';
+const report = { theme: input.theme, browser: { engine: 'chromium', version: browser.version(), revision }, files: [] };
 
 try {
   await login(page, input.baseUrl);
