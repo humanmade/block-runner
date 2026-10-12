@@ -1,0 +1,8 @@
+{
+  "targetWordPress": "7.1",
+  "schemaUrl": "https://schemas.wp.org/wp/7.1/theme.json",
+  "upstream": "https://schemas.wp.org/wp/7.1/theme.json",
+  "retrieved": "2026-10-12",
+  "sha256": "718d6e0109a06933eea29d8261ebdf5fcfabe4926bcfb30c44e2e16a3a535f9a",
+  "note": "The checked-in WordPress schema snapshot is the validation authority. Change it only with a target-version and hash review."
+}

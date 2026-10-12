@@ -29,13 +29,15 @@ describe('block theme folders', () => {
       items: Array<{ reason: string }>;
     };
 
-    expect(result.code).toBe(0);
+    expect(result.code).toBe(1);
     expect(report.files.map(({ file }) => file)).toEqual([
       'parts/footer.html', 'parts/header.html', 'patterns/callout.php', 'patterns/dynamic.php',
       'templates/index.html', 'templates/nested/UPPER.HTML', 'templates/node_modules/hidden/ignored.html', 'templates/single.html',
+      'theme.json',
     ]);
     expect(report.files.find(({ file }) => file === 'patterns/callout.php')).toMatchObject({ blocks: 3, invalid: 0 });
     expect(report.files.find(({ file }) => file === 'patterns/dynamic.php')).toMatchObject({ blocks: 0, invalid: 0, warnings: 1 });
+    expect(report.files.find(({ file }) => file === 'theme.json')).toMatchObject({ blocks: 0, invalid: 2 });
     expect(report.summary.warnings).toBeGreaterThanOrEqual(1);
     expect(report.items.some(({ reason }) => reason.includes('block validation was skipped'))).toBe(true);
 
