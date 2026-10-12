@@ -2,6 +2,19 @@ import { describe, expect, it } from 'vitest';
 import { canonicalize, validate } from '../../src/index.js';
 
 describe('gate', () => {
+  it('matches the WordPress 7.1 server-bootstrapped comment order for scrambled attributes', async () => {
+    const style = { spacing: { padding: { top: '1rem' } } };
+    const layout = { type: 'constrained' };
+    const html = '<div class="wp-block-group has-base-background-color has-background" style="padding-top:1rem"></div>';
+    const comment = (attrs: Record<string, unknown>) => `<!-- wp:group ${JSON.stringify(attrs)} -->\n${html}\n<!-- /wp:group -->`;
+    const expected = comment({ style, backgroundColor: 'base', layout });
+    for (const attrs of [{ style, backgroundColor: 'base', layout }, { layout, backgroundColor: 'base', style }]) {
+      const result = await canonicalize(comment(attrs));
+      expect(result.ok).toBe(true);
+      expect(result.output).toBe(expected);
+    }
+  });
+
   const inline = '<!-- wp:paragraph --><p>Keep this content</p><!-- /wp:paragraph -->';
   const reference = `<!-- wp:block {"ref":123} -->${inline}<!-- /wp:block -->`;
 
