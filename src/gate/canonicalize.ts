@@ -90,7 +90,7 @@ export async function canonicalize(markup: string, options: CanonicalizeOptions 
   return {
     ...report,
     summary: { ...report.summary, warnings: report.summary.warnings + repairs.filter((item) => item.status === 'warning').length },
-    ok: report.summary.invalid === 0,
+    ok: report.ok,
     command: 'fix',
     items: [...repairs, ...generatedMarkupItems(report.items, inputPath)],
     output,

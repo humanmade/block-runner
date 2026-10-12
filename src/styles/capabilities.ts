@@ -194,7 +194,7 @@ interface Manifest {
 }
 
 /** Read and parse the manifest. Undefined means unreadable/invalid — a hard error for the caller. */
-function readManifest(manifestPath: string): Manifest | undefined {
+export function readManifest(manifestPath: string): Manifest | undefined {
   const resolved = path.resolve(manifestPath);
   if (!existsSync(resolved)) {
     return undefined;
