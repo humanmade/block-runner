@@ -1,4 +1,6 @@
 import { formatWithOptions } from 'node:util';
+import { loadConfig } from '../config/load.js';
+import { readManifest } from '../styles/capabilities.js';
 import { getWp } from '../headless/wp.js';
 import { withMutedWordPressConsole } from '../headless/env.js';
 import { patternReferenceProblem } from './patterns.js';
@@ -13,6 +15,12 @@ import {
 
 export async function validate(markup: string, options: ValidateOptions = {}): Promise<BlockRunnerReport> {
   const wp = await getWp();
+  const config = await loadConfig(options);
+  const contextPath = options.context ?? config.tokens?.context;
+  const manifest = contextPath ? readManifest(contextPath) : undefined;
+  if (contextPath && !manifest) throw new Error(`Could not read site context: ${contextPath}`);
+  const types = manifest?.blocks?.types;
+  const targetNames = new Set(Array.isArray(types) ? types.map((type) => type?.name).filter((name) => typeof name === 'string') : []);
   // parse() validates each block internally and Gutenberg logs verbose validation
   // diffs to the console on invalid markup (the LLM-engine path). Mute it — the gate
   // below reports invalidity properly; the raw dump is ~700 KB of run-log noise.
@@ -31,6 +39,19 @@ export async function validate(markup: string, options: ValidateOptions = {}): P
     // Advance for valid blocks too, so a later reference points at its own occurrence.
     const source = locateBlock(markup, block, searchOffset, options.sourcePath);
     if (source.offset != null) searchOffset = source.offset + 1;
+
+    if (block.name === 'core/missing') {
+      const name = String(block.attributes.originalName ?? 'unknown');
+      const onTarget = targetNames.has(name);
+      summary.valid += 1;
+      if (!onTarget) summary.warnings += 1;
+      items.push({ block: name, code: 'unregistered-block', status: 'warning',
+        severity: onTarget ? 'info' : 'warning', source,
+        reason: onTarget ? `${name}: registered on target; save output not checked`
+          : `Unregistered block: ${name}; save output not checked`,
+      });
+      continue;
+    }
 
     // `core/html` is a raw passthrough: since @wordpress/block-library 10.5.0 (WordPress 7.1)
     // its `save()` returns null, so the generic validator expects EMPTY output and rejects any
@@ -64,7 +85,7 @@ export async function validate(markup: string, options: ValidateOptions = {}): P
   }
 
   return {
-    ok: summary.invalid === 0,
+    ok: summary.invalid === 0 && !(config.strict && summary.warnings > 0),
     command: 'validate',
     summary,
     items,
@@ -128,7 +149,8 @@ function formatValidationIssue(issue: unknown): string {
 }
 
 function locateBlock(markup: string, block: WpBlock, fromOffset: number, path?: string): SourceLocation {
-  const needles = [`<!-- wp:${block.name.replace(/^core\//, '')}`, block.originalContent ?? ''].filter(Boolean);
+  const originalName = block.name === 'core/missing' ? String(block.attributes.originalName ?? block.name) : block.name;
+  const needles = [`<!-- wp:${originalName.replace(/^core\//, '')}`, block.originalContent ?? ''].filter(Boolean);
   let offset = -1;
 
   for (const needle of needles) {

@@ -1,3 +1,6 @@
+import { mkdtemp, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { canonicalize, validate } from '../../src/index.js';
 
@@ -12,6 +15,32 @@ describe('gate', () => {
       const result = await canonicalize(comment(attrs));
       expect(result.ok).toBe(true);
       expect(result.output).toBe(expected);
+    }
+  });
+
+
+  it('warns on unregistered names, locates them, and refuses strict fix without losing input', async () => {
+    const markup = '<!-- wp:paragraph --><p>Known</p><!-- /wp:paragraph -->\n<!-- wp:acme/nope {"x":1} /-->';
+    for (const strict of [false, true]) {
+      const report = await validate(markup, { strict, sourcePath: 'template.html' });
+      expect(report.ok).toBe(!strict);
+      expect(report.summary).toEqual({ blocks: 2, valid: 2, invalid: 0, warnings: 1 });
+      expect(report.items).toEqual([expect.objectContaining({ code: 'unregistered-block', block: 'acme/nope', severity: 'warning', source: expect.objectContaining({ path: 'template.html', htmlLine: 2 }) })]);
+      const fixed = await canonicalize(markup, { strict });
+      expect(fixed.ok).toBe(!strict);
+      expect(fixed.output).toContain('<!-- wp:acme/nope {"x":1} /-->');
+    }
+  });
+
+  it('reports target-registered names as informational even in strict mode', async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-registry-'));
+    const context = path.join(directory, 'site.context.json');
+    await writeFile(context, JSON.stringify({ blocks: { types: [{ name: 'acme/nope' }] } }));
+    for (const operation of [validate, canonicalize]) {
+      const report = await operation('<!-- wp:acme/nope {"x":1} /-->', { context, strict: true });
+      expect(report.ok).toBe(true);
+      expect(report.summary.warnings).toBe(0);
+      expect(report.items).toEqual([expect.objectContaining({ code: 'unregistered-block', severity: 'info', reason: 'acme/nope: registered on target; save output not checked' })]);
     }
   });
 

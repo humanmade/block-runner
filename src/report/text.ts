@@ -9,7 +9,7 @@ export function formatTextReport(report: BlockRunnerReport): string {
   const coverageNotices = new Set<string>();
 
   for (const item of report.items) {
-    lines.push(`- ${item.status}: ${item.block ?? 'input'}: ${item.reason}${formatLocation(item)}`);
+    lines.push(`- ${item.severity ?? item.status}: ${item.block ?? 'input'}: ${item.reason}${formatLocation(item)}`);
     const details = record(item.details);
     add(lines, 'code', item.code);
     add(lines, 'rule', item.rule);
