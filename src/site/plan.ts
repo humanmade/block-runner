@@ -7,6 +7,7 @@ import { prepareSiteSource } from './input.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import type { PreparedSiteSource, CompiledSitePage, SiteInputDiagnostic, ThemeArtifact, SiteAttachmentBinding } from './types.js';
 import type { SiteEntity, SitePlan, SitePlanOperation, SiteSnapshot } from './plan-types.js';
+import { attachmentVersionKey } from './media.js';
 
 export function managedStateHash(state: Record<string, unknown>): string { return hashCanonicalJson(state); }
 export function entityFingerprint(entity: SiteEntity): string { return hashCanonicalJson(entity); }
@@ -49,30 +50,51 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     if (entity.ownership.length > 1) issue(`/target/entities/${entity.id}`, 'duplicate-ownership-metadata', 'multiple ownership metadata rows are ambiguous');
     const ownership = entity.ownership[0];
     if (!ownership || ownership.siteId !== intent.siteId) continue;
-    const key = `${ownership.kind}:${ownership.entityId}`;
-    if (ownership.version !== 1 || ownership.kind !== entity.kind || !ownership.entityId || !ownership.lastAppliedHash) issue(`/target/entities/${entity.id}`, 'invalid-ownership', 'ownership metadata is incomplete or inconsistent');
-    else if (ownership.lastAppliedHash !== managedStateHash(entity.state)) issue(`/target/entities/${entity.id}`, 'managed-state-changed', 'current managed fields differ from the complete last-applied baseline');
-    if (owned.has(key)) issue(`/target/entities/${entity.id}`, 'duplicate-ownership', `duplicate logical ownership key ${key}`);
-    else owned.set(key, entity);
+    const baselineMatches = ownership.lastAppliedHash === managedStateHash(entity.state);
+    if (ownership.version !== 1 || ownership.kind !== entity.kind || !ownership.entityId || !ownership.lastAppliedHash
+      || (entity.kind !== 'attachment' && ownership.assetSha256 !== undefined)
+      || (ownership.assetSha256 !== undefined && !/^[a-f0-9]{64}$/.test(ownership.assetSha256))) issue(`/target/entities/${entity.id}`, 'invalid-ownership', 'ownership metadata is incomplete or inconsistent');
+    else if (!baselineMatches) issue(`/target/entities/${entity.id}`, 'managed-state-changed', 'current managed fields differ from the complete last-applied baseline');
+    if (entity.kind === 'attachment') {
+      if (entity.postStatus !== 'inherit') issue(`/target/entities/${entity.id}`, 'unavailable-owned-attachment', 'only inherited attachments are available for exact owned media reuse');
+      const sha256 = ownership.assetSha256 ?? (baselineMatches && typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+      if (!sha256 || !/^[a-f0-9]{64}$/.test(sha256) || (ownership.assetSha256 !== undefined && entity.state.sha256 !== sha256)) {
+        issue(`/target/entities/${entity.id}`, 'invalid-attachment-version', 'owned attachment has no verified original-byte version');
+        continue;
+      }
+      const key = attachmentVersionKey(ownership.entityId, sha256);
+      if (owned.has(key)) issue(`/target/entities/${entity.id}`, 'duplicate-ownership', `duplicate owned attachment version ${key}`);
+      else owned.set(key, entity);
+    } else {
+      const key = `${ownership.kind}:${ownership.entityId}`;
+      if (owned.has(key)) issue(`/target/entities/${entity.id}`, 'duplicate-ownership', `duplicate logical ownership key ${key}`);
+      else owned.set(key, entity);
+    }
   }
 
   for (const [key, id] of Object.entries(snapshot.siteRecord?.entities ?? {})) {
-    const entity = owned.get(key);
+    const legacyMatch = /^attachment:([^@]+)$/.exec(key);
+    const entity = owned.get(key) ?? (legacyMatch ? snapshot.entities.find(item => item.kind === 'attachment' && item.id === id
+      && item.ownership.some(meta => meta.siteId === intent.siteId && meta.entityId === legacyMatch[1] && meta.assetSha256 === undefined
+        && meta.lastAppliedHash === managedStateHash(item.state))) : undefined);
     if (!entity || entity.id !== id) issue(`/target/entities/${id}`, 'missing-owned-id', `previously owned entity ${key} is missing or its metadata changed`);
   }
   const desiredKeys = new Set<string>();
   // Attachments precede pages; new bindings remain logical pending references.
   for (const asset of source.assets.filter(asset => asset.role === 'attachment').sort((a,b) => a.id.localeCompare(b.id))) {
-    const key = `attachment:${asset.id}`; desiredKeys.add(key);
+    const key = attachmentVersionKey(asset.id, asset.sha256); desiredKeys.add(key);
     const existing = owned.get(key);
     const external = !existing && bindings[asset.id];
     const boundEntity = external ? snapshot.entities.find(entity=>entity.id===external.id && entity.kind==='attachment') : undefined;
-    if (external && (!boundEntity || boundEntity.state.sha256 !== asset.sha256 || boundEntity.attachment?.url !== external.url)) issue(`/assets/${asset.id}`, 'binding-target-mismatch', 'attachment binding does not match exact observed destination identity and bytes');
-    const desired = { sha256: asset.sha256 };
-    if (existing && existing.state.sha256 !== asset.sha256) issue(`/assets/${asset.id}`, 'attachment-bytes-changed', 'attachment replacement is unsupported; declare a new logical attachment identity');
+    if (external && (!boundEntity || boundEntity.state.sha256 !== asset.sha256 || boundEntity.attachment?.url !== external.url
+      || !boundEntity.ownership.some(meta=>meta.siteId===intent.siteId && meta.entityId===asset.id
+        && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(boundEntity.state) ? boundEntity.state.sha256 : undefined)) === asset.sha256))) {
+      issue(`/assets/${asset.id}`, 'binding-target-mismatch', 'attachment binding does not match exact owned destination identity and bytes');
+    }
+    const desired = { sha256: asset.sha256, assetSha256: asset.sha256 };
     operations.push(existing
-      ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: existing.id, beforeFingerprint: entityFingerprint(existing) }
-      : external ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: external.id, externalBinding: true, ...(boundEntity ? { beforeFingerprint: entityFingerprint(boundEntity) } : {}) }
+      ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: existing.id, desired, beforeFingerprint: entityFingerprint(existing) }
+      : external ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: external.id, desired, externalBinding: true, ...(boundEntity ? { beforeFingerprint: entityFingerprint(boundEntity) } : {}) }
       : { action: 'create', kind: 'attachment', entityId: asset.id, desired });
   }
   const pageIds = new Map([...owned.entries()].filter(([key]) => key.startsWith('page:')).map(([key,entity]) => [key.slice(5), entity.id]));
@@ -92,7 +114,11 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     }
     const occupied = snapshot.entities.find(entity => entity.kind === 'page' && normalizeRoute(entity.route) === normalizeRoute(page.route) && entity.id !== existing?.id);
     if (occupied) issue(`/pages/${page.id}/route`, 'route-conflict', `route is occupied by page ID ${occupied.id}; no adoption is permitted`);
-    const pendingBindings = intent.assetUses.filter(use => use.documentId === key && !owned.has(`attachment:${use.assetId}`) && !bindings[use.assetId] && source.assets.some(asset=>asset.id===use.assetId && asset.role==='attachment'));
+    const pendingBindings = intent.assetUses.filter(use => {
+      if (use.documentId !== key || bindings[use.assetId]) return false;
+      const asset = source.assets.find(candidate=>candidate.id===use.assetId && candidate.role==='attachment');
+      return Boolean(asset && !owned.has(attachmentVersionKey(asset.id, asset.sha256)));
+    });
     const output = compiled.get(page.id);
     if (!output && pendingBindings.length === 0) issue(`/pages/${page.id}/body`, 'uncompiled-page', 'page has no finalized content and no declared pending bindings');
     const pendingParent = page.parentId && !pageIds.has(page.parentId);
@@ -193,14 +219,20 @@ export function observedAttachmentBindings(input: SitePlanInput, snapshot: SiteS
   const result: Record<string, SiteAttachmentBinding> = {};
   for (const asset of input.source.assets.filter(item=>item.role === 'attachment')) {
     const retained = input.retainedBindings[asset.id];
-    const candidates = snapshot.entities.filter(entity=>entity.kind === 'attachment' && entity.ownership.some(meta=>meta.siteId===input.source.sourceIntent.siteId && meta.entityId===asset.id));
-    if (candidates.length > 1) throw new Error(`duplicate logical attachment ownership for ${asset.id}`);
+    const ownedVersions = snapshot.entities.filter(entity=>entity.kind === 'attachment' && entity.ownership.some(meta=>meta.siteId===input.source.sourceIntent.siteId && meta.entityId===asset.id));
+    const candidates = ownedVersions.filter(entity=>entity.ownership.some(meta=>meta.siteId===input.source.sourceIntent.siteId && meta.entityId===asset.id
+      && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(entity.state) ? entity.state.sha256 : undefined)) === asset.sha256));
+    if (candidates.length > 1) throw new Error(`duplicate owned attachment version for ${asset.id}`);
     const observed = retained ? snapshot.entities.find(entity=>entity.kind==='attachment' && entity.id===retained.id) : candidates[0];
     if (!observed) { if (retained) throw new Error(`retained attachment binding ${asset.id} is absent on the observed target`); continue; }
-    if (observed.state.sha256 !== asset.sha256 || typeof observed.attachment?.url !== 'string' || (retained && observed.attachment?.url !== retained.url)) throw new Error(`attachment binding ${asset.id} differs from observed destination bytes or URL`);
+    const exactOwner = observed.ownership.some(meta=>meta.siteId===input.source.sourceIntent.siteId && meta.entityId===asset.id
+      && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(observed.state) ? observed.state.sha256 : undefined)) === asset.sha256);
+    if (observed.postStatus !== 'inherit' || !exactOwner || observed.state.sha256 !== asset.sha256 || typeof observed.attachment?.url !== 'string' || (retained && observed.attachment?.url !== retained.url)) throw new Error(`attachment binding ${asset.id} is unavailable or differs from exact owned destination bytes or URL`);
     const url = new URL(observed.attachment!.url!);
     if (!['http:','https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('attachment URL contains unsupported identity or secret fields');
-    result[asset.id] = { id: observed.id, url: observed.attachment!.url! };
+    result[asset.id] = { id: observed.id, url: observed.attachment!.url!, ...(observed.attachment!.linkUrl ? { attachmentPageUrl: observed.attachment!.linkUrl } : {}),
+      ...(observed.attachment!.width && observed.attachment!.height ? { observedSize: { width: observed.attachment!.width, height: observed.attachment!.height } } : {}),
+      ...(observed.attachment!.sizes ? { imageSizes: observed.attachment!.sizes } : {}) };
   }
   for (const id of Object.keys(input.retainedBindings)) if (!input.source.assets.some(asset=>asset.id===id && asset.role==='attachment')) throw new Error(`retained binding ${id} has no declared attachment asset`);
   return result;

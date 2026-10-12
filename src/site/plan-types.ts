@@ -8,13 +8,24 @@ export interface SiteOwnership {
   entityId: string;
   kind: SiteEntity['kind'];
   lastAppliedHash: string;
+  /** Exact original bytes for one owned attachment version. Omitted on legacy records. */
+  assetSha256?: string;
 }
 export interface SiteEntity {
   id: number;
   kind: 'page' | 'attachment' | 'pattern';
   route: string | null;
   state: Record<string, unknown>;
-  attachment?: { url: string | null; currentFileSha256: string | null; width: number | null; height: number | null };
+  /** Observed WordPress post status, kept outside managed state for legacy attachment hashes. */
+  postStatus?: string;
+  attachment?: {
+    url: string | null;
+    linkUrl?: string | null;
+    currentFileSha256: string | null;
+    width: number | null;
+    height: number | null;
+    sizes?: Record<string, { url: string; width: number; height: number }>;
+  };
   ownership: SiteOwnership[];
 }
 export interface SiteSnapshot {
@@ -27,7 +38,12 @@ export interface SiteSnapshot {
   overrides: Array<{ id: number; kind: string; theme: string[]; content: string }>;
   navigation: Array<{ id: number; content: string; status: string }>;
   options: Record<string, unknown>;
-  siteRecord: { version: 1; siteId: string; entities: Record<string, number>; options: Record<string, { lastAppliedValue: unknown }>; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed' } | null } | null;
+  siteRecord: { version: 1; siteId: string; entities: Record<string, number>; options: Record<string, { lastAppliedValue: unknown }>; operation: {
+    token: string;
+    planHash: string;
+    status: 'started' | 'outcome_unknown' | 'completed';
+    currentStep?: { key: string; kind: 'attachment'; entityId: string; assetSha256: string; status: 'started' | 'completed' | 'outcome_unknown' };
+  } | null } | null;
 }
 export interface SitePlanOperation {
   action: 'create' | 'update' | 'retain' | 'set-option';

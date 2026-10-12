@@ -8,6 +8,7 @@ import { parseThemeJsonSettings } from '../tokens/resolver.js';
 import { canonicalJson } from '../proof/receipt.js';
 import type { BlockRunnerConfig, IntentNode, IntentTree, ReportItem, WpBlock } from '../types.js';
 import { buildSiteThemeAssets } from './assets.js';
+import { bindNativeImage, declaredEmbedAspectRatio } from './media.js';
 import { validateSiteIntent } from './input.js';
 import type {
   CompiledSite,
@@ -192,6 +193,7 @@ async function compileDocuments(
     const bound = bindDocument(body, document.id, intent, source, options, settings.allowPendingPageBindings);
     diagnostics.push(...bound.diagnostics);
     if (bound.diagnostics.some((item) => item.status === 'invalid')) continue;
+    const embedWarnings = prepareEmbedRatios(body, document.id);
 
     if (body.blocks.length === 0) {
       output.push({ ...document, markup: '', report: [], ok: true });
@@ -219,7 +221,7 @@ async function compileDocuments(
       config: isolatedConfig(intent, previewStrict),
       isolateConfig: true,
     });
-    const mapped = mapReport(report.items, document.id, sourceLabel(intent.siteId, document.id), body);
+    const mapped = [...mapReport(report.items, document.id, sourceLabel(intent.siteId, document.id), body), ...embedWarnings];
     diagnostics.push(...mapped);
     if (pending.length && options.strict && mapped.some(item=>item.status==='warning' && item.code!=='intent-attribute-dropped' && item.reason!=='noop resolver does not resolve media IDs')) diagnostics.push(invalid(document.id,'pending-preview-warning','strict pending preview contains a warning unrelated to declared media'));
     if (!report.ok && !mapped.some((item) => item.status === 'invalid')) {
@@ -275,7 +277,12 @@ function bindDocument(
       }
     }
 
-    setIntentAttribute(node, use, url, attachment);
+    const imageBinding = attachment ? bindNativeImage(node, attachment) : undefined;
+    if (imageBinding?.error) {
+      diagnostics.push(invalid(documentId, 'attachment-image-metadata', imageBinding.error, use.nodePath));
+      continue;
+    }
+    setIntentAttribute(node, use, imageBinding?.url ?? url, attachment);
   }
   return { diagnostics };
 }
@@ -498,6 +505,23 @@ function nodeAtPath(tree: IntentTree, path: number[]): IntentNode | undefined {
     nodes = node.children ?? [];
   }
   return node;
+}
+
+function prepareEmbedRatios(tree: IntentTree, documentId: string): ReportItem[] {
+  const warnings: ReportItem[] = [];
+  const visit = (nodes: IntentNode[], parent: number[]): void => nodes.forEach((node, index) => {
+    const at = [...parent, index];
+    if (node.block === 'core/embed') {
+      const ratio = declaredEmbedAspectRatio(node);
+      if (ratio) node.attrs!.aspectRatio = ratio;
+      else warnings.push({ status: 'warning', block: node.block,
+        reason: 'embed has no valid caller-declared aspect ratio; remote oEmbed metadata is not queried',
+        source: { path: `site://${documentId}` }, details: { documentId, nodePath: at } });
+    }
+    if (node.children) visit(node.children, at);
+  });
+  visit(tree.blocks, []);
+  return warnings;
 }
 
 function mapReport(items: ReportItem[], documentId: string, sourcePath: string, _body: IntentTree): ReportItem[] {
