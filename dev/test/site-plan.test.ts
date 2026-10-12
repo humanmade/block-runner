@@ -83,6 +83,19 @@ describe('bounded site reconciliation',()=>{
     const input=source();input.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment',sha256:'aaa',bytes:new Uint8Array()}];input.sourceIntent.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment'}];input.sourceIntent.assetUses=[{documentId:'page:home',nodePath:[0],attribute:'attrs.id',assetId:'photo'}];
     const result=reconcileSitePlan(input,theme(input),[],snapshot());expect(result.executable).toBe(true);expect(result.operations.find(op=>op.kind==='attachment')).not.toHaveProperty('id');expect(result.operations.find(op=>op.kind==='page')).toMatchObject({requiresFinalization:true,pendingBindings:input.sourceIntent.assetUses});
   });
+  it('rejects invalid custom image URLs during planning while the attachment remains pending',async()=>{
+    const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-pending-image-'));
+    const intent=source().sourceIntent;
+    intent.templates={index:{body:{blocks:[{block:'core/post-content'}]}}};
+    intent.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment'}];
+    intent.assetUses=[{documentId:'page:home',nodePath:[0],attribute:'attrs.id',assetId:'photo'}];
+    intent.pages[0]!.body.blocks=[{block:'core/image',url:'photo.png',attrs:{id:0,linkDestination:'custom',href:'/relative'}}];
+    const png=await readFile(fileURLToPath(new URL('./fixtures/site-intent/media/hero.png',import.meta.url)));
+    await writeFile(path.join(root,'photo.png'),png);
+    const inputPath=path.join(root,'site.intent.json');await writeFile(inputPath,JSON.stringify(intent));
+    await expect(planSite(inputPath,{wpPath:'/unused',assetRoot:root},async()=>JSON.stringify(snapshot())))
+      .rejects.toThrow(/attachment-image-metadata: custom image href must be an HTTP\(S\) URL without credentials/);
+  });
 });
 
 describe('source and retained bundle boundaries',()=>{

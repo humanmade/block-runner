@@ -8,7 +8,7 @@ import { parseThemeJsonSettings } from '../tokens/resolver.js';
 import { canonicalJson } from '../proof/receipt.js';
 import type { BlockRunnerConfig, IntentNode, IntentTree, ReportItem, WpBlock } from '../types.js';
 import { buildSiteThemeAssets } from './assets.js';
-import { bindNativeImage, declaredEmbedAspectRatio } from './media.js';
+import { bindNativeImage, declaredEmbedAspectRatio, validateNativeImageSettings } from './media.js';
 import { patternOverrideContent } from '../authoring/pattern-overrides.js';
 import { compileSyncedPatterns, type CompiledSyncedPattern } from './patterns.js';
 import { validateSiteIntent } from './input.js';
@@ -329,7 +329,11 @@ function bindDocument(
     let attachment: SiteAttachmentBinding | undefined;
     if (asset.role === 'attachment') {
       attachment = options.attachmentBindings?.[asset.id];
-      if (!attachment && allowPendingPageBindings && (documentId.startsWith('page:') || documentId.startsWith('synced-pattern:'))) continue;
+      if (!attachment && allowPendingPageBindings && (documentId.startsWith('page:') || documentId.startsWith('synced-pattern:'))) {
+        const settingsError = validateNativeImageSettings(node);
+        if (settingsError) diagnostics.push(invalid(documentId, 'attachment-image-metadata', settingsError, use.nodePath));
+        continue;
+      }
       if (!validBinding(attachment)) {
         diagnostics.push(invalid(documentId, 'attachment-binding-required', `asset ${asset.id} requires a supplied attachment ID and URL binding`, use.nodePath));
         continue;

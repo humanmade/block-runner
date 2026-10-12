@@ -51,17 +51,44 @@ export function verifiedOwnedAttachment(
   return versionId === wpId || legacyId === wpId;
 }
 
+/** Validate authored core/image settings that do not depend on destination metadata. */
+export function validateNativeImageSettings(node: IntentNode): string | undefined {
+  if (node.block !== 'core/image') return undefined;
+  const attrs = node.attrs ?? {};
+  const explicitSize = attrs.sizeSlug;
+  if (explicitSize !== undefined && (typeof explicitSize !== 'string' || explicitSize.length === 0)) {
+    return 'image sizeSlug must be a non-empty native size name';
+  }
+  const linkDestination = attrs.linkDestination;
+  if (linkDestination !== undefined && !['none', 'media', 'attachment', 'custom'].includes(String(linkDestination))) {
+    return 'image linkDestination is unsupported by the native image block';
+  }
+  const destination = linkDestination ?? 'none';
+  if (destination === 'none' && typeof attrs.href === 'string' && attrs.href.length > 0) {
+    return 'image href contradicts linkDestination none';
+  }
+  if (destination === 'custom') {
+    if (typeof attrs.href !== 'string') return 'custom image linkDestination requires an explicit href';
+    try {
+      const href = new URL(attrs.href);
+      if (!['http:', 'https:'].includes(href.protocol) || href.username || href.password) throw new Error();
+    } catch {
+      return 'custom image href must be an HTTP(S) URL without credentials';
+    }
+  }
+  return undefined;
+}
+
 /**
  * Apply the destination's observed native image metadata before shared finalization.
  * Covers deliberately keep their separate schema and are not changed here.
  */
 export function bindNativeImage(node: IntentNode, binding: SiteAttachmentBinding): ImageBindingResult | undefined {
   if (node.block !== 'core/image') return undefined;
+  const settingsError = validateNativeImageSettings(node);
+  if (settingsError) return { url: binding.url, sizeSlug: 'full', error: settingsError };
   const attrs = node.attrs ?? (node.attrs = {});
   const explicitSize = attrs.sizeSlug;
-  if (explicitSize !== undefined && (typeof explicitSize !== 'string' || explicitSize.length === 0)) {
-    return { url: binding.url, sizeSlug: 'full', error: 'image sizeSlug must be a non-empty native size name' };
-  }
   const sizeSlug = typeof explicitSize === 'string' ? explicitSize : 'full';
   const imageSize = binding.imageSizes?.[sizeSlug];
   if (binding.imageSizes && !imageSize) {
@@ -70,23 +97,12 @@ export function bindNativeImage(node: IntentNode, binding: SiteAttachmentBinding
   const url = imageSize?.url ?? binding.url;
   if (explicitSize === undefined) attrs.sizeSlug = sizeSlug;
   const linkDestination = attrs.linkDestination;
-  if (linkDestination !== undefined && !['none', 'media', 'attachment', 'custom'].includes(String(linkDestination))) {
-    return { url, sizeSlug, error: 'image linkDestination is unsupported by the native image block' };
-  }
   const destination = linkDestination ?? 'none';
-  if (destination === 'none' && typeof attrs.href === 'string' && attrs.href.length > 0) {
-    return { url, sizeSlug, error: 'image href contradicts linkDestination none' };
-  }
   if (destination === 'media' || destination === 'attachment') {
     const target = destination === 'media' ? binding.url : binding.attachmentPageUrl;
     if (!target) return { url, sizeSlug, error: `destination attachment has no observed ${destination} link URL` };
     if (typeof attrs.href === 'string' && attrs.href !== target) return { url, sizeSlug, error: `image href contradicts observed ${destination} link URL` };
     attrs.href = target;
-  }
-  if (destination === 'custom') {
-    if (typeof attrs.href !== 'string') return { url, sizeSlug, error: 'custom image linkDestination requires an explicit href' };
-    try { const href = new URL(attrs.href); if (!['http:', 'https:'].includes(href.protocol) || href.username || href.password) throw new Error(); }
-    catch { return { url, sizeSlug, error: 'custom image href must be an HTTP(S) URL without credentials' }; }
   }
   if (linkDestination === undefined) attrs.linkDestination = destination;
   return { url, sizeSlug, ...(imageSize ? { width: imageSize.width, height: imageSize.height } : {}) };
