@@ -1,4 +1,6 @@
 import type { IntentNode } from '../types.js';
+import { hashCanonicalJson } from '../proof/receipt.js';
+import type { SiteSnapshot } from './plan-types.js';
 import type { SiteAttachmentBinding } from './types.js';
 
 export interface ImageBindingResult {
@@ -12,6 +14,45 @@ export interface ImageBindingResult {
 /** Stable ownership/index key for one exact source version of a logical attachment. */
 export function attachmentVersionKey(entityId: string, sha256: string): string {
   return `attachment:${entityId}@${sha256}`;
+}
+
+/** Prove one available attachment against exact ownership, complete baseline and site index. */
+export function verifiedOwnedAttachment(
+  snapshot: SiteSnapshot,
+  siteId: string,
+  entityId: string,
+  originalSha256: string,
+  wpId: number,
+): boolean {
+  if (!/^[a-f0-9]{64}$/.test(originalSha256) || !Number.isSafeInteger(wpId) || wpId < 1) return false;
+  const numericIds = snapshot.entities.map(candidate => candidate.id);
+  if (numericIds.some(id => !Number.isSafeInteger(id) || id < 1) || new Set(numericIds).size !== numericIds.length) return false;
+  const ids = snapshot.entities.filter(entity => entity.id === wpId);
+  if (ids.length !== 1) return false;
+  const entity = ids[0]!;
+  if (entity.kind !== 'attachment' || entity.ownership.length !== 1 || entity.postStatus !== 'inherit'
+    || !/^[a-f0-9]{64}$/.test(entity.attachment?.currentFileSha256 ?? '')) return false;
+  const owner = entity.ownership[0]!;
+  if (owner.version !== 1 || owner.siteId !== siteId || owner.entityId !== entityId || owner.kind !== 'attachment'
+    || !/^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash) || owner.lastAppliedHash !== hashCanonicalJson(entity.state)) return false;
+  const ownerSha = owner.assetSha256 ?? (typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+  if (ownerSha !== originalSha256 || entity.state.sha256 !== originalSha256) return false;
+  const exactVersions = snapshot.entities.filter(candidate => candidate.kind === 'attachment'
+    && candidate.ownership.length === 1
+    && candidate.ownership[0]!.version === 1
+    && candidate.ownership[0]!.siteId === siteId
+    && candidate.ownership[0]!.entityId === entityId
+    && candidate.ownership[0]!.kind === 'attachment'
+    && candidate.ownership[0]!.lastAppliedHash === hashCanonicalJson(candidate.state)
+    && (candidate.ownership[0]!.assetSha256 ?? (typeof candidate.state.sha256 === 'string' ? candidate.state.sha256 : undefined)) === originalSha256
+    && candidate.state.sha256 === originalSha256);
+  if (exactVersions.length !== 1 || exactVersions[0]!.id !== wpId) return false;
+  const record = snapshot.siteRecord;
+  if (!record || record.version !== 1 || record.siteId !== siteId) return false;
+  const versionId = record.entities[attachmentVersionKey(entityId, originalSha256)];
+  const legacyId = owner.assetSha256 === undefined ? record.entities[`attachment:${entityId}`] : undefined;
+  if (versionId !== undefined && legacyId !== undefined && versionId !== legacyId) return false;
+  return versionId === wpId || legacyId === wpId;
 }
 
 /**

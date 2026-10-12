@@ -4,6 +4,7 @@ import { hashCanonicalJson } from '../proof/receipt.js';
 import { hashBytes, readStableRegularFile } from '../publication.js';
 import type { SiteEntity, SiteSnapshot } from './plan-types.js';
 import { managedStateHash, readSitePlanInput } from './plan.js';
+import { verifiedOwnedAttachment } from './media.js';
 import { readSiteSnapshot, readSiteTemplateSnapshot, type SiteReadTransport, type SiteTemplateSnapshot, type SiteWpCliOptions } from './wpcli.js';
 
 export type SiteDriftFindingStatus = 'clean' | 'equivalent-override' | 'changed' | 'missing' | 'orphaned' | 'conflict' | 'dependency' | 'blocked';
@@ -230,7 +231,7 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
         } else if (!indexed) {
           add({ kind: 'attachment', status: 'conflict', entityId: key, wpId: entity.id, code: 'ownership-record-missing', message: 'Owned attachment metadata has no matching version-qualified site-record ID.' });
         } else {
-          verifiedAttachmentIds.add(entity.id);
+          if (verifiedOwnedAttachment(snapshot, siteId, owner.entityId, originalSha, entity.id)) verifiedAttachmentIds.add(entity.id);
           add({ kind: 'attachment', status: 'clean', entityId: key, wpId: entity.id, code: 'managed-attachment-match', sourceSha256: originalSha, observedSha256: originalSha, message: 'The exact logical attachment version, original-byte SHA-256 baseline, inherited status, and current file are present.' });
         }
         continue;

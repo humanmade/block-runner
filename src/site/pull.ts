@@ -13,6 +13,9 @@ import { findThemeReferenceIssues } from '../theme/references.js';
 import { discoverThemeMarkupFiles } from '../theme/folders.js';
 import { validateThemeJson } from '../theme/theme-json.js';
 import type { ReportItem } from '../types.js';
+import type { SiteSnapshot } from './plan-types.js';
+import type { PreparedSiteSource } from './types.js';
+import { verifiedOwnedAttachment } from './media.js';
 import { readSitePlanInput } from './plan.js';
 import { readSiteSnapshot, readSiteTemplateSnapshot, type SiteReadTransport, type SiteWpCliOptions } from './wpcli.js';
 
@@ -261,7 +264,7 @@ async function buildPullPlan(bundlePath: string, selections: readonly SitePullSe
     afterFiles.set(sourcePath, after);
     selected.push({ ...selection, sourcePath, raw: observed.raw, rawSha256: hashBytes(rawBytes), normalizedSha256: hashBytes(normalized) });
   }
-  const gateDiagnostics = await validateProspectiveTheme(absoluteBundle, manifest, beforeFiles, afterFiles);
+  const gateDiagnostics = await validateProspectiveTheme(absoluteBundle, manifest, beforeFiles, afterFiles, snapshot, input.source.sourceIntent.siteId, input.source.assets);
   diagnostics.push(...gateDiagnostics);
   const files: PullFile[] = [...beforeFiles].map(([filePath, before]) => {
     const after = afterFiles.get(filePath)!;
@@ -300,7 +303,15 @@ async function buildPullPlan(bundlePath: string, selections: readonly SitePullSe
   };
 }
 
-async function validateProspectiveTheme(bundle: string, manifest: PullManifest, before: Map<string, Buffer>, after: Map<string, Buffer>): Promise<ReportItem[]> {
+async function validateProspectiveTheme(
+  bundle: string,
+  manifest: PullManifest,
+  before: Map<string, Buffer>,
+  after: Map<string, Buffer>,
+  snapshot: SiteSnapshot,
+  siteId: string,
+  sourceAssets: PreparedSiteSource['assets'],
+): Promise<ReportItem[]> {
   const themeRoot = path.join(bundle, 'theme');
   const files = await discoverThemeMarkupFiles(themeRoot);
   if (files.some(file => file.skipReason === 'theme-unsafe-target')) throw new Error('theme bundle contains a symbolic link or unsafe markup target');
@@ -341,6 +352,14 @@ async function validateProspectiveTheme(bundle: string, manifest: PullManifest, 
         reason: 'saved navigation references an external wp_navigation record; pull does not inline or adopt that database dependency', source: { path: filePath } });
       if (block.name === 'core/block' && block.attributes?.ref !== undefined) diagnostics.push({ status: 'invalid', code: 'unsupported-synced-pattern-dependency', block: block.name,
         reason: 'saved synced-pattern references require a declared supported source representation; pull does not adopt unowned database graphs', source: { path: filePath } });
+      if ((block.name === 'core/image' || block.name === 'core/cover') && block.attributes?.id !== undefined) {
+        const wpId = block.attributes.id;
+        const declaredVersion = typeof wpId === 'number' && Number.isSafeInteger(wpId) && wpId > 0
+          && sourceAssets.some(asset => asset.role === 'attachment'
+            && verifiedOwnedAttachment(snapshot, siteId, asset.id, asset.sha256, wpId));
+        if (!declaredVersion) diagnostics.push({ status: 'invalid', code: 'unsupported-attachment-dependency', block: block.name,
+          reason: `saved ${block.name} references attachment ID ${String(wpId)} without one exact, available, non-ambiguous owned source version and complete site baseline`, source: { path: filePath } });
+      }
       visit(block.innerBlocks ?? []);
     });
     visit(blocks);

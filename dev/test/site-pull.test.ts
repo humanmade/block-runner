@@ -9,9 +9,9 @@ import { hashBytes } from '../../src/publication.js';
 import { compileThemeDocuments } from '../../src/site/compile.js';
 import { inspectSiteDrift } from '../../src/site/drift.js';
 import { confirmSitePull, previewSitePull, type SitePullSelection } from '../../src/site/pull.js';
-import { planSite, readSitePlanInput } from '../../src/site/plan.js';
+import { managedStateHash, planSite, readSitePlanInput } from '../../src/site/plan.js';
 import { writeCompiledSite } from '../../src/site/write.js';
-import type { SiteSnapshot } from '../../src/site/plan-types.js';
+import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource } from '../../src/site/types.js';
 import type { SiteTemplateSnapshot } from '../../src/site/wpcli.js';
 
@@ -19,6 +19,25 @@ const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent/', import.meta
 const intentFile = path.join(fixtureRoot, 'site.intent.json');
 const run = promisify(execFile);
 const editedMarkup = '<!-- wp:paragraph --><p>Saved editor change.</p><!-- /wp:paragraph -->';
+
+function addOwnedAttachment(f: PullFixture, wpId: number, options: { status?: string; duplicate?: boolean; duplicateNumericId?: boolean; legacy?: boolean; foreignOwner?: boolean } = {}): void {
+  const asset = f.source.assets.find(item => item.role === 'attachment')!;
+  const state = { sha256: asset.sha256 };
+  const ownership: SiteEntity['ownership'] = [{ version: 1, siteId: f.source.sourceIntent.siteId, entityId: asset.id, kind: 'attachment',
+    ...(options.legacy ? {} : { assetSha256: asset.sha256 }), lastAppliedHash: managedStateHash(state) }];
+  if (options.foreignOwner) ownership.push({ version: 1, siteId: 'another-site', entityId: 'shared', kind: 'attachment', assetSha256: asset.sha256, lastAppliedHash: managedStateHash(state) });
+  const entity: SiteEntity = { id: wpId, kind: 'attachment', route: null, state, postStatus: options.status ?? 'inherit',
+    attachment: { url: `https://example.test/uploads/${wpId}.png`, currentFileSha256: 'c'.repeat(64), width: 640, height: 480 }, ownership };
+  f.snapshot.entities.push(entity);
+  if (options.duplicate || options.duplicateNumericId) f.snapshot.entities.push({ ...entity, id: options.duplicateNumericId ? wpId : wpId + 1, state: { ...state }, ownership: ownership.map(row => ({ ...row })) });
+  f.snapshot.siteRecord = { version: 1, siteId: f.source.sourceIntent.siteId,
+    entities: { [options.legacy ? `attachment:${asset.id}` : `attachment:${asset.id}@${asset.sha256}`]: wpId }, options: {}, operation: null };
+}
+
+function imageRefs(wpId: number): string {
+  const url = `https://example.test/uploads/${wpId}.png`;
+  return `<!-- wp:image {"id":${wpId}} -->\n<figure class="wp-block-image"><img src="${url}" alt="" class="wp-image-${wpId}"/></figure>\n<!-- /wp:image -->\n\n<!-- wp:cover {"url":"${url}","id":${wpId},"dimRatio":50} -->\n<div class="wp-block-cover"><img class="wp-block-cover__image-background wp-image-${wpId}" alt="" src="${url}" data-object-fit="cover"/><span aria-hidden="true" class="wp-block-cover__background has-background-dim"></span><div class="wp-block-cover__inner-container"></div></div>\n<!-- /wp:cover -->`;
+}
 
 interface PullFixture {
   root: string;
@@ -150,6 +169,73 @@ describe('bounded site template and part pull', () => {
     manifest.inventory[0]!.sha256 = '0'.repeat(64);
     await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
     await expect(previewSitePull(f.bundle, path.join(f.root, 'wrong-inventory'), [f.selection], f.options)).rejects.toThrow('retained theme inventory differs');
+  });
+
+  it('blocks unowned attachment IDs in image and cover blocks without staging or changing source bytes', async () => {
+    for (const wpId of [811, 812]) {
+      const f = await fixture();
+      f.setTemplates({ ...f.templates, entities: f.templates.entities.map(entity => entity.id === f.selection.entityId ? { ...entity, raw: imageRefs(wpId) } : entity) });
+      const out = path.join(f.root, `unowned-${wpId}`);
+      const beforeHtml = await readFile(path.join(f.bundle, f.sourcePath));
+      const beforeManifest = await readFile(path.join(f.bundle, 'site.manifest.json'));
+      const result = await previewSitePull(f.bundle, out, [f.selection], f.options);
+      expect(result.ok).toBe(false);
+      expect(result.diagnostics).toContainEqual(expect.objectContaining({ status: 'invalid', code: 'unsupported-attachment-dependency' }));
+      await expect(readFile(out)).rejects.toMatchObject({ code: 'ENOENT' });
+      expect(await readFile(path.join(f.bundle, f.sourcePath))).toEqual(beforeHtml);
+      expect(await readFile(path.join(f.bundle, 'site.manifest.json'))).toEqual(beforeManifest);
+    }
+  });
+
+  it.each([
+    ['missing', {}],
+    ['trashed', { status: 'trash' }],
+    ['ambiguous duplicate version', { duplicate: true }],
+    ['ambiguous duplicate numeric ID', { duplicateNumericId: true }],
+    ['foreign ownership rows', { foreignOwner: true }],
+  ] as const)('blocks %s attachment versions before source publication', async (_label, attachmentOptions) => {
+    const f = await fixture();
+    const ownedId = 811;
+    if (_label !== 'missing') addOwnedAttachment(f, ownedId, attachmentOptions);
+    f.setTemplates({ ...f.templates, entities: f.templates.entities.map(entity => entity.id === f.selection.entityId ? { ...entity, raw: imageRefs(ownedId) } : entity) });
+    const beforeHtml = await readFile(path.join(f.bundle, f.sourcePath));
+    const beforeManifest = await readFile(path.join(f.bundle, 'site.manifest.json'));
+    const result = await previewSitePull(f.bundle, path.join(f.root, 'blocked-preview'), [f.selection], f.options);
+    expect(result.ok).toBe(false);
+    expect(result.diagnostics).toContainEqual(expect.objectContaining({ status: 'invalid', code: 'unsupported-attachment-dependency' }));
+    expect(await readFile(path.join(f.bundle, f.sourcePath))).toEqual(beforeHtml);
+    expect(await readFile(path.join(f.bundle, 'site.manifest.json'))).toEqual(beforeManifest);
+  });
+
+  it('permits exact available owned image and cover versions, then rechecks ownership at confirmation', async () => {
+    const f = await fixture();
+    const wpId = 811;
+    addOwnedAttachment(f, wpId);
+    f.setTemplates({ ...f.templates, entities: f.templates.entities.map(entity => entity.id === f.selection.entityId ? { ...entity, raw: imageRefs(wpId) } : entity) });
+    const beforeHtml = await readFile(path.join(f.bundle, f.sourcePath));
+    const beforeManifest = await readFile(path.join(f.bundle, 'site.manifest.json'));
+    const preview = await previewSitePull(f.bundle, path.join(f.root, 'owned-image-preview'), [f.selection], f.options);
+    expect(preview.ok, JSON.stringify(preview.diagnostics)).toBe(true);
+    expect(preview.diagnostics.some(item => item.code === 'unsupported-attachment-dependency')).toBe(false);
+
+    f.snapshot.entities[0]!.postStatus = 'trash';
+    await expect(confirmSitePull(f.bundle, preview.directory, preview.confirmationHash!, f.options)).rejects.toThrow('changed after preview');
+    expect(await readFile(path.join(f.bundle, f.sourcePath))).toEqual(beforeHtml);
+    expect(await readFile(path.join(f.bundle, 'site.manifest.json'))).toEqual(beforeManifest);
+  });
+
+  it('permits exact legacy indexed attachment ownership only with its complete baseline', async () => {
+    const f = await fixture();
+    addOwnedAttachment(f, 811, { legacy: true });
+    f.setTemplates({ ...f.templates, entities: f.templates.entities.map(entity => entity.id === f.selection.entityId ? { ...entity, raw: imageRefs(811) } : entity) });
+    const beforeHtml = await readFile(path.join(f.bundle, f.sourcePath));
+    const beforeManifest = await readFile(path.join(f.bundle, 'site.manifest.json'));
+    const preview = await previewSitePull(f.bundle, path.join(f.root, 'legacy-owned-preview'), [f.selection], f.options);
+    expect(preview.ok, JSON.stringify(preview.diagnostics)).toBe(true);
+    f.snapshot.entities[0]!.state.sha256 = 'd'.repeat(64);
+    await expect(confirmSitePull(f.bundle, preview.directory, preview.confirmationHash!, f.options)).rejects.toThrow('changed after preview');
+    expect(await readFile(path.join(f.bundle, f.sourcePath))).toEqual(beforeHtml);
+    expect(await readFile(path.join(f.bundle, 'site.manifest.json'))).toEqual(beforeManifest);
   });
 
   it('blocks invalid blocks and external navigation refs without creating a preview', async () => {
