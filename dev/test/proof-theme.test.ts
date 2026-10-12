@@ -1,4 +1,4 @@
-import { mkdtemp, mkdir, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -67,6 +67,43 @@ describe('theme Site Editor proof profile', () => {
     );
     expect(verified).toBe(false);
     expect(writes).toBe(0);
+  });
+
+  it('ignores development overrides and stages root dependencies when testsEnvironment is false', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-theme-single-env-'));
+    const config = {
+      testsEnvironment: false,
+      port: 8891,
+      core: 'WordPress/WordPress#7.1',
+      phpVersion: '8.4',
+      plugins: ['./plugins/root-helper'],
+      themes: ['./themes/root-theme'],
+      mappings: { 'wp-content/uploads': './root-uploads' },
+      config: { WP_HOME: 'http://localhost' },
+      env: { development: {
+        port: 9999,
+        core: 'WordPress/WordPress#6.9',
+        phpVersion: '8.2',
+        plugins: ['./plugins/ignored'],
+        themes: ['./themes/ignored'],
+        mappings: { 'wp-content/uploads': './ignored-uploads' },
+        config: { WP_HOME: 'https://example.com' },
+      } },
+    };
+    expect(effectiveWpEnvPort(config, {})).toBe(8891);
+    expect(effectiveWpEnvPort(config, { WP_ENV_PORT: '8893' })).toBe(8893);
+    expect(effectiveWpEnvUrl(config, {})).toBe('http://localhost:8891');
+    expect(effectiveWpEnvConfig(config)).toMatchObject({
+      core: config.core, phpVersion: config.phpVersion,
+      plugins: config.plugins, themes: config.themes, mappings: config.mappings,
+    });
+    const output = path.join(root, 'runtime.json');
+    await writeThemeRuntimeConfig(config, path.join(root, 'source.json'), { slug: 'fixture-theme' } as never, '/stage/fixture-theme', output);
+    const runtime = JSON.parse(await readFile(output, 'utf8'));
+    expect(runtime.plugins).toEqual([path.resolve('plugins/root-helper')]);
+    expect(runtime.themes).toEqual([path.resolve('themes/root-theme'), '/stage/fixture-theme']);
+    expect(runtime.mappings).toEqual({ 'wp-content/uploads': path.resolve('root-uploads') });
+    expect(effectiveWpEnvConfig(runtime)).toMatchObject({ core: config.core, phpVersion: config.phpVersion });
   });
 
   it('saves the mounted editor blocks when they differ from the original raw source', async () => {
