@@ -81,17 +81,19 @@ export async function assemble(nodes: IntentNode[]): Promise<WpBlock[]> {
 
 async function assembleWithWp(
   nodes: IntentNode[], wp: WpModules, intentPath = 'blocks', diagnostics?: AssemblyDiagnostics,
+  inheritedAccordionIconPosition?: string,
 ): Promise<WpBlock[]> {
   if (!Array.isArray(nodes)) throw new Error(`${intentPath}: expected an array of block nodes`);
   const out: WpBlock[] = [];
   for (const [index, node] of nodes.entries()) {
-    out.push(await assembleNode(node, wp, `${intentPath}[${index}]`, diagnostics));
+    out.push(await assembleNode(node, wp, `${intentPath}[${index}]`, diagnostics, inheritedAccordionIconPosition));
   }
   return out;
 }
 
 async function assembleNode(
   node: IntentNode, wp: WpModules, intentPath: string, diagnostics?: AssemblyDiagnostics,
+  inheritedAccordionIconPosition?: string,
 ): Promise<WpBlock> {
   if (!node || typeof node.block !== 'string' || !node.block.trim()) {
     throw new Error(`${intentPath}: expected a node with a non-empty block name`);
@@ -100,7 +102,16 @@ async function assembleNode(
   if (!wp.getBlockType(name)) throw new Error(`${intentPath}: block type ${JSON.stringify(name)} is not registered`);
   const text = node.text;
   const attrs: Record<string, unknown> = { ...(node.attrs ?? {}) };
-  const children = await assembleWithWp(node.children === undefined ? [] : node.children, wp, `${intentPath}.children`, diagnostics);
+  const childAccordionIconPosition = name === 'core/accordion'
+    ? (typeof attrs.iconPosition === 'string' ? attrs.iconPosition : 'right')
+    : inheritedAccordionIconPosition;
+  const children = await assembleWithWp(
+    node.children === undefined ? [] : node.children,
+    wp,
+    `${intentPath}.children`,
+    diagnostics,
+    childAccordionIconPosition,
+  );
 
   const createBlock = (innerBlocks: WpBlock[]): WpBlock => {
     const block = wp.createBlock(name, attrs, innerBlocks);
@@ -125,6 +136,12 @@ async function assembleNode(
       if (text != null) attrs.content = text;
       attrs.level = node.level ?? attrs.level ?? 2;
       return createBlock([]);
+
+    case 'core/accordion-heading':
+      if (!Object.hasOwn(node.attrs ?? {}, 'iconPosition') && inheritedAccordionIconPosition !== undefined) {
+        attrs.iconPosition = inheritedAccordionIconPosition;
+      }
+      return createBlock(children);
 
     case 'core/paragraph':
       if (text != null) attrs.content = text;

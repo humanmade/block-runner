@@ -1079,6 +1079,9 @@ async function emit(
     if (!report.output.endsWith('\n')) {
       process.stdout.write('\n');
     }
+    if (report.items.length > 0) {
+      process.stderr.write(`${formatTextReport(report)}\n`);
+    }
     emitHint(report);
     return;
   }

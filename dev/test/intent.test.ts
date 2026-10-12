@@ -188,6 +188,106 @@ describe('intent assembly', () => {
     expect((await validate(report.output ?? '')).ok).toBe(true);
   });
 
+  it('copies the nearest accordion icon position to every unconfigured heading', async () => {
+    const createAccordionIntent = (materializeHeadingPositions: boolean) => {
+      const heading = (title: string, position: 'left' | 'right') => ({
+        block: 'core/accordion-heading',
+        attrs: {
+          title,
+          ...(materializeHeadingPositions ? { iconPosition: position } : {}),
+        },
+      });
+      const nestedAccordion = {
+        block: 'core/accordion',
+        children: [{
+          block: 'core/accordion-item',
+          children: [
+            heading('Nested default', 'right'),
+            { block: 'core/accordion-panel', children: [{ block: 'core/paragraph', text: 'Nested content' }] },
+          ],
+        }],
+      };
+
+      return {
+        blocks: [{
+          block: 'core/accordion',
+          attrs: { iconPosition: 'left' },
+          children: [
+            {
+              block: 'core/accordion-item',
+              children: [
+                heading('Outer one', 'left'),
+                {
+                  block: 'core/accordion-panel',
+                  children: [{ block: 'core/group', children: [nestedAccordion] }],
+                },
+              ],
+            },
+            {
+              block: 'core/accordion-item',
+              children: [
+                heading('Outer two', 'left'),
+                { block: 'core/accordion-panel', children: [{ block: 'core/paragraph', text: 'Outer content' }] },
+              ],
+            },
+          ],
+        }],
+      };
+    };
+
+    const assembled = await realize(JSON.stringify(createAccordionIntent(false)));
+    const editorSavedReference = await realize(JSON.stringify(createAccordionIntent(true)));
+
+    expect(assembled.ok).toBe(true);
+    expect(editorSavedReference.ok).toBe(true);
+    expect(assembled.output).toBe(editorSavedReference.output);
+    expect(assembled.output).toContain('has-icon-left');
+    expect(assembled.output).toContain('has-icon-right');
+  });
+
+  it('keeps an explicit accordion heading icon position over its parent value', async () => {
+    const createAccordionIntent = (materializeInheritedPosition: boolean) => ({
+      blocks: [{
+        block: 'core/accordion',
+        attrs: { iconPosition: 'left' },
+        children: [
+          {
+            block: 'core/accordion-item',
+            children: [
+              {
+                block: 'core/accordion-heading',
+                attrs: { title: 'Explicit right', iconPosition: 'right' },
+              },
+              { block: 'core/accordion-panel', children: [{ block: 'core/paragraph', text: 'First content' }] },
+            ],
+          },
+          {
+            block: 'core/accordion-item',
+            children: [
+              {
+                block: 'core/accordion-heading',
+                attrs: {
+                  title: 'Inherited left',
+                  ...(materializeInheritedPosition ? { iconPosition: 'left' } : {}),
+                },
+              },
+              { block: 'core/accordion-panel', children: [{ block: 'core/paragraph', text: 'Second content' }] },
+            ],
+          },
+        ],
+      }],
+    });
+
+    const assembled = await realize(JSON.stringify(createAccordionIntent(false)));
+    const editorSavedReference = await realize(JSON.stringify(createAccordionIntent(true)));
+
+    expect(assembled.ok).toBe(true);
+    expect(editorSavedReference.ok).toBe(true);
+    expect(assembled.output).toBe(editorSavedReference.output);
+    expect(assembled.output).toContain('has-icon-right');
+    expect(assembled.output).toContain('has-icon-left');
+  });
+
   it('fails loudly when intent JSON cannot be parsed', async () => {
     const report = await realize('{not json');
 
