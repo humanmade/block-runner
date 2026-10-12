@@ -212,7 +212,7 @@ function decodeUtf8(bytes: Buffer, diagnosticPath: string, diagnostics: SiteInpu
 function stylesheetBootstrap(stylesheets: string[]): string {
   const editorStyles = stylesheets.map((file) => `    add_editor_style(${phpString(file)});`).join('\n');
   const frontendStyles = stylesheets.map((file, index) => `    wp_enqueue_style('block-runner-site-${index}', get_theme_file_uri(${phpString(file)}), [], null);`).join('\n');
-  return `<?php\nadd_action('wp_enqueue_scripts', static function (): void {\n${frontendStyles}\n});\nadd_action('after_setup_theme', static function (): void {\n${editorStyles}\n});\n`;
+  return `<?php\nadd_action('wp_enqueue_scripts', static function (): void {\n${frontendStyles}\n});\nadd_action('after_setup_theme', static function (): void {\n    add_theme_support('editor-styles');\n${editorStyles}\n});\n`;
 }
 
 function phpString(value: string): string {

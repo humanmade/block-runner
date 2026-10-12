@@ -36,6 +36,7 @@ describe('site theme assets', () => {
       expect(result.files.map(({ path: filePath }) => filePath)).toEqual(['assets/media/brand.png', 'assets/styles/site.css', 'functions.php']);
       const bootstrap = Buffer.from(result.files.find(({ path: filePath }) => filePath === 'functions.php')!.bytes).toString();
       expect(bootstrap).toContain("wp_enqueue_style('block-runner-site-0', get_theme_file_uri('assets/styles/site.css')");
+      expect(bootstrap).toContain("add_theme_support('editor-styles');");
       expect(bootstrap).toContain("add_editor_style('assets/styles/site.css')");
       expect(bootstrap).not.toContain('wp-content/themes');
     } finally {
