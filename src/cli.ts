@@ -37,6 +37,7 @@ import { discoverThemeMarkupFiles, isThemeDirectory, type ThemeMarkupFile } from
 import { validateThemeJson } from './theme/theme-json.js';
 import { findThemeReferenceIssues } from './theme/references.js';
 import { compileSite, compileThemeDocuments } from './site/compile.js';
+import { planSite } from './site/plan.js';
 import { prepareSiteSource } from './site/input.js';
 import { writeCompiledSite } from './site/write.js';
 import type { SiteAttachmentBinding } from './site/types.js';
@@ -171,9 +172,9 @@ addTokenOptions(
 
 const author = program.command('author').description('Review and materialize a versioned registered-block authoring plan.');
 
-program.command('site')
-  .description('Compile and safely publish a whole-site bundle.')
-  .command('compile <intentOrStdin>')
+const siteCommand = program.command('site')
+  .description('Compile site bundles and preview changes against an explicit WordPress target.');
+siteCommand.command('compile <intentOrStdin>')
   .description('Compile a site intent into a new source bundle and installable theme.')
   .requiredOption('--out <new-bundle-dir>', 'new directory for the retained source and compiled bundle')
   .requiredOption('--asset-root <dir>', 'explicit root for declared source assets')
@@ -237,6 +238,31 @@ program.command('site')
     console.log(`Artifact: ${written.artifactType === 'theme' ? 'theme-only; page bindings remain pending' : 'compiled site'}`);
     console.log(`Files: ${written.files.length}`);
     console.log('WordPress installation and runtime proof have not run.');
+  });
+
+siteCommand.command('plan <intentOrBundle>')
+  .description('Read an explicit WordPress target and produce a hash-bound plan without WordPress writes.')
+  .requiredOption('--wp-path <path>', 'local WordPress installation path')
+  .requiredOption('--out <plan-file>', 'new local JSON plan file')
+  .option('--asset-root <dir>', 'explicit declared asset root for raw site intent input')
+  .option('--wp-url <url>', 'explicit target URL, including multisite selection')
+  .option('--wp-binary <path>', 'local WP-CLI executable path')
+  .option('--wp-user <id-or-login>', 'WordPress principal; otherwise use configured WP-CLI principal')
+  .option('--strict', 'fail on warnings unrelated to declared pending media')
+  .option('--json', 'emit the machine-readable plan')
+  .action(async (intentOrBundle: string, options: {wpPath:string;out:string;assetRoot?:string;wpUrl?:string;wpBinary?:string;wpUser?:string;strict?:boolean;json?:boolean}) => {
+    const plan = await planSite(intentOrBundle, options);
+    await writeFile(path.resolve(options.out), `${JSON.stringify(plan,null,2)}\n`, { flag: 'wx', mode: 0o600 });
+    if (options.json) console.log(JSON.stringify(plan,null,2));
+    else {
+      console.log(`Plan: ${path.resolve(options.out)}`);
+      console.log(`Confirmation: ${plan.confirmationHash}`);
+      console.log(`Operations: ${plan.operations.length}; conflicts: ${plan.conflicts.length}`);
+      for (const conflict of plan.conflicts) console.error(`- ${formatSiteDiagnostic(conflict)}`);
+      for (const diagnostic of plan.diagnostics.filter(item=>item.status==='warning')) console.error(`- ${formatSiteDiagnostic(diagnostic)}`);
+      console.log('WordPress was inspected; no WordPress mutation commands were issued.');
+    }
+    if (!plan.executable) process.exitCode = 1;
   });
 
 addTokenOptions(

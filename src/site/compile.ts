@@ -154,16 +154,40 @@ export async function compileSite(
   return { ok: true, site, diagnostics };
 }
 
+/** Internal adapter seam: finalized pages and source-only previews are separate outcomes. */
+export async function compileSitePageDocuments(source: PreparedSiteSource, options: CompileSiteOptions = {}): Promise<{
+  ok: boolean;
+  pages: CompiledSitePage[];
+  pendingPages: Array<{ id: string; body: IntentTree; uses: SiteAssetUse[]; diagnostics: ReportItem[] }>;
+  diagnostics: ReportItem[];
+}> {
+  const prepared = validatePreparedSource(source);
+  if (!prepared.ok) return { ok: false, pages: [], pendingPages: [], diagnostics: prepared.diagnostics };
+  const compiled = await compileDocuments(source, prepared.intent, options, { allowPendingPageBindings: true, includePages: true, previewPendingPages: true });
+  const diagnostics = [...compiled.diagnostics, ...await themeChecks(prepared.intent, compiled.documents)];
+  const pages: CompiledSitePage[] = [];
+  const pendingPages: Array<{ id: string; body: IntentTree; uses: SiteAssetUse[]; diagnostics: ReportItem[] }> = [];
+  for (const document of compiled.documents) {
+    if (!document.page) continue;
+    const uses = prepared.intent.assetUses.filter(use=>use.documentId===document.id && assetRole(prepared.intent,use.assetId)==='attachment' && !options.attachmentBindings?.[use.assetId]);
+    if (uses.length) pendingPages.push({ id: document.page.id, body: document.page.body, uses, diagnostics: document.report });
+    else if (document.ok) pages.push({ id:document.page.id, route:document.page.route, title:document.page.title, ...(document.page.parentId ? {parentId:document.page.parentId}:{}), template:document.page.template, status:document.page.status ?? 'draft', content:document.markup, diagnostics:document.report });
+  }
+  return { ok: !hasFailures(diagnostics), pages, pendingPages, diagnostics };
+}
+
 async function compileDocuments(
   source: PreparedSiteSource,
   intent: SiteIntent,
   options: CompileSiteOptions,
-  settings: { allowPendingPageBindings: boolean; includePages: boolean },
+  settings: { allowPendingPageBindings: boolean; includePages: boolean; previewPendingPages?: boolean },
 ): Promise<{ documents: CompiledDocument[]; diagnostics: ReportItem[] }> {
   const documents = documentInputs(intent).filter((document) => settings.includePages || document.kind !== 'page');
   const diagnostics: ReportItem[] = [];
   const output: CompiledDocument[] = [];
   for (const document of documents) {
+    const pending = settings.previewPendingPages && document.kind === 'page'
+      ? intent.assetUses.filter(use=>use.documentId===document.id && assetRole(intent,use.assetId)==='attachment' && !options.attachmentBindings?.[use.assetId]) : [];
     const body = structuredClone(document.body);
     const bound = bindDocument(body, document.id, intent, source, options, settings.allowPendingPageBindings);
     diagnostics.push(...bound.diagnostics);
@@ -174,18 +198,30 @@ async function compileDocuments(
       continue;
     }
 
+    const undeclaredMedia: number[][] = [];
+    if (settings.previewPendingPages) {
+      const visit = (nodes: IntentNode[], parent: number[]): void => nodes.forEach((node,index)=>{
+        const at = [...parent,index];
+        if ((node.block==='core/image' || node.block==='core/cover') && typeof (node.url ?? node.attrs?.url)==='string' && typeof node.attrs?.id !== 'number' && !pending.some(use=>use.nodePath.join('.')===at.join('.'))) undeclaredMedia.push(at);
+        if (node.children) visit(node.children,at);
+      });
+      visit(body.blocks,[]);
+      for (const at of undeclaredMedia) diagnostics.push(invalid(document.id,'undeclared-media-reference','unresolved media must have an explicit pending asset use',at));
+    }
+    const previewStrict = pending.length ? false : options.strict;
     const report = await realize(JSON.stringify(body), {
       sourcePath: sourceLabel(intent.siteId, document.id),
       resolver: 'noop',
       tokenResolver: 'noop',
       // Intent trees have no source HTML styling pass; use the normal default to avoid a spurious warning.
       styling: 'relaxed',
-      strict: options.strict,
-      config: isolatedConfig(intent, options.strict),
+      strict: previewStrict,
+      config: isolatedConfig(intent, previewStrict),
       isolateConfig: true,
     });
     const mapped = mapReport(report.items, document.id, sourceLabel(intent.siteId, document.id), body);
     diagnostics.push(...mapped);
+    if (pending.length && options.strict && mapped.some(item=>item.status==='warning' && item.code!=='intent-attribute-dropped' && item.reason!=='noop resolver does not resolve media IDs')) diagnostics.push(invalid(document.id,'pending-preview-warning','strict pending preview contains a warning unrelated to declared media'));
     if (!report.ok && !mapped.some((item) => item.status === 'invalid')) {
       diagnostics.push(invalid(document.id, 'document-finalization-failed', 'required document failed finalization; see its warnings for details'));
     }
