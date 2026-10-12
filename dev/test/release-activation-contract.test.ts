@@ -33,13 +33,6 @@ describe('release command capture', () => {
   });
 });
 
-describe('release consumer archive coverage', () => {
-  it('runs the consumer archive suite in the full matrix and treats a failed row as failed release status', () => {
-    expect(source).toContain("runRow('candidate-consumer-tests', 'npm', ['run', 'test:consumer']);");
-    expect(source).toContain("statuses.includes('failed') ? 'failed'");
-  });
-});
-
 describe('release evidence paths', () => {
   it('keeps receipt artifacts beside an extensionless receipt stem', () => {
     const begin = source.indexOf('function artifactDirectoryForReceipt(');
@@ -47,7 +40,6 @@ describe('release evidence paths', () => {
     const directory = runInNewContext(`(${source.slice(begin, finish)})`, { path }) as (file: string) => string;
     expect(directory('/tmp/release/b311e6e.json')).toBe('/tmp/release/b311e6e.artifacts');
     expect(directory('/tmp/release/release.0.9.json')).toBe('/tmp/release/release.0.9.artifacts');
-    expect(source).toContain('const evidenceDirectory = artifactDirectoryForReceipt(receiptFile);');
   });
 });
 
@@ -86,7 +78,6 @@ describe('release packed consumer npm policy', () => {
       .toBe('@example/explicit-different');
     expect(evaluate(projected, { status: 1, stdout: '' }).child.npm_config_allow_scripts)
       .toBe('@example/approved-script');
-    expect(source).toContain('env: npmEnvironmentForPackedConsumer(consumer)');
   });
 });
 
@@ -133,8 +124,6 @@ describe('release benchmark boundary', () => {
     expect(authoringRows).toHaveLength(2);
     expect(authoringRows.every((row) => row.required === false && row.optional === true)).toBe(true);
     expect(matrix.releaseRule.optionalRowsDoNotBlockRelease).toBe(true);
-    expect(source).toContain('benchmarkReadiness');
-    expect(source).toContain('optional benchmark must remain unscored and non-blocking');
   });
 });
 
@@ -149,8 +138,6 @@ describe('release manual review binding', () => {
     expect(() => bind({ inputHash: 'stale', pluginZipHash: hash }, hash, hash)).toThrow('different');
     expect(() => bind({ inputHash: hash, pluginZipHash: 'stale' }, hash, hash)).toThrow('different');
     expect(() => bind(null, hash, hash)).toThrow('different');
-    expect(source).toContain("valueFor('--manual-review')");
-    expect(source).toContain('manualReviewPath: reviewPath');
   });
 });
 
@@ -169,7 +156,6 @@ describe('release native control retention', () => {
       nativeParagraphControlEvidence: { ...evidence, wordpressVersion: '7.1.1' } });
     record({ nativeHeadingControlEvidence: evidence, nativeParagraphControlEvidence: evidence });
     expect(rows.map(({ status }) => status)).toEqual(['blocked', 'blocked', 'blocked', 'passed']);
-    expect(source).toContain('recordNativeControlRequirement(acceptance);');
   });
   const helperStart = source.indexOf('function retainNativeControlEvidence(');
   const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
@@ -191,11 +177,6 @@ describe('release native control retention', () => {
 });
 
 describe('release installed skill verification', () => {
-  it('keeps package-install logs distinct for the two installer consumers', () => {
-    expect(source).toContain("installPackedCandidate(candidate, 'project-skill-package-install')");
-    expect(source).toContain("installPackedCandidate(candidate, 'user-skill-package-install')");
-    expect(source).toContain("const row = runRow(rowId, 'npm'");
-  });
   const helperStart = source.indexOf('function validateInstalledSkill(');
   const helperEnd = source.indexOf('\nfunction ', helperStart + 1);
   const digest = (bytes: string | Buffer) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;

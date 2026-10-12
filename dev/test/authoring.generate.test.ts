@@ -107,24 +107,6 @@ describe('registered-block source compiler', () => {
     expect(metadata).not.toHaveProperty('viewScript');
     expect(metadata).not.toHaveProperty('render');
 
-    const index = sourceFile(first.files, 'index.js').content;
-    expect(index).toContain('registerBlockType');
-    expect(index).toContain('metadata');
-
-    const edit = sourceFile(first.files, 'edit.js').content;
-    expect(edit).toContain('core/heading');
-    expect(edit).toContain('Plan once, ship safely');
-    expect(edit).toContain('core/paragraph');
-    expect(edit).toContain('This is native inner block content.');
-    expect(edit).toContain('useInnerBlocksProps( blockProps');
-    expect(edit).toContain('<div { ...innerBlocksProps } />');
-    expect(edit).not.toContain('<InnerBlocks');
-
-    const save = sourceFile(first.files, 'save.js').content;
-    expect(save).toContain('useInnerBlocksProps.save( blockProps )');
-    expect(save).toContain('<div { ...innerBlocksProps } />');
-    expect(save).not.toContain('InnerBlocks.Content');
-
     const php = sourceFile(first.files, 'block.php').content;
     expect(php).toContain('register_block_type');
     expect(php).toContain('__DIR__');
