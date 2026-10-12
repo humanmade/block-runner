@@ -39,6 +39,10 @@ export interface SiteAssetIntent {
   kind: 'image' | 'font' | 'stylesheet' | 'other';
   /** Attachments require a later WordPress binding; theme files are copied as files. */
   role: 'theme-file' | 'attachment';
+  /** Human-supplied redistribution decision for a theme font. */
+  fontLicense?: { ownership: string; license: string; notice?: string };
+  /** Exact CSS url() token values declared by a stylesheet and their local theme-file assets. */
+  cssUrls?: Array<{ url: string; assetId: string }>;
 }
 
 export type SiteAssetAttribute = 'url' | 'attrs.url' | 'attrs.src' | 'attrs.id';
