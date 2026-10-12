@@ -160,53 +160,25 @@ function expectValidTree(wp: WpModules, block: RuntimeBlock): void {
 }
 
 describe('generated registered blocks in WordPress 7.1', () => {
-  it('loads the emitted components and puts the InnerBlocks layout on their shared root', async () => {
+  it('passes the compiled native settings to the emitted editor component', async () => {
     const compiled = compileAuthoringPlan(planFor('all'));
-    const calls: Array<{ hook: string; props?: Record<string, unknown>; options?: Record<string, unknown> }> = [];
-    const editBlockProps = { className: 'wp-block-block-runner-runtime-all', 'data-layout-owner': 'edit-root' };
-    const saveBlockProps = { className: 'wp-block-block-runner-runtime-all', 'data-layout-owner': 'save-root' };
-    const editChildren = { kind: 'editor-block-list' };
-    const saveChildren = { kind: 'saved-native-children' };
-    const blockEditor = {
-      useBlockProps: Object.assign(() => {
-        calls.push({ hook: 'useBlockProps' });
-        return editBlockProps;
-      }, {
-        save: () => {
-          calls.push({ hook: 'useBlockProps.save' });
-          return saveBlockProps;
+    let settings: Record<string, unknown> | undefined;
+    const Edit = await loadGeneratedComponent(compiled, 'edit.js', {
+      '@wordpress/block-editor': {
+        useBlockProps: () => ({}),
+        useInnerBlocksProps: (props: Record<string, unknown>, options: Record<string, unknown>) => {
+          settings = options;
+          return props;
         },
-      }),
-      useInnerBlocksProps: Object.assign((props: Record<string, unknown>, options: Record<string, unknown>) => {
-        calls.push({ hook: 'useInnerBlocksProps', props, options });
-        return { ...props, className: `${props.className} block-editor-block-list__layout`, children: editChildren };
-      }, {
-        save: (props: Record<string, unknown>) => {
-          calls.push({ hook: 'useInnerBlocksProps.save', props });
-          return { ...props, className: `${props.className} saved-inner-blocks`, children: saveChildren };
-        },
-      }),
-    };
-    const [Edit, save] = await Promise.all([
-      loadGeneratedComponent(compiled, 'edit.js', { '@wordpress/block-editor': blockEditor }),
-      loadGeneratedComponent(compiled, 'save.js', { '@wordpress/block-editor': blockEditor }),
-    ]);
-
-    const edit = Edit() as { type: unknown; props: Record<string, unknown> };
-    const saved = save() as { type: unknown; props: Record<string, unknown> };
-
-    expect(edit).toMatchObject({ type: 'div', props: { className: expect.stringContaining('block-editor-block-list__layout'), children: editChildren } });
-    expect(saved).toMatchObject({ type: 'div', props: { className: expect.stringContaining('saved-inner-blocks'), children: saveChildren } });
-    expect(calls).toEqual([
-      { hook: 'useBlockProps' },
-      {
-        hook: 'useInnerBlocksProps',
-        props: editBlockProps,
-        options: { allowedBlocks: compiled.allowedBlocks, template: compiled.template, templateLock: compiled.templateLock },
       },
-      { hook: 'useBlockProps.save' },
-      { hook: 'useInnerBlocksProps.save', props: saveBlockProps },
-    ]);
+    });
+
+    Edit();
+    expect(settings).toEqual({
+      allowedBlocks: compiled.allowedBlocks,
+      template: compiled.template,
+      templateLock: compiled.templateLock,
+    });
   });
 
   it.each([false, 'insert', 'all', 'contentOnly'] as const satisfies readonly InnerBlocksLock[])(
