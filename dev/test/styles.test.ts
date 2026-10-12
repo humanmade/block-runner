@@ -531,6 +531,21 @@ describe('styling — relaxed (default)', () => {
     expect(warningsOf(report.items).join('\n')).not.toContain('color: red');
     expect(report.sidecarCss!.match(/max-width:9px/g)).toHaveLength(1);
   });
+
+  it('accounts for class CSS on direct foreign-element fallbacks', async () => {
+    const input = `<style>.ink{color:red}</style><svg><text class="ink">label</text></svg>`;
+    const relaxed = await convert(input);
+    const open = await convert(input, { styling: 'open' });
+    const markup = '<svg><text class="ink">label</text></svg>';
+
+    expect(relaxed.output).toContain(markup);
+    expect(warningsOf(relaxed.items)).toContainEqual(
+      expect.stringContaining('color: red in .ink dropped — the <style> element is stripped'),
+    );
+    expect(open.output).toContain(markup);
+    expect(open.sidecarCss).toBe('.ink { color:red }\n');
+    expect(warningsOf(open.items).join('\n')).not.toContain('color: red');
+  });
 });
 
 describe('styling — unattributable CSS', () => {
