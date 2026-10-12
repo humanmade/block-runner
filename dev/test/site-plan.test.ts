@@ -166,6 +166,10 @@ describe('bounded native target route resolution',()=>{
   it.each(['/category/news','/feed','/wp-json'])('blocks native reserved endpoint %s',route=>{
     const {input,observed}=withRoute(route,'reserved');expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('route-conflict');
   });
+  it.each(['/Foo','/two words'])('retains the native noncanonical slug refusal for %s',route=>{
+    const {input,observed}=withRoute(route,'unsupported');observed.routing.routes[0]!.reason='route segment is not a canonical WordPress slug';
+    const result=plan(observed,input);expect(result.executable).toBe(false);expect(result.conflicts).toContainEqual(expect.objectContaining({code:'unsupported-route',message:'route segment is not a canonical WordPress slug'}));
+  });
   it('fails closed on unresolved/custom routes and absent cached/plain permalink configuration',()=>{
     const {input,observed}=withRoute('/members','unsupported');expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('unsupported-route');
     observed.routing.permalinkStructure='';observed.routing.rewriteRulesHash=null;expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('unsupported-routing');

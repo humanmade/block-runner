@@ -121,9 +121,17 @@ export const {
   writePluginOutput,
 } = library;
 
+export { planSite } from './site/plan.js';
+export { readSiteSnapshot } from './site/wpcli.js';
+export type { SitePlanOptions } from './site/plan.js';
+export type { SiteWpCliOptions } from './site/wpcli.js';
+export type { SitePlan, SiteSnapshot } from './site/plan-types.js';
+
 export { prepareSiteSource } from './site/input.js';
 export { compileSite, compileThemeDocuments } from './site/compile.js';
 export type { CompileSiteOptions, CompileSiteResult, CompileThemeDocumentsResult } from './site/compile.js';
+export { SiteWriteError, writeCompiledSite } from './site/write.js';
+export type { SiteWriteOptions, SiteWriteResult } from './site/write.js';
 
 export type * from './index-implementation.js';
 export type * from './site/types.js';

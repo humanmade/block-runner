@@ -67,6 +67,9 @@ function snapshotScript(siteId: string, desiredRoutes: string[]): string {
   const option = JSON.stringify(siteRecordOption(siteId));
   const routes = Buffer.from(JSON.stringify(desiredRoutes.filter(route=>route!=='/'))).toString('base64');
   return `
+// This process terminates after inspection; restoring core cron would spawn a write at shutdown.
+if (defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON) throw new Exception('alternate cron bootstrap is unsupported for read-only site planning');
+remove_action('shutdown','_wp_cron');
 $capabilities = array();
 foreach (array('edit_pages','publish_pages','edit_others_pages','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
 $entities = array(); $overrides = array(); $navigation = array();
@@ -132,6 +135,7 @@ foreach (array('do_parse_request','request','query_vars','parse_request','parse_
   }
 }
 $resolve = function($route) use ($cachedRules) {
+  foreach (explode('/',trim($route,'/')) as $segment) if ($segment !== sanitize_title_with_dashes($segment,'','save')) return array('route'=>$route,'kind'=>'unsupported','matchedRule'=>null,'queryFingerprint'=>hash('sha256',$route),'reason'=>'route segment is not a canonical WordPress slug');
   $saved = array(); foreach (array('wp','wp_query','wp_the_query','post','wp_rewrite') as $key) $saved[$key] = array_key_exists($key,$GLOBALS) ? array(true,$GLOBALS[$key]) : array(false,null);
   $savedServer = $_SERVER; $savedGet = $_GET; $savedPost = $_POST;
   $savedDispatch = $GLOBALS['wp_filter']['parse_request'] ?? null;
@@ -157,9 +161,11 @@ $resolve = function($route) use ($cachedRules) {
       if (array_diff(array_keys($matched),$allowed)) { $base['reason'] = 'custom rewrite query variables are unsupported'; return $base; }
       if (isset($matched['rest_route'])) { $base['kind']='reserved'; $base['reason']='native REST endpoint'; return $base; }
       $query = new WP_Query(); $GLOBALS['wp_query'] = $query; $GLOBALS['wp_the_query'] = $query;
-      $query->query(array_merge($vars,array('posts_per_page'=>1,'no_found_rows'=>true,'suppress_filters'=>true,'cache_results'=>false,'update_post_meta_cache'=>false,'update_post_term_cache'=>false,'lazy_load_term_meta'=>false)));
+      $query->parse_query(array_merge($vars,array('posts_per_page'=>1,'no_found_rows'=>true,'suppress_filters'=>true,'cache_results'=>false,'update_post_meta_cache'=>false,'update_post_term_cache'=>false,'lazy_load_term_meta'=>false)));
       if ($query->is_archive || $query->is_feed || $query->is_search || $query->is_date || $query->is_author || $query->is_tax || $query->is_category || $query->is_tag || $query->is_post_type_archive || $query->is_paged || $query->is_embed || $query->is_trackback || $query->is_robots || $query->is_favicon) { $base['kind']='reserved'; $base['reason']='native archive, taxonomy, or endpoint'; return $base; }
       if (array_key_exists('page',$matched) && $matched['page'] !== '') { $base['kind']='reserved'; $base['reason']='native page pagination endpoint'; return $base; }
+      // Reserved route flags are classified before get_posts can materialize taxonomy caches.
+      if ($query->is_singular()) $query->get_posts();
       if ($query->is_singular() && $query->posts) { $base['kind']='singular'; $base['postId']=(int)$query->posts[0]->ID; $base['postType']=$query->posts[0]->post_type; return $base; }
       $pageSlot = $matched; if (isset($pageSlot['page']) && $pageSlot['page'] === '') unset($pageSlot['page']);
       if ($request->matched_rule && count(array_diff(array_keys($pageSlot),array('pagename','name'))) === 0 && (isset($matched['pagename']) || isset($matched['name']))) {
