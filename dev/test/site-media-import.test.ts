@@ -1,7 +1,9 @@
 import { copyFile, mkdir, mkdtemp, readFile, realpath, symlink, unlink, writeFile } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import os from 'node:os';
 import path from 'node:path';
+import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { importPlannedSiteAttachment, SiteMediaImportOutcomeUnknown } from '../../src/site/media-import.js';
@@ -11,6 +13,7 @@ import type { PreparedSiteSource, ThemeArtifact } from '../../src/site/types.js'
 
 const target = { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 1 };
 const themeSlug = 'sample';
+const run = promisify(execFile);
 
 function snapshot(): SiteSnapshot {
   return {
@@ -119,7 +122,7 @@ describe('private declared attachment import primitive', () => {
     expect(calls).toBe(1);
   });
 
-  it('returns only the exact new owned attachment and observed native metadata', async () => {
+  it('returns only the exact new owned attachment and observed native metadata with matching PHP baseline hashes', async ({ skip }) => {
     const ready = await fixture();
     const hash = ready.source.assets[0]!.sha256;
     const after = createdSnapshot(ready.plan, hash);
@@ -145,6 +148,24 @@ describe('private declared attachment import primitive', () => {
     expect(payload).not.toBeNull();
     expect(JSON.parse(Buffer.from(payload![1]!, 'base64').toString('utf8'))).toMatchObject({ assetSha256: hash, relativePath: 'media/hero.png' });
     expect(script).not.toContain(Buffer.from(await readFile(path.join(ready.root, 'media/hero.png'))).toString('base64'));
+    const legacyExpression = script.match(/\$legacyHash\s*=\s*([^;]+);/)?.[1];
+    const ownershipExpression = script.match(/'lastAppliedHash'=>(.+?), 'assetSha256'/)?.[1];
+    expect(legacyExpression).toBeDefined();
+    expect(ownershipExpression).toBeDefined();
+    const php = `function wp_json_encode($value) { return json_encode($value); }
+$expected = array('assetSha256'=>'${hash}');
+$state = array('sha256'=>'${hash}');
+$legacyHash = ${legacyExpression};
+$ownershipHash = ${ownershipExpression};
+echo json_encode(array($legacyHash, $ownershipHash));`;
+    let hashOutput: string;
+    try {
+      ({ stdout: hashOutput } = await run('php', ['-r', php], { encoding: 'utf8' }));
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === 'ENOENT') return skip();
+      throw error;
+    }
+    expect(JSON.parse(hashOutput)).toEqual([managedStateHash({ sha256: hash }), managedStateHash({ sha256: hash })]);
     expect(binding).toMatchObject({ id: 44, url: 'https://example.test/uploads/hero-3.png', observedSize: { width: 1200, height: 800 },
       imageSizes: { full: { url: 'https://example.test/uploads/hero-3.png', width: 1200, height: 800 } } });
   });

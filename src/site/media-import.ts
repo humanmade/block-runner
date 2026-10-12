@@ -248,7 +248,7 @@ $result = (function() use ($expected, &$attempted) {
       if (!isset($owned['assetSha256'])) {
         $existingOriginal = wp_get_original_image_path($existing->ID); if (!$existingOriginal) $existingOriginal = get_attached_file($existing->ID);
         $existingHash = $existingOriginal && is_file($existingOriginal) && !is_link($existingOriginal) ? hash_file('sha256', $existingOriginal) : null;
-        $legacyHash = hash('sha256', wp_json_encode(array('sha256'=>$expected['assetSha256'])));
+        $legacyHash = 'sha256:' . hash('sha256', wp_json_encode(array('sha256'=>$expected['assetSha256'])));
         if ($existingHash === $expected['assetSha256'] && ($owned['lastAppliedHash'] ?? null) === $legacyHash) return array('status'=>'refused');
       }
     }
@@ -269,7 +269,7 @@ $result = (function() use ($expected, &$attempted) {
     if (!$original || !is_file($original) || is_link($original) || !hash_equals($expected['assetSha256'], hash_file('sha256', $original))) throw new Exception('original-byte readback');
     $state = array('sha256'=>$expected['assetSha256']);
     $ownership = array('version'=>1, 'siteId'=>$expected['siteId'], 'entityId'=>$expected['entityId'], 'kind'=>'attachment',
-      'lastAppliedHash'=>hash('sha256', wp_json_encode($state)), 'assetSha256'=>$expected['assetSha256']);
+      'lastAppliedHash'=>'sha256:' . hash('sha256', wp_json_encode($state)), 'assetSha256'=>$expected['assetSha256']);
     if (!add_post_meta((int)$attachmentId, '${SITE_OWNERSHIP_META}', $ownership, true)) throw new Exception('ownership write');
     $stored = get_post_meta((int)$attachmentId, '${SITE_OWNERSHIP_META}', true);
     if (!is_array($stored) || ($stored['siteId'] ?? null) !== $expected['siteId'] || ($stored['entityId'] ?? null) !== $expected['entityId']
