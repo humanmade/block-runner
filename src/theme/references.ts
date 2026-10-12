@@ -1,5 +1,6 @@
 import path from 'node:path';
 import { parseMarkup } from '../headless/wp.js';
+import { parseThemeJsonSettings } from '../tokens/resolver.js';
 import type { ReportItem, WpBlock } from '../types.js';
 import type { ThemeMarkupFile } from './folders.js';
 
@@ -18,16 +19,10 @@ export async function findThemeReferenceIssues(
 ): Promise<ReportItem[]> {
   const references: ReportItem[] = [];
   const registry = presetRegistry(themeJson);
-  const partSlugs = new Set(files
-    .filter((file) => file.kind === 'part' && !file.skipReason)
-    .map((file) => file.file.replace(/^parts\//, '').replace(/\.html$/i, '')));
-  const patternSlugs = new Set(files
-    .filter((file) => file.kind === 'pattern' && file.skipReason !== 'theme-unsafe-target')
-    .flatMap((file) => file.header?.slug ? [file.header.slug] : []));
   const skippedKinds = new Set<PresetKind>();
 
   for (const entry of templateParts(themeJson)) {
-    if (!partSlugs.has(entry.name)) {
+    if (!hasPartFile(files, entry.name)) {
       references.push({
         status: 'warning',
         reason: `theme.json templateParts entry "${entry.name}" has no matching parts/${entry.name}.html file.`,
@@ -85,12 +80,13 @@ export async function findThemeReferenceIssues(
               slug: attributes.slug,
               theme: referencedTheme,
             });
-          } else if (!partSlugs.has(attributes.slug)) {
+          } else if (!hasPartFile(files, attributes.slug)) {
             warn('unresolved-template-part', `Template part "${attributes.slug}" has no matching parts/${attributes.slug}.html file.`, {
               slug: attributes.slug,
             });
           }
-        } else if (block.name === 'core/pattern' && typeof attributes.slug === 'string' && !patternSlugs.has(attributes.slug)) {
+        } else if (block.name === 'core/pattern' && typeof attributes.slug === 'string'
+          && !hasPatternFile(files, attributes.slug)) {
           warn('unresolved-pattern', `Pattern "${attributes.slug}" has no matching Slug header in patterns/*.php.`, {
             slug: attributes.slug,
           });
@@ -126,13 +122,14 @@ function presetRegistry(themeJson: unknown): PresetRegistry {
   const color = isRecord(settings.color) ? settings.color : {};
   const typography = isRecord(settings.typography) ? settings.typography : {};
   const spacing = isRecord(settings.spacing) ? settings.spacing : {};
+  const parsed = parseThemeJsonSettings(settings as Parameters<typeof parseThemeJsonSettings>[0]);
   return {
     slugs: {
-      color: presetSlugs(color.palette),
-      gradient: presetSlugs(color.gradients),
-      'font-family': presetSlugs(typography.fontFamilies),
-      'font-size': presetSlugs(typography.fontSizes),
-      spacing: presetSlugs(spacing.spacingSizes),
+      color: new Set(Object.keys(parsed.colors)),
+      gradient: new Set(Object.keys(parsed.gradients ?? {})),
+      'font-family': new Set(Object.keys(parsed.fonts)),
+      'font-size': new Set(Object.keys(parsed.fontSizes)),
+      spacing: new Set(Object.keys(parsed.spacing)),
     },
     defaults: {
       color: color.defaultPalette !== false,
@@ -144,9 +141,15 @@ function presetRegistry(themeJson: unknown): PresetRegistry {
   };
 }
 
-function presetSlugs(value: unknown): Set<string> {
-  if (!Array.isArray(value)) return new Set();
-  return new Set(value.flatMap((entry) => isRecord(entry) && typeof entry.slug === 'string' ? [entry.slug] : []));
+function hasPartFile(files: ThemeMarkupFile[], slug: string): boolean {
+  const expected = `parts/${slug}.html`;
+  return files.some((file) => file.kind === 'part' && !file.skipReason && file.file === expected);
+}
+
+function hasPatternFile(files: ThemeMarkupFile[], slug: string): boolean {
+  return files.some((file) => file.kind === 'pattern'
+    && file.skipReason !== 'theme-unsafe-target'
+    && file.header?.slug === slug);
 }
 
 function templateParts(themeJson: unknown): Array<{ name: string }> {

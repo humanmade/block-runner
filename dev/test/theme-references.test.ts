@@ -109,6 +109,12 @@ describe('theme folder references', () => {
       }),
     ]));
     expect(references.filter(({ code }) => code === 'unresolved-template-part')).toHaveLength(2);
+
+    const noncanonical = `\n${await readFile(template, 'utf8')}`;
+    await writeFile(template, noncanonical);
+    const strictFix = await runCli(['fix', project, '--write', '--strict', '--json']);
+    expect(strictFix.code).toBe(1);
+    expect(await readFile(template, 'utf8')).toBe(noncanonical);
   });
 
   it('parses gradient presets and ignores malformed preset-array shapes', () => {
