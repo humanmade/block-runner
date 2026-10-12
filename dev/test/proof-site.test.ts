@@ -109,6 +109,6 @@ describe('controlled site proof', () => {
     const seeded = JSON.parse(Buffer.from(encoded, 'base64').toString());
     if (negativeControl === 'missing-content') expect(seeded.pages[0].content).toBe('');
     if (negativeControl === 'broken-asset') expect(seeded.pages[0].content).toContain('missing-proof-image');
-    if (negativeControl === 'broken-mobile') expect(await readFile(path.join(input.root, 'staged/sample-studio/style.css'), 'utf8')).toContain('pointer-events:none');
+    if (negativeControl === 'broken-mobile') expect(await readFile(path.join(input.root, 'staged/sample-studio/assets/styles/site.css'), 'utf8')).toContain('pointer-events:none');
   });
 });

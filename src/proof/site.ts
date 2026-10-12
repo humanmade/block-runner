@@ -130,18 +130,32 @@ export async function runSiteProof(input: {
     const result = await compileSite(site.source, { attachmentBindings: bindings, themeAssetBaseUrl });
     if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
     compiled = result.site;
+    let accordionSeeded = false;
+    let mobileSeeded = false;
+    const mobileStylesheet = compiled.assets.find((file) => file.path.endsWith('.css'))?.path;
     for (const file of compiled.themeFiles) {
       const destination = path.join(input.stagedTheme, file.path);
       await mkdir(path.dirname(destination), { recursive: true });
       let bytes = file.bytes;
-      if (input.negativeControl === 'accordion-mismatch' && file.path.endsWith('.html') && Buffer.from(bytes).toString().includes('wp:accordion-heading')) bytes = Buffer.from(Buffer.from(bytes).toString().replace(/(wp:accordion-heading\s*\{[^}]*"iconPosition":)"left"/, '$1"right"'));
-      if (input.negativeControl === 'broken-mobile' && file.path === 'style.css') bytes = Buffer.concat([Buffer.from(bytes), Buffer.from('\n@media(max-width:600px){.wp-block-navigation__responsive-container-open{pointer-events:none!important}}\n')]);
+      if (input.negativeControl === 'accordion-mismatch' && !accordionSeeded && file.path.endsWith('.html')) {
+        const original = Buffer.from(bytes).toString();
+        const changed = original.replace(/(wp:accordion-heading\s*\{[^}]*"iconPosition":)"(left|right)"/, (_match, prefix, value) => `${prefix}"${value === 'left' ? 'right' : 'left'}"`);
+        accordionSeeded = original !== changed;
+        bytes = Buffer.from(changed);
+      }
+      if (input.negativeControl === 'broken-mobile' && file.path === mobileStylesheet) { mobileSeeded = true; bytes = Buffer.concat([Buffer.from(bytes), Buffer.from('\n@media(max-width:600px){.wp-block-navigation__responsive-container-open{pointer-events:none!important}}\n')]); }
       await writeFile(destination, bytes);
     }
+    if (input.negativeControl === 'accordion-mismatch' && !accordionSeeded) throw new Error('Accordion negative requires an explicitly declared iconPosition; no mutation applied');
+    if (input.negativeControl === 'broken-mobile' && !mobileSeeded) throw new Error('Mobile negative requires a declared enqueued stylesheet; no mutation applied');
     theme = await prepareThemeProof(input.stagedTheme, evidence);
     const seededPages = topologicalSitePages(structuredClone(compiled.pages));
     if (input.negativeControl === 'missing-content') seededPages[0]!.content = '';
-    if (input.negativeControl === 'broken-asset') seededPages[0]!.content = seededPages[0]!.content.replace(/src="[^"]+"/, `src="${input.baseUrl}/missing-proof-image.png"`);
+    if (input.negativeControl === 'broken-asset') {
+      const page = seededPages.find((item) => /src="[^"]+"/.test(item.content));
+      if (!page) throw new Error('Asset negative requires a declared native image; no mutation applied');
+      page.content = page.content.replace(/src="[^"]+"/, `src="${input.baseUrl}/missing-proof-image.png"`);
+    }
     const ids = JSON.parse(await execute(siteFixturePhp(marker, 'pages', { pages: seededPages, homePageId: site.source.sourceIntent.homePageId })));
     const identity = await evidence.putJson({ sourceHash: site.sourceHash, bundleHash: site.bundleHash, targetBuildHash: compiled.artifactIdentity, negativeControl: input.negativeControl, targetBindingFingerprint: compiled.targetBindingFingerprint, bindings, themeSnapshot: theme.snapshot });
     gates.site_fixture = { status: 'pass', evidence: [identity] };

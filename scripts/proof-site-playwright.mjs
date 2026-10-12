@@ -179,8 +179,13 @@ async function main() {
           if (mobile) await nav.locator('.wp-block-navigation__responsive-container-open').click();
           const submenu = nav.locator('.wp-block-navigation-submenu').first();
           const toggle = submenu.locator('button').first();
-          await toggle.focus();
-          await page.keyboard.press('Enter');
+          if (await toggle.isVisible()) {
+            await toggle.focus();
+            await page.keyboard.press('Enter');
+          } else {
+            await submenu.locator('a').first().focus();
+            await submenu.hover();
+          }
           const opened = await submenu.locator('.wp-block-navigation__submenu-container').isVisible();
           const link = submenu.locator('a').last();
           const href = await link.getAttribute('href');
@@ -188,7 +193,11 @@ async function main() {
           await page.waitForURL((url) => url.pathname.replace(/\/$/, '') === new URL(href, input.baseUrl).pathname.replace(/\/$/, ''));
           const followed = (await page.locator('.wp-block-post-content').innerText()).length > 0;
           await page.goto(input.baseUrl);
-          let closed = true;
+          let closed;
+          if (!mobile) {
+            await page.locator('.wp-block-post-content').first().hover();
+            closed = !(await page.locator('.wp-block-navigation__submenu-container').first().isVisible());
+          }
           if (mobile) {
             await page.locator('.wp-block-navigation__responsive-container-open').first().click();
             await page.locator('.wp-block-navigation__responsive-container-close').first().click();
