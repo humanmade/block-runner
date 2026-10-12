@@ -47,6 +47,10 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     else owned.set(key, entity);
   }
 
+  for (const [key, id] of Object.entries(snapshot.siteRecord?.entities ?? {})) {
+    const entity = owned.get(key);
+    if (!entity || entity.id !== id) issue(`/target/entities/${id}`, 'missing-owned-id', `previously owned entity ${key} is missing or its metadata changed`);
+  }
   const desiredKeys = new Set<string>();
   // Attachments precede pages; new bindings remain logical pending references.
   for (const asset of source.assets.filter(asset => asset.role === 'attachment').sort((a,b) => a.id.localeCompare(b.id))) {
@@ -64,6 +68,9 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   function depth(id: string): number { const page = intent.pages.find(item=>item.id===id); return page?.parentId ? 1 + depth(page.parentId) : 0; }
   for (const page of orderedPages) {
     const key = `page:${page.id}`; desiredKeys.add(key);
+    const parentRoute = page.parentId ? intent.pages.find(candidate => candidate.id === page.parentId)?.route : '/';
+    const routePrefix = page.route === '/' ? '/' : (page.route.slice(0, page.route.lastIndexOf('/')) || '/');
+    if (routePrefix !== parentRoute) issue(`/pages/${page.id}/route`, 'route-parent-mismatch', 'route prefix must match the explicitly declared parent route; inferred parents are unsupported');
     const existing = owned.get(key);
     const occupied = snapshot.entities.find(entity => entity.kind === 'page' && normalizeRoute(entity.route) === normalizeRoute(page.route) && entity.id !== existing?.id);
     if (occupied) issue(`/pages/${page.id}/route`, 'route-conflict', `route is occupied by page ID ${occupied.id}; no adoption is permitted`);
@@ -75,7 +82,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
       title: page.title, slug: page.route === '/' ? page.id : page.route.split('/').at(-1)!,
       parentId: page.parentId ? (pageIds.get(page.parentId) ?? { pendingPageId: page.parentId }) : 0,
       template: page.template, status: page.status ?? 'draft',
-      ...(output ? { content: output.content } : {}),
+      ...(output && pendingBindings.length === 0 ? { content: output.content } : {}),
     };
     const needsFinalization = pendingBindings.length > 0 || Boolean(pendingParent);
     const same = existing && !needsFinalization && hashCanonicalJson(existing.state) === hashCanonicalJson(desired);

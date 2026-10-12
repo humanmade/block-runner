@@ -25,7 +25,7 @@ export interface SiteSnapshot {
   overrides: Array<{ id: number; kind: string; theme: string[]; content: string }>;
   navigation: Array<{ id: number; content: string; status: string }>;
   options: Record<string, unknown>;
-  siteRecord: { version: 1; siteId: string; options: Record<string, { lastAppliedValue: unknown }>; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed' } | null } | null;
+  siteRecord: { version: 1; siteId: string; entities: Record<string, number>; options: Record<string, { lastAppliedValue: unknown }>; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed' } | null } | null;
 }
 export interface SitePlanOperation {
   action: 'create' | 'update' | 'retain' | 'set-option';

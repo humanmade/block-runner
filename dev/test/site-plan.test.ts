@@ -52,12 +52,21 @@ describe('bounded site reconciliation',()=>{
     const result=plan(observed,input);expect(result.executable).toBe(true);expect(result.operations.find(op=>op.kind==='page')).toMatchObject({action:'update',id:14});
   });
   it('blocks duplicate keys, changed theme/runtime, insufficient capability and outstanding unknown operations',()=>{
-    const observed=snapshot();const duplicate=owned();duplicate.id=15;observed.entities=[owned(),duplicate];observed.theme.slug='wrong';observed.runtime.wordpress='7.0';observed.principal.capabilities.manage_options=false;observed.siteRecord={version:1,siteId:'sample',options:{},operation:{token:'x',planHash:'x',status:'outcome_unknown'}};
+    const observed=snapshot();const duplicate=owned();duplicate.id=15;observed.entities=[owned(),duplicate];observed.theme.slug='wrong';observed.runtime.wordpress='7.0';observed.principal.capabilities.manage_options=false;observed.siteRecord={version:1,siteId:'sample',entities:{},options:{},operation:{token:'x',planHash:'x',status:'outcome_unknown'}};
     expect(plan(observed).conflicts.map(item=>item.code)).toEqual(expect.arrayContaining(['duplicate-ownership','theme-mismatch','runtime-mismatch','missing-capability','outstanding-operation']));
   });
   it('retains omitted owned entities and blocks changed explicitly managed options',()=>{
-    const observed=snapshot();const orphan=owned();orphan.route='/old';orphan.ownership[0]!.entityId='old';observed.entities=[orphan];observed.siteRecord={version:1,siteId:'sample',options:{show_on_front:{lastAppliedValue:'page'}},operation:null};
+    const observed=snapshot();const orphan=owned();orphan.route='/old';orphan.ownership[0]!.entityId='old';observed.entities=[orphan];observed.siteRecord={version:1,siteId:'sample',entities:{},options:{show_on_front:{lastAppliedValue:'page'}},operation:null};
     const result=plan(observed);expect(result.operations).toContainEqual(expect.objectContaining({action:'retain',id:14,desired:{orphaned:true}}));expect(result.conflicts.some(item=>item.code==='managed-option-changed')).toBe(true);
+  });
+
+  it('blocks deleted owned IDs, duplicate metadata rows and database theme shadows',()=>{
+    const observed=snapshot();const entity=owned();entity.ownership.push({...entity.ownership[0]!});observed.entities=[entity];observed.siteRecord={version:1,siteId:'sample',entities:{'page:gone':99},options:{},operation:null};observed.overrides=[{id:55,kind:'wp_template',theme:['sample'],content:'Editor override'}];
+    expect(plan(observed).conflicts.map(item=>item.code)).toEqual(expect.arrayContaining(['missing-owned-id','duplicate-ownership-metadata','theme-shadow']));
+  });
+  it('blocks external native navigation and synced-pattern dependencies',()=>{
+    const input=source();input.sourceIntent.templates.index!.body.blocks=[{block:'core/navigation',attrs:{ref:123}},{block:'core/block',attrs:{ref:124}}];
+    expect(plan(snapshot(),input).conflicts.map(item=>item.code)).toEqual(expect.arrayContaining(['unsupported-navigation-reference','unsupported-synced-pattern-reference']));
   });
   it('keeps attachment imports pending without manufactured WordPress IDs',()=>{
     const input=source();input.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment',sha256:'aaa',bytes:new Uint8Array()}];input.sourceIntent.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment'}];input.sourceIntent.assetUses=[{documentId:'page:home',nodePath:[0],attribute:'attrs.id',assetId:'photo'}];
