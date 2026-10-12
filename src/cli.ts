@@ -45,6 +45,7 @@ import { writeCompiledSite } from './site/write.js';
 import type { SiteAttachmentBinding } from './site/types.js';
 import { readStableRegularFile } from './publication.js';
 import { inspectSiteDrift } from './site/drift.js';
+import { confirmSitePull, previewSitePull, type SitePullSelection } from './site/pull.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -136,6 +137,17 @@ interface SiteCompileCliOptions {
   themeAssetBaseUrl?: string;
   themeOnly?: boolean;
   strict?: boolean;
+  json?: boolean;
+}
+
+interface SitePullCliOptions {
+  out: string;
+  select: string[];
+  confirm?: string;
+  wpPath: string;
+  wpUrl?: string;
+  wpBinary?: string;
+  wpUser?: string;
   json?: boolean;
 }
 
@@ -317,6 +329,35 @@ siteCommand.command('drift <bundle>')
       console.log('WordPress and bundle files were inspected without writing site state or EvidenceStore data.');
     }
     process.exitCode = report.status === 'clean' ? 0 : report.status === 'actionable' ? 1 : 2;
+  });
+
+siteCommand.command('pull <bundle>')
+  .description('Preview selected saved theme templates or parts, then confirm their gated source adoption.')
+  .requiredOption('--out <new-preview-dir>', 'new directory for the staged preview, before-bytes and publication journal')
+  .option('--select <kind:theme//id:wp-id>', 'exact custom template or part selection; repeat for multiple entities', (value: string, previous: string[] = []) => [...previous, value], [])
+  .option('--confirm <sha256>', 'publish the exact previously staged preview hash')
+  .requiredOption('--wp-path <path>', 'local WordPress installation path')
+  .option('--wp-url <url>', 'explicit target URL, including multisite selection')
+  .option('--wp-binary <path>', 'local WP-CLI executable path')
+  .option('--wp-user <id-or-login>', 'WordPress principal; otherwise use configured WP-CLI principal')
+  .option('--json', 'emit the machine-readable pull result')
+  .action(async (bundle: string, options: SitePullCliOptions) => {
+    const selection = options.select.map(parseSitePullSelection);
+    if (options.confirm && selection.length > 0) throw new Error('do not provide --select with --confirm; confirmation uses the staged selection');
+    const result = options.confirm
+      ? await confirmSitePull(bundle, options.out, options.confirm, options)
+      : await previewSitePull(bundle, options.out, selection, options);
+    if (options.json) console.log(JSON.stringify(result, null, 2));
+    else {
+      console.log(`Site pull ${result.mode}: ${result.ok ? 'ready' : 'blocked'}`);
+      console.log(`Preview: ${result.directory}`);
+      if (result.confirmationHash) console.log(`Confirmation: ${result.confirmationHash}`);
+      if (result.noOp) console.log('Selected saved markup is already equivalent to the retained source; no files were written.');
+      for (const file of result.files) console.log(`- ${file.changed ? 'changed' : 'equivalent'} ${file.path}: ${file.beforeSha256} -> ${file.afterSha256}`);
+      for (const item of result.diagnostics) console.error(`- ${item.status} ${item.code ?? 'theme-validation'}: ${item.reason}`);
+      if (result.journal) console.log(`Journal: ${result.journal}`);
+    }
+    if (!result.ok) process.exitCode = 1;
   });
 
 addTokenOptions(
@@ -911,6 +952,20 @@ function addTokenOptions(command: Command, options: { styling?: boolean } = {}):
     : withTokens
         .option('--styling <rung>', 'styling ceiling: strict, relaxed (default), open')
         .option('--css-out <path>', 'write sidecar CSS emitted by --styling open to a file');
+}
+
+function parseSitePullSelection(value: string): SitePullSelection {
+  const first = value.indexOf(':');
+  const last = value.lastIndexOf(':');
+  const kind = value.slice(0, first);
+  const entityId = value.slice(first + 1, last);
+  const rawId = value.slice(last + 1);
+  if (first < 0 || last <= first || !['template', 'part'].includes(kind)
+    || !/^[-a-z0-9]+\/\/[A-Za-z0-9._/-]+$/.test(entityId)
+    || !/^[1-9]\d*$/.test(rawId) || !Number.isSafeInteger(Number(rawId))) {
+    throw new Error('pull selection must be template:theme//logical-id:positive-wp-id or part:theme//logical-id:positive-wp-id');
+  }
+  return { kind: kind as SitePullSelection['kind'], entityId, wpId: Number(rawId) };
 }
 
 function normalizeOptions(options: CliOptions): CommonOptions {

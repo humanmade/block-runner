@@ -132,6 +132,16 @@ async function sourceFirstFixture() {
   return {intentFile,input,observed,artifact:compiled.artifact};
 }
 describe('source-first plan orchestration and CLI',()=>{
+  it('refuses an unreconciled generated bundle before producing destination operations',async()=>{
+    const {input,observed,artifact}=await sourceFirstFixture();const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-unreconciled-'));const bundle=path.join(root,'bundle');
+    await writeCompiledSite(bundle,input.source,artifact);
+    const manifestFile=path.join(bundle,'site.manifest.json');const manifest=JSON.parse(await readFile(manifestFile,'utf8'));manifest.sourceIntentState='unreconciled';await writeFile(manifestFile,`${JSON.stringify(manifest,null,2)}\n`);
+    const before=await readFile(manifestFile);const calls:string[][]=[];
+    const result=await planSite(bundle,{wpPath:'/wp'},async(_,args)=>{calls.push(args);return JSON.stringify(observed);});
+    expect(result).toMatchObject({executable:false,operations:[],conflicts:[expect.objectContaining({code:'source-intent-out-of-date'})]});
+    expect(calls).toHaveLength(1);
+    expect(await readFile(manifestFile)).toEqual(before);
+  });
   it('plans a first install with original pending media, finalized other pages and zero WP writes',async()=>{
     const {intentFile,observed}=await sourceFirstFixture();const calls:string[][]=[];
     const result=await planSite(intentFile,{assetRoot:fixtureRoot,wpPath:'/wp',wpUser:'7',strict:true},async(_,args)=>{calls.push(args);return JSON.stringify(observed);});
