@@ -1,4 +1,4 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -28,6 +28,7 @@ import {
   compareThemeMarkup,
   copyThemeSnapshot,
   effectiveWpEnvConfig,
+  effectiveWpEnvUrl,
   pinLocalPluginDirectories,
   prepareThemeProof,
   resolveLocalSource,
@@ -1406,68 +1407,7 @@ function createRuntime(
       }
 
       if (context.gate === 'theme_roundtrip' && preparedTheme) {
-        const result = await runThemeBrowserProof(preparedTheme, themePlaywrightHelper, command, options, sourceThemeConfig);
-        const log = await logged(result.command);
-        if (!result.report) return { status: 'blocked', reason: 'Site Editor theme save proof did not produce a report.', evidence: [log] };
-        const browserObservation = result.report.browser;
-        if (isRecord(browserObservation)) {
-          if (typeof browserObservation.version === 'string') environment.browser.version = browserObservation.version;
-          if (typeof browserObservation.revision === 'string') environment.browser.revision = browserObservation.revision;
-        }
-        const files = Array.isArray(result.report.files) ? result.report.files as Array<Record<string, unknown>> : [];
-        const expectedByName = new Map(preparedTheme.files.map((file) => [file.file, file]));
-        const reportByName = new Map(files.map((file) => [String(file.file ?? ''), file]));
-        const exactFileSet = files.length === preparedTheme.files.length
-          && reportByName.size === files.length
-          && preparedTheme.files.every((file) => reportByName.has(file.file))
-          && files.every((file) => expectedByName.has(String(file.file ?? '')));
-        const comparedFiles = exactFileSet ? await Promise.all(preparedTheme.files.map(async (expected) => {
-          const actual = reportByName.get(expected.file)!;
-          const fixedSource = await canonicalize(expected.content);
-          const fixedMarkup = fixedSource.output ?? expected.content;
-          const loaded = typeof actual.loadedRaw === 'string'
-            ? compareThemeMarkup(expected.content, actual.loadedRaw, preparedTheme!.slug)
-            : undefined;
-          const saved = typeof actual.savedRaw === 'string'
-            ? compareThemeMarkup(expected.content, actual.savedRaw, preparedTheme!.slug)
-            : undefined;
-          const fixed = typeof actual.savedRaw === 'string'
-            ? compareThemeMarkup(fixedMarkup, actual.savedRaw, preparedTheme!.slug)
-            : undefined;
-          const serialized = typeof actual.editorSave === 'object' && actual.editorSave !== null
-            && typeof (actual.editorSave as Record<string, unknown>).serialized === 'string'
-            && typeof actual.savedRaw === 'string'
-            ? compareExactMarkup((actual.editorSave as Record<string, unknown>).serialized as string, actual.savedRaw)
-            : undefined;
-          const passed = actual.status === 'pass' && loaded?.equal === true && saved?.equal === true && serialized?.equal === true;
-          if (loaded) actual.sourceLoadComparison = loaded;
-          if (saved) actual.sourceComparison = saved;
-          if (fixed) actual.fixComparison = fixed;
-          if (serialized) actual.editorRestComparison = serialized;
-          actual.status = passed ? 'pass' : 'fail';
-          if (!passed) {
-            actual.reason = loaded?.equal !== true
-              ? 'Loaded source entity differed from the source file after removing only the matching theme attribute.'
-              : saved?.equal !== true
-                ? 'Saved REST content differed from the source after removing only the matching theme attribute.'
-                : serialized?.equal !== true
-                  ? 'Fresh REST content.raw differed from the editor serialization saved through core data.'
-                  : actual.reason ?? 'Browser proof did not confirm source loading and persistence.';
-            const firstDifferenceByte = loaded?.firstDifferenceByte ?? saved?.firstDifferenceByte ?? serialized?.firstDifferenceByte;
-            if (firstDifferenceByte !== undefined) actual.firstDifferenceByte = firstDifferenceByte;
-          }
-          return actual;
-        })) : [];
-        result.report.files = comparedFiles;
-        const reportEvidence = await evidence.putJson(result.report);
-        const passed = result.command.exitCode === 0 && exactFileSet && comparedFiles.every((file) => file.status === 'pass');
-        const completedWithDifferences = exactFileSet && comparedFiles.some((file) => file.status === 'fail');
-        return {
-          status: passed ? 'pass' : completedWithDifferences ? 'fail' : 'blocked',
-          reason: passed ? undefined : completedWithDifferences ? 'One or more theme templates or parts changed during a Site Editor save.' : 'Site Editor theme save proof did not produce a complete unique per-file result.',
-          evidence: [log, reportEvidence],
-          details: result.report,
-        };
+        return runThemeRoundtripWithRuntimeMarker(preparedTheme, themePlaywrightHelper, command, options, sourceThemeConfig, wpEnv, logged, evidence, environment);
       }
 
       // Deactivation is intentionally after the frontend/browser snapshot. The checks distinguish
@@ -1530,7 +1470,8 @@ async function runThemeBrowserProof(
   helper: string,
   command: ProofCommandRunner,
   options: ProofRunOptions,
-  wpEnvConfig?: ThemeWpEnvConfig,
+  wpEnvConfig: ThemeWpEnvConfig | undefined,
+  runtimeMarker: string,
 ): Promise<{ command: ProofCommandResult; report?: Record<string, unknown> }> {
   try {
     await access(helper, fsConstants.R_OK);
@@ -1547,9 +1488,13 @@ async function runThemeBrowserProof(
     const fixed = await canonicalize(file.content);
     files.push({ file: file.file, kind: file.kind, content: file.content, fix: fixed.output ?? file.content });
   }
-  const development = wpEnvConfig?.env?.development ?? {};
-  const port = Number(process.env.WP_ENV_PORT ?? development.port ?? 8888);
-  await writeFile(configPath, JSON.stringify({ theme: theme.slug, files, baseUrl: `http://localhost:${port}` }), 'utf8');
+  let baseUrl: string;
+  try {
+    baseUrl = effectiveWpEnvUrl(wpEnvConfig ?? {});
+  } catch (error) {
+    return { command: commandFailure(process.execPath, error) };
+  }
+  await writeFile(configPath, JSON.stringify({ theme: theme.slug, files, baseUrl, runtimeMarker }), 'utf8');
   const result = await command(process.execPath, [helper, '--config', configPath, '--out', reportPath], {
     cwd: projectRoot,
     timeoutMs: PROOF_COMMAND_TIMEOUTS.browser,
@@ -1560,6 +1505,126 @@ async function runThemeBrowserProof(
     return { command: result, report };
   } catch (error) {
     return { command: { ...result, exitCode: null, stderr: `${result.stderr}\nCould not read theme browser report: ${error instanceof Error ? error.message : String(error)}` } };
+  }
+}
+
+async function runThemeRoundtripWithRuntimeMarker(
+  theme: PreparedThemeProof,
+  helper: string,
+  command: ProofCommandRunner,
+  options: ProofRunOptions,
+  wpEnvConfig: ThemeWpEnvConfig | undefined,
+  wpEnv: (args: string[]) => Promise<ProofCommandResult>,
+  logged: (result: ProofCommandResult) => Promise<EvidenceReference>,
+  evidence: EvidenceStore,
+  environment: ProofEnvironment,
+): Promise<ProofGateResult> {
+  const originalRead = await wpEnv(['run', 'cli', 'wp', 'option', 'get', 'blogdescription', '--format=json']);
+  const originalDescription = originalRead.exitCode === 0 ? parseWpCliJsonString(originalRead.stdout) : undefined;
+  if (originalDescription === undefined) {
+    const readEvidence = await logged(originalRead);
+    return { status: 'blocked', reason: 'Could not safely capture wp-env blogdescription before the theme save proof.', evidence: [readEvidence] };
+  }
+
+  const marker = `block-runner-theme-proof:${randomUUID()}`;
+  const markerSet = await wpEnv(['run', 'cli', 'wp', 'option', 'update', 'blogdescription', marker]);
+  const markerSetEvidence = await logged(markerSet);
+  let result: ProofGateResult = { status: 'blocked', reason: 'Site Editor theme save proof did not complete.' };
+  let cleanupEvidence: EvidenceReference | undefined;
+  try {
+    if (markerSet.exitCode !== 0) {
+      result = { status: 'blocked', reason: 'Could not bind the browser to this run’s wp-env site before saving templates.', evidence: [markerSetEvidence] };
+    } else {
+      const browserResult = await runThemeBrowserProof(theme, helper, command, options, wpEnvConfig, marker);
+      const browserEvidence = await logged(browserResult.command);
+      if (!browserResult.report) {
+        result = { status: 'blocked', reason: 'Site Editor theme save proof did not produce a report.', evidence: [browserEvidence] };
+      } else {
+        const browserObservation = browserResult.report.browser;
+        if (isRecord(browserObservation)) {
+          if (typeof browserObservation.version === 'string') environment.browser.version = browserObservation.version;
+          if (typeof browserObservation.revision === 'string') environment.browser.revision = browserObservation.revision;
+        }
+        const files = Array.isArray(browserResult.report.files) ? browserResult.report.files as Array<Record<string, unknown>> : [];
+        const expectedByName = new Map(theme.files.map((file) => [file.file, file]));
+        const reportByName = new Map(files.map((file) => [String(file.file ?? ''), file]));
+        const exactFileSet = files.length === theme.files.length
+          && reportByName.size === files.length
+          && theme.files.every((file) => reportByName.has(file.file))
+          && files.every((file) => expectedByName.has(String(file.file ?? '')));
+        const comparedFiles = exactFileSet ? await Promise.all(theme.files.map(async (expected) => {
+          const actual = reportByName.get(expected.file)!;
+          const fixedSource = await canonicalize(expected.content);
+          const fixedMarkup = fixedSource.output ?? expected.content;
+          const loaded = typeof actual.loadedRaw === 'string'
+            ? compareThemeMarkup(expected.content, actual.loadedRaw, theme.slug)
+            : undefined;
+          const saved = typeof actual.savedRaw === 'string'
+            ? compareThemeMarkup(expected.content, actual.savedRaw, theme.slug)
+            : undefined;
+          const fixed = typeof actual.savedRaw === 'string'
+            ? compareThemeMarkup(fixedMarkup, actual.savedRaw, theme.slug)
+            : undefined;
+          const serialized = typeof actual.editorSave === 'object' && actual.editorSave !== null
+            && typeof (actual.editorSave as Record<string, unknown>).serialized === 'string'
+            && typeof actual.savedRaw === 'string'
+            ? compareExactMarkup((actual.editorSave as Record<string, unknown>).serialized as string, actual.savedRaw)
+            : undefined;
+          const passed = actual.status === 'pass' && loaded?.equal === true && saved?.equal === true && serialized?.equal === true;
+          if (loaded) actual.sourceLoadComparison = loaded;
+          if (saved) actual.sourceComparison = saved;
+          if (fixed) actual.fixComparison = fixed;
+          if (serialized) actual.editorRestComparison = serialized;
+          actual.status = passed ? 'pass' : 'fail';
+          if (!passed) {
+            actual.reason = loaded?.equal !== true
+              ? 'Loaded source entity differed from the source file after removing only the matching theme attribute.'
+              : saved?.equal !== true
+                ? 'Saved REST content differed from the source after removing only the matching theme attribute.'
+                : serialized?.equal !== true
+                  ? 'Fresh REST content.raw differed from the mounted editor serialization saved through core data.'
+                  : actual.reason ?? 'Browser proof did not confirm source loading and persistence.';
+            const firstDifferenceByte = loaded?.firstDifferenceByte ?? saved?.firstDifferenceByte ?? serialized?.firstDifferenceByte;
+            if (firstDifferenceByte !== undefined) actual.firstDifferenceByte = firstDifferenceByte;
+          }
+          return actual;
+        })) : [];
+        browserResult.report.files = comparedFiles;
+        const reportEvidence = await evidence.putJson(browserResult.report);
+        const runtimeBinding = isRecord(browserResult.report.runtimeBinding) && browserResult.report.runtimeBinding.verified === true;
+        const passed = browserResult.command.exitCode === 0 && runtimeBinding && exactFileSet && comparedFiles.every((file) => file.status === 'pass');
+        const completedWithDifferences = runtimeBinding && exactFileSet && comparedFiles.some((file) => file.status === 'fail');
+        result = {
+          status: passed ? 'pass' : completedWithDifferences ? 'fail' : 'blocked',
+          reason: passed ? undefined : completedWithDifferences ? 'One or more theme templates or parts changed during a Site Editor save.' : !runtimeBinding ? 'Site Editor theme save proof did not confirm the browser target as this wp-env runtime.' : 'Site Editor theme save proof did not produce a complete unique per-file result.',
+          evidence: [browserEvidence, reportEvidence],
+          details: browserResult.report,
+        };
+      }
+    }
+  } catch (error) {
+    result = { status: 'fail', reason: `Theme Site Editor proof errored: ${error instanceof Error ? error.message : String(error)}` };
+  } finally {
+    const currentRead = await wpEnv(['run', 'cli', 'wp', 'option', 'get', 'blogdescription', '--format=json']);
+    const currentDescription = currentRead.exitCode === 0 ? parseWpCliJsonString(currentRead.stdout) : undefined;
+    if (currentDescription === marker) {
+      const restored = await wpEnv(['run', 'cli', 'wp', 'option', 'update', 'blogdescription', originalDescription]);
+      cleanupEvidence = await logged(restored);
+      if (restored.exitCode !== 0) result = { ...result, status: 'fail', reason: 'Theme proof could not restore the original blogdescription marker.', evidence: [...(result.evidence ?? []), cleanupEvidence] };
+    } else {
+      cleanupEvidence = await evidence.putJson({ markerRestored: false, currentValueIsMarker: currentDescription === marker, readExitCode: currentRead.exitCode });
+      result = { ...result, status: 'fail', reason: 'Theme proof marker changed or could not be read; no setting was overwritten during cleanup.', evidence: [...(result.evidence ?? []), cleanupEvidence] };
+    }
+  }
+  return { ...result, evidence: dedupeEvidence([...(result.evidence ?? []), ...(cleanupEvidence ? [cleanupEvidence] : [])]) };
+}
+
+function parseWpCliJsonString(value: string): string | undefined {
+  try {
+    const parsed: unknown = JSON.parse(value.trim());
+    return typeof parsed === 'string' ? parsed : undefined;
+  } catch {
+    return undefined;
   }
 }
 

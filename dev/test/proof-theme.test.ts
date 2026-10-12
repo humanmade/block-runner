@@ -5,10 +5,18 @@ import { describe, expect, it } from 'vitest';
 import {
   compareThemeMarkup,
   effectiveWpEnvConfig,
+  effectiveWpEnvPort,
+  effectiveWpEnvUrl,
   pinLocalPluginDirectories,
   removeThemeAttributes,
   writeThemeRuntimeConfig,
 } from '../../src/proof/theme.js';
+
+// @ts-expect-error The packaged browser helper exposes a small runtime-check seam for this test.
+const { runAfterRuntimeVerification, proveFile } = await import('../../scripts/proof-theme-playwright.mjs') as {
+  runAfterRuntimeVerification: (settings: unknown, marker: string, action: () => Promise<void>) => Promise<boolean>;
+  proveFile: (page: unknown, theme: string, file: { file: string; kind: 'template' | 'part' }, baseUrl: string) => Promise<Record<string, any>>;
+};
 import { PROOF_PROFILES } from '../../src/proof/profiles.js';
 import { runProof } from '../../src/proof/runner.js';
 import { EvidenceStore } from '../../src/proof/receipt.js';
@@ -38,6 +46,88 @@ describe('theme Site Editor proof profile', () => {
     expect(result.firstDifferenceByte).toBe(6);
     expect(compareThemeMarkup('<!-- wp:template-part {"theme":"fixture"} /-->', '<!-- wp:template-part {} /-->', 'fixture').equal).toBe(true);
     expect(compareThemeMarkup('a\n', 'a \n', 'fixture').firstDifferenceByte).toBe(1);
+  });
+
+  it('resolves the effective local wp-env URL and rejects ambiguous auto-port settings', () => {
+    expect(effectiveWpEnvPort({ env: { development: { port: 8892 } } }, {})).toBe(8892);
+    expect(effectiveWpEnvPort({ port: 8891, env: { development: { port: 8892 } } }, {})).toBe(8892);
+    expect(effectiveWpEnvPort({ port: 8891, env: { development: { port: 8892 } } }, { WP_ENV_PORT: '8893' })).toBe(8893);
+    expect(effectiveWpEnvUrl({ port: 8891 }, {})).toBe('http://localhost:8891');
+    expect(effectiveWpEnvUrl({ config: { WP_HOME: 'http://localhost' }, env: { development: { port: 8892 } } }, {})).toBe('http://localhost:8892');
+    expect(() => effectiveWpEnvUrl({ autoPort: true, port: 8891 }, {})).toThrow(/autoPort/);
+    expect(() => effectiveWpEnvUrl({ config: { WP_HOME: 'https://example.com' } }, {})).toThrow(/local HTTP host/);
+  });
+
+  it('does not attempt a template save when the authenticated runtime marker mismatches', async () => {
+    let writes = 0;
+    const verified = await runAfterRuntimeVerification(
+      { description: 'another wp-env site' },
+      'this-run-marker',
+      async () => { writes++; },
+    );
+    expect(verified).toBe(false);
+    expect(writes).toBe(0);
+  });
+
+  it('saves the mounted editor blocks when they differ from the original raw source', async () => {
+    const entityId = 'fixture-theme//index';
+    const source = '<!-- wp:accordion {"iconPosition":"left"} --><!-- wp:accordion-heading {"iconPosition":"right"} /--><!-- /wp:accordion -->';
+    const mounted = source.replace('"iconPosition":"right"', '"iconPosition":"left"');
+    const blocks = [{ name: 'core/accordion', innerBlocks: [{ name: 'core/accordion-heading', attributes: { iconPosition: 'left' } }] }];
+    const sourceBlocks = [{ name: 'core/accordion', innerBlocks: [{ name: 'core/accordion-heading', attributes: { iconPosition: 'right' } }] }];
+    let savedContent = '';
+    let custom = false;
+    const entity = { id: entityId, source: 'theme', content: { raw: source } };
+    const wp = {
+      data: {
+        resolveSelect: () => ({ getEntityRecord: async () => entity }),
+        select: (store: string) => {
+          if (store === 'core') return { getEntityRecord: () => entity };
+          if (store === 'core/block-editor') return { getBlocks: () => blocks };
+          if (store === 'core/editor') return {
+            getCurrentPostId: () => entityId,
+            isEditorReady: () => true,
+            getEditedPostContent: () => mounted,
+          };
+          return {};
+        },
+        dispatch: () => ({
+          saveEntityRecord: async (_type: string, _name: string, record: { content: string }) => {
+            savedContent = record.content;
+            custom = true;
+            return { id: entityId, source: 'custom', wp_id: 17 };
+          },
+        }),
+      },
+      blocks: { parse: () => sourceBlocks, serialize: (value: unknown[]) => value === blocks ? mounted : source },
+      apiFetch: async ({ method }: { path: string; method?: string }) => {
+        if (method === 'DELETE') {
+          custom = false;
+          return { previous: { id: entityId, wp_id: 17 } };
+        }
+        if (custom) return { id: entityId, source: 'custom', wp_id: 17, content: { raw: savedContent } };
+        return { id: entityId, source: 'theme', wp_id: 0, content: { raw: source } };
+      },
+    };
+    Object.defineProperty(globalThis, 'wp', { configurable: true, value: wp });
+    const page = {
+      goto: async () => undefined,
+      waitForFunction: async () => undefined,
+      frame: () => undefined,
+      locator: () => ({ first: () => ({ waitFor: async () => undefined }) }),
+      evaluate: async (fn: (argument: unknown) => unknown, argument?: unknown) => argument === undefined ? undefined : fn(argument),
+    };
+    try {
+      const result = await proveFile(page, 'fixture-theme', { file: 'templates/index.html', kind: 'template' }, 'http://localhost:8888');
+      expect(savedContent).toBe(mounted);
+      expect(savedContent).not.toBe(source);
+      expect(result.loadedRaw).toBe(source);
+      expect(result.savedRaw).toBe(mounted);
+      expect(result.editorSave.editedContent).toBe(mounted);
+      expect(result.status).toBe('pass');
+    } finally {
+      Reflect.deleteProperty(globalThis, 'wp');
+    }
   });
 
   it('uses effective development overrides and keeps caller-relative dependencies and mappings local', async () => {
@@ -137,15 +227,24 @@ describe('theme Site Editor proof profile', () => {
     await writeFile(path.join(theme, 'style.css'), '/*\nTheme Name: Fixture\nVersion: 1.0.0\n*/\n');
     await writeFile(path.join(theme, 'templates', 'index.html'), '<!-- wp:paragraph --><p>Fixture</p><!-- /wp:paragraph -->');
     await writeFile(config, JSON.stringify({ core: 'WordPress/WordPress#7.1', phpVersion: '8.4' }));
+    let blogdescription = 'Original site description';
     const result = await runProof({
       theme,
       wpEnvConfig: config,
       outputDir,
       commandRunner: async (command, args, options) => {
+        if (args.includes('option') && args.includes('get') && args.includes('blogdescription')) {
+          return { command, args: [...args], exitCode: 0, stdout: JSON.stringify(blogdescription), stderr: '' };
+        }
+        if (args.includes('option') && args.includes('update') && args.includes('blogdescription')) {
+          blogdescription = args[args.indexOf('blogdescription') + 1]!;
+          return { command, args: [...args], exitCode: 0, stdout: 'Success', stderr: '' };
+        }
         if (options.phase === 'browser-theme-save') {
           const output = args[args.indexOf('--out') + 1]!;
           await writeFile(output, JSON.stringify({
             theme: 'fixture-theme',
+            runtimeBinding: { verified: true },
             files: [{ file: 'templates/index.html', status: 'fail', reason: 'incomplete browser report' }],
           }));
           return { command, args: [...args], exitCode: 1, stdout: '', stderr: '' };
@@ -159,5 +258,6 @@ describe('theme Site Editor proof profile', () => {
     expect(roundtrip?.details).toMatchObject({
       files: [{ file: 'templates/index.html', status: 'fail' }],
     });
+    expect(blogdescription).toBe('Original site description');
   });
 });
