@@ -45,6 +45,23 @@ function validateSnapshot(value: SiteSnapshot): void {
     const parsed = new URL(url);
     if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('snapshot URL contains unsupported identity or secret fields');
   }
+  for (const entity of value.entities) {
+    if (entity.kind !== 'attachment') continue;
+    if (!entity.attachment) throw new Error('snapshot attachment has no native metadata');
+    if (typeof entity.postStatus !== 'string' || entity.postStatus.length === 0) throw new Error('snapshot attachment has no observed WordPress post status');
+    for (const url of [entity.attachment.url, ...Object.values(entity.attachment.sizes ?? {}).map(size => size.url)]) {
+      if (url === null || url === undefined) continue;
+      const parsed = new URL(url);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('attachment metadata URL contains unsupported identity or secret fields');
+    }
+    if (entity.attachment.linkUrl) {
+      const parsed = new URL(entity.attachment.linkUrl);
+      if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.hash) throw new Error('attachment page URL contains unsupported identity or secret fields');
+    }
+    for (const [slug, size] of Object.entries(entity.attachment.sizes ?? {})) {
+      if (!/^[a-zA-Z0-9_-]+$/.test(slug) || !Number.isInteger(size.width) || size.width < 1 || !Number.isInteger(size.height) || size.height < 1) throw new Error('attachment metadata contains an invalid image size');
+    }
+  }
   if (!Number.isInteger(value.principal.userId) || value.principal.userId < 1) throw new Error('Select an authenticated WordPress principal with --wp-user or WP-CLI configuration (observed user ID 0)');
 }
 
@@ -81,10 +98,17 @@ foreach ($posts as $post) {
     $original = wp_get_original_image_path($post->ID); if (!$original) $original = $file;
     $metadata = wp_get_attachment_metadata($post->ID);
     $state = array('sha256'=>($original && is_file($original) && !is_link($original)) ? hash_file('sha256',$original) : null);
-    $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'currentFileSha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null);
+    $sizes = array();
+    $full = wp_get_attachment_image_src($post->ID, 'full');
+    if ($full) $sizes['full'] = array('url'=>$full[0], 'width'=>(int)$full[1], 'height'=>(int)$full[2]);
+    foreach (isset($metadata['sizes']) && is_array($metadata['sizes']) ? $metadata['sizes'] : array() as $slug=>$size) {
+      $variant = wp_get_attachment_image_src($post->ID, $slug);
+      if ($variant) $sizes[$slug] = array('url'=>$variant[0], 'width'=>(int)$variant[1], 'height'=>(int)$variant[2]);
+    }
+    $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'linkUrl'=>get_attachment_link($post->ID) ?: null,'currentFileSha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null,'sizes'=>$sizes);
   }
   $meta = get_post_meta($post->ID, '${SITE_OWNERSHIP_META}', false);
-  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'ownership'=>$meta);
+  $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'postStatus'=>$post->post_status,'ownership'=>$meta);
   if ($attachment) $entity['attachment'] = $attachment;
   $entities[] = $entity;
 }

@@ -122,7 +122,10 @@ export interface SiteAttachmentBinding {
   /** WordPress attachment ID supplied by the caller or an adapter. */
   id: number;
   url: string;
+  attachmentPageUrl?: string;
   observedSize?: { width?: number; height?: number; bytes?: number };
+  /** Image variants observed from WordPress attachment metadata, keyed by native size slug. */
+  imageSizes?: Readonly<Record<string, { url: string; width: number; height: number }>>;
 }
 
 /** Successful, fully bound result of compiling the complete site. */
