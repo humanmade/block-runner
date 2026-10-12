@@ -28,6 +28,8 @@ export interface SourceSelectorDependency {
 export interface ReportItem {
   block?: string;
   status: ReportStatus;
+  /** Informational findings retain the existing status vocabulary without counting as warnings. */
+  severity?: 'info' | 'warning';
   reason: string;
   source?: SourceLocation;
   rule?: string;

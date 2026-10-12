@@ -56,7 +56,7 @@ export async function finalizeBlocks(
   });
 
   const hardWarnings = warnings.filter((item) => isStrictFailureWarning(item));
-  const ok = gate.summary.invalid === 0 && !(config.strict && hardWarnings.length > 0);
+  const ok = gate.ok && !(config.strict && hardWarnings.length > 0);
 
   return {
     ok,
@@ -65,7 +65,7 @@ export async function finalizeBlocks(
       blocks: gate.summary.blocks,
       valid: gate.summary.valid,
       invalid: gate.summary.invalid,
-      warnings: warnings.length,
+      warnings: warnings.length + gate.summary.warnings,
     },
     items: [...warnings, ...generatedMarkupItems(gate.items, inputPath)],
     output,
