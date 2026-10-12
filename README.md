@@ -52,7 +52,9 @@ The JSON report includes `ok`, block counts, warnings and source locations. Revi
 For a block theme, pass its directory to check each discovered template, part and pattern. Pattern
 PHP metadata headers are preserved and excluded from block counts; patterns with PHP in the body
 are reported and skipped. A present `theme.json` is also checked against the pinned WordPress 7.1
-schema; `fix --write` never rewrites it and only canonicalises eligible markup files in place:
+schema; `fix --write` never rewrites it and only canonicalises eligible markup files in place.
+Validation also warns when referenced parts, patterns or declared presets cannot be resolved from
+the theme folder. Preset kinds with core defaults enabled are reported as skipped:
 
 ```sh
 npx --no-install block-runner validate ./my-theme

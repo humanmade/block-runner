@@ -35,6 +35,7 @@ import { renderAuthoringPreview } from './authoring/preview.js';
 import { formatTextReport } from './report/text.js';
 import { discoverThemeMarkupFiles, isThemeDirectory, type ThemeMarkupFile } from './theme/folders.js';
 import { validateThemeJson } from './theme/theme-json.js';
+import { findThemeReferenceIssues } from './theme/references.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -830,6 +831,7 @@ async function validateThemeInputs(
   themeRoot?: string,
 ): Promise<BlockRunnerReport> {
   const results: Array<{ report: BlockRunnerReport; file: string }> = [];
+  let themeJson: unknown;
   for (const input of inputs) {
     const theme = input.theme;
     if (!theme) continue;
@@ -843,8 +845,10 @@ async function validateThemeInputs(
     const themeJsonPath = path.join(themeRoot, 'theme.json');
     if (existsSync(themeJsonPath)) {
       const checked = validateThemeJson(await readFile(themeJsonPath, 'utf8'), themeJsonPath, 'validate');
+      themeJson = checked.parsed;
       results.push({ report: checked.report, file: 'theme.json' });
     }
+    await appendThemeReferenceIssues(results, inputs, themeRoot, themeJson, options.strict === true);
   }
   return themeAggregate('validate', results);
 }
@@ -856,6 +860,7 @@ async function fixThemeInputs(
   themeRoot?: string,
 ): Promise<BlockRunnerReport> {
   const results: Array<{ report: BlockRunnerReport; file: string; changed?: boolean }> = [];
+  let themeJson: unknown;
   for (const input of inputs) {
     const theme = input.theme;
     if (!theme) continue;
@@ -891,10 +896,33 @@ async function fixThemeInputs(
     const themeJsonPath = path.join(themeRoot, 'theme.json');
     if (existsSync(themeJsonPath)) {
       const checked = validateThemeJson(await readFile(themeJsonPath, 'utf8'), themeJsonPath, 'fix');
+      themeJson = checked.parsed;
       results.push({ report: checked.report, file: 'theme.json', changed: false });
     }
+    await appendThemeReferenceIssues(results, inputs, themeRoot, themeJson, options.strict === true);
   }
   return themeAggregate('fix', results);
+}
+
+async function appendThemeReferenceIssues(
+  results: Array<{ report: BlockRunnerReport; file: string; changed?: boolean }>,
+  inputs: CliInput[],
+  themeRoot: string,
+  themeJson: unknown,
+  strict: boolean,
+): Promise<void> {
+  const files = inputs.flatMap((input) => input.theme ? [input.theme] : []);
+  const items = await findThemeReferenceIssues(themeRoot, files, themeJson);
+  const reportsByPath = new Map(results.map((result) => [path.resolve(themeRoot, result.file), result.report]));
+  for (const item of items) {
+    const target = item.source?.path ? reportsByPath.get(path.resolve(item.source.path)) : undefined;
+    if (!target) continue;
+    target.items.push(item);
+    if (item.status === 'warning' && item.severity !== 'info') {
+      target.summary.warnings += 1;
+      if (strict) target.ok = false;
+    }
+  }
 }
 
 function skippedThemeFileReport(command: 'validate' | 'fix', theme: ThemeMarkupFile): BlockRunnerReport {
