@@ -33,6 +33,7 @@ const texts = (blocks) => blocks.flatMap((block) => [block.text, ...texts(block.
 async function login(page, baseUrl) {
   await page.goto(`${baseUrl}/wp-login.php`, { waitUntil: 'domcontentloaded' });
   if (!page.url().includes('wp-login.php')) return;
+  await page.waitForFunction(() => document.activeElement?.id === 'user_login');
   await page.locator('#user_login').fill(process.env.WP_USERNAME ?? 'admin');
   await page.locator('#user_pass').fill(process.env.WP_PASSWORD ?? 'password');
   await Promise.all([page.waitForURL((url) => !url.pathname.endsWith('/wp-login.php'), { waitUntil: 'domcontentloaded' }), page.locator('#wp-submit').click()]);
