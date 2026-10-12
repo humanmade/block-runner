@@ -109,6 +109,7 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
   const pages = validatePages(input.pages, diagnostics);
   const assets = validateAssets(input.assets, diagnostics);
   const uses = validateUses(input.assetUses, diagnostics);
+  if (assets) validateCssUrlBindings(assets, diagnostics);
 
   if (pages && templates) {
     const templateNames = new Set(Object.keys(templates));
@@ -307,7 +308,7 @@ function validateAssets(value: unknown, diagnostics: SiteInputDiagnostic[]): Sit
       diagnostics.push(issue(current, 'object-required', 'asset must be an object'));
       continue;
     }
-    checkKeys(asset, ['id', 'path', 'kind', 'role'], current, diagnostics);
+    checkKeys(asset, ['id', 'path', 'kind', 'role', 'fontLicense', 'cssUrls'], current, diagnostics);
     if (!isSafeSlug(asset.id)) diagnostics.push(issue(`${current}/id`, 'unsafe-id', 'asset id must be lowercase and path-safe'));
     else if (ids.has(asset.id)) diagnostics.push(issue(`${current}/id`, 'duplicate-asset-id', `asset id "${asset.id}" is already declared`));
     else ids.add(asset.id);
@@ -320,11 +321,92 @@ function validateAssets(value: unknown, diagnostics: SiteInputDiagnostic[]): Sit
     }
     if (!['image', 'font', 'stylesheet', 'other'].includes(String(asset.kind))) diagnostics.push(issue(`${current}/kind`, 'unsupported-kind', 'asset kind must be image, font, stylesheet, or other'));
     if (asset.role !== 'theme-file' && asset.role !== 'attachment') diagnostics.push(issue(`${current}/role`, 'unsupported-role', 'asset role must be theme-file or attachment'));
+    const fontLicense = validateFontLicense(asset.fontLicense, asset.kind, asset.role, `${current}/fontLicense`, diagnostics);
+    const cssUrls = validateCssUrls(asset.cssUrls, asset.kind, asset.role, `${current}/cssUrls`, diagnostics);
     if (isSafeSlug(asset.id) && typeof asset.path === 'string' && isSafeRelativePath(asset.path) && ['image', 'font', 'stylesheet', 'other'].includes(String(asset.kind)) && (asset.role === 'theme-file' || asset.role === 'attachment')) {
-      assets.push({ id: asset.id, path: asset.path, kind: asset.kind as SiteAssetIntent['kind'], role: asset.role });
+      assets.push({ id: asset.id, path: asset.path, kind: asset.kind as SiteAssetIntent['kind'], role: asset.role,
+        ...(fontLicense ? { fontLicense } : {}), ...(cssUrls ? { cssUrls } : {}) });
     }
   }
   return assets;
+}
+
+function validateFontLicense(
+  value: unknown,
+  kind: unknown,
+  role: unknown,
+  pathName: string,
+  diagnostics: SiteInputDiagnostic[],
+): SiteAssetIntent['fontLicense'] | undefined {
+  if (value === undefined) {
+    if (kind === 'font' && role === 'theme-file') diagnostics.push(issue(pathName, 'font-license-required', 'theme font files require explicit ownership and license details'));
+    return undefined;
+  }
+  if (kind !== 'font' || role !== 'theme-file') {
+    diagnostics.push(issue(pathName, 'font-license-scope', 'fontLicense is supported only for theme-file font assets'));
+    return undefined;
+  }
+  if (!isRecord(value)) {
+    diagnostics.push(issue(pathName, 'font-license-required', 'fontLicense must include ownership and license strings'));
+    return undefined;
+  }
+  checkKeys(value, ['ownership', 'license', 'notice'], pathName, diagnostics);
+  if (typeof value.ownership !== 'string' || !value.ownership.trim()) diagnostics.push(issue(`${pathName}/ownership`, 'string-required', 'font ownership decision must be a non-empty string'));
+  if (typeof value.license !== 'string' || !value.license.trim()) diagnostics.push(issue(`${pathName}/license`, 'string-required', 'font license must be a non-empty string'));
+  if (value.notice !== undefined && typeof value.notice !== 'string') diagnostics.push(issue(`${pathName}/notice`, 'string-required', 'font notice must be text'));
+  if (typeof value.ownership !== 'string' || !value.ownership.trim() || typeof value.license !== 'string' || !value.license.trim() || (value.notice !== undefined && typeof value.notice !== 'string')) return undefined;
+  return { ownership: value.ownership.trim(), license: value.license.trim(), ...(typeof value.notice === 'string' ? { notice: value.notice } : {}) };
+}
+
+function validateCssUrls(
+  value: unknown,
+  kind: unknown,
+  role: unknown,
+  pathName: string,
+  diagnostics: SiteInputDiagnostic[],
+): SiteAssetIntent['cssUrls'] | undefined {
+  if (value === undefined) return undefined;
+  if (kind !== 'stylesheet' || role !== 'theme-file') {
+    diagnostics.push(issue(pathName, 'css-url-scope', 'cssUrls is supported only for theme-file stylesheets'));
+    return undefined;
+  }
+  if (!Array.isArray(value)) {
+    diagnostics.push(issue(pathName, 'array-required', 'cssUrls must be an array of exact CSS URL declarations'));
+    return undefined;
+  }
+  const seen = new Set<string>();
+  const result: NonNullable<SiteAssetIntent['cssUrls']> = [];
+  value.forEach((candidate, index) => {
+    const current = `${pathName}/${index}`;
+    if (!isRecord(candidate)) {
+      diagnostics.push(issue(current, 'object-required', 'CSS URL declaration must be an object'));
+      return;
+    }
+    checkKeys(candidate, ['url', 'assetId'], current, diagnostics);
+    if (typeof candidate.url !== 'string' || !candidate.url.trim() || candidate.url !== candidate.url.trim() || /[\u0000-\u001f\u007f]/.test(candidate.url)) {
+      diagnostics.push(issue(`${current}/url`, 'invalid-css-url', 'url must be the exact non-empty CSS token value without surrounding whitespace or controls'));
+    }
+    if (!isSafeSlug(candidate.assetId)) diagnostics.push(issue(`${current}/assetId`, 'unsafe-id', 'assetId must be a declared theme-file asset id'));
+    if (typeof candidate.url === 'string') {
+      if (seen.has(candidate.url)) diagnostics.push(issue(`${current}/url`, 'duplicate-css-url', 'a stylesheet cannot declare the same CSS URL token more than once'));
+      else seen.add(candidate.url);
+    }
+    if (typeof candidate.url === 'string' && candidate.url.trim() && candidate.url === candidate.url.trim() && !/[\u0000-\u001f\u007f]/.test(candidate.url) && isSafeSlug(candidate.assetId)) {
+      result.push({ url: candidate.url, assetId: candidate.assetId });
+    }
+  });
+  return result;
+}
+
+function validateCssUrlBindings(assets: SiteAssetIntent[], diagnostics: SiteInputDiagnostic[]): void {
+  const byId = new Map(assets.map((asset) => [asset.id, asset]));
+  assets.forEach((asset, assetIndex) => {
+    for (const [declarationIndex, declaration] of (asset.cssUrls ?? []).entries()) {
+      const target = byId.get(declaration.assetId);
+      if (!target) diagnostics.push(issue(`/assets/${assetIndex}/cssUrls/${declarationIndex}/assetId`, 'unknown-css-asset', `unknown theme-file asset id "${declaration.assetId}"`));
+      else if (target.role !== 'theme-file') diagnostics.push(issue(`/assets/${assetIndex}/cssUrls/${declarationIndex}/assetId`, 'theme-file-required', 'CSS URL declarations must target theme-file assets'));
+    }
+  });
 }
 
 function validateUses(value: unknown, diagnostics: SiteInputDiagnostic[]): SiteAssetUse[] | undefined {

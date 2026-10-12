@@ -424,6 +424,8 @@ export interface AuthorOptions extends ConvertOptions {
 
 export interface AssembleOptions extends CommonOptions {
   config?: BlockRunnerConfig;
+  /** Internal contract boundary: use only the supplied config and skip project config discovery. */
+  isolateConfig?: boolean;
 }
 
 export interface ValidateOptions extends CommonOptions {
