@@ -128,6 +128,52 @@ describe('theme folder references', () => {
       spacing: { spacingSizes: 'not-an-array' as never },
     })).not.toThrow();
   });
+
+  it('honors config-file strictness before rewriting a missing-reference file', async () => {
+    const project = await copiedTheme('valid-theme');
+    const config = path.join(path.dirname(project), 'strict.json');
+    await writeFile(config, JSON.stringify({ strict: true }));
+    const template = path.join(project, 'templates', 'index.html');
+    const original = `\n${(await readFile(template, 'utf8')).replace(
+      '{"slug":"footer"}', '{"slug":"footer","theme":"another-theme"}',
+    )}`;
+    await writeFile(template, original);
+
+    const validation = await runCli(['validate', project, '--config', config, '--json']);
+    const fix = await runCli(['fix', project, '--write', '--config', config, '--json']);
+    expect(validation.code).toBe(1);
+    expect(fix.code).toBe(1);
+    expect(JSON.parse(fix.stdout).items).toContainEqual(expect.objectContaining({ code: 'unresolved-template-part' }));
+    expect(await readFile(template, 'utf8')).toBe(original);
+  });
+
+  it('accepts block-scoped presets without exposing them to unrelated blocks', async () => {
+    const project = await copiedTheme('valid-theme');
+    const themeJsonPath = path.join(project, 'theme.json');
+    const themeJson = JSON.parse(await readFile(themeJsonPath, 'utf8'));
+    themeJson.settings.blocks = {
+      'core/group': { color: { defaultPalette: false, palette: [{ slug: 'block-only', name: 'Block Only', color: '#eeeeee' }] } },
+      'core/paragraph': { color: { defaultPalette: false } },
+    };
+    await writeFile(themeJsonPath, JSON.stringify(themeJson));
+    const template = path.join(project, 'templates', 'index.html');
+    const markup = (await readFile(template, 'utf8'))
+      .replace('"backgroundColor":"base"', '"backgroundColor":"block-only"')
+      .replace('has-base-background-color', 'has-block-only-background-color');
+    await writeFile(template, markup);
+    const valid = await runCli(['validate', project, '--strict', '--json']);
+    expect(valid.code).toBe(0);
+    expect(JSON.parse(valid.stdout).items.some((item: { code?: string }) => item.code === 'undeclared-preset')).toBe(false);
+
+    // A block override disables defaults even when the global setting enables them.
+    themeJson.settings.color.defaultPalette = true;
+    await writeFile(themeJsonPath, JSON.stringify(themeJson));
+    await writeFile(template, markup.replace('"textColor":"ink"', '"textColor":"block-only"').replace('has-ink-color', 'has-block-only-color'));
+    const invalid = await runCli(['validate', project, '--strict', '--json']);
+    expect(invalid.code).toBe(1);
+    const findings = JSON.parse(invalid.stdout).items.filter((item: { code?: string }) => item.code === 'undeclared-preset');
+    expect(findings).toEqual([expect.objectContaining({ block: 'core/paragraph', details: expect.objectContaining({ slug: 'block-only' }) })]);
+  });
 });
 
 async function copiedTheme(name: string): Promise<string> {

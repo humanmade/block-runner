@@ -18,7 +18,6 @@ export async function findThemeReferenceIssues(
   themeJson: unknown,
 ): Promise<ReportItem[]> {
   const references: ReportItem[] = [];
-  const registry = presetRegistry(themeJson);
   const skippedKinds = new Set<PresetKind>();
 
   for (const entry of templateParts(themeJson)) {
@@ -41,6 +40,7 @@ export async function findThemeReferenceIssues(
       nodes.forEach((block, index) => {
         const blockPath = `${parent}[${index}]`;
         const attributes = isRecord(block.attributes) ? block.attributes : {};
+        const registry = presetRegistry(themeJson, block.name);
         const warn = (code: string, reason: string, details: Record<string, unknown>): void => {
           references.push({
             block: block.name,
@@ -116,20 +116,23 @@ export async function findThemeReferenceIssues(
   return references;
 }
 
-function presetRegistry(themeJson: unknown): PresetRegistry {
+function presetRegistry(themeJson: unknown, blockName: string): PresetRegistry {
   const root = isRecord(themeJson) ? themeJson : {};
   const settings = isRecord(root.settings) ? root.settings : {};
-  const color = isRecord(settings.color) ? settings.color : {};
-  const typography = isRecord(settings.typography) ? settings.typography : {};
-  const spacing = isRecord(settings.spacing) ? settings.spacing : {};
+  const blocks = isRecord(settings.blocks) ? settings.blocks : {};
+  const blockSettings = isRecord(blocks[blockName]) ? blocks[blockName] : {};
+  const color = { ...(isRecord(settings.color) ? settings.color : {}), ...(isRecord(blockSettings.color) ? blockSettings.color : {}) };
+  const typography = { ...(isRecord(settings.typography) ? settings.typography : {}), ...(isRecord(blockSettings.typography) ? blockSettings.typography : {}) };
+  const spacing = { ...(isRecord(settings.spacing) ? settings.spacing : {}), ...(isRecord(blockSettings.spacing) ? blockSettings.spacing : {}) };
   const parsed = parseThemeJsonSettings(settings as Parameters<typeof parseThemeJsonSettings>[0]);
+  const scoped = parseThemeJsonSettings(blockSettings as Parameters<typeof parseThemeJsonSettings>[0]);
   return {
     slugs: {
-      color: new Set(Object.keys(parsed.colors)),
-      gradient: new Set(Object.keys(parsed.gradients ?? {})),
-      'font-family': new Set(Object.keys(parsed.fonts)),
-      'font-size': new Set(Object.keys(parsed.fontSizes)),
-      spacing: new Set(Object.keys(parsed.spacing)),
+      color: new Set([...Object.keys(parsed.colors), ...Object.keys(scoped.colors)]),
+      gradient: new Set([...Object.keys(parsed.gradients ?? {}), ...Object.keys(scoped.gradients ?? {})]),
+      'font-family': new Set([...Object.keys(parsed.fonts), ...Object.keys(scoped.fonts)]),
+      'font-size': new Set([...Object.keys(parsed.fontSizes), ...Object.keys(scoped.fontSizes)]),
+      spacing: new Set([...Object.keys(parsed.spacing), ...Object.keys(scoped.spacing)]),
     },
     defaults: {
       color: color.defaultPalette !== false,

@@ -836,6 +836,7 @@ async function validateThemeInputs(
   options: CommonOptions,
   themeRoot?: string,
 ): Promise<BlockRunnerReport> {
+  const strict = (await loadConfig(options)).strict === true;
   const results: Array<{ report: BlockRunnerReport; file: string }> = [];
   let themeJson: unknown;
   for (const input of inputs) {
@@ -854,7 +855,7 @@ async function validateThemeInputs(
       themeJson = checked.parsed;
       results.push({ report: checked.report, file: 'theme.json' });
     }
-    await appendThemeReferenceIssues(results, inputs, themeRoot, themeJson, options.strict === true);
+    await appendThemeReferenceIssues(results, inputs, themeRoot, themeJson, strict);
   }
   return themeAggregate('validate', results);
 }
@@ -865,6 +866,7 @@ async function fixThemeInputs(
   write: boolean,
   themeRoot?: string,
 ): Promise<BlockRunnerReport> {
+  const strict = (await loadConfig(options)).strict === true;
   const results: Array<{ report: BlockRunnerReport; file: string; changed?: boolean }> = [];
   const themeJsonPath = themeRoot ? path.join(themeRoot, 'theme.json') : undefined;
   const checkedThemeJson = themeJsonPath && existsSync(themeJsonPath)
@@ -886,7 +888,7 @@ async function fixThemeInputs(
     appendThemeReferenceItems(
       report,
       referenceItems.filter((item) => item.source?.path && path.resolve(item.source.path) === path.resolve(theme.path)),
-      options.strict === true,
+      strict,
     );
     let changed = false;
     if (write && report.ok) {
@@ -913,7 +915,7 @@ async function fixThemeInputs(
     appendThemeReferenceItems(
       checkedThemeJson.report,
       referenceItems.filter((item) => item.source?.path && path.resolve(item.source.path) === path.resolve(themeJsonPath)),
-      options.strict === true,
+      strict,
     );
     results.push({ report: checkedThemeJson.report, file: 'theme.json', changed: false });
   }

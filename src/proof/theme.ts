@@ -25,6 +25,9 @@ export interface ThemeWpEnvConfig {
   [key: string]: unknown;
   phpVersion?: string | null;
   core?: string | null;
+  port?: number;
+  autoPort?: boolean;
+  config?: Record<string, unknown>;
   plugins?: string[];
   themes?: string[];
   mappings?: Record<string, string>;
@@ -130,7 +133,40 @@ export function effectiveWpEnvConfig(config: ThemeWpEnvConfig): {
   };
 }
 
+export function effectiveWpEnvPort(config: ThemeWpEnvConfig, environment: NodeJS.ProcessEnv = process.env): number {
+  const development = config.env?.development ?? {};
+  if (config.autoPort === true) throw new Error('Theme proof cannot safely target wp-env while autoPort may change the runtime URL.');
+  const raw = environment.WP_ENV_PORT ?? development.port ?? config.port ?? 8888;
+  const port = typeof raw === 'number' ? raw : typeof raw === 'string' && /^\d+$/.test(raw) ? Number(raw) : NaN;
+  if (!Number.isInteger(port) || port < 1 || port > 65535) {
+    throw new Error(`Invalid effective wp-env development port: ${String(raw)}.`);
+  }
+  return port;
+}
+
+export function effectiveWpEnvUrl(config: ThemeWpEnvConfig, environment: NodeJS.ProcessEnv = process.env): string {
+  const port = effectiveWpEnvPort(config, environment);
+  const development = config.env?.development ?? {};
+  const developmentConfig = isPlainRecord(development.config) ? development.config : {};
+  const rootConfig = isPlainRecord(config.config) ? config.config : {};
+  const home = developmentConfig.WP_HOME ?? rootConfig.WP_HOME;
+  if (home === undefined) return `http://localhost:${port}`;
+  if (typeof home !== 'string') throw new Error('Theme proof requires a string wp-env development WP_HOME.');
+  let url: URL;
+  try { url = new URL(home); } catch { throw new Error('Theme proof could not parse the wp-env development WP_HOME URL.'); }
+  if (url.protocol !== 'http:' || !['localhost', '127.0.0.1', '[::1]'].includes(url.hostname)) {
+    throw new Error('Theme proof requires wp-env WP_HOME to use a local HTTP host.');
+  }
+  if (!url.port) url.port = String(port);
+  return url.toString().replace(/\/$/, '');
+}
+
+function isPlainRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
+}
+
 export function themePreflightFailure(theme: PreparedThemeProof, config: ThemeWpEnvConfig): string | undefined {
+  try { effectiveWpEnvUrl(config); } catch (error) { return error instanceof Error ? error.message : String(error); }
   const effective = effectiveWpEnvConfig(config);
   if (!effective.phpVersion || !/^\d+\.\d+(?:\.\d+)?$/.test(effective.phpVersion)) {
     return 'Theme proof needs a specified development PHP version in --wp-env-config (phpVersion or env.development.phpVersion).';

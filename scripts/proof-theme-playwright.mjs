@@ -2,36 +2,61 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { pathToFileURL } from 'node:url';
 import { chromium } from '@playwright/test';
 
-const args = new Map(process.argv.slice(2).filter((value, index) => index % 2 === 0).map((key, index) => [key, process.argv.slice(2)[index * 2 + 1]]));
-const configPath = args.get('--config');
-const outputPath = args.get('--out');
-if (!configPath || !outputPath) throw new Error('Usage: node scripts/proof-theme-playwright.mjs --config <proof.json> --out <result.json>');
-
-const input = JSON.parse(await readFile(configPath, 'utf8'));
-if (typeof input.theme !== 'string' || !Array.isArray(input.files) || typeof input.baseUrl !== 'string') {
-  throw new Error('Theme proof requires theme, files, and baseUrl.');
-}
-await mkdir(path.dirname(outputPath), { recursive: true });
-const browser = await chromium.launch({ headless: true });
-const page = await browser.newPage({ baseURL: input.baseUrl });
-page.setDefaultTimeout(20_000);
-page.setDefaultNavigationTimeout(20_000);
-const revision = /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved';
-const report = { theme: input.theme, browser: { engine: 'chromium', version: browser.version(), revision }, files: [] };
-
-try {
-  await login(page, input.baseUrl);
-  for (const file of input.files) report.files.push(await proveFile(page, input.theme, file));
-} finally {
-  await browser.close();
-  await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+export async function runAfterRuntimeVerification(settings, marker, action) {
+  if (typeof marker !== 'string' || !marker || settings?.description !== marker) return false;
+  await action();
+  return true;
 }
 
-if (report.files.some((file) => file.status !== 'pass')) process.exitCode = 1;
+async function main() {
+  const args = new Map(process.argv.slice(2).filter((value, index) => index % 2 === 0).map((key, index) => [key, process.argv.slice(2)[index * 2 + 1]]));
+  const configPath = args.get('--config');
+  const outputPath = args.get('--out');
+  if (!configPath || !outputPath) throw new Error('Usage: node scripts/proof-theme-playwright.mjs --config <proof.json> --out <result.json>');
 
-async function proveFile(page, theme, file) {
+  const input = JSON.parse(await readFile(configPath, 'utf8'));
+  if (typeof input.theme !== 'string' || !Array.isArray(input.files) || typeof input.baseUrl !== 'string' || typeof input.runtimeMarker !== 'string') {
+    throw new Error('Theme proof requires theme, files, baseUrl, and runtimeMarker.');
+  }
+  await mkdir(path.dirname(outputPath), { recursive: true });
+  const browser = await chromium.launch({ headless: true });
+  const page = await browser.newPage({ baseURL: input.baseUrl });
+  page.setDefaultTimeout(20_000);
+  page.setDefaultNavigationTimeout(20_000);
+  const revision = /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved';
+  const report = { theme: input.theme, browser: { engine: 'chromium', version: browser.version(), revision }, files: [] };
+
+  try {
+    await login(page, input.baseUrl);
+    await page.goto(`${input.baseUrl}/wp-admin/site-editor.php?canvas=edit`, { waitUntil: 'domcontentloaded' });
+    await page.waitForFunction(() => typeof globalThis.wp?.apiFetch === 'function');
+    const settings = await page.evaluate(async () => globalThis.wp.apiFetch({ path: '/wp/v2/settings?context=edit' }));
+    const runtimeVerified = await runAfterRuntimeVerification(settings, input.runtimeMarker, async () => {
+      for (const file of input.files) report.files.push(await proveFile(page, input.theme, file, input.baseUrl));
+    });
+    report.runtimeBinding = { verified: runtimeVerified };
+    if (!runtimeVerified) {
+      report.files = input.files.map((file) => ({
+        file: file.file,
+        kind: file.kind,
+        status: 'fail',
+        reason: 'Authenticated WordPress settings did not contain this run’s runtime marker; no template save was attempted.',
+      }));
+    }
+  } finally {
+    await browser.close();
+    await writeFile(outputPath, `${JSON.stringify(report, null, 2)}\n`, 'utf8');
+  }
+
+  if (report.files.some((file) => file.status !== 'pass')) process.exitCode = 1;
+}
+
+if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
+
+export async function proveFile(page, theme, file, baseUrl) {
   const part = file.kind === 'part';
   const entityType = part ? 'wp_template_part' : 'wp_template';
   const route = part ? 'template-parts' : 'templates';
@@ -54,10 +79,22 @@ async function proveFile(page, theme, file) {
   let createdOverrideId;
   try {
     postId.set('canvas', 'edit');
-    await page.goto(`${input.baseUrl}/wp-admin/site-editor.php?${postId}`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${baseUrl}/wp-admin/site-editor.php?${postId}`, { waitUntil: 'domcontentloaded' });
     await page.waitForFunction(() => Boolean(globalThis.wp?.data?.resolveSelect && globalThis.wp?.blocks?.parse && globalThis.wp?.blocks?.serialize));
     await page.waitForFunction((entityId) => globalThis.wp?.data?.select('core/editor')?.getCurrentPostId?.() === entityId, entityId);
     await page.locator('iframe[name="editor-canvas"], .editor-styles-wrapper, .block-editor-writing-flow').first().waitFor({ state: 'visible' });
+    await page.waitForFunction((entityId) => {
+      const wp = globalThis.wp;
+      const editor = wp?.data?.select('core/editor');
+      const blocks = wp?.data?.select('core/block-editor')?.getBlocks?.();
+      return editor?.getCurrentPostId?.() === entityId
+        && (typeof editor?.isEditorReady !== 'function' || editor.isEditorReady())
+        && Array.isArray(blocks);
+    }, entityId);
+    // Store initialization precedes React mount effects such as accordion context sync.
+    const canvas = page.frame({ name: 'editor-canvas' }) ?? page;
+    await canvas.locator('.block-editor-block-list__layout').first().waitFor({ state: 'attached' });
+    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const before = await page.evaluate(async ({ entityType, entityId }) => {
       const core = globalThis.wp.data;
       const entity = await core.resolveSelect('core').getEntityRecord('postType', entityType, entityId);
@@ -93,12 +130,24 @@ async function proveFile(page, theme, file) {
       if (!entity || entity.id !== entityId || entity.source !== 'theme' || typeof entity.content?.raw !== 'string') {
         throw new Error('The loaded source entity changed before save.');
       }
-      const serialized = wp.blocks.serialize(wp.blocks.parse(entity.content.raw));
+      const blocks = core.select('core/block-editor')?.getBlocks?.();
+      if (!Array.isArray(blocks)) throw new Error('The mounted Site Editor block state was unavailable.');
+      const serialized = wp.blocks.serialize(blocks);
+      const editedContent = core.select('core/editor')?.getEditedPostContent?.();
+      if (typeof editedContent !== 'string') throw new Error('The Site Editor did not expose its mounted edited content.');
+      if (editedContent !== serialized) throw new Error('The mounted block state and edited content disagree; no save was attempted.');
       const saved = await core.dispatch('core').saveEntityRecord('postType', entityType, {
         id: entity.id,
         content: serialized,
       }, { throwOnError: true });
-      return { serialized, savedId: saved?.id, savedSource: saved?.source, savedWpId: saved?.wp_id };
+      return {
+        serialized,
+        editedContent,
+        mountedBlockCount: blocks.length,
+        savedId: saved?.id,
+        savedSource: saved?.source,
+        savedWpId: saved?.wp_id,
+      };
     }, { entityType, entityId });
     result.editorSave = save;
     const savedWpId = Number(save.savedWpId);
