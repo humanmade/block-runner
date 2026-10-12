@@ -182,6 +182,22 @@ describe('read-only site drift inspection', () => {
     ]));
   });
 
+  it('reports an unreferenced attachment with extra ownership claims as a conflict, never clean', async () => {
+    const fixture = await bundleFixture();
+    const siteId = fixture.input.source.sourceIntent.siteId;
+    const asset = fixture.input.source.assets.find(candidate => candidate.role === 'attachment')!;
+    const attachment = attachmentEntity(siteId, 41, asset.id, asset.sha256);
+    attachment.ownership.push({ version: 1, siteId: 'another-site', entityId: 'shared', kind: 'attachment', assetSha256: asset.sha256,
+      lastAppliedHash: managedStateHash(attachment.state) });
+    const observed = snapshot(fixture.input.source.sourceIntent.theme.slug, { entities: [attachment], siteRecord: {
+      version: 1, siteId, entities: { [`attachment:${asset.id}@${asset.sha256}`]: 41 }, options: {}, operation: null,
+    } });
+    const report = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
+    expect(report.status).toBe('actionable');
+    expect(report.findings).toContainEqual(expect.objectContaining({ kind: 'attachment', status: 'conflict', code: 'ambiguous-attachment-ownership', wpId: 41 }));
+    expect(report.findings).not.toContainEqual(expect.objectContaining({ kind: 'attachment', status: 'clean', code: 'managed-attachment-match', wpId: 41 }));
+  });
+
   it('reports unresolved navigation and unowned synced-pattern references as actionable dependencies', async () => {
     const fixture = await bundleFixture();
     const sourceId = fixture.input.source.sourceIntent.pages[0]!.id;

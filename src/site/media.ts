@@ -37,16 +37,12 @@ export function verifiedOwnedAttachment(
     || !/^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash) || owner.lastAppliedHash !== hashCanonicalJson(entity.state)) return false;
   const ownerSha = owner.assetSha256 ?? (typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
   if (ownerSha !== originalSha256 || entity.state.sha256 !== originalSha256) return false;
-  const exactVersions = snapshot.entities.filter(candidate => candidate.kind === 'attachment'
-    && candidate.ownership.length === 1
-    && candidate.ownership[0]!.version === 1
-    && candidate.ownership[0]!.siteId === siteId
-    && candidate.ownership[0]!.entityId === entityId
-    && candidate.ownership[0]!.kind === 'attachment'
-    && candidate.ownership[0]!.lastAppliedHash === hashCanonicalJson(candidate.state)
-    && (candidate.ownership[0]!.assetSha256 ?? (typeof candidate.state.sha256 === 'string' ? candidate.state.sha256 : undefined)) === originalSha256
-    && candidate.state.sha256 === originalSha256);
-  if (exactVersions.length !== 1 || exactVersions[0]!.id !== wpId) return false;
+  const versionClaims = snapshot.entities.flatMap(candidate => candidate.kind !== 'attachment' ? [] : candidate.ownership
+    .filter(claim => claim.siteId === siteId && claim.entityId === entityId
+      && (claim.assetSha256 === originalSha256
+        || (claim.assetSha256 === undefined && claim.lastAppliedHash === hashCanonicalJson(candidate.state) && candidate.state.sha256 === originalSha256)))
+    .map(claim => ({ candidate, claim })));
+  if (versionClaims.length !== 1 || versionClaims[0]!.candidate.id !== wpId) return false;
   const record = snapshot.siteRecord;
   if (!record || record.version !== 1 || record.siteId !== siteId) return false;
   const versionId = record.entities[attachmentVersionKey(entityId, originalSha256)];

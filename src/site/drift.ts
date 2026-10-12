@@ -231,8 +231,12 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
         } else if (!indexed) {
           add({ kind: 'attachment', status: 'conflict', entityId: key, wpId: entity.id, code: 'ownership-record-missing', message: 'Owned attachment metadata has no matching version-qualified site-record ID.' });
         } else {
-          if (verifiedOwnedAttachment(snapshot, siteId, owner.entityId, originalSha, entity.id)) verifiedAttachmentIds.add(entity.id);
-          add({ kind: 'attachment', status: 'clean', entityId: key, wpId: entity.id, code: 'managed-attachment-match', sourceSha256: originalSha, observedSha256: originalSha, message: 'The exact logical attachment version, original-byte SHA-256 baseline, inherited status, and current file are present.' });
+          if (verifiedOwnedAttachment(snapshot, siteId, owner.entityId, originalSha, entity.id)) {
+            verifiedAttachmentIds.add(entity.id);
+            add({ kind: 'attachment', status: 'clean', entityId: key, wpId: entity.id, code: 'managed-attachment-match', sourceSha256: originalSha, observedSha256: originalSha, message: 'The exact logical attachment version, original-byte SHA-256 baseline, inherited status, and current file are present.' });
+          } else {
+            add({ kind: 'attachment', status: 'conflict', entityId: key, wpId: entity.id, code: 'ambiguous-attachment-ownership', message: 'The attachment version, numeric ID, ownership rows, baseline or site-record binding is ambiguous.' });
+          }
         }
         continue;
       }

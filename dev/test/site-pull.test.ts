@@ -20,7 +20,7 @@ const intentFile = path.join(fixtureRoot, 'site.intent.json');
 const run = promisify(execFile);
 const editedMarkup = '<!-- wp:paragraph --><p>Saved editor change.</p><!-- /wp:paragraph -->';
 
-function addOwnedAttachment(f: PullFixture, wpId: number, options: { status?: string; duplicate?: boolean; duplicateNumericId?: boolean; legacy?: boolean; foreignOwner?: boolean } = {}): void {
+function addOwnedAttachment(f: PullFixture, wpId: number, options: { status?: string; duplicate?: boolean; duplicateNumericId?: boolean; duplicateDirty?: boolean; duplicateForeignOwner?: boolean; legacy?: boolean; foreignOwner?: boolean } = {}): void {
   const asset = f.source.assets.find(item => item.role === 'attachment')!;
   const state = { sha256: asset.sha256 };
   const ownership: SiteEntity['ownership'] = [{ version: 1, siteId: f.source.sourceIntent.siteId, entityId: asset.id, kind: 'attachment',
@@ -30,6 +30,9 @@ function addOwnedAttachment(f: PullFixture, wpId: number, options: { status?: st
     attachment: { url: `https://example.test/uploads/${wpId}.png`, currentFileSha256: 'c'.repeat(64), width: 640, height: 480 }, ownership };
   f.snapshot.entities.push(entity);
   if (options.duplicate || options.duplicateNumericId) f.snapshot.entities.push({ ...entity, id: options.duplicateNumericId ? wpId : wpId + 1, state: { ...state }, ownership: ownership.map(row => ({ ...row })) });
+  if (options.duplicateDirty) f.snapshot.entities.push({ ...entity, id: wpId + 1, state: { sha256: 'd'.repeat(64) }, ownership: ownership.map(row => ({ ...row })) });
+  if (options.duplicateForeignOwner) f.snapshot.entities.push({ ...entity, id: wpId + 1, state: { ...state }, ownership: [...ownership.map(row => ({ ...row })),
+    { version: 1, siteId: 'another-site', entityId: 'shared', kind: 'attachment', assetSha256: asset.sha256, lastAppliedHash: managedStateHash(state) }] });
   f.snapshot.siteRecord = { version: 1, siteId: f.source.sourceIntent.siteId,
     entities: { [options.legacy ? `attachment:${asset.id}` : `attachment:${asset.id}@${asset.sha256}`]: wpId }, options: {}, operation: null };
 }
@@ -192,6 +195,8 @@ describe('bounded site template and part pull', () => {
     ['trashed', { status: 'trash' }],
     ['ambiguous duplicate version', { duplicate: true }],
     ['ambiguous duplicate numeric ID', { duplicateNumericId: true }],
+    ['dirty duplicate version claim', { duplicateDirty: true }],
+    ['duplicate version claimant with foreign owner', { duplicateForeignOwner: true }],
     ['foreign ownership rows', { foreignOwner: true }],
   ] as const)('blocks %s attachment versions before source publication', async (_label, attachmentOptions) => {
     const f = await fixture();
