@@ -96,6 +96,7 @@ function emitCustomHtml(node: Element, context: RuleContext, reason: string): Wp
   context.warn(reason, node, 'core/html', 'html');
   const block = createHtmlFallback(context.wp, node.outerHTML);
   block.__blockRunnerSource = context.sourceFor(node);
+  context.applyStyles(node, [block]);
   return block;
 }
 

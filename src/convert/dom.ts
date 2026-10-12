@@ -18,11 +18,13 @@ export function prepareDom(input: string, sourcePath?: string): PreparedDom {
     includeNodeLocations: true,
   });
   const warnings: ReportItem[] = [];
+  const exportRoots = selectAuthoredStaticAlternatives(dom, warnings, sourcePath);
   // Harvested before sanitizeDocument strips the <style> elements.
   const cssClassRules = extractCssClassRules(dom.window.document);
   const cssBackgrounds = cssBackgroundsFromRules(cssClassRules);
 
   sanitizeDocument(dom, warnings, sourcePath);
+  reportUnresolvedBindingsAndCanvas(dom, exportRoots, warnings, sourcePath);
 
   return {
     dom,
@@ -30,6 +32,104 @@ export function prepareDom(input: string, sourcePath?: string): PreparedDom {
     cssClassRules,
     warnings,
   };
+}
+
+/**
+ * Some authored exports include a complete static page beside its runtime page. Select that page
+ * only when the wrapper, static branch, and matching canvas dimensions identify one exact pair.
+ * Keep the original nodes in place so their source locations remain available to diagnostics.
+ */
+function selectAuthoredStaticAlternatives(dom: JSDOM, warnings: ReportItem[], sourcePath?: string): Element[] {
+  const document = dom.window.document;
+  const exportRoots: Element[] = [];
+  for (const wrapper of [...document.querySelectorAll('x-dc')]) {
+    exportRoots.push(wrapper);
+    const children = [...wrapper.children];
+    const branches = children.filter((element) =>
+      element.tagName.toLowerCase() === 'sc-if' && element.hasAttribute('data-dc-static'),
+    );
+    if (branches.length === 0) continue;
+
+    const warn = (reason: string) => warnings.push({
+      block: 'input',
+      status: 'warning',
+      reason,
+      source: sourceForNode(dom, wrapper, sourcePath),
+    });
+
+    if (branches.length !== 1) {
+      warn('authored static alternative is ambiguous; original export markup was preserved');
+      continue;
+    }
+
+    const branch = branches[0];
+    const pages = [...branch.children].filter((element) =>
+      element.getAttribute('data-document-role') === 'page',
+    );
+    if (pages.length !== 1) {
+      warn('authored static alternative is ambiguous; original export markup was preserved');
+      continue;
+    }
+
+    const staticPage = pages[0];
+    const width = staticPage.getAttribute('data-canvas-width');
+    const height = staticPage.getAttribute('data-canvas-height');
+    if (!width || !height) {
+      warn('authored static alternative is ambiguous; original export markup was preserved');
+      continue;
+    }
+
+    const competingPages = children.filter((element) =>
+      element !== branch &&
+      element.getAttribute('data-document-role') !== 'page' &&
+      element.getAttribute('data-canvas-width') === width &&
+      element.getAttribute('data-canvas-height') === height,
+    );
+    if (competingPages.length !== 1) {
+      warn('authored static alternative is ambiguous; original export markup was preserved');
+      continue;
+    }
+
+    competingPages[0].remove();
+    warn('authored static alternative selected; runtime behavior is not carried');
+  }
+  return exportRoots;
+}
+
+/** Surface source expressions and canvas pixels that the static block tree cannot represent. */
+function reportUnresolvedBindingsAndCanvas(
+  dom: JSDOM,
+  roots: readonly Element[],
+  warnings: ReportItem[],
+  sourcePath?: string,
+): void {
+  for (const root of roots) {
+    for (const element of [root, ...root.querySelectorAll('*')]) {
+      const hasBinding =
+        [...element.attributes].some((attribute) => /\{\{[^{}]*\}\}/.test(attribute.value)) ||
+        [...element.childNodes].some(
+          (node) =>
+            node.nodeType === dom.window.Node.TEXT_NODE && /\{\{[^{}]*\}\}/.test(node.textContent ?? ''),
+        );
+      if (hasBinding) {
+        warnings.push({
+          block: 'input',
+          status: 'warning',
+          reason: 'unresolved {{...}} binding remains in authored markup',
+          source: sourceForNode(dom, element, sourcePath),
+        });
+      }
+    }
+
+    for (const canvas of [...root.querySelectorAll('canvas')]) {
+      warnings.push({
+        block: 'input',
+        status: 'warning',
+        reason: 'canvas pixels are runtime-managed; authored fallback children are preserved',
+        source: sourceForNode(dom, canvas, sourcePath),
+      });
+    }
+  }
 }
 
 /**
