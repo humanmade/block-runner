@@ -4,6 +4,8 @@ import path from 'node:path';
 import { readStableRegularFile } from '../publication.js';
 import { prepareSiteSource } from '../site/input.js';
 import { compileSite } from '../site/compile.js';
+import { getWp } from '../headless/wp.js';
+import type { WpBlock } from '../types.js';
 import type { PreparedSiteSource, CompiledSite } from '../site/types.js';
 import type { ProofCommandResult, ProofGateResult } from './runner.js';
 import type { EvidenceStore } from './receipt.js';
@@ -19,6 +21,23 @@ export interface PreparedSiteProof {
   theme: PreparedThemeProof;
 }
 const hash = (bytes: Uint8Array | string) => `sha256:${createHash('sha256').update(bytes).digest('hex')}`;
+
+/** Keep the negative heading valid while making its explicit icon disagree with its parent. */
+export async function seedAccordionHeadingMismatch(markup: string): Promise<string> {
+  const wp = await getWp();
+  const blocks = wp.parse(markup);
+  let seeded = false;
+  const visit = (items: WpBlock[]): void => {
+    for (const [index, block] of items.entries()) {
+      if (!seeded && block.name === 'core/accordion-heading' && ['left', 'right'].includes(String(block.attributes.iconPosition))) {
+        items[index] = wp.createBlock(block.name, { ...block.attributes, iconPosition: block.attributes.iconPosition === 'left' ? 'right' : 'left' }, block.innerBlocks);
+        seeded = true;
+      } else if (!seeded) visit(block.innerBlocks);
+    }
+  };
+  visit(blocks);
+  return seeded ? wp.serialize(blocks) : markup;
+}
 
 /** This is deliberately a five-page published proof fixture, never a general site apply adapter. */
 export async function prepareSiteProof(directory: string, evidence: EvidenceStore): Promise<PreparedSiteProof> {
@@ -171,7 +190,7 @@ export async function runSiteProof(input: {
       let bytes = file.bytes;
       if (input.negativeControl === 'accordion-mismatch' && !accordionSeeded && file.path.endsWith('.html')) {
         const original = Buffer.from(bytes).toString();
-        const changed = original.replace(/(wp:accordion-heading\s*\{[^}]*"iconPosition":)"(left|right)"/, (_match, prefix, value) => `${prefix}"${value === 'left' ? 'right' : 'left'}"`);
+        const changed = await seedAccordionHeadingMismatch(original);
         accordionSeeded = original !== changed;
         bytes = Buffer.from(changed);
       }

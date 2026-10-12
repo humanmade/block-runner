@@ -5,8 +5,10 @@ import { fileURLToPath } from 'node:url';
 import { describe, expect, it, vi } from 'vitest';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { compileSite } from '../../src/site/compile.js';
+import { realize } from '../../src/intent/index.js';
+import { getWp } from '../../src/headless/wp.js';
 import { writeCompiledSite } from '../../src/site/write.js';
-import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, siteOwnedRecord, siteFixturePhp, topologicalSitePages, siteTrashOverridesPhp, runAfterSiteBinding } from '../../src/proof/site.js';
+import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, siteOwnedRecord, siteFixturePhp, topologicalSitePages, siteTrashOverridesPhp, runAfterSiteBinding, seedAccordionHeadingMismatch } from '../../src/proof/site.js';
 import { EvidenceStore } from '../../src/proof/receipt.js';
 import { evaluateProofProfile, PROOF_PROFILES } from '../../src/proof/profiles.js';
 import type { ProofCommandResult } from '../../src/proof/runner.js';
@@ -29,6 +31,21 @@ async function bundle(published = true) {
 const commandResult = (stdout = '', exitCode = 0): ProofCommandResult => ({ command: 'fixture-adapter', args: [], stdout, stderr: '', exitCode });
 
 describe('controlled site proof', () => {
+  it('seeds a valid native accordion heading with matching HTML for editor sync', async () => {
+    const report = await realize(JSON.stringify({ blocks: [{ block: 'core/accordion', attrs: { iconPosition: 'left' }, children: [{ block: 'core/accordion-item', children: [{ block: 'core/accordion-heading', attrs: { title: 'Controlled heading', iconPosition: 'left' } }, { block: 'core/accordion-panel', children: [{ block: 'core/paragraph', text: 'Body' }] }] }] }] }), { isolateConfig: true });
+    expect(report.ok).toBe(true);
+    const seeded = await seedAccordionHeadingMismatch(report.output!);
+    const wp = await getWp();
+    const parsed = wp.parse(seeded);
+    const flatten = (items: typeof parsed): typeof parsed => items.flatMap(block => [block, ...flatten(block.innerBlocks)]);
+    expect(parsed[0]!.attributes.iconPosition).toBe('left');
+    expect(flatten(parsed).find(block => block.name === 'core/accordion-heading')!.attributes.iconPosition).toBe('right');
+    expect(seeded).toContain('has-icon-right');
+    expect(flatten(parsed).every(block => wp.validateBlock(block)[0])).toBe(true);
+    expect(wp.serialize(parsed)).toBe(seeded);
+    const ordinary = '<!-- wp:paragraph -->\n<p>Ordinary</p>\n<!-- /wp:paragraph -->';
+    expect(await seedAccordionHeadingMismatch(ordinary)).toBe(ordinary);
+  });
   it('pins the explicit published variant without promoting the ordinary draft fixture', async () => {
     const draft = await bundle(false);
     await expect(prepareSiteProof(draft.directory, draft.evidence)).rejects.toThrow('draft statuses are never promoted');
