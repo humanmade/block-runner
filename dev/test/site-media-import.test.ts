@@ -63,7 +63,7 @@ async function fixture(retainOld = false) {
   const source: PreparedSiteSource = prepared.source;
   const theme: ThemeArtifact = {
     sourceIntent: source.sourceIntent, sourceAssets: source.assets, targetBindings: {}, targetBindingFingerprint: 'test',
-    themeFiles: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'test-theme',
+    themeFiles: [], syncedPatterns: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'test-theme',
   };
   const compiledPage = { id: 'home', route: '/', title: 'Home', template: 'index', status: 'draft' as const,
     content: '<!-- wp:paragraph --><p>Home</p><!-- /wp:paragraph -->', diagnostics: [] };

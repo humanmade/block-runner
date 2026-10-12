@@ -73,7 +73,7 @@ function snapshotScript(siteId: string, desiredRoutes: string[]): string {
 if (defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON) throw new Exception('alternate cron bootstrap is unsupported for read-only site planning');
 remove_action('shutdown','_wp_cron');
 $capabilities = array();
-foreach (array('edit_pages','publish_pages','edit_others_pages','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
+foreach (array('edit_pages','publish_pages','edit_others_pages','edit_posts','edit_others_posts','publish_posts','publish_blocks','edit_published_posts','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
 $entities = array(); $overrides = array(); $navigation = array();
 $posts = get_posts(array('post_type'=>array('page','attachment','wp_block','wp_template','wp_template_part','wp_navigation'), 'post_status'=>array('publish','future','draft','pending','private','trash','inherit','auto-draft'), 'numberposts'=>-1, 'orderby'=>'ID', 'order'=>'ASC', 'suppress_filters'=>true));
 foreach ($posts as $post) {
