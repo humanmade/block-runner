@@ -165,7 +165,8 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       if(!compiled?.ok||compiled.content===undefined||compiled.pendingUses.length||compiled.pendingBindings.length) throw new Error('pattern dependency finalization failed');
       const desired={title:compiled.title,content:compiled.content,status:'publish'};
       const existing=op.id?live.entities.find(entity=>entity.id===op.id):undefined;
-      await perform({...op,desired,action:op.action==='retain'&&!same(existing?.state,desired)?'update':op.action});
+      const {body:_body,pendingBindings:_pendingBindings,pendingPatternUses:_pendingPatternUses,requiresFinalization:_requiresFinalization,...finalizedOp}=op;
+      await perform({...finalizedOp,desired,action:op.action==='retain'&&!same(existing?.state,desired)?'update':op.action});
       const entity=live.entities.find(entity=>entity.kind==='pattern'&&entity.ownership.some(owner=>owner.siteId===plan.siteId&&owner.entityId===id));if(!entity)throw new Error('pattern readback absent');patternBindings[id]=entity.id;
     }
     const compiled=await compileSite(input.source,compileOptions());
@@ -177,7 +178,8 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       const parent=page.parentId?ids.get(page.parentId):0;if(parent===undefined)throw new Error('page parent dependency absent');
       const desired={title:page.title,slug:page.route==='/'?page.id:page.route.split('/').at(-1)!,parentId:parent,template:page.template,status:page.status,content:page.content};
       const existing=op.id?live.entities.find(entity=>entity.id===op.id):undefined;
-      await perform({...op,desired,action:op.action==='retain'&&!same(existing?.state,desired)?'update':op.action});
+      const {body:_body,pendingBindings:_pendingBindings,pendingPatternUses:_pendingPatternUses,requiresFinalization:_requiresFinalization,...finalizedOp}=op;
+      await perform({...finalizedOp,desired,action:op.action==='retain'&&!same(existing?.state,desired)?'update':op.action});
       const entity=live.entities.find(entity=>entity.kind==='page'&&entity.ownership.some(owner=>owner.siteId===plan.siteId&&owner.entityId===page.id));if(!entity)throw new Error('page readback absent');ids.set(page.id,entity.id);
     }
     for(const op of plan.operations.filter(op=>op.kind==='option')) {
