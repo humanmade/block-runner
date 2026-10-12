@@ -308,18 +308,26 @@ async function themeChecks(intent: SiteIntent, documents: CompiledDocument[]): P
   const themeJson = JSON.stringify(intent.theme.themeJson, null, 2);
   const checked = validateThemeJson(themeJson, 'theme.json', 'assemble');
   const diagnostics = [...checked.report.items];
-  const files: ThemeMarkupFile[] = documents.filter((document) => document.kind !== 'page').map((document) => ({
+  const files: ThemeMarkupFile[] = documents.map((document) => ({
     path: themeFilePath(document),
     file: themeRelativePath(document),
-    kind: document.kind as 'template' | 'part' | 'pattern',
+    // The existing scanner needs only a markup-file kind; pages use a virtual template entry.
+    kind: document.kind === 'page' ? 'template' : document.kind,
     content: document.markup,
     markup: document.markup,
     ...(document.kind === 'pattern' ? { header: { raw: '', title: intent.patterns[document.name]?.title, slug: intent.patterns[document.name]?.slug } } : {}),
   }));
   const references = await findThemeReferenceIssues(`/themes/${intent.theme.slug}`, files, intent.theme.themeJson);
-  diagnostics.push(...references.map((item) => HARD_REFERENCE_CODES.has(item.code ?? '')
-    ? { ...item, status: 'invalid' as const }
-    : item));
+  const pageSources = new Map(documents.filter((document) => document.kind === 'page')
+    .map((document) => [themeFilePath(document), sourceLabel(intent.siteId, document.id)]));
+  diagnostics.push(...references.map((item) => {
+    const sourcePath = item.source?.path;
+    return {
+      ...item,
+      ...(sourcePath && pageSources.has(sourcePath) ? { source: { ...item.source, path: pageSources.get(sourcePath)! } } : {}),
+      ...(HARD_REFERENCE_CODES.has(item.code ?? '') ? { status: 'invalid' as const } : {}),
+    };
+  }));
   if (!isSingleLineHeader(intent.theme.title)) {
     diagnostics.push(invalid('theme', 'unsafe-theme-header', 'theme title must be a single-line value safe for the style.css metadata header'));
   }

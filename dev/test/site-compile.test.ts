@@ -77,6 +77,38 @@ describe('site compiler', () => {
       .toContain('<!-- wp:group {"tagName":"section","className":"ordered","layout":{"type":"constrained"}} -->');
   });
 
+  it('rejects undeclared presets used only by a page and accepts block-scoped page presets', async () => {
+    const missingSource = await prepareAssetFreeIntent((intent) => {
+      intent.theme.themeJson.settings = {
+        color: { defaultPalette: false, palette: [] },
+      };
+      intent.pages[0]!.body.blocks.unshift({ block: 'core/group', attrs: { backgroundColor: 'page-only-missing' } });
+    });
+    const missing = await compileSite(missingSource);
+    expect(missing.ok).toBe(false);
+    if (!missing.ok) expect(missing.diagnostics).toContainEqual(expect.objectContaining({
+      code: 'undeclared-preset',
+      status: 'invalid',
+      source: { path: 'site://sample-studio/page:home' },
+      details: expect.objectContaining({ kind: 'color', slug: 'page-only-missing' }),
+    }));
+
+    const scopedSource = await prepareAssetFreeIntent((intent) => {
+      intent.theme.themeJson.settings = {
+        color: { defaultPalette: false, palette: [] },
+        blocks: {
+          'core/group': {
+            color: { defaultPalette: false, palette: [{ slug: 'page-only', name: 'Page Only', color: '#123456' }] },
+          },
+        },
+      };
+      intent.pages[0]!.body.blocks.unshift({ block: 'core/group', attrs: { backgroundColor: 'page-only' } });
+    });
+    const scoped = await compileSite(scopedSource);
+    expect(scoped.ok).toBe(true);
+    if (scoped.ok) expect(scoped.diagnostics.some((item) => item.code === 'undeclared-preset')).toBe(false);
+  });
+
   it('binds both attachment ID and URL for native image and cover URL-use forms', async () => {
     const binding = { 'home-hero': { id: 731, url: 'https://media.example.test/hero.png' } };
     for (const block of ['core/image', 'core/cover'] as const) {
