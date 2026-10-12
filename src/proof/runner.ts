@@ -1,4 +1,4 @@
-import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, type PreparedSiteProof, type SiteProofGate, siteTrashOverridesPhp } from './site.js';
+import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, type PreparedSiteProof, type SiteProofGate, siteTrashOverridesPhp, runAfterSiteBinding } from './site.js';
 import { createHash, randomUUID } from 'node:crypto';
 import { access, copyFile, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import { constants as fsConstants, existsSync, readFileSync } from 'node:fs';
@@ -970,6 +970,7 @@ function createRuntime(
   let runtimeThemeConfig: string | undefined;
   let themeStageRoot: string | undefined;
   let siteResults: Partial<Record<SiteProofGate, ProofGateResult>> | undefined;
+  let siteThemeAssigned = false;
   const command = options.commandRunner ?? runCommand;
 
   const wpEnv = async (args: string[], phase = `wp-env:${args.slice(0, 3).join(' ')}`): Promise<ProofCommandResult> => {
@@ -1332,7 +1333,7 @@ function createRuntime(
             command: async (name, args) => command(name, args, { cwd: projectRoot, timeoutMs: PROOF_COMMAND_TIMEOUTS.browser, phase: 'browser-site-proof' }),
           });
           siteResults = result.gates;
-          if (result.theme && preparedTheme) Object.assign(preparedTheme, result.theme);
+          if (result.theme && preparedTheme && result.gates.site_fixture?.status === 'pass') { Object.assign(preparedTheme, result.theme); siteThemeAssigned = true; }
           if (isRecord(result.browser) && typeof result.browser.version === 'string' && typeof result.browser.revision === 'string') {
             environment.browser.version = result.browser.version;
             environment.browser.revision = result.browser.revision;
@@ -1435,7 +1436,8 @@ function createRuntime(
       }
 
       if (context.gate === 'theme_roundtrip' && preparedTheme) {
-        return runThemeRoundtripWithRuntimeMarker(preparedTheme, preparedSite ? path.join(projectRoot, 'scripts', 'proof-site-playwright.mjs') : themePlaywrightHelper, command, options, sourceThemeConfig, wpEnv, logged, evidence, environment);
+        const parity = () => runThemeRoundtripWithRuntimeMarker(preparedTheme!, preparedSite ? path.join(projectRoot, 'scripts', 'proof-site-playwright.mjs') : themePlaywrightHelper, command, options, sourceThemeConfig, wpEnv, logged, evidence, environment);
+        return preparedSite ? runAfterSiteBinding(siteResults?.site_fixture, siteThemeAssigned, parity) : parity();
       }
 
       // Deactivation is intentionally after the frontend/browser snapshot. The checks distinguish
@@ -1626,13 +1628,18 @@ async function runThemeRoundtripWithRuntimeMarker(
           return actual;
         })) : [];
         browserResult.report.files = comparedFiles;
+        const outputIndex = browserResult.command.args.indexOf('--out');
+        const outputPath = browserResult.command.args[outputIndex + 1];
+        if (outputPath && Array.isArray(browserResult.report.screenshots)) {
+          browserResult.report.screenshotEvidence = await Promise.all(browserResult.report.screenshots.filter((name): name is string => typeof name === 'string').map(async (name) => evidence.put(await readFile(path.join(path.dirname(outputPath), path.basename(name))), { mediaType: 'image/png' })));
+        }
         const reportEvidence = await evidence.putJson(browserResult.report);
         const runtimeBinding = isRecord(browserResult.report.runtimeBinding) && browserResult.report.runtimeBinding.verified === true;
         const passed = browserResult.command.exitCode === 0 && runtimeBinding && exactFileSet && comparedFiles.every((file) => file.status === 'pass');
         const completedWithDifferences = runtimeBinding && exactFileSet && comparedFiles.some((file) => file.status === 'fail');
         result = {
           status: passed ? 'pass' : completedWithDifferences ? 'fail' : 'blocked',
-          reason: passed ? undefined : completedWithDifferences ? 'One or more theme templates or parts changed during a Site Editor save.' : !runtimeBinding ? 'Site Editor theme save proof did not confirm the browser target as this wp-env runtime.' : 'Site Editor theme save proof did not produce a complete unique per-file result.',
+          reason: passed ? undefined : isRecord(browserResult.report.exception) && typeof browserResult.report.exception.message === 'string' ? `Site Editor helper failed at ${String(browserResult.report.exception.url ?? 'unobserved URL')}: ${browserResult.report.exception.message}` : completedWithDifferences ? 'One or more theme templates or parts changed during a Site Editor save.' : !runtimeBinding ? 'Site Editor theme save proof did not confirm the browser target as this wp-env runtime.' : 'Site Editor theme save proof did not produce a complete unique per-file result.',
           evidence: [browserEvidence, reportEvidence],
           details: browserResult.report,
         };

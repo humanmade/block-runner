@@ -35,7 +35,7 @@ async function login(page, baseUrl) {
   if (!page.url().includes('wp-login.php')) return;
   await page.locator('#user_login').fill(process.env.WP_USERNAME ?? 'admin');
   await page.locator('#user_pass').fill(process.env.WP_PASSWORD ?? 'password');
-  await Promise.all([page.waitForURL((url) => !url.pathname.endsWith('/wp-login.php')), page.locator('#wp-submit').click()]);
+  await Promise.all([page.waitForURL((url) => !url.pathname.endsWith('/wp-login.php'), { waitUntil: 'domcontentloaded' }), page.locator('#wp-submit').click()]);
 }
 async function editAndReopen(page, input, target, onSaved = () => {}) {
   const part = target.kind === 'part';
@@ -72,7 +72,7 @@ async function editAndReopen(page, input, target, onSaved = () => {}) {
   return { mounted, savedRaw: raw.content.raw, restPath, overrideId: raw.wp_id, reopened: true };
 }
 export async function proveControlledThemeFile(page, theme, file, baseUrl, onOverride = () => {}) {
-  return proveFile(page, theme, file, baseUrl, {
+  const result = await proveFile(page, theme, file, baseUrl, {
     awaitMounted: async (mountedPage, source) => {
       const expected = await mountedPage.evaluate((content) => {
         const flatten = (items) => items.flatMap((block) => [block.name, ...flatten(block.innerBlocks ?? [])]);
@@ -87,7 +87,21 @@ export async function proveControlledThemeFile(page, theme, file, baseUrl, onOve
       return { deferredRecoverableTrash: true, id };
     },
   });
+  if (result.status !== 'pass') result.failureUrl = page.url();
+  return result;
 }
+export async function recordSiteHelperFailure(report, page, error, directory, context = {}) {
+  const failure = { message: error instanceof Error ? error.message : String(error), url: page.url(), ...context };
+  report.exception = failure;
+  try {
+    const screenshot = `failure-${report.screenshots.length}.png`;
+    await page.screenshot({ path: path.join(directory, screenshot), fullPage: true });
+    report.screenshots.push(screenshot);
+    failure.screenshot = screenshot;
+  } catch (captureError) { failure.screenshotError = String(captureError); }
+  return failure;
+}
+
 async function main() {
   const args = process.argv.slice(2);
   const configPath = args[args.indexOf('--config') + 1];
@@ -97,18 +111,22 @@ async function main() {
   const browser = await chromium.launch({ headless: true });
   const page = await browser.newPage();
   page.setDefaultTimeout(25_000);
-  const report = { gates: {}, screenshots: [], files: [], recoverableOverrides: [], browser: { engine: 'chromium', version: browser.version(), revision: /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved' } };
+  const report = { runtimeBinding: { verified: false, status: 'unobserved' }, gates: {}, screenshots: [], files: [], recoverableOverrides: [], browser: { engine: 'chromium', version: browser.version(), revision: /(?:chromium|chrome|headless_shell)[-_](\d+)/i.exec(chromium.executablePath())?.[1] ?? 'unobserved' } };
   const errors = [];
+  const screenshotDirectory = input.screenshotDirectory ?? path.dirname(outputPath);
+  let phase = 'login';
+  let activeEntity;
   page.on('pageerror', (error) => errors.push(error.message));
   const gate = async (id, action) => {
     try { report.gates[id] = { status: 'pass', details: await action() }; }
-    catch (error) { report.gates[id] = { status: 'fail', reason: String(error) }; }
+    catch (error) { const failure = await recordSiteHelperFailure(report, page, error, screenshotDirectory, { gate: id }); report.gates[id] = { status: 'fail', reason: failure.message, details: failure }; }
   };
   let partOverride;
   let partOverrideContent;
   let partOriginalRaw;
   try {
     await login(page, input.baseUrl);
+    phase = 'runtime-settings';
     await page.goto(`${input.baseUrl}/wp-admin/site-editor.php?canvas=edit`);
     await page.waitForFunction(() => Boolean(globalThis.wp?.apiFetch));
     const settings = await page.evaluate(async () => globalThis.wp.apiFetch({ path: '/wp/v2/settings?context=edit' }));
@@ -118,7 +136,13 @@ async function main() {
       if (!principal.capabilities?.manage_options || (input.principalId && principal.id !== input.principalId)) throw new Error('Authenticated browser principal cannot manage fixture options');
       if (input.verifyOnly) return;
       if (input.files) {
-        for (const file of input.files) report.files.push(await proveControlledThemeFile(page, input.theme, file, input.baseUrl, (override) => report.recoverableOverrides.push(override)));
+        for (const file of input.files) {
+          phase = 'theme_roundtrip';
+          activeEntity = { file: file.file, postType: file.kind === 'part' ? 'wp_template_part' : 'wp_template' };
+          const result = await proveControlledThemeFile(page, input.theme, file, input.baseUrl, (override) => report.recoverableOverrides.push(override));
+          report.files.push(result);
+          if (result.status !== 'pass') await recordSiteHelperFailure(report, page, new Error(result.reason ?? 'Theme file proof failed'), screenshotDirectory, activeEntity);
+        }
         return;
       }
       await gate('site_routes', async () => {
@@ -247,6 +271,9 @@ async function main() {
     if (input.verifyOnly && !report.runtimeBinding.verified) process.exitCode = 1;
     if (!verified) for (const id of ['site_content', 'site_routes', 'site_assets', 'site_frontend_styles', 'site_editor_styles', 'site_navigation', 'site_page_edit', 'site_part_edit']) report.gates[id] = { status: 'fail', reason: 'Wrong runtime marker; zero fixture editor writes' };
     if (!input.files && !input.verifyOnly) report.gates.site_runtime_errors = { status: errors.length ? 'fail' : 'pass', reason: errors.length ? 'Browser runtime errors' : undefined, details: errors };
+  } catch (error) {
+    await recordSiteHelperFailure(report, page, error, screenshotDirectory, { phase, ...(activeEntity ?? {}) });
+    process.exitCode = 1;
   } finally {
     if (partOverride) {
       try {

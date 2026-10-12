@@ -6,7 +6,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { compileSite } from '../../src/site/compile.js';
 import { writeCompiledSite } from '../../src/site/write.js';
-import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, siteOwnedRecord, siteFixturePhp, topologicalSitePages, siteTrashOverridesPhp } from '../../src/proof/site.js';
+import { prepareSiteProof, runSiteProof, SITE_PROOF_GATES, siteOwnedRecord, siteFixturePhp, topologicalSitePages, siteTrashOverridesPhp, runAfterSiteBinding } from '../../src/proof/site.js';
 import { EvidenceStore } from '../../src/proof/receipt.js';
 import { evaluateProofProfile, PROOF_PROFILES } from '../../src/proof/profiles.js';
 import type { ProofCommandResult } from '../../src/proof/runner.js';
@@ -76,6 +76,10 @@ describe('controlled site proof', () => {
     expect(cleanup.indexOf('Unowned runtime or principal')).toBeLessThan(cleanup.indexOf('wp_trash_post'));
     expect(cleanup).toContain("get_post_meta($id,'_block_runner_proof',true)!==$marker");
     expect(cleanup).toContain('$preserved[]=$id');
+    expect(cleanup.indexOf('$frontBefore=')).toBeLessThan(cleanup.indexOf('wp_trash_post'));
+    expect(cleanup).toContain("$frontTrashReset=$frontAfter['show_on_front']==='posts' && $frontAfter['page_on_front']===0");
+    expect(cleanup).toContain('$restoreFront=$frontOwned && ($frontAfter===$frontBefore || $frontTrashReset)');
+    expect(cleanup).toContain("$frontBefore['page_on_front']===(int)$expected['page_on_front']");
   });
   it('sorts nested pages and rejects unresolved parents', () => {
     expect(topologicalSitePages([{ id: 'child', parentId: 'parent' }, { id: 'parent' }]).map((page) => page.id)).toEqual(['parent', 'child']);
@@ -83,6 +87,24 @@ describe('controlled site proof', () => {
     const cleanup = siteTrashOverridesPhp('owned', [{ id: 1, content: 'exact', postType: 'wp_template_part' }]);
     expect(cleanup).toContain('wp_trash_post');
     expect(cleanup).not.toContain('wp_delete');
+  });
+  it('retains a helper timeout and actual URL with a failure capture request', async () => {
+    // @ts-expect-error The bundled helper is a standalone ESM script.
+    const { recordSiteHelperFailure } = await import('../../scripts/proof-site-playwright.mjs');
+    const report = { screenshots: [] as string[] };
+    const screenshot = vi.fn(async () => {});
+    const failure = await recordSiteHelperFailure(report, { url: () => 'http://localhost:8899/wp-login.php', screenshot }, new Error('login wait timed out'), '/tmp', { postType: 'wp_template_part' });
+    expect(failure).toMatchObject({ message: 'login wait timed out', url: 'http://localhost:8899/wp-login.php', postType: 'wp_template_part', screenshot: 'failure-0.png' });
+    expect(screenshot).toHaveBeenCalledWith({ path: '/tmp/failure-0.png', fullPage: true });
+    expect(JSON.stringify(report)).not.toContain('Wrong runtime marker');
+  });
+  it('blocks parity until fixture setup passes and the bound theme is assigned', async () => {
+    const parity = vi.fn(async () => ({ status: 'pass' as const }));
+    expect((await runAfterSiteBinding({ status: 'blocked' }, true, parity)).status).toBe('blocked');
+    expect((await runAfterSiteBinding({ status: 'pass' }, false, parity)).status).toBe('blocked');
+    expect(parity).not.toHaveBeenCalled();
+    expect((await runAfterSiteBinding({ status: 'pass' }, true, parity)).status).toBe('pass');
+    expect(parity).toHaveBeenCalledOnce();
   });
   it('wrong target preflight performs zero page or media fixture writes', async () => {
     const input = await bundle();
@@ -95,10 +117,13 @@ describe('controlled site proof', () => {
     expect(writes.some((php) => php.includes('wp_insert_post') || php.includes('wp_insert_attachment'))).toBe(false);
     expect(result.gates.site_fixture?.status).toBe('blocked');
   });
-  it.each(['missing-content', 'broken-asset', 'broken-mobile'] as const)('seeds %s only after browser target verification', async (negativeControl) => {
+  it.each([undefined, 'missing-content', 'broken-asset', 'broken-mobile'] as const)('seeds %s only after browser target verification', async (negativeControl) => {
     const input = await bundle();
     const site = await prepareSiteProof(input.directory, input.evidence);
     const writes: string[] = [];
+    const identities: any[] = [];
+    const originalPutJson = input.evidence.putJson.bind(input.evidence);
+    vi.spyOn(input.evidence, 'putJson').mockImplementation(async (value: any) => { if (value.targetBuildHash) identities.push(value); return originalPutJson(value); });
     let browserCalls = 0;
     const result = await runSiteProof({ site, stagedTheme: path.join(input.root, 'staged/sample-studio'), baseUrl: 'http://localhost:8888', helper: 'fixture-helper', evidence: input.evidence, negativeControl,
       wp: async (php) => {
@@ -113,14 +138,17 @@ describe('controlled site proof', () => {
       },
       command: async (_command, args) => {
         browserCalls++;
-        const report = browserCalls === 1 ? { runtimeBinding: { verified: true }, principal: { id: 1 } } : { gates: Object.fromEntries(SITE_PROOF_GATES.map((gate) => [gate, { status: gate === ({ 'missing-content': 'site_content', 'broken-asset': 'site_assets', 'broken-mobile': 'site_navigation' }[negativeControl]) ? 'fail' : 'pass' }])) };
+        const report = browserCalls === 1 ? { runtimeBinding: { verified: true }, principal: { id: 1 } } : { gates: Object.fromEntries(SITE_PROOF_GATES.map((gate) => [gate, { status: gate === (negativeControl ? { 'missing-content': 'site_content', 'broken-asset': 'site_assets', 'broken-mobile': 'site_navigation' }[negativeControl] : undefined) ? 'fail' : 'pass' }])) };
         await writeFile(args[args.indexOf('--out') + 1]!, JSON.stringify(report));
         return commandResult();
       },
     });
     expect(browserCalls).toBe(2);
+    expect(identities).toHaveLength(1);
+    if (!negativeControl) expect(Object.hasOwn(identities[0], 'negativeControl')).toBe(false);
     expect(result.gates.site_cleanup?.status).toBe('pass');
-    expect(result.gates[({ 'missing-content': 'site_content', 'broken-asset': 'site_assets', 'broken-mobile': 'site_navigation' } as const)[negativeControl]]?.status).toBe('fail');
+    if (negativeControl) expect(result.gates[({ 'missing-content': 'site_content', 'broken-asset': 'site_assets', 'broken-mobile': 'site_navigation' } as const)[negativeControl]]?.status).toBe('fail');
+    else expect(result.gates.site_fixture?.status).toBe('pass');
     const pageWrite = writes.find((php) => php.includes('wp_insert_post'))!;
     const encoded = /\$data=json_decode\(base64_decode\('([^']+)'\)/.exec(pageWrite)![1]!;
     const seeded = JSON.parse(Buffer.from(encoded, 'base64').toString());

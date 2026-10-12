@@ -76,10 +76,22 @@ export function siteFixturePhp(marker: string, action: 'assets' | 'pages' | 'cle
   const owned = `$owned=get_option($marker,array('ids'=>array(),'options'=>array()));`;
   const persist = `update_option($marker,$owned,false);`;
   if (action === 'assets') return `${guard} if(get_option($marker,false)!==false) throw new Exception('Fixture ownership collision'); $owned=array('ids'=>array(),'options'=>array()); foreach(array('show_on_front','page_on_front','permalink_structure') as $key) $owned['options'][$key]=get_option($key); ${persist} $bindings=array(); foreach($data as $asset){ $upload=wp_upload_bits($asset['name'],null,base64_decode($asset['bytes'])); if($upload['error']) throw new Exception($upload['error']); $id=wp_insert_attachment(array('post_title'=>$marker,'post_status'=>'inherit','post_mime_type'=>wp_check_filetype($asset['name'])['type']),$upload['file'],0,true); if(is_wp_error($id)) throw new Exception($id->get_error_message()); update_post_meta($id,'_block_runner_proof',$marker); $owned['ids'][]=$id; ${persist} $bindings[$asset['id']]=array('id'=>$id,'url'=>wp_get_attachment_url($id)); } echo json_encode($bindings);`;
-  if (action === 'pages') return `${guard} ${owned} $pages=array(); foreach($data['pages'] as $p){ $parent=isset($p['parentId'])?($pages[$p['parentId']]??0):0; if(isset($p['parentId'])&&!$parent) throw new Exception('Parent must precede child'); $slug=basename(trim($p['route'],'/')); $id=wp_insert_post(array('post_type'=>'page','post_status'=>$p['status'],'post_title'=>$p['title'],'post_name'=>$slug?:'home','post_content'=>$p['content'],'post_parent'=>$parent),true); if(is_wp_error($id)) throw new Exception($id->get_error_message()); update_post_meta($id,'_block_runner_proof',$marker); update_post_meta($id,'_wp_page_template',$p['template']); $owned['ids'][]=$id; ${persist} $pages[$p['id']]=$id; } update_option('show_on_front','page'); update_option('page_on_front',$pages[$data['homePageId']]); update_option('permalink_structure','/%postname%/'); flush_rewrite_rules(); echo json_encode($pages);`;
-  return `${guard} ${owned} $preserved=array(); foreach(array_reverse($owned['ids']) as $id){ if(get_post_meta($id,'_block_runner_proof',true)!==$marker){$preserved[]=$id;continue;} if(!defined('EMPTY_TRASH_DAYS') || EMPTY_TRASH_DAYS<1) throw new Exception('Recoverable trash unavailable; fixture preserved'); if(!wp_trash_post($id)) $preserved[]=$id; }  $frontOwned=get_option('show_on_front')==='page' && in_array((int)get_option('page_on_front'),$owned['ids'],true); foreach($owned['options'] as $key=>$value){ if(in_array($key,array('show_on_front','page_on_front'),true)&&!$frontOwned){$preserved[]=$key;continue;} if($key==='page_on_front'&&!in_array((int)get_option($key),$owned['ids'],true)){ $preserved[]=$key; continue; } if($key==='show_on_front'&&get_option($key)!=='page'){ $preserved[]=$key;continue; } if($key==='permalink_structure'&&get_option($key)!=='/%postname%/'){ $preserved[]=$key;continue; } update_option($key,$value); } if(!$preserved) delete_option($marker); flush_rewrite_rules(); echo json_encode(array('preserved'=>$preserved));`;
+  if (action === 'pages') return `${guard} ${owned} $pages=array(); foreach($data['pages'] as $p){ $parent=isset($p['parentId'])?($pages[$p['parentId']]??0):0; if(isset($p['parentId'])&&!$parent) throw new Exception('Parent must precede child'); $slug=basename(trim($p['route'],'/')); $id=wp_insert_post(array('post_type'=>'page','post_status'=>$p['status'],'post_title'=>$p['title'],'post_name'=>$slug?:'home','post_content'=>$p['content'],'post_parent'=>$parent),true); if(is_wp_error($id)) throw new Exception($id->get_error_message()); update_post_meta($id,'_block_runner_proof',$marker); update_post_meta($id,'_wp_page_template',$p['template']); $owned['ids'][]=$id; ${persist} $pages[$p['id']]=$id; } $owned['expected_options']=array('show_on_front'=>'page','page_on_front'=>$pages[$data['homePageId']],'permalink_structure'=>'/%postname%/'); ${persist} update_option('show_on_front','page'); update_option('page_on_front',$pages[$data['homePageId']]); update_option('permalink_structure','/%postname%/'); flush_rewrite_rules(); echo json_encode($pages);`;
+  return `${guard} ${owned} $expected=$owned['expected_options']??array(); $frontBefore=array('show_on_front'=>get_option('show_on_front'),'page_on_front'=>(int)get_option('page_on_front')); $frontOwned=isset($expected['page_on_front']) && $frontBefore['show_on_front']===$expected['show_on_front'] && $frontBefore['page_on_front']===(int)$expected['page_on_front']; $permalinkBefore=get_option('permalink_structure'); $preserved=array(); foreach(array_reverse($owned['ids']) as $id){ if(get_post_meta($id,'_block_runner_proof',true)!==$marker){$preserved[]=$id;continue;} if(!defined('EMPTY_TRASH_DAYS') || EMPTY_TRASH_DAYS<1) throw new Exception('Recoverable trash unavailable; fixture preserved'); if(!wp_trash_post($id)) $preserved[]=$id; } $frontAfter=array('show_on_front'=>get_option('show_on_front'),'page_on_front'=>(int)get_option('page_on_front')); $frontTrashReset=$frontAfter['show_on_front']==='posts' && $frontAfter['page_on_front']===0; $restoreFront=$frontOwned && ($frontAfter===$frontBefore || $frontTrashReset); foreach($owned['options'] as $key=>$value){ if(in_array($key,array('show_on_front','page_on_front'),true)){ if(!isset($expected['page_on_front'])) continue; if(!$restoreFront){$preserved[]=$key;continue;} } if($key==='permalink_structure'){ if(!isset($expected[$key])) continue; if($permalinkBefore!==$expected[$key] || get_option($key)!==$permalinkBefore){$preserved[]=$key;continue;} } update_option($key,$value); } if(!$preserved) delete_option($marker); flush_rewrite_rules(); echo json_encode(array('preserved'=>$preserved));`;
+
 }
 
+
+
+/** Site parity is meaningful only after this runtime owns the completed target-bound fixture. */
+export async function runAfterSiteBinding(
+  fixture: ProofGateResult | undefined,
+  themeAssigned: boolean,
+  parity: () => Promise<ProofGateResult>,
+): Promise<ProofGateResult> {
+  if (fixture?.status !== 'pass' || !themeAssigned) return { status: 'blocked', reason: 'Site theme parity requires passed fixture setup and the assigned target-bound theme.' };
+  return parity();
+}
 
 export function topologicalSitePages<T extends { id: string; parentId?: string }>(pages: T[]): T[] {
   const pending = new Map(pages.map((page) => [page.id, page]));
@@ -134,7 +146,14 @@ export async function runSiteProof(input: {
     const preflight = await input.command(process.execPath, [input.helper, '--config', preflightConfig, '--out', preflightOutput]);
     await evidence.putJson(preflight);
     const target = JSON.parse(await readFile(preflightOutput, 'utf8'));
-    if (preflight.exitCode !== 0 || target.runtimeBinding?.verified !== true || target.principal?.id !== principalId) throw new Error('Browser target/principal mismatch; zero fixture writes');
+    if (preflight.exitCode !== 0 || target.runtimeBinding?.verified !== true || target.principal?.id !== principalId) {
+      const reference = await evidence.putJson(target);
+      const screenshots = [];
+      for (const name of target.screenshots ?? []) screenshots.push(await evidence.put(await readFile(path.join(preflightWork, path.basename(name))), { mediaType: 'image/png' }));
+      const reason = target.exception?.message ? `Browser helper failed at ${target.exception.url}: ${target.exception.message}` : 'Browser target/principal mismatch; zero fixture writes';
+      gates.site_fixture = { status: 'blocked', reason, details: target, evidence: [reference, ...screenshots] };
+      throw new Error(reason);
+    }
     fixtureStarted = true;
     const bindings = JSON.parse(await execute(siteFixturePhp(marker, 'assets', site.source.assets.filter((asset) => asset.role === 'attachment').map((asset) => ({ id: asset.id, name: path.basename(asset.path), bytes: Buffer.from(asset.bytes).toString('base64') })))));
     if (input.negativeControl === 'accordion-mismatch' && !Object.values(site.source.sourceIntent.templates).concat(Object.values(site.source.sourceIntent.parts)).some((document) => JSON.stringify(document.body).includes('core/accordion-heading'))) throw new Error('Accordion negative control requires a declared accordion heading in the controlled fixture.');
@@ -170,7 +189,7 @@ export async function runSiteProof(input: {
       page.content = page.content.replace(/src="[^"]+"/, `src="${input.baseUrl}/missing-proof-image.png"`);
     }
     const ids = JSON.parse(await execute(siteFixturePhp(marker, 'pages', { pages: seededPages, homePageId: site.source.sourceIntent.homePageId })));
-    const identity = await evidence.putJson({ sourceHash: site.sourceHash, bundleHash: site.bundleHash, targetBuildHash: compiled.artifactIdentity, negativeControl: input.negativeControl, targetBindingFingerprint: compiled.targetBindingFingerprint, bindings, themeSnapshot: theme.snapshot });
+    const identity = await evidence.putJson({ sourceHash: site.sourceHash, bundleHash: site.bundleHash, targetBuildHash: compiled.artifactIdentity, ...(input.negativeControl ? { negativeControl: input.negativeControl } : {}), targetBindingFingerprint: compiled.targetBindingFingerprint, bindings, themeSnapshot: theme.snapshot });
     gates.site_fixture = { status: 'pass', evidence: [identity] };
     const work = await mkdtemp(path.join(site.root, '.site-proof-'));
     const configPath = path.join(work, 'config.json');
