@@ -1,8 +1,11 @@
 import { readFile } from 'node:fs/promises';
+import { mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validateSiteIntent } from '../../src/site/input.js';
-import { compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
+import { compileSite, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { PreparedSiteSource, SiteIntent, ThemeArtifact } from '../../src/site/types.js';
 import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
 import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
@@ -62,6 +65,63 @@ describe('site synced pattern contract and compiler', () => {
     }
   });
 
+  it('gates unused definitions in full-site compilation and preserves definition warnings with source attribution', async () => {
+    const intent = await base();
+    intent.assets = [];
+    intent.assetUses = [];
+    intent.pages = [intent.pages[0]!];
+    intent.pages[0]!.body = { blocks: [{ block: 'core/paragraph', text: 'Page' }] };
+    intent.syncedPatterns = declaration();
+    intent.syncedPatterns.definitions.card.body.blocks[0]!.attrs!.metadata = { bindings: { content: { source: 'core/pattern-overrides' } } };
+    const preparedInvalid = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(preparedInvalid.ok).toBe(true);
+    if (!preparedInvalid.ok) return;
+    const invalidUnused = await compileSite(preparedInvalid.source);
+    expect(invalidUnused.ok).toBe(false);
+    if (!invalidUnused.ok) expect(invalidUnused.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'pattern-override-contract' })]));
+
+    intent.syncedPatterns = declaration();
+    intent.syncedPatterns.definitions.card.body = { blocks: [{ block: 'core/image', url: 'https://example.test/remote.jpg', attrs: { alt: 'Remote' } }] };
+    const preparedWarning = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(preparedWarning.ok).toBe(true);
+    if (!preparedWarning.ok) return;
+    const result = await compileSite(preparedWarning.source);
+    expect(result.ok).toBe(true);
+    if (result.ok) {
+      expect(result.site.syncedPatterns).toMatchObject([{ id: 'card', ok: true, content: expect.stringContaining('remote.jpg'), pendingUses: [], pendingBindings: [] }]);
+      expect(result.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'warning', source: { path: 'site://sample-studio/synced-pattern:card' }, details: expect.objectContaining({ strict: false }) })]));
+    }
+    const strict = await compileSite(preparedWarning.source, { strict: true });
+    expect(strict.ok).toBe(true);
+    if (strict.ok) expect(strict.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'warning', source: { path: 'site://sample-studio/synced-pattern:card' }, details: expect.objectContaining({ strict: true }) })]));
+  });
+
+  it('isolates synced-pattern finalization from discovered config and applies theme.json token values', async () => {
+    const intent = await base();
+    intent.assets = [];
+    intent.assetUses = [];
+    intent.pages = [intent.pages[0]!];
+    intent.pages[0]!.body = { blocks: [{ block: 'core/paragraph', text: 'Page' }] };
+    intent.theme.themeJson.settings = { color: { palette: [{ slug: 'brand', name: 'Brand', color: '#123456' }] } };
+    intent.syncedPatterns = { version: 1, definitions: { token: { title: 'Token', body: { blocks: [{ block: 'core/paragraph', text: 'Token', attrs: { style: { color: { text: '#123456' } } } }] } } }, uses: [] };
+    const prepared = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const cwd = process.cwd();
+    const configRoot = await mkdtemp(path.join(os.tmpdir(), 'site-pattern-config-'));
+    try {
+      await writeFile(path.join(configRoot, 'block-runner.config.json'), JSON.stringify({ strict: true, tokens: { resolver: 'rest' } }));
+      process.chdir(configRoot);
+      const patterns = await compileSiteSyncedPatterns(prepared.source, { strict: false });
+      expect(patterns[0]?.ok).toBe(true);
+      expect(patterns[0]?.content).toContain('has-brand-color');
+      expect(patterns[0]?.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ status: 'valid', rule: 'token-repair', source: { path: 'site://sample-studio/synced-pattern:token' } })]));
+    } finally {
+      process.chdir(cwd);
+      await rm(configRoot, { recursive: true, force: true });
+    }
+  });
+
   it('reconciles by logical ID and retains only complete managed pattern state', async () => {
     const intent = await base();
     intent.syncedPatterns = declaration(); intent.pages = [intent.pages[0]!]; intent.pages[0]!.status = 'draft';
@@ -70,14 +130,28 @@ describe('site synced pattern contract and compiler', () => {
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
     const source: PreparedSiteSource = prepared.source;
-    const theme: ThemeArtifact = { sourceIntent: intent, sourceAssets: [], targetBindings: {}, targetBindingFingerprint: 'bindings', themeFiles: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'theme' };
+    const theme: ThemeArtifact = { sourceIntent: intent, sourceAssets: [], targetBindings: {}, targetBindingFingerprint: 'bindings', themeFiles: [], syncedPatterns: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'theme' };
     const compiled = await compileSiteSyncedPatterns(source, { patternBindings: { card: 642 } });
     const state = { title: 'Card', content: compiled[0]!.content!, status: 'publish' };
     const entity: SiteEntity = { id: 642, kind: 'pattern', route: null, state, ownership: [{ version: 1, siteId: intent.siteId, entityId: 'card', kind: 'pattern', lastAppliedHash: managedStateHash(state) }] };
-    const snapshot: SiteSnapshot = { target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 1 }, runtime: { wordpress: '7.1.0', php: '8.4.0' }, principal: { userId: 1, capabilities: { edit_pages: true, edit_others_pages: true, edit_posts: true, edit_others_posts: true, manage_options: true, edit_theme_options: true, upload_files: true } }, theme: { slug: intent.theme.slug, assetBaseUrl: 'https://example.test/theme', inventory: [] }, routing: { permalinkStructure: '/%postname%/', rewriteRulesHash: 'rules', routes: [] }, entities: [entity], overrides: [], navigation: [], options: { show_on_front: 'page', page_on_front: 0 }, siteRecord: null };
+    const snapshot: SiteSnapshot = { target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 1 }, runtime: { wordpress: '7.1.0', php: '8.4.0' }, principal: { userId: 1, capabilities: { edit_pages: true, edit_others_pages: true, edit_posts: true, edit_others_posts: true, publish_posts: true, publish_blocks: true, edit_published_posts: true, manage_options: true, edit_theme_options: true, upload_files: true } }, theme: { slug: intent.theme.slug, assetBaseUrl: 'https://example.test/theme', inventory: [] }, routing: { permalinkStructure: '/%postname%/', rewriteRulesHash: 'rules', routes: [] }, entities: [entity], overrides: [], navigation: [], options: { show_on_front: 'page', page_on_front: 0 }, siteRecord: null };
     const plan = reconcileSitePlan(source, theme, [], snapshot, {}, [], compiled, { card: 642 });
     expect(plan.executable).toBe(true);
     expect(plan.operations.find((operation) => operation.kind === 'pattern')).toMatchObject({ action: 'retain', id: 642, entityId: 'card' });
+
+    const missingEdit = structuredClone(snapshot);
+    delete missingEdit.principal.capabilities.edit_published_posts;
+    const editPlan = reconcileSitePlan(source, theme, [], missingEdit, {}, [], compiled, { card: 642 });
+    expect(editPlan.conflicts).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'missing-capability', message: expect.stringContaining('edit_published_posts') })]));
+    const newPatternTarget = structuredClone(snapshot);
+    newPatternTarget.entities = [];
+    delete newPatternTarget.principal.capabilities.publish_posts;
+    delete newPatternTarget.principal.capabilities.publish_blocks;
+    const createPlan = reconcileSitePlan(source, theme, [], newPatternTarget, {}, [], compiled, { card: 642 });
+    expect(createPlan.conflicts).toEqual(expect.arrayContaining([
+      expect.objectContaining({ code: 'missing-capability', message: expect.stringContaining('publish_posts') }),
+      expect.objectContaining({ code: 'missing-capability', message: expect.stringContaining('publish_blocks') }),
+    ]));
 
     intent.syncedPatterns!.definitions.card!.title = 'Renamed card';
     const renamed: PreparedSiteSource = { ...source, sourceIntent: intent };
@@ -101,6 +175,54 @@ describe('site synced pattern contract and compiler', () => {
     const compiled = await (await import('../../src/site/compile.js')).compileThemeDocuments(prepared.source);
     expect(compiled.ok).toBe(false);
     if (!compiled.ok) expect(compiled.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'pattern-binding-required' })]));
+  });
+
+  it('keeps theme artifacts explicit about pending database dependencies and refuses them in full compilation', async () => {
+    const intent = await base();
+    intent.assets = [];
+    intent.assetUses = [];
+    intent.pages = [intent.pages[0]!];
+    intent.pages[0]!.body = { blocks: [{ block: 'core/paragraph', text: 'Page' }] };
+    intent.syncedPatterns = {
+      version: 1,
+      definitions: {
+        card: declaration().definitions.card!,
+        dependent: { title: 'Dependent', body: { blocks: [{ block: 'core/group', children: [{ block: 'core/block' }] }] } },
+      },
+      uses: [{ documentId: 'synced-pattern:dependent', nodePath: [0, 0], patternId: 'card' }],
+    };
+    const prepared = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const theme = await (await import('../../src/site/compile.js')).compileThemeDocuments(prepared.source);
+    expect(theme.ok).toBe(true);
+    if (theme.ok) expect(theme.artifact.syncedPatterns.find((pattern) => pattern.id === 'dependent')?.pendingUses).toEqual([
+      expect.objectContaining({ documentId: 'synced-pattern:dependent', patternId: 'card' }),
+    ]);
+    const full = await compileSite(prepared.source);
+    expect(full.ok).toBe(false);
+    if (!full.ok) expect(full.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({ code: 'pattern-binding-required' })]));
+  });
+
+  it('runs theme reference checks over finalized database pattern bodies', async () => {
+    const intent = await base();
+    intent.assets = [];
+    intent.assetUses = [];
+    intent.pages = [intent.pages[0]!];
+    intent.pages[0]!.body = { blocks: [{ block: 'core/paragraph', text: 'Page' }] };
+    intent.theme.themeJson.settings = { color: { defaultPalette: false } };
+    intent.syncedPatterns = declaration();
+    intent.syncedPatterns.definitions.card.body = { blocks: [{ block: 'core/group', attrs: { backgroundColor: 'missing-color' } }] };
+    const prepared = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const theme = await (await import('../../src/site/compile.js')).compileThemeDocuments(prepared.source);
+    expect(theme.ok).toBe(false);
+    if (!theme.ok) expect(theme.diagnostics).toEqual(expect.arrayContaining([expect.objectContaining({
+      code: 'undeclared-preset',
+      status: 'invalid',
+      source: { path: 'site://sample-studio/synced-pattern:card' },
+    })]));
   });
 
   it('allows declared media uses in owned pattern bodies and keeps missing bindings pending', async () => {

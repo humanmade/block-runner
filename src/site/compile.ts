@@ -68,7 +68,8 @@ export async function compileThemeDocuments(
   if (unavailable.length > 0) return { ok: false, diagnostics: unavailable };
 
   const compiled = await compileDocuments(source, intent, options, { allowPendingPageBindings: true, includePages: false });
-  const diagnostics = [...compiled.diagnostics, ...await themeChecks(intent, compiled.documents)];
+  const syncedPatterns = await compileSiteSyncedPatterns(source, options, true);
+  const diagnostics = [...compiled.diagnostics, ...syncedPatterns.flatMap((pattern) => pattern.diagnostics), ...await themeChecks(intent, compiled.documents, syncedPatterns)];
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
 
   const generatedThemeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
@@ -80,7 +81,11 @@ export async function compileThemeDocuments(
   const themeFiles = completeThemeFiles(generatedThemeFiles, assets, diagnostics);
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
   const inventory = inventoryFiles(themeFiles);
-  const targetBindings = usedBindings(intent, options.attachmentBindings, new Set(compiled.documents.filter((document) => document.kind !== 'page').map((document) => document.id)));
+  const themeOwnedDocumentIds = new Set([
+    ...compiled.documents.filter((document) => document.kind !== 'page').map((document) => document.id),
+    ...syncedPatterns.map((pattern) => `synced-pattern:${pattern.id}`),
+  ]);
+  const targetBindings = usedBindings(intent, options.attachmentBindings, themeOwnedDocumentIds);
   const targetBindingFingerprint = hashTargetContext(targetBindings, options.themeAssetBaseUrl);
   const artifact: ThemeArtifact = {
     sourceIntent: intent,
@@ -89,12 +94,14 @@ export async function compileThemeDocuments(
     targetBindingFingerprint,
     ...(options.themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl: options.themeAssetBaseUrl } : {}),
     themeFiles,
+    syncedPatterns,
     pendingPageBindings: intent.assetUses.filter((use) => use.documentId.startsWith('page:')
       && assetRole(intent, use.assetId) === 'attachment'
       && !options.attachmentBindings?.[use.assetId]),
     diagnostics,
     inventory,
-    artifactIdentity: hashJson({ sourceIdentity: source.sourceIdentity, sourceAssets: sourceAssetIdentity(source), targetBindingFingerprint, themeFiles: inventory }),
+    artifactIdentity: hashJson({ sourceIdentity: source.sourceIdentity, sourceAssets: sourceAssetIdentity(source), targetBindingFingerprint, themeFiles: inventory,
+      syncedPatterns: syncedPatterns.map(({ id, title, content, pendingUses, pendingBindings, diagnostics }) => ({ id, title, content, pendingUses, pendingBindings, diagnostics })) }),
   };
   return { ok: true, artifact, diagnostics };
 }
@@ -112,7 +119,14 @@ export async function compileSite(
   if (unavailable.length > 0) return { ok: false, diagnostics: unavailable };
 
   const compiled = await compileDocuments(source, intent, options, { allowPendingPageBindings: false, includePages: true });
-  const diagnostics = [...compiled.diagnostics, ...await themeChecks(intent, compiled.documents)];
+  const syncedPatterns = await compileSiteSyncedPatterns(source, options, false);
+  const unresolvedPatterns = syncedPatterns.filter((pattern) => pattern.pendingUses.length > 0 || pattern.pendingBindings.length > 0);
+  const diagnostics = [
+    ...compiled.diagnostics,
+    ...syncedPatterns.flatMap((pattern) => pattern.diagnostics),
+    ...unresolvedPatterns.map((pattern) => invalid(`synced-pattern:${pattern.id}`, 'pattern-binding-required', 'synced pattern definition has unresolved database or asset dependencies')),
+    ...await themeChecks(intent, compiled.documents, syncedPatterns),
+  ];
   if (hasFailures(diagnostics)) return { ok: false, diagnostics };
 
   const generatedThemeFiles = emitThemeFiles(intent, compiled.documents, diagnostics);
@@ -147,6 +161,7 @@ export async function compileSite(
     ...(options.themeAssetBaseUrl !== undefined ? { themeAssetBaseUrl: options.themeAssetBaseUrl } : {}),
     themeFiles,
     pages,
+    syncedPatterns,
     assets,
     diagnostics,
     inventory,
@@ -156,6 +171,7 @@ export async function compileSite(
       targetBindingFingerprint,
       themeFiles: inventory,
       pages: pages.map(({ id, route, title, parentId, template, content, status }) => ({ id, route, title, parentId, template, content, status })),
+      syncedPatterns: syncedPatterns.map(({ id, title, content, diagnostics }) => ({ id, title, content, diagnostics })),
     }),
   };
   return { ok: true, site, diagnostics };
@@ -185,15 +201,32 @@ export async function compileSitePageDocuments(source: PreparedSiteSource, optio
 }
 
 /** Compile owned pattern definitions with the same explicit media binding rules as site documents. */
-export async function compileSiteSyncedPatterns(source: PreparedSiteSource, options: CompileSiteOptions = {}): Promise<CompiledSyncedPattern[]> {
+export async function compileSiteSyncedPatterns(source: PreparedSiteSource, options: CompileSiteOptions = {}, allowPendingBindings = true): Promise<CompiledSyncedPattern[]> {
   const prepared = validatePreparedSource(source);
   if (!prepared.ok) return [];
   const intent = prepared.intent;
   return compileSyncedPatterns(intent, options.patternBindings, (body, documentId) => {
-    const result = bindDocument(body, documentId, intent, source, options, true);
-    return result.diagnostics.filter((item): item is ReportItem & { status: 'invalid'; code: string; source: { path: string } } => item.status === 'invalid' && Boolean(item.code && item.source?.path));
+    const result = bindDocument(body, documentId, intent, source, options, allowPendingBindings);
+    return result.diagnostics;
   }, (documentId) => intent.assetUses.filter((use) => use.documentId === documentId
-    && assetRole(intent, use.assetId) === 'attachment' && !options.attachmentBindings?.[use.assetId]));
+    && assetRole(intent, use.assetId) === 'attachment' && !options.attachmentBindings?.[use.assetId]), async (body, documentId) => {
+      const sourcePath = sourceLabel(intent.siteId, documentId);
+      const embedWarnings = prepareEmbedRatios(body, documentId);
+      const report = await realize(JSON.stringify(body), {
+        sourcePath,
+        resolver: 'noop',
+        tokenResolver: 'noop',
+        styling: 'relaxed',
+        strict: options.strict,
+        config: isolatedConfig(intent, options.strict),
+        isolateConfig: true,
+      });
+      const diagnostics = [...mapReport(report.items, documentId, sourcePath, body), ...embedWarnings];
+      if (!report.ok && !diagnostics.some((item) => item.status === 'invalid')) {
+        diagnostics.push(invalid(documentId, 'document-finalization-failed', 'required synced pattern definition failed finalization; see its warnings for details'));
+      }
+      return { ...(report.output !== undefined ? { content: report.output } : {}), diagnostics, ok: report.ok && !diagnostics.some((item) => item.status === 'invalid') };
+    });
 }
 
 async function compileDocuments(
@@ -352,7 +385,7 @@ function unresolvedThemeBindings(
     const asset = intent.assets.find((candidate) => candidate.id === use.assetId);
     if (!asset) continue;
     if (asset.role === 'attachment') {
-      if (options.attachmentBindings?.[asset.id] || (!requirePages && use.documentId.startsWith('page:'))) continue;
+      if (options.attachmentBindings?.[asset.id] || (!requirePages && (use.documentId.startsWith('page:') || use.documentId.startsWith('synced-pattern:')))) continue;
       diagnostics.push(invalid(use.documentId, 'attachment-binding-required', `asset ${asset.id} requires a supplied attachment ID and URL binding`, use.nodePath));
     } else if (!options.themeAssetBaseUrl) {
       diagnostics.push(invalid(use.documentId, 'theme-asset-base-url-required', `theme-file asset ${asset.id} requires themeAssetBaseUrl before it can be used in native markup`, use.nodePath));
@@ -386,11 +419,11 @@ function documentInputs(intent: SiteIntent): Array<{
   ];
 }
 
-async function themeChecks(intent: SiteIntent, documents: CompiledDocument[]): Promise<ReportItem[]> {
+async function themeChecks(intent: SiteIntent, documents: CompiledDocument[], syncedPatterns: CompiledSyncedPattern[] = []): Promise<ReportItem[]> {
   const themeJson = JSON.stringify(intent.theme.themeJson, null, 2);
   const checked = validateThemeJson(themeJson, 'theme.json', 'assemble');
   const diagnostics = [...checked.report.items];
-  const files: ThemeMarkupFile[] = documents.map((document) => ({
+  const files: ThemeMarkupFile[] = [...documents.map((document) => ({
     path: themeFilePath(document),
     file: themeRelativePath(document),
     // The existing scanner needs only a markup-file kind; pages use a virtual template entry.
@@ -398,10 +431,19 @@ async function themeChecks(intent: SiteIntent, documents: CompiledDocument[]): P
     content: document.markup,
     markup: document.markup,
     ...(document.kind === 'pattern' ? { header: { raw: '', title: intent.patterns[document.name]?.title, slug: intent.patterns[document.name]?.slug } } : {}),
-  }));
+  })), ...syncedPatterns.filter((pattern) => pattern.content !== undefined).map((pattern) => ({
+    path: `/themes/${intent.theme.slug}/patterns/${pattern.id}.php`,
+    file: `patterns/${pattern.id}.php`,
+    kind: 'pattern' as const,
+    content: pattern.content!,
+    markup: pattern.content!,
+    header: { raw: '', title: pattern.title, slug: pattern.id },
+  }))];
   const references = await findThemeReferenceIssues(`/themes/${intent.theme.slug}`, files, intent.theme.themeJson);
-  const pageSources = new Map(documents.filter((document) => document.kind === 'page')
-    .map((document) => [themeFilePath(document), sourceLabel(intent.siteId, document.id)]));
+  const pageSources = new Map([
+    ...documents.filter((document) => document.kind === 'page').map((document) => [themeFilePath(document), sourceLabel(intent.siteId, document.id)] as const),
+    ...syncedPatterns.map((pattern) => [`/themes/${intent.theme.slug}/patterns/${pattern.id}.php`, sourceLabel(intent.siteId, `synced-pattern:${pattern.id}`)] as const),
+  ]);
   diagnostics.push(...references.map((item) => {
     const sourcePath = item.source?.path;
     return {

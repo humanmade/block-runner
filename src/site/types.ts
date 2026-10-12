@@ -143,6 +143,17 @@ export interface SiteAttachmentBinding {
   imageSizes?: Readonly<Record<string, { url: string; width: number; height: number }>>;
 }
 
+export interface CompiledSiteSyncedPattern {
+  id: string;
+  title: string;
+  content?: string;
+  body: IntentTree;
+  pendingUses: SiteSyncedPatternUse[];
+  pendingBindings: SiteAssetUse[];
+  diagnostics: ReportItem[];
+  ok: boolean;
+}
+
 /** Successful, fully bound result of compiling the complete site. */
 export interface CompiledSite {
   sourceIntent: SiteIntent;
@@ -152,6 +163,7 @@ export interface CompiledSite {
   themeAssetBaseUrl?: string;
   themeFiles: SiteFile[];
   pages: CompiledSitePage[];
+  syncedPatterns: CompiledSiteSyncedPattern[];
   assets: SiteFile[];
   diagnostics: ReportItem[];
   inventory: Array<{ path: string; sha256: string; size: number }>;
@@ -166,6 +178,7 @@ export interface ThemeArtifact {
   targetBindingFingerprint: string;
   themeAssetBaseUrl?: string;
   themeFiles: SiteFile[];
+  syncedPatterns: CompiledSiteSyncedPattern[];
   pendingPageBindings: SiteAssetUse[];
   diagnostics: ReportItem[];
   inventory: Array<{ path: string; sha256: string; size: number }>;

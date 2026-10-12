@@ -1,28 +1,20 @@
 import { validatePatternOverrideContract, type PatternOverrideBinding } from '../authoring/pattern-overrides.js';
-import type { AuthoringTemplate, IntentNode, IntentTree } from '../types.js';
+import type { AuthoringTemplate, IntentNode, IntentTree, ReportItem } from '../types.js';
 import { patternOverrideContent } from '../authoring/pattern-overrides.js';
-import type { SiteAssetUse, SiteIntent, SiteSyncedPatternUse } from './types.js';
+import type { CompiledSiteSyncedPattern, SiteAssetUse, SiteIntent, SiteSyncedPatternUse } from './types.js';
 
-export interface CompiledSyncedPattern {
-  id: string;
-  title: string;
-  content?: string;
-  body: IntentTree;
-  pendingUses: SiteSyncedPatternUse[];
-  pendingBindings: SiteAssetUse[];
-  diagnostics: Array<{ status: 'invalid'; code: string; reason: string; source: { path: string } }>;
-}
+export type CompiledSyncedPattern = CompiledSiteSyncedPattern;
 
 /** Compile database-owned definitions in dependency order, binding only supplied destination IDs. */
 export async function compileSyncedPatterns(
   intent: SiteIntent,
   bindings: Readonly<Record<string, number>> = {},
-  prepareBody?: (body: IntentTree, documentId: string) => Array<{ status: 'invalid'; code: string; reason: string; source: { path: string } }>,
+  prepareBody?: (body: IntentTree, documentId: string) => ReportItem[],
   pendingAssets?: (documentId: string) => SiteAssetUse[],
+  finalizeBody?: (body: IntentTree, documentId: string) => Promise<{ content?: string; diagnostics: ReportItem[]; ok: boolean }>,
 ): Promise<CompiledSyncedPattern[]> {
   const extension = intent.syncedPatterns;
   if (!extension) return [];
-  const { realize } = await import('../intent/index.js');
   const order = syncedPatternOrder(intent);
   const output: CompiledSyncedPattern[] = [];
   for (const id of order) {
@@ -42,13 +34,17 @@ export async function compileSyncedPatterns(
     }
     diagnostics.push(...(prepareBody?.(body, `synced-pattern:${id}`) ?? []));
     let content: string | undefined;
-    if (diagnostics.length === 0 && pendingUses.length === 0 && pendingBindings.length === 0) {
-      const report = await realize(JSON.stringify(body), { resolver: 'noop', tokenResolver: 'noop', styling: 'relaxed' });
-      if (!report.ok || report.output === undefined) {
-        diagnostics.push({ status: 'invalid', code: 'pattern-finalization-failed', reason: 'synced pattern definition failed native finalization', source: { path: `synced-pattern:${id}` } });
-      } else content = report.output;
+    let ok = !diagnostics.some((item) => item.status === 'invalid');
+    if (!diagnostics.some((item) => item.status === 'invalid') && pendingUses.length === 0 && pendingBindings.length === 0) {
+      const result = await finalizeBody?.(body, `synced-pattern:${id}`);
+      diagnostics.push(...(result?.diagnostics ?? []));
+      if (!result?.ok || result.content === undefined) {
+        diagnostics.push({ status: 'invalid', code: 'pattern-finalization-failed', reason: 'synced pattern definition failed native finalization', source: { path: `site://${intent.siteId}/synced-pattern:${id}` } });
+        ok = false;
+      } else content = result.content;
     }
-    output.push({ id, title: definition.title, ...(content !== undefined ? { content } : {}), body, pendingUses, pendingBindings, diagnostics });
+    ok = ok && !diagnostics.some((item) => item.status === 'invalid');
+    output.push({ id, title: definition.title, ...(content !== undefined ? { content } : {}), body, pendingUses, pendingBindings, diagnostics, ok });
   }
   return output;
 }

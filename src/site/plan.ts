@@ -25,11 +25,20 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   if (snapshot.theme.slug !== intent.theme.slug) issue('/target/theme', 'theme-mismatch', 'activate the explicitly deployed intended theme before planning');
   if (hashCanonicalJson([...snapshot.theme.inventory].sort((a,b)=>a.path.localeCompare(b.path))) !== hashCanonicalJson([...theme.inventory].sort((a,b)=>a.path.localeCompare(b.path)))) issue('/target/theme/inventory', 'theme-bytes-mismatch', 'installed theme files differ from the independently compiled theme artifact');
   const capabilities = ['edit_pages', 'edit_others_pages', 'manage_options', 'edit_theme_options'];
-  if (intent.syncedPatterns && Object.keys(intent.syncedPatterns.definitions).length > 0) capabilities.push('edit_posts', 'edit_others_posts');
+  const patternDefinitions = Object.keys(intent.syncedPatterns?.definitions ?? {});
+  if (patternDefinitions.length > 0) {
+    capabilities.push('edit_posts', 'edit_others_posts');
+    for (const id of patternDefinitions) {
+      const existing = snapshot.entities.find((entity) => entity.kind === 'pattern' && entity.ownership.some((owner) =>
+        owner.siteId === intent.siteId && owner.kind === 'pattern' && owner.entityId === id));
+      if (existing?.state.status === 'publish') capabilities.push('edit_published_posts');
+      else capabilities.push('publish_posts', 'publish_blocks');
+    }
+  }
   if (intent.pages.some(page => page.status === 'publish')) capabilities.push('publish_pages');
   if (source.assets.some(asset => asset.role === 'attachment')) capabilities.push('upload_files');
   if (!Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1) issue('/target/principal', 'unauthenticated-principal', 'select an authenticated WordPress principal with --wp-user or WP-CLI configuration');
-  for (const capability of capabilities) if (snapshot.principal.capabilities[capability] !== true) issue('/target/principal', 'missing-capability', `selected principal requires ${capability}`);
+  for (const capability of new Set(capabilities)) if (snapshot.principal.capabilities[capability] !== true) issue('/target/principal', 'missing-capability', `selected principal requires ${capability}`);
   if (snapshot.siteRecord?.operation && snapshot.siteRecord.operation.status !== 'completed') issue('/target/operations', 'outstanding-operation', 'reconcile the outstanding started or unknown operation before producing a fresh plan');
 
   if (snapshot.siteRecord && (snapshot.siteRecord.version !== 1 || snapshot.siteRecord.siteId !== intent.siteId)) issue('/target/siteRecord', 'invalid-site-record', 'site operation record identity is inconsistent');
@@ -108,7 +117,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   for (const pattern of compiledPatterns) {
     const key = `pattern:${pattern.id}`; desiredKeys.add(key);
     const existing = owned.get(key);
-    const ready = pattern.content !== undefined && pattern.pendingUses.length === 0 && pattern.pendingBindings.length === 0 && pattern.diagnostics.length === 0;
+    const ready = pattern.ok && pattern.content !== undefined && pattern.pendingUses.length === 0 && pattern.pendingBindings.length === 0;
     const desired: Record<string, unknown> = { title: pattern.title, ...(ready ? { content: pattern.content } : {}), status: 'publish' };
     const same = existing && ready && hashCanonicalJson(existing.state) === hashCanonicalJson(desired);
     operations.push({ action: existing ? (same ? 'retain' : 'update') : 'create', kind: 'pattern', entityId: pattern.id,
@@ -116,8 +125,9 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
       ...(!ready ? { requiresFinalization: true, body: pattern.body, ...(pattern.pendingUses.length ? { pendingPatternUses: pattern.pendingUses } : {}), ...(pattern.pendingBindings.length ? { pendingBindings: pattern.pendingBindings } : {}) } : {}),
     });
     for (const diagnostic of pattern.diagnostics) {
-      diagnostics.push({ block: 'core/block', status: 'invalid', reason: diagnostic.reason, source: diagnostic.source, code: diagnostic.code });
-      issue(`/syncedPatterns/definitions/${pattern.id}`, diagnostic.code, diagnostic.reason);
+      const serialized = JSON.stringify(diagnostic);
+      if (!diagnostics.some((item) => JSON.stringify(item) === serialized)) diagnostics.push(diagnostic);
+      if (diagnostic.status === 'invalid') issue(`/syncedPatterns/definitions/${pattern.id}`, diagnostic.code ?? 'synced-pattern-invalid', diagnostic.reason);
     }
   }
   const pageIds = new Map([...owned.entries()].filter(([key]) => key.startsWith('page:')).map(([key,entity]) => [key.slice(5), entity.id]));
