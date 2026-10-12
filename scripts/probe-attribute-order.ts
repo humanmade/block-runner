@@ -21,6 +21,7 @@ const browser = await chromium.launch({ headless: true });
 try {
   const page = await browser.newPage();
   await page.goto(`${baseUrl}/wp-login.php`);
+  await page.waitForFunction(() => document.activeElement?.id === 'user_login');
   await page.locator('#user_login').fill('admin');
   await page.locator('#user_pass').fill('password');
   await Promise.all([page.waitForURL('**/wp-admin/**'), page.locator('#wp-submit').click()]);
