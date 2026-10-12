@@ -1,6 +1,11 @@
+import { mkdtemp, mkdir, writeFile, symlink, realpath } from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { hashBytes } from '../../src/publication.js';
+import { prepareSiteSource } from '../../src/site/input.js';
 import { describe, expect, it } from 'vitest';
 import { readSiteSnapshot, siteRecordOption } from '../../src/site/wpcli.js';
-import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
+import { managedStateHash, reconcileSitePlan, readSitePlanInput } from '../../src/site/plan.js';
 import type { SiteSnapshot, SiteEntity } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../src/site/types.js';
 
@@ -71,5 +76,24 @@ describe('bounded site reconciliation',()=>{
   it('keeps attachment imports pending without manufactured WordPress IDs',()=>{
     const input=source();input.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment',sha256:'aaa',bytes:new Uint8Array()}];input.sourceIntent.assets=[{id:'photo',path:'photo.png',kind:'image',role:'attachment'}];input.sourceIntent.assetUses=[{documentId:'page:home',nodePath:[0],attribute:'attrs.id',assetId:'photo'}];
     const result=reconcileSitePlan(input,theme(input),[],snapshot());expect(result.executable).toBe(true);expect(result.operations.find(op=>op.kind==='attachment')).not.toHaveProperty('id');expect(result.operations.find(op=>op.kind==='page')).toMatchObject({requiresFinalization:true,pendingBindings:input.sourceIntent.assetUses});
+  });
+});
+
+describe('source and retained bundle boundaries',()=>{
+  it('loads raw source without pre-existing IDs and refuses undeclared graph references',async()=>{
+    const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-source-'));const file=path.join(root,'intent.json');await writeFile(file,JSON.stringify(source().sourceIntent));
+    expect((await readSitePlanInput(file,root)).retainedBindings).toEqual({});
+    await expect(readSitePlanInput(file)).rejects.toThrow('asset root');
+    const input=source().sourceIntent;input.templates.index!.body.blocks=[{block:'core/template-part',attrs:{slug:'missing'}}];await writeFile(file,JSON.stringify(input));
+    await expect(readSitePlanInput(file,root)).rejects.toThrow('unknown template part');
+  });
+  it('verifies retained source bytes/inventory and rejects corruption and symlink input',async()=>{
+    const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-bundle-'));const assetRoot=root;
+    const input=source().sourceIntent;const bytes=Buffer.from(JSON.stringify(input));await writeFile(path.join(root,'site.intent.json'),bytes);
+    const prepared=await prepareSiteSource(input,assetRoot);if(!prepared.ok)throw new Error('fixture invalid');
+    const manifest={formatVersion:1,siteId:input.siteId,sourceIdentity:prepared.source.sourceIdentity,sourceAssets:[],targetBindings:{},bundleFiles:[{path:'site.intent.json',sha256:hashBytes(bytes),size:bytes.length}]};await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
+    expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(prepared.source.sourceIdentity);
+    await writeFile(path.join(root,'site.intent.json'),Buffer.from('corrupt'));await expect(readSitePlanInput(root)).rejects.toThrow('retained bundle bytes differ');
+    const linked=path.join(root,'linked');await symlink(root,linked);await expect(readSitePlanInput(linked)).rejects.toThrow('symlinks');
   });
 });
