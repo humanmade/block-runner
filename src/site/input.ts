@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
+import { validateSyncedPatternOverrideContent } from './patterns.js';
 import { readStableRegularFile } from '../publication.js';
 import type { IntentNode, IntentTree } from '../types.js';
 import type {
@@ -12,6 +13,7 @@ import type {
   SiteInputDiagnostic,
   SiteIntent,
   SitePatternIntent,
+  SiteSyncedPatternUse,
 } from './types.js';
 
 const SAFE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
@@ -84,7 +86,7 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
     return undefined;
   }
 
-  checkKeys(input, ['version', 'siteId', 'homePageId', 'theme', 'templates', 'parts', 'patterns', 'pages', 'assets', 'assetUses'], '', diagnostics);
+  checkKeys(input, ['version', 'siteId', 'homePageId', 'theme', 'templates', 'parts', 'patterns', 'syncedPatterns', 'pages', 'assets', 'assetUses'], '', diagnostics);
   if (input.version !== 1) diagnostics.push(issue('/version', 'unsupported-version', 'only site intent version 1 is supported'));
   if (!isSafeSlug(input.siteId)) diagnostics.push(issue('/siteId', 'unsafe-id', 'siteId must be a lowercase URL-safe identifier'));
   if (!isSafeSlug(input.homePageId)) diagnostics.push(issue('/homePageId', 'unsafe-id', 'homePageId must name a declared page'));
@@ -102,6 +104,7 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
   const templates = validateDocuments(input.templates, '/templates', 'template', diagnostics);
   const parts = validateDocuments(input.parts, '/parts', 'part', diagnostics);
   const patterns = validatePatterns(input.patterns, diagnostics);
+  const syncedPatterns = input.syncedPatterns === undefined ? undefined : validateSyncedPatterns(input.syncedPatterns, diagnostics);
   if (templates && !Object.hasOwn(templates, 'index')) {
     diagnostics.push(issue('/templates', 'index-template-required', 'templates must declare the required index template'));
   }
@@ -126,7 +129,7 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
   }
 
   if (templates && parts && patterns && pages && uses && assets) {
-    const trees = collectTrees(templates, parts, patterns, pages);
+    const trees = collectTrees(templates, parts, patterns, pages, syncedPatterns?.definitions);
     checkDocumentReferences(trees, parts, patterns, pages, diagnostics);
     const assetIds = new Map(assets.map((asset) => [asset.id, asset]));
     const seenUses = new Set<string>();
@@ -156,9 +159,20 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
       if (seenUses.has(target)) diagnostics.push(issue(usePath, 'duplicate-asset-use', 'an asset use already targets this document attribute'));
       seenUses.add(target);
     }
+    if (syncedPatterns) validateSyncedPatternUses(syncedPatterns, trees, diagnostics);
+    for (const [documentId, tree] of trees) {
+      const visit = (nodes: IntentNode[], pathParts: number[]): void => nodes.forEach((node, index) => {
+        const at = [...pathParts, index];
+        if (node.block === 'core/block' && !syncedPatterns?.uses.some((use) => use.documentId === documentId && use.nodePath.join('.') === at.join('.'))) {
+          diagnostics.push(issue(`${documentIdPath(documentId)}${nodePath(at)}`, 'undeclared-pattern-reference', 'core/block requires an explicit syncedPatterns use'));
+        }
+        if (node.children) visit(node.children, at);
+      });
+      visit(tree.blocks, []);
+    }
   }
 
-  if (diagnostics.length > 0 || !theme || !templates || !parts || !patterns || !pages || !assets || !uses) return undefined;
+  if (diagnostics.length > 0 || !theme || !templates || !parts || !patterns || !pages || !assets || !uses || (input.syncedPatterns !== undefined && !syncedPatterns)) return undefined;
   return {
     version: 1,
     siteId: input.siteId as string,
@@ -167,10 +181,113 @@ export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnos
     templates,
     parts,
     patterns,
+    ...(syncedPatterns ? { syncedPatterns } : {}),
     pages,
     assets,
     assetUses: uses,
   };
+}
+
+function validateSyncedPatterns(value: unknown, diagnostics: SiteInputDiagnostic[]): SiteIntent['syncedPatterns'] | undefined {
+  const root = '/syncedPatterns';
+  if (!isRecord(value)) { diagnostics.push(issue(root, 'object-required', 'syncedPatterns must be an object')); return undefined; }
+  checkKeys(value, ['version', 'definitions', 'uses'], root, diagnostics);
+  if (value.version !== 1) diagnostics.push(issue(`${root}/version`, 'unsupported-version', 'only syncedPatterns version 1 is supported'));
+  if (!isRecord(value.definitions)) { diagnostics.push(issue(`${root}/definitions`, 'object-required', 'definitions must be a logical-ID-to-definition object')); return undefined; }
+  const definitions: NonNullable<SiteIntent['syncedPatterns']>['definitions'] = {};
+  for (const [id, item] of Object.entries(value.definitions)) {
+    const current = `${root}/definitions/${escapePointer(id)}`;
+    if (!isSafeSlug(id)) diagnostics.push(issue(current, 'unsafe-id', 'logical pattern ID must be lowercase and path-safe'));
+    if (!isRecord(item)) { diagnostics.push(issue(current, 'object-required', 'definition must be an object')); continue; }
+    checkKeys(item, ['title', 'body'], current, diagnostics);
+    if (!nonEmptyString(item.title)) diagnostics.push(issue(`${current}/title`, 'string-required', 'pattern title must be a non-empty string'));
+    const body = validateTree(item.body, `${current}/body`, diagnostics);
+    if (isSafeSlug(id) && nonEmptyString(item.title) && body) definitions[id] = { title: item.title, body };
+  }
+  const uses = validateSyncedUses(value.uses, diagnostics);
+  if (value.version !== 1 || !uses) return undefined;
+  return { version: 1, definitions, uses };
+}
+
+function validateSyncedUses(value: unknown, diagnostics: SiteInputDiagnostic[]): SiteSyncedPatternUse[] | undefined {
+  const root = '/syncedPatterns/uses';
+  if (!Array.isArray(value)) { diagnostics.push(issue(root, 'array-required', 'uses must be an array')); return undefined; }
+  const uses: SiteSyncedPatternUse[] = [];
+  for (const [index, entry] of value.entries()) {
+    const current = `${root}/${index}`;
+    if (!isRecord(entry)) { diagnostics.push(issue(current, 'object-required', 'use must be an object')); continue; }
+    checkKeys(entry, ['documentId', 'nodePath', 'patternId', 'content'], current, diagnostics);
+    if (typeof entry.documentId !== 'string' || !/^(page|synced-pattern|template|part|pattern):[a-z0-9][a-z0-9-]*$/.test(entry.documentId)) diagnostics.push(issue(`${current}/documentId`, 'invalid-document-id', 'documentId must name a declared page or document'));
+    if (!Array.isArray(entry.nodePath) || !entry.nodePath.every((part) => Number.isInteger(part) && part >= 0)) diagnostics.push(issue(`${current}/nodePath`, 'invalid-node-path', 'nodePath must be an array of non-negative child indices'));
+    if (!isSafeSlug(entry.patternId)) diagnostics.push(issue(`${current}/patternId`, 'unsafe-id', 'patternId must be a declared logical pattern ID'));
+    let content: SiteSyncedPatternUse['content'];
+    if (entry.content !== undefined) {
+      if (!isRecord(entry.content)) diagnostics.push(issue(`${current}/content`, 'object-required', 'content must map metadata.name values to attribute objects'));
+      else {
+        content = {};
+        for (const [name, attrs] of Object.entries(entry.content)) {
+          if (!nonEmptyString(name)) diagnostics.push(issue(`${current}/content/${escapePointer(name)}`, 'invalid-name', 'content keys must be non-empty metadata.name values'));
+          if (!isRecord(attrs)) diagnostics.push(issue(`${current}/content/${escapePointer(name)}`, 'object-required', 'override content must be an attribute object'));
+          else content[name] = attrs;
+        }
+      }
+    }
+    if (typeof entry.documentId === 'string' && /^(page|synced-pattern|template|part|pattern):[a-z0-9][a-z0-9-]*$/.test(entry.documentId) && Array.isArray(entry.nodePath) && entry.nodePath.every((part) => Number.isInteger(part) && part >= 0) && isSafeSlug(entry.patternId) && (entry.content === undefined || isRecord(entry.content))) {
+      uses.push({ documentId: entry.documentId, nodePath: entry.nodePath as number[], patternId: entry.patternId, ...(content ? { content } : {}) });
+    }
+  }
+  return uses;
+}
+
+function validateSyncedPatternUses(
+  extension: NonNullable<SiteIntent['syncedPatterns']>,
+  trees: Map<string, IntentTree>,
+  diagnostics: SiteInputDiagnostic[],
+): void {
+  const defs = extension.definitions;
+  const seen = new Set<string>();
+  const graph = new Map<string, Set<string>>();
+  for (const id of Object.keys(defs)) graph.set(id, new Set());
+  for (const [index, use] of extension.uses.entries()) {
+    const base = `/syncedPatterns/uses/${index}`;
+    const target = defs[use.patternId];
+    if (!target) diagnostics.push(issue(`${base}/patternId`, 'unknown-pattern-id', `unknown synced pattern "${use.patternId}"`));
+    const tree = trees.get(use.documentId);
+    if (!tree) { diagnostics.push(issue(`${base}/documentId`, 'unknown-document', `unknown document "${use.documentId}"`)); continue; }
+    const node = nodeAtPath(tree, use.nodePath);
+    if (!node) diagnostics.push(issue(`${base}/nodePath`, 'unknown-node', 'nodePath does not identify a node in the declared document'));
+    else if (node.block !== 'core/block' || node.children?.length || node.attrs && Object.keys(node.attrs).some((key) => ['ref', 'content'].includes(key))) diagnostics.push(issue(`${base}/nodePath`, 'invalid-pattern-placeholder', 'synced pattern use must identify a childless core/block placeholder without ref or content attributes'));
+    const key = `${use.documentId}\0${use.nodePath.join('.')}`;
+    if (seen.has(key)) diagnostics.push(issue(base, 'duplicate-pattern-use', 'a synced pattern use already targets this document node'));
+    seen.add(key);
+    if (use.documentId.startsWith('synced-pattern:')) graph.get(use.documentId.slice('synced-pattern:'.length))?.add(use.patternId);
+    if (use.content && target) for (const message of validateSyncedPatternOverrideContent(target.body, use.content)) diagnostics.push(issue(`${base}/content`, 'invalid-override-content', message));
+  }
+  for (const [id, definition] of Object.entries(defs)) {
+    const visit = (nodes: IntentNode[], pathParts: number[]): void => nodes.forEach((node, index) => {
+      const at = [...pathParts, index];
+      if (node.block === 'core/block' && !extension.uses.some((use) => use.documentId === `synced-pattern:${id}` && use.nodePath.join('.') === at.join('.'))) diagnostics.push(issue(`/syncedPatterns/definitions/${escapePointer(id)}/body${nodePath(at)}`, 'undeclared-pattern-reference', 'core/block requires an explicit syncedPatterns use'));
+      if (node.children) visit(node.children, at);
+    });
+    visit(definition.body.blocks, []);
+  }
+  const state = new Map<string, 'visiting' | 'done'>();
+  const walk = (id: string): void => {
+    if (state.get(id) === 'visiting') { diagnostics.push(issue(`/syncedPatterns/definitions/${escapePointer(id)}`, 'pattern-cycle', 'synced pattern dependencies must be acyclic')); return; }
+    if (state.get(id) === 'done') return;
+    state.set(id, 'visiting');
+    for (const next of graph.get(id) ?? []) if (defs[next]) walk(next);
+    state.set(id, 'done');
+  };
+  for (const id of Object.keys(defs)) walk(id);
+}
+
+function documentIdPath(id: string): string {
+  const [kind, name] = id.split(':', 2);
+  if (kind === 'page') return `/pages/${name}/body`;
+  if (kind === 'synced-pattern') return `/syncedPatterns/definitions/${escapePointer(name ?? '')}/body`;
+  const collection = kind === 'template' ? 'templates' : kind === 'part' ? 'parts' : 'patterns';
+  return `/${collection}/${escapePointer(name ?? '')}/body`;
 }
 
 function validateDocuments(value: unknown, pathName: string, kind: string, diagnostics: SiteInputDiagnostic[]): Record<string, SiteDocumentIntent> | undefined {
@@ -423,7 +540,7 @@ function validateUses(value: unknown, diagnostics: SiteInputDiagnostic[]): SiteA
       continue;
     }
     checkKeys(use, ['documentId', 'nodePath', 'attribute', 'assetId'], current, diagnostics);
-    if (typeof use.documentId !== 'string' || !/^(page|template|part|pattern):[a-z0-9][a-z0-9-]*$/.test(use.documentId)) {
+    if (typeof use.documentId !== 'string' || !/^(page|template|part|pattern|synced-pattern):[a-z0-9][a-z0-9-]*$/.test(use.documentId)) {
       diagnostics.push(issue(`${current}/documentId`, 'unsafe-document-id', 'documentId must use a typed stable document key'));
     }
     if (!Array.isArray(use.nodePath) || use.nodePath.some((part) => !Number.isInteger(part) || part < 0)) {
@@ -431,7 +548,7 @@ function validateUses(value: unknown, diagnostics: SiteInputDiagnostic[]): SiteA
     }
     if (typeof use.attribute !== 'string' || !ASSET_ATTRIBUTES.has(use.attribute)) diagnostics.push(issue(`${current}/attribute`, 'unsupported-attribute', `attribute must be one of ${[...ASSET_ATTRIBUTES].join(', ')}`));
     if (!isSafeSlug(use.assetId)) diagnostics.push(issue(`${current}/assetId`, 'unsafe-id', 'assetId must be a declared stable asset id'));
-    if (typeof use.documentId === 'string' && /^(page|template|part|pattern):[a-z0-9][a-z0-9-]*$/.test(use.documentId) && Array.isArray(use.nodePath) && use.nodePath.every((part) => Number.isInteger(part) && part >= 0) && typeof use.attribute === 'string' && ASSET_ATTRIBUTES.has(use.attribute) && isSafeSlug(use.assetId)) {
+    if (typeof use.documentId === 'string' && /^(page|template|part|pattern|synced-pattern):[a-z0-9][a-z0-9-]*$/.test(use.documentId) && Array.isArray(use.nodePath) && use.nodePath.every((part) => Number.isInteger(part) && part >= 0) && typeof use.attribute === 'string' && ASSET_ATTRIBUTES.has(use.attribute) && isSafeSlug(use.assetId)) {
       uses.push({ documentId: use.documentId, nodePath: use.nodePath as number[], attribute: use.attribute as SiteAssetUse['attribute'], assetId: use.assetId });
     }
   }
@@ -454,12 +571,14 @@ function collectTrees(
   parts: Record<string, SiteDocumentIntent>,
   patterns: Record<string, SitePatternIntent>,
   pages: SiteIntent['pages'],
+  syncedPatterns?: NonNullable<SiteIntent['syncedPatterns']>['definitions'],
 ): Map<string, IntentTree> {
   const result = new Map<string, IntentTree>();
   for (const [name, value] of Object.entries(templates)) result.set(`template:${name}`, value.body);
   for (const [name, value] of Object.entries(parts)) result.set(`part:${name}`, value.body);
   for (const [name, value] of Object.entries(patterns)) result.set(`pattern:${name}`, value.body);
   for (const page of pages) result.set(`page:${page.id}`, page.body);
+  for (const [id, pattern] of Object.entries(syncedPatterns ?? {})) result.set(`synced-pattern:${id}`, pattern.body);
   return result;
 }
 
@@ -475,6 +594,7 @@ function checkDocumentReferences(
     const pageIndex = kind === 'page' ? pages.findIndex((page) => page.id === name) : -1;
     const basePath = kind === 'page'
       ? `/pages/${pageIndex}/body`
+      : kind === 'synced-pattern' ? `/syncedPatterns/definitions/${escapePointer(name!)}/body`
       : `/${kind === 'template' ? 'templates' : kind === 'part' ? 'parts' : 'patterns'}/${escapePointer(name!)}/body`;
     const visit = (nodes: unknown[], pathParts: number[]): void => {
       nodes.forEach((candidate, index) => {

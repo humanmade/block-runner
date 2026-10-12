@@ -1,5 +1,5 @@
 import type { IntentTree, ReportItem } from '../types.js';
-import type { SiteAssetUse, SiteInputDiagnostic } from './types.js';
+import type { SiteAssetUse, SiteInputDiagnostic, SiteSyncedPatternUse } from './types.js';
 
 export interface SiteTarget { homeUrl: string; siteUrl: string; blogId: number }
 export interface SiteOwnership {
@@ -46,6 +46,7 @@ export interface SitePlanOperation {
   beforeFingerprint?: string;
   desired?: Record<string, unknown>;
   pendingBindings?: SiteAssetUse[];
+  pendingPatternUses?: SiteSyncedPatternUse[];
   body?: IntentTree;
   requiresFinalization?: boolean;
   externalBinding?: boolean;

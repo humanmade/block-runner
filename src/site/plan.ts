@@ -1,4 +1,4 @@
-import { compileThemeDocuments, compileSitePageDocuments } from './compile.js';
+import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatterns } from './compile.js';
 import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
@@ -8,12 +8,13 @@ import { hashCanonicalJson } from '../proof/receipt.js';
 import type { PreparedSiteSource, CompiledSitePage, SiteInputDiagnostic, ThemeArtifact, SiteAttachmentBinding } from './types.js';
 import type { SiteEntity, SitePlan, SitePlanOperation, SiteSnapshot } from './plan-types.js';
 import { attachmentVersionKey } from './media.js';
+import type { CompiledSyncedPattern } from './patterns.js';
 
 export function managedStateHash(state: Record<string, unknown>): string { return hashCanonicalJson(state); }
 export function entityFingerprint(entity: SiteEntity): string { return hashCanonicalJson(entity); }
 
 /** Pure reconciliation. It never adopts a numeric entity by title, route, or filename. */
-export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifact, pages: CompiledSitePage[], snapshot: SiteSnapshot, bindings: Record<string, SiteAttachmentBinding> = {}, previewDiagnostics: import('../types.js').ReportItem[] = []): SitePlan {
+export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifact, pages: CompiledSitePage[], snapshot: SiteSnapshot, bindings: Record<string, SiteAttachmentBinding> = {}, previewDiagnostics: import('../types.js').ReportItem[] = [], compiledPatterns: CompiledSyncedPattern[] = [], patternBindings: Record<string, number> = {}): SitePlan {
   const conflicts: SiteInputDiagnostic[] = [];
   // Reports contain optional fields set to undefined; retain their JSON representation in plans.
   const diagnostics = JSON.parse(JSON.stringify([...theme.diagnostics, ...pages.flatMap(page=>page.diagnostics), ...previewDiagnostics])) as import('../types.js').ReportItem[];
@@ -24,6 +25,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   if (snapshot.theme.slug !== intent.theme.slug) issue('/target/theme', 'theme-mismatch', 'activate the explicitly deployed intended theme before planning');
   if (hashCanonicalJson([...snapshot.theme.inventory].sort((a,b)=>a.path.localeCompare(b.path))) !== hashCanonicalJson([...theme.inventory].sort((a,b)=>a.path.localeCompare(b.path)))) issue('/target/theme/inventory', 'theme-bytes-mismatch', 'installed theme files differ from the independently compiled theme artifact');
   const capabilities = ['edit_pages', 'edit_others_pages', 'manage_options', 'edit_theme_options'];
+  if (intent.syncedPatterns && Object.keys(intent.syncedPatterns.definitions).length > 0) capabilities.push('edit_posts', 'edit_others_posts');
   if (intent.pages.some(page => page.status === 'publish')) capabilities.push('publish_pages');
   if (source.assets.some(asset => asset.role === 'attachment')) capabilities.push('upload_files');
   if (!Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1) issue('/target/principal', 'unauthenticated-principal', 'select an authenticated WordPress principal with --wp-user or WP-CLI configuration');
@@ -32,15 +34,22 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
 
   if (snapshot.siteRecord && (snapshot.siteRecord.version !== 1 || snapshot.siteRecord.siteId !== intent.siteId)) issue('/target/siteRecord', 'invalid-site-record', 'site operation record identity is inconsistent');
   for (const override of snapshot.overrides) if (override.theme.includes(snapshot.theme.slug)) issue(`/target/overrides/${override.id}`, 'theme-shadow', 'database template or part shadows the installed theme; resolve it explicitly');
-  const trees = [...Object.values(intent.templates), ...Object.values(intent.parts), ...Object.values(intent.patterns), ...intent.pages];
-  const visit = (nodes: import('../types.js').IntentNode[]): void => {
-    for (const node of nodes) {
+  const trees = [
+    ...Object.entries(intent.templates).map(([id, value]) => ({ id: `template:${id}`, body: value.body })),
+    ...Object.entries(intent.parts).map(([id, value]) => ({ id: `part:${id}`, body: value.body })),
+    ...Object.entries(intent.patterns).map(([id, value]) => ({ id: `pattern:${id}`, body: value.body })),
+    ...Object.entries(intent.syncedPatterns?.definitions ?? {}).map(([id, value]) => ({ id: `synced-pattern:${id}`, body: value.body })),
+    ...intent.pages.map((page) => ({ id: `page:${page.id}`, body: page.body })),
+  ];
+  const visit = (nodes: import('../types.js').IntentNode[], documentId: string, parent: number[] = []): void => {
+    for (const [index, node] of nodes.entries()) {
+      const at = [...parent, index];
       if (node.block === 'core/navigation' && node.attrs?.ref !== undefined) issue('/source/references', 'unsupported-navigation-reference', 'external native navigation references require explicit supported dependency handling');
-      if (node.block === 'core/block') issue('/source/references', 'unsupported-synced-pattern-reference', 'external synced-pattern references require explicit supported dependency handling');
-      if (node.children) visit(node.children);
+      if (node.block === 'core/block' && !intent.syncedPatterns?.uses.some(use => use.documentId === documentId && use.nodePath.join('.') === at.join('.'))) issue('/source/references', 'unsupported-synced-pattern-reference', 'external synced-pattern references require explicit supported dependency handling');
+      if (node.children) visit(node.children, documentId, at);
     }
   };
-  for (const tree of trees) visit(tree.body.blocks);
+  for (const tree of trees) visit(tree.body.blocks, tree.id);
   if (snapshot.routing.unsupportedReason || !snapshot.routing.permalinkStructure || !snapshot.routing.rewriteRulesHash) issue('/target/routing', 'unsupported-routing', snapshot.routing.unsupportedReason ?? 'cached pretty-permalink routing is required');
   const owned = new Map<string, SiteEntity>();
   const ids = new Set<number>();
@@ -96,6 +105,21 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
       : external ? { action: 'retain', kind: 'attachment', entityId: asset.id, id: external.id, desired, externalBinding: true, ...(boundEntity ? { beforeFingerprint: entityFingerprint(boundEntity) } : {}) }
       : { action: 'create', kind: 'attachment', entityId: asset.id, desired });
   }
+  for (const pattern of compiledPatterns) {
+    const key = `pattern:${pattern.id}`; desiredKeys.add(key);
+    const existing = owned.get(key);
+    const ready = pattern.content !== undefined && pattern.pendingUses.length === 0 && pattern.pendingBindings.length === 0 && pattern.diagnostics.length === 0;
+    const desired: Record<string, unknown> = { title: pattern.title, ...(ready ? { content: pattern.content } : {}), status: 'publish' };
+    const same = existing && ready && hashCanonicalJson(existing.state) === hashCanonicalJson(desired);
+    operations.push({ action: existing ? (same ? 'retain' : 'update') : 'create', kind: 'pattern', entityId: pattern.id,
+      ...(existing ? { id: existing.id, beforeFingerprint: entityFingerprint(existing) } : {}), desired,
+      ...(!ready ? { requiresFinalization: true, body: pattern.body, ...(pattern.pendingUses.length ? { pendingPatternUses: pattern.pendingUses } : {}), ...(pattern.pendingBindings.length ? { pendingBindings: pattern.pendingBindings } : {}) } : {}),
+    });
+    for (const diagnostic of pattern.diagnostics) {
+      diagnostics.push({ block: 'core/block', status: 'invalid', reason: diagnostic.reason, source: diagnostic.source, code: diagnostic.code });
+      issue(`/syncedPatterns/definitions/${pattern.id}`, diagnostic.code, diagnostic.reason);
+    }
+  }
   const pageIds = new Map([...owned.entries()].filter(([key]) => key.startsWith('page:')).map(([key,entity]) => [key.slice(5), entity.id]));
   const compiled = new Map(pages.map(page => [page.id,page]));
   const orderedPages = [...intent.pages].sort((a,b) => depth(a.id) - depth(b.id) || a.id.localeCompare(b.id));
@@ -118,21 +142,23 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
       const asset = source.assets.find(candidate=>candidate.id===use.assetId && candidate.role==='attachment');
       return Boolean(asset && !owned.has(attachmentVersionKey(asset.id, asset.sha256)));
     });
+    const pendingPatternUses = intent.syncedPatterns?.uses.filter(use => use.documentId === key && !patternBindings[use.patternId]) ?? [];
     const output = compiled.get(page.id);
-    if (!output && pendingBindings.length === 0) issue(`/pages/${page.id}/body`, 'uncompiled-page', 'page has no finalized content and no declared pending bindings');
+    if (!output && pendingBindings.length === 0 && pendingPatternUses.length === 0) issue(`/pages/${page.id}/body`, 'uncompiled-page', 'page has no finalized content and no declared pending bindings');
     const pendingParent = page.parentId && !pageIds.has(page.parentId);
     const desired: Record<string, unknown> = {
       title: page.title, slug: page.route === '/' ? page.id : page.route.split('/').at(-1)!,
       parentId: page.parentId ? (pageIds.get(page.parentId) ?? { pendingPageId: page.parentId }) : 0,
       template: page.template, status: page.status ?? 'draft',
-      ...(output && pendingBindings.length === 0 ? { content: output.content } : {}),
+      ...(output && pendingBindings.length === 0 && pendingPatternUses.length === 0 ? { content: output.content } : {}),
     };
-    const needsFinalization = pendingBindings.length > 0 || Boolean(pendingParent);
+    const needsFinalization = pendingBindings.length > 0 || pendingPatternUses.length > 0 || Boolean(pendingParent);
     const same = existing && !needsFinalization && hashCanonicalJson(existing.state) === hashCanonicalJson(desired);
     operations.push({ action: existing ? (same ? 'retain' : 'update') : 'create', kind: 'page', entityId: page.id,
       ...(existing ? { id: existing.id, beforeFingerprint: entityFingerprint(existing) } : {}), desired,
       ...(needsFinalization ? { requiresFinalization: true } : {}),
       ...(pendingBindings.length ? { pendingBindings, body: page.body } : {}),
+      ...(pendingPatternUses.length ? { pendingPatternUses, body: page.body } : {}),
     });
   }
   for (const [key, entity] of [...owned.entries()].sort(([a],[b])=>a.localeCompare(b))) {
@@ -244,7 +270,8 @@ export async function planSite(inputPath: string, options: SitePlanOptions, tran
   const input = await readSitePlanInput(inputPath, options.assetRoot);
   const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport, input.source.sourceIntent.pages.map(page=>page.route));
   const bindings = observedAttachmentBindings(input, observed);
-  const compileOptions = { attachmentBindings: bindings, themeAssetBaseUrl: observed.theme.assetBaseUrl, strict: options.strict };
+  const patternBindings = observedPatternBindings(input.source.sourceIntent.siteId, observed);
+  const compileOptions = { attachmentBindings: bindings, patternBindings, themeAssetBaseUrl: observed.theme.assetBaseUrl, strict: options.strict };
   const theme = await compileThemeDocuments(input.source, compileOptions);
   if (!theme.ok) throw new Error(theme.diagnostics.map(item=>`${item.source?.path ?? 'source'}: ${item.code ?? item.status}: ${item.reason}`).join('\n'));
   // Check every explicit media ID against this exact destination before invoking the native gate.
@@ -253,6 +280,7 @@ export async function planSite(inputPath: string, options: SitePlanOptions, tran
     ...Object.entries(intent.templates).map(([id,value])=>({id:`template:${id}`,body:value.body})),
     ...Object.entries(intent.parts).map(([id,value])=>({id:`part:${id}`,body:value.body})),
     ...Object.entries(intent.patterns).map(([id,value])=>({id:`pattern:${id}`,body:value.body})),
+    ...Object.entries(intent.syncedPatterns?.definitions ?? {}).map(([id,value])=>({id:`synced-pattern:${id}`,body:value.body})),
     ...intent.pages.map(page=>({id:`page:${page.id}`,body:page.body})),
   ];
   const check = (nodes: import('../types.js').IntentNode[], documentId: string, parent: number[]): void => {
@@ -265,11 +293,26 @@ export async function planSite(inputPath: string, options: SitePlanOptions, tran
         // Zero on an explicit asset-use field is caller source, never a destination binding.
         if (!(node.attrs.id === 0 && declared) && (!entity || (typeof url === 'string' && url !== entity.attachment?.url))) throw new Error('inline media ID or URL does not match the observed destination');
       }
+      if (node.block==='core/block' && !intent.syncedPatterns?.uses.some(use=>use.documentId===documentId && use.nodePath.join('.')===at.join('.'))) throw new Error('undeclared core/block reference is not a supported synced pattern use');
       if (node.children) check(node.children,documentId,at);
     });
   };
   for (const document of trees) check(document.body.blocks,document.id,[]);
+  const compiledPatterns = await compileSiteSyncedPatterns(input.source, compileOptions);
   const inspected = await compileSitePageDocuments(input.source, compileOptions);
   if (!inspected.ok) throw new Error(inspected.diagnostics.filter(item=>item.status==='invalid').map(item=>`${item.source?.path ?? 'source'}: ${item.code ?? item.status}: ${item.reason}`).join('\n'));
-  return reconcileSitePlan(input.source, theme.artifact, inspected.pages, observed, bindings, inspected.diagnostics);
+  return reconcileSitePlan(input.source, theme.artifact, inspected.pages, observed, bindings, inspected.diagnostics, compiledPatterns, patternBindings);
+}
+
+function observedPatternBindings(siteId: string, snapshot: SiteSnapshot): Record<string, number> {
+  const grouped = new Map<string, SiteEntity[]>();
+  for (const entity of snapshot.entities) {
+    if (entity.kind !== 'pattern') continue;
+    const owner = entity.ownership.find(meta => meta.siteId === siteId && meta.kind === 'pattern');
+    if (!owner || owner.lastAppliedHash !== managedStateHash(entity.state)) continue;
+    const list = grouped.get(owner.entityId) ?? [];
+    list.push(entity);
+    grouped.set(owner.entityId, list);
+  }
+  return Object.fromEntries([...grouped].filter(([, entities]) => entities.length === 1).map(([id, entities]) => [id, entities[0]!.id]));
 }
