@@ -1,0 +1,225 @@
+import { mkdtemp, readFile, realpath } from 'node:fs/promises';
+import { spawn } from 'node:child_process';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { describe, expect, it } from 'vitest';
+import { compileThemeDocuments } from '../../src/site/compile.js';
+import { inspectSiteDrift } from '../../src/site/drift.js';
+import { readSitePlanInput, managedStateHash } from '../../src/site/plan.js';
+import { writeCompiledSite } from '../../src/site/write.js';
+import { readSiteTemplateSnapshot, type SiteTemplateSnapshot } from '../../src/site/wpcli.js';
+import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
+
+const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent/', import.meta.url));
+const intentFile = path.join(fixtureRoot, 'site.intent.json');
+
+async function bundleFixture() {
+  const root = await mkdtemp(path.join(await realpath(tmpdir()), 'site-drift-'));
+  const bundle = path.join(root, 'bundle');
+  const input = await readSitePlanInput(intentFile, fixtureRoot);
+  const compiled = await compileThemeDocuments(input.source, { themeAssetBaseUrl: `https://example.test/themes/${input.source.sourceIntent.theme.slug}` });
+  if (!compiled.ok) throw new Error('drift test fixture theme did not compile');
+  await writeCompiledSite(bundle, input.source, compiled.artifact);
+  const manifest = JSON.parse(await readFile(path.join(bundle, 'site.manifest.json'), 'utf8')) as { artifactIdentity: string; sourceIdentity: string; bundleFiles: Array<{ path: string }> };
+  const entities: SiteTemplateSnapshot['entities'] = [];
+  for (const file of manifest.bundleFiles.filter(file => /^theme\/(templates|parts)\/.*\.html$/.test(file.path))) {
+    const kind = file.path.startsWith('theme/parts/') ? 'wp_template_part' : 'wp_template';
+    const relative = file.path.replace(/^theme\/(?:templates|parts)\//, '').replace(/\.html$/, '');
+    const raw = await readFile(path.join(bundle, file.path), 'utf8');
+    entities.push({ id: `${input.source.sourceIntent.theme.slug}//${relative}`, theme: input.source.sourceIntent.theme.slug, type: kind, source: 'theme', wpId: 0, raw });
+  }
+  return { root, bundle, input, manifest, entities };
+}
+
+function snapshot(theme: string, overrides: Partial<SiteSnapshot> = {}): SiteSnapshot {
+  return {
+    target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 3 },
+    runtime: { wordpress: '7.1.2', php: '8.4.26' },
+    principal: { userId: 7, capabilities: { edit_theme_options: true, edit_pages: true, edit_posts: true, edit_others_pages: true, edit_others_posts: true, manage_options: true } },
+    theme: { slug: theme, assetBaseUrl: `https://example.test/wp/wp-content/themes/${theme}`, inventory: [] },
+    routing: { permalinkStructure: '/%postname%/', rewriteRulesHash: 'hash', routes: [] },
+    entities: [], overrides: [], navigation: [], options: {}, siteRecord: null,
+    ...overrides,
+  };
+}
+
+function templateSnapshot(theme: string, entities: SiteTemplateSnapshot['entities']): SiteTemplateSnapshot {
+  return { target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 3 }, theme,
+    principal: { userId: 7, userLogin: 'editor', canReadEditContext: true }, runtime: { wordpress: '7.1.2' }, entities };
+}
+
+function transportFor(observed: SiteSnapshot, templates: SiteTemplateSnapshot) {
+  return {
+    snapshotTransport: async () => JSON.stringify(observed),
+    templateTransport: async () => JSON.stringify(templates),
+  };
+}
+
+describe('read-only site drift inspection', () => {
+  it('maps fresh theme and part entities by exact source ID and preserves full markup bytes', async () => {
+    const fixture = await bundleFixture();
+    const observed = snapshot(fixture.input.source.sourceIntent.theme.slug);
+    const result = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
+    expect(result.status).toBe('clean');
+    expect(result.bundle).toMatchObject({ siteId: fixture.input.source.sourceIntent.siteId, sourceIdentity: fixture.manifest.sourceIdentity, artifactIdentity: fixture.manifest.artifactIdentity });
+    expect(result.findings.filter(finding => finding.kind === 'template' || finding.kind === 'part')).toHaveLength(fixture.entities.length);
+    expect(result.findings.every(finding => finding.status === 'clean')).toBe(true);
+
+    const changed = fixture.entities.map((entity, index) => index === 0 ? { ...entity, raw: `${entity.raw} ` } : entity);
+    const changedReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, changed)) });
+    expect(changedReport.status).toBe('actionable');
+    expect(changedReport.findings).toContainEqual(expect.objectContaining({ status: 'changed', code: 'theme-source-differs', firstDifferenceByte: fixture.entities[0]!.raw.length }));
+  });
+
+  it('distinguishes a persisted byte-equivalent override from changed database markup', async () => {
+    const fixture = await bundleFixture();
+    const observed = snapshot(fixture.input.source.sourceIntent.theme.slug);
+    const override = fixture.entities.map((entity, index) => index === 0 ? { ...entity, source: 'custom' as const, wpId: 44 } : entity);
+    const equivalent = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, override)) });
+    expect(equivalent.status).toBe('clean');
+    expect(equivalent.findings).toContainEqual(expect.objectContaining({ status: 'equivalent-override', wpId: 44, code: 'equivalent-database-override' }));
+
+    override[0]!.raw += '\n';
+    const changed = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, override)) });
+    expect(changed.findings).toContainEqual(expect.objectContaining({ status: 'changed', wpId: 44, code: 'changed-database-override' }));
+  });
+
+  it('detects status-only managed edits, missing and orphaned IDs, option changes, and unknown operations', async () => {
+    const fixture = await bundleFixture();
+    const id = fixture.input.source.sourceIntent.pages[0]!.id;
+    const state = { content: '<!-- wp:paragraph --><p>Same body</p><!-- /wp:paragraph -->', title: 'Home', status: 'draft', slug: 'home', parentId: 0, template: 'index' };
+    const owned: SiteEntity = { id: 20, kind: 'page', route: '/', state: { ...state, status: 'publish' }, ownership: [{ version: 1, siteId: fixture.input.source.sourceIntent.siteId,
+      entityId: id, kind: 'page', lastAppliedHash: managedStateHash(state) }] };
+    const observed = snapshot(fixture.input.source.sourceIntent.theme.slug, {
+      entities: [owned], options: { show_on_front: 'posts' },
+      siteRecord: { version: 1, siteId: fixture.input.source.sourceIntent.siteId, entities: { [`page:${id}`]: 20, 'page:removed': 21 },
+        options: { show_on_front: { lastAppliedValue: 'page' } }, operation: { token: 'opaque', planHash: 'hash', status: 'outcome_unknown' } },
+    });
+    const report = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
+    expect(report.status).toBe('blocked');
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'changed', code: 'managed-state-changed', wpId: 20 }),
+      expect.objectContaining({ status: 'missing', code: 'missing-owned-entity', entityId: 'page:removed' }),
+      expect.objectContaining({ status: 'orphaned', code: 'orphaned-owned-entity', entityId: 'page:removed' }),
+      expect.objectContaining({ status: 'changed', code: 'managed-option-changed', entityId: 'show_on_front' }),
+      expect.objectContaining({ status: 'blocked', code: 'outstanding-operation' }),
+    ]));
+  });
+
+  it('reports unresolved navigation and unowned synced-pattern references as actionable dependencies', async () => {
+    const fixture = await bundleFixture();
+    const sourceId = fixture.input.source.sourceIntent.pages[0]!.id;
+    const state = { content: '<!-- wp:navigation {"ref":55} /--><!-- wp:block {"ref":66} /-->', title: 'Home', status: 'draft', slug: 'home', parentId: 0, template: 'index' };
+    const entity: SiteEntity = { id: 20, kind: 'page', route: '/', state, ownership: [{ version: 1, siteId: fixture.input.source.sourceIntent.siteId,
+      entityId: sourceId, kind: 'page', lastAppliedHash: managedStateHash(state) }] };
+    const observed = snapshot(fixture.input.source.sourceIntent.theme.slug, { entities: [entity], navigation: [{ id: 55, content: '', status: 'publish' }],
+      siteRecord: { version: 1, siteId: fixture.input.source.sourceIntent.siteId, entities: { [`page:${sourceId}`]: 20 }, options: {}, operation: null } });
+    const report = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
+    expect(report.status).toBe('actionable');
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'dependency', code: 'unowned-navigation-dependency', wpId: 55 }),
+      expect.objectContaining({ status: 'dependency', code: 'unresolved-dependency', wpId: 66 }),
+    ]));
+  });
+
+  it('returns blocked for unavailable edit-context permissions and wrong active theme', async () => {
+    const fixture = await bundleFixture();
+    const theme = fixture.input.source.sourceIntent.theme.slug;
+    const observed = snapshot(theme);
+    const denied = templateSnapshot(theme, fixture.entities); denied.principal.canReadEditContext = false;
+    const deniedReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, denied) });
+    expect(deniedReport.status).toBe('blocked');
+    expect(deniedReport.target).toBeNull();
+    const wrong = templateSnapshot('different-theme', fixture.entities);
+    const wrongReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, wrong) });
+    expect(wrongReport.status).toBe('blocked');
+    const wrongPrincipal = templateSnapshot(theme, fixture.entities); wrongPrincipal.principal.userId = 8;
+    const principalReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, wrongPrincipal) });
+    expect(principalReport).toMatchObject({ status: 'blocked', findings: [expect.objectContaining({ code: 'target-observation-mismatch' })] });
+    const selectedLoginMismatch = templateSnapshot(theme, fixture.entities); selectedLoginMismatch.principal.userLogin = 'other-user';
+    const selectedReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', wpUser: 'editor', ...transportFor(observed, selectedLoginMismatch) });
+    expect(selectedReport.status).toBe('blocked');
+  });
+
+  it('refuses a bundle whose source bytes change during the target inspection', async () => {
+    const fixture = await bundleFixture();
+    const theme = fixture.input.source.sourceIntent.theme.slug;
+    const observed = snapshot(theme);
+    const file = path.join(fixture.bundle, 'theme/templates/index.html');
+    await expect(inspectSiteDrift(fixture.bundle, {
+      wpPath: '/wp',
+      snapshotTransport: async () => { const original = await readFile(file, 'utf8'); await import('node:fs/promises').then(({ writeFile }) => writeFile(file, `${original} `)); return JSON.stringify(observed); },
+      templateTransport: async () => JSON.stringify(templateSnapshot(theme, fixture.entities)),
+    })).rejects.toThrow('retained bundle identity changed during drift inspection');
+  });
+
+  it('uses only fixed authenticated edit-context REST reads and rejects absent capabilities', async () => {
+    const calls: Array<{ executable: string; args: string[] }> = [];
+    const expected: SiteTemplateSnapshot = templateSnapshot('fixture', []);
+    const returned = await readSiteTemplateSnapshot({ wpPath: '/wp', wpUrl: 'https://example.test/sub', wpUser: 'editor', wpBinary: '/usr/bin/wp' }, 'fixture', async (executable, args) => {
+      calls.push({ executable, args }); return JSON.stringify(expected);
+    });
+    expect(returned.entities).toEqual([]);
+    expect(calls).toHaveLength(1);
+    expect(calls[0]!.executable).toBe('/usr/bin/wp');
+    expect(calls[0]!.args.slice(0, 4)).toEqual(['--path=/wp', '--url=https://example.test/sub', '--user=editor', 'eval']);
+    expect(calls[0]!.args.at(-1)).toContain("set_param('context','edit')");
+    expect(calls[0]!.args.at(-1)).toContain('rest_do_request');
+    expect(calls[0]!.args.at(-1)).toContain("get_post($wpId)");
+    expect(calls[0]!.args.at(-1)).toContain("get_the_terms($wpId,'wp_theme')");
+    expect(calls[0]!.args.at(-1)).toContain('$post->post_content');
+    expect(calls[0]!.args.at(-1)).not.toMatch(/\b(?:wp_insert_post|wp_update_post|update_option|add_post_meta|update_post_meta)\s*\(/);
+    expected.principal.canReadEditContext = false;
+    await expect(readSiteTemplateSnapshot({ wpPath: '/wp' }, 'fixture', async () => JSON.stringify(expected))).rejects.toThrow('edit_posts');
+    expected.principal.canReadEditContext = true;
+    expected.entities = [
+      { id: 'fixture//header', theme: 'fixture', type: 'wp_template', source: 'theme', wpId: 0, raw: 'template' },
+      { id: 'fixture//header', theme: 'fixture', type: 'wp_template_part', source: 'theme', wpId: 0, raw: 'part' },
+    ];
+    expect((await readSiteTemplateSnapshot({ wpPath: '/wp' }, 'fixture', async () => JSON.stringify(expected))).entities).toHaveLength(2);
+    expected.entities.push({ ...expected.entities[0]! });
+    await expect(readSiteTemplateSnapshot({ wpPath: '/wp' }, 'fixture', async () => JSON.stringify(expected))).rejects.toThrow('invalid or conflicting');
+  });
+
+  it('emits JSON with distinct clean, actionable, and blocked CLI exit codes', async () => {
+    const fixture = await bundleFixture();
+    const theme = fixture.input.source.sourceIntent.theme.slug;
+    const observed = snapshot(theme);
+    const wpBinary = path.join(fixture.root, 'wp fake');
+    const script = (templates: SiteTemplateSnapshot) => `#!/usr/bin/env node\nconst input = process.argv.at(-1);\nconst value = input.includes('read-only site inspection') ? ${JSON.stringify(JSON.stringify(templates))} : ${JSON.stringify(JSON.stringify(observed))};\nprocess.stdout.write(value);\n`;
+    const clean = templateSnapshot(theme, fixture.entities);
+    const run = async (templates: SiteTemplateSnapshot, json = true, bundlePath = fixture.bundle) => {
+      const { writeFile, chmod } = await import('node:fs/promises');
+      await writeFile(wpBinary, script(templates), { mode: 0o755 }); await chmod(wpBinary, 0o755);
+      const cliPath = fileURLToPath(new URL('../../src/cli.ts', import.meta.url));
+      const tsx = import.meta.resolve('tsx');
+      return new Promise<{ code: number | null; stdout: string }>((resolve, reject) => {
+        const child = spawn(process.execPath, ['--import', tsx, cliPath, 'site', 'drift', bundlePath, '--wp-path', '/wp', '--wp-binary', wpBinary, ...(json ? ['--json'] : [])]);
+        let stdout = ''; child.stdout.setEncoding('utf8'); child.stdout.on('data', chunk => { stdout += chunk; });
+        child.on('error', reject); child.on('close', code => resolve({ code, stdout }));
+      });
+    };
+    const cleanResult = await run(clean);
+    expect(cleanResult.code).toBe(0);
+    expect(JSON.parse(cleanResult.stdout)).toMatchObject({ status: 'clean', bundle: { sourceIdentity: fixture.manifest.sourceIdentity } });
+    const textResult = await run(clean, false);
+    expect(textResult.code).toBe(0);
+    expect(textResult.stdout).toContain('Site drift: clean');
+    const equivalent = templateSnapshot(theme, fixture.entities.map((entity, index) => index === 0 ? { ...entity, source: 'custom' as const, wpId: 44 } : entity));
+    const equivalentResult = await run(equivalent);
+    expect(equivalentResult.code).toBe(0);
+    expect(JSON.parse(equivalentResult.stdout)).toMatchObject({ status: 'clean', findings: expect.arrayContaining([expect.objectContaining({ status: 'equivalent-override' })]) });
+    const changed = templateSnapshot(theme, fixture.entities.map((entity, index) => index === 0 ? { ...entity, raw: `${entity.raw} ` } : entity));
+    const actionableResult = await run(changed);
+    expect(actionableResult.code).toBe(1);
+    expect(JSON.parse(actionableResult.stdout).status).toBe('actionable');
+    const denied = templateSnapshot(theme, fixture.entities); denied.principal.canReadEditContext = false;
+    const blockedResult = await run(denied);
+    expect(blockedResult.code).toBe(2);
+    expect(JSON.parse(blockedResult.stdout)).toMatchObject({ status: 'blocked', target: null });
+    const errorResult = await run(clean, true, path.join(fixture.root, 'missing-bundle'));
+    expect(errorResult.code).toBe(3);
+    expect(JSON.parse(errorResult.stdout)).toMatchObject({ status: 'error', code: 'inspection-failed' });
+  });
+});

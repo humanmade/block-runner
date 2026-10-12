@@ -42,6 +42,7 @@ import { prepareSiteSource } from './site/input.js';
 import { writeCompiledSite } from './site/write.js';
 import type { SiteAttachmentBinding } from './site/types.js';
 import { readStableRegularFile } from './publication.js';
+import { inspectSiteDrift } from './site/drift.js';
 const { version: packageVersion } = createRequire(import.meta.url)('../package.json') as {
   version: string;
 };
@@ -263,6 +264,36 @@ siteCommand.command('plan <intentOrBundle>')
       console.log('WordPress was inspected; no WordPress mutation commands were issued.');
     }
     if (!plan.executable) process.exitCode = 1;
+  });
+
+siteCommand.command('drift <bundle>')
+  .description('Compare one retained site bundle with a fresh read-only WordPress inspection.')
+  .requiredOption('--wp-path <path>', 'local WordPress installation path')
+  .option('--wp-url <url>', 'explicit target URL, including multisite selection')
+  .option('--wp-binary <path>', 'local WP-CLI executable path')
+  .option('--wp-user <id-or-login>', 'WordPress principal; otherwise use configured WP-CLI principal')
+  .option('--json', 'emit the machine-readable drift report')
+  .action(async (bundle: string, options: {wpPath:string;wpUrl?:string;wpBinary?:string;wpUser?:string;json?:boolean}) => {
+    let report;
+    try {
+      report = await inspectSiteDrift(bundle, options);
+    } catch (error) {
+      const result = { version: 1, status: 'error', code: 'inspection-failed', message: error instanceof Error ? error.message : 'site drift inspection failed' };
+      if (options.json) console.log(JSON.stringify(result, null, 2));
+      else console.error(`Site drift inspection failed: ${result.message}`);
+      process.exitCode = 3;
+      return;
+    }
+    if (options.json) console.log(JSON.stringify(report, null, 2));
+    else {
+      console.log(`Site drift: ${report.status}`);
+      if (report.target) console.log(`Target: ${report.target.homeUrl} (blog ${report.target.blogId}, theme ${report.target.theme})`);
+      else console.log('Target: unavailable; WordPress inspection was blocked.');
+      console.log(`Bundle: ${report.bundle.siteId} (${report.bundle.sourceIdentity}; artifact ${report.bundle.artifactIdentity})`);
+      for (const finding of report.findings) console.log(`- ${finding.status} ${finding.entityId ?? finding.code}: ${finding.message}${finding.sourcePath ? ` [${finding.sourcePath}]` : ''}${finding.wpId ? ` [wp_id ${finding.wpId}]` : ''}`);
+      console.log('WordPress and bundle files were inspected without writing site state or EvidenceStore data.');
+    }
+    process.exitCode = report.status === 'clean' ? 0 : report.status === 'actionable' ? 1 : 2;
   });
 
 addTokenOptions(

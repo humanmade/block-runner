@@ -122,9 +122,13 @@ export const {
 } = library;
 
 export { planSite } from './site/plan.js';
+export { inspectSiteDrift } from './site/drift.js';
+export type { SiteDriftFinding, SiteDriftFindingStatus, SiteDriftOptions, SiteDriftReport } from './site/drift.js';
 export { readSiteSnapshot } from './site/wpcli.js';
+export { readSiteTemplateSnapshot } from './site/wpcli.js';
 export type { SitePlanOptions } from './site/plan.js';
 export type { SiteWpCliOptions } from './site/wpcli.js';
+export type { SiteTemplateObservation, SiteTemplateSnapshot } from './site/wpcli.js';
 export type { SitePlan, SiteSnapshot } from './site/plan-types.js';
 
 export { prepareSiteSource } from './site/input.js';
