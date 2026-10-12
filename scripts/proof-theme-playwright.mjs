@@ -56,7 +56,7 @@ async function main() {
 
 if (process.argv[1] && import.meta.url === pathToFileURL(path.resolve(process.argv[1])).href) await main();
 
-export async function proveFile(page, theme, file, baseUrl) {
+export async function proveFile(page, theme, file, baseUrl, hooks = {}) {
   const part = file.kind === 'part';
   const entityType = part ? 'wp_template_part' : 'wp_template';
   const route = part ? 'template-parts' : 'templates';
@@ -94,7 +94,8 @@ export async function proveFile(page, theme, file, baseUrl) {
     // Store initialization precedes React mount effects such as accordion context sync.
     const canvas = page.frame({ name: 'editor-canvas' }) ?? page;
     await canvas.locator('.block-editor-block-list__layout').first().waitFor({ state: 'attached' });
-    await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
+    if (hooks.awaitMounted) await hooks.awaitMounted(page, file);
+    else await page.evaluate(() => new Promise((resolve) => requestAnimationFrame(() => requestAnimationFrame(resolve))));
     const before = await page.evaluate(async ({ entityType, entityId }) => {
       const core = globalThis.wp.data;
       const entity = await core.resolveSelect('core').getEntityRecord('postType', entityType, entityId);
@@ -175,6 +176,10 @@ export async function proveFile(page, theme, file, baseUrl) {
   } finally {
     if (createdOverride && createdOverrideId) {
       try {
+        if (hooks.cleanupOverride) {
+          result.cleanup = await hooks.cleanupOverride({ page, restPath, id: createdOverrideId, entityType, result });
+          return result;
+        }
         const current = await page.evaluate(async (restPath) => globalThis.wp.apiFetch({ path: restPath }), restPath);
         if (current.source !== 'custom' || Number(current.wp_id) !== createdOverrideId) {
           result.status = 'fail';

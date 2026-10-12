@@ -39,6 +39,7 @@ describe('site compiler', () => {
       'templates/index.html',
       'theme.json',
     ]);
+    expect(new TextDecoder().decode(first.site.themeFiles.find((file) => file.path === 'style.css')!.bytes)).toContain('\nVersion: 0.1.0\n');
     expect(first.site.pages.map((page) => page.id)).toEqual(['home', 'about', 'services', 'consulting', 'contact']);
     expect(first.site.themeFiles).toEqual(second.site.themeFiles);
     expect(first.site.pages).toEqual(second.site.pages);

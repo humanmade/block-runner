@@ -471,7 +471,7 @@ async function themeChecks(intent: SiteIntent, documents: CompiledDocument[], sy
 
 function emitThemeFiles(intent: SiteIntent, documents: CompiledDocument[], diagnostics: ReportItem[]): SiteFile[] {
   const files: SiteFile[] = [];
-  addFile(files, 'style.css', `/*\nTheme Name: ${intent.theme.title}\nText Domain: ${intent.theme.slug}\n*/\n`);
+  addFile(files, 'style.css', `/*\nTheme Name: ${intent.theme.title}\nVersion: 0.1.0\nText Domain: ${intent.theme.slug}\n*/\n`);
   addFile(files, 'theme.json', `${JSON.stringify(intent.theme.themeJson, null, 2)}\n`);
   for (const document of documents.filter((entry) => entry.kind !== 'page')) {
     if (!document.ok) continue;
