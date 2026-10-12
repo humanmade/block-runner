@@ -146,3 +146,6 @@ export type UnsupportedPluginLayoutError = import('./index-implementation.js').U
 
 export type PublicationInterruptedError = import('./index-implementation.js').PublicationInterruptedError;
 export type PluginPublicationInterruptedError = import('./index-implementation.js').PluginPublicationInterruptedError;
+
+export { applySite } from './site/apply.js';
+export type { SiteApplyOptions, SiteApplyReceipt } from './site/apply.js';
