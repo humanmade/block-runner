@@ -1,6 +1,7 @@
 import { loadConfig } from '../config/load.js';
 import { DEFAULT_CONFIG } from '../config/schema.js';
 import { finalizeBlocks } from '../convert/finalize.js';
+import { createHtmlFallback } from '../convert/fallback.js';
 import { getWp } from '../headless/wp.js';
 import {
   AssembleOptions,
@@ -73,7 +74,7 @@ function normalizeTree(parsed: unknown): IntentTree {
 
 /**
  * Assemble an intent tree into registered Gutenberg block objects. Every node is created through
- * `createBlock`; this path never authors or injects inner HTML.
+ * `createBlock`; Custom HTML retains its explicitly supplied serialization payload.
  */
 export async function assemble(nodes: IntentNode[]): Promise<WpBlock[]> {
   return assembleWithWp(nodes, await getWp());
@@ -114,7 +115,9 @@ async function assembleNode(
   );
 
   const createBlock = (innerBlocks: WpBlock[]): WpBlock => {
-    const block = wp.createBlock(name, attrs, innerBlocks);
+    const block = name === 'core/html'
+      ? createHtmlFallback(wp, attrs.content as string, attrs)
+      : wp.createBlock(name, attrs, innerBlocks);
     if (diagnostics) {
       for (const key of Object.keys(node.attrs ?? {})) {
         if (Object.hasOwn(block.attributes, key)) continue;
@@ -132,6 +135,12 @@ async function assembleNode(
   };
 
   switch (name) {
+    case 'core/html':
+      if (text != null) attrs.content = text;
+      if (attrs.content === undefined) attrs.content = '';
+      if (typeof attrs.content !== 'string') throw new Error(`${intentPath}.content: expected a string`);
+      return createBlock([]);
+
     case 'core/heading':
       if (text != null) attrs.content = text;
       attrs.level = node.level ?? attrs.level ?? 2;
