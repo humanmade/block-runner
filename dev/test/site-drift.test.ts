@@ -49,6 +49,14 @@ function templateSnapshot(theme: string, entities: SiteTemplateSnapshot['entitie
     principal: { userId: 7, userLogin: 'editor', canReadEditContext: true }, runtime: { wordpress: '7.1.2' }, entities };
 }
 
+function attachmentEntity(siteId: string, id: number, logicalId: string, originalSha: string, options: { stateSha?: string; postStatus?: string; currentFileSha256?: string | null } = {}): SiteEntity {
+  const baseline = { sha256: originalSha };
+  const state = { sha256: options.stateSha ?? originalSha };
+  return { id, kind: 'attachment', route: null, postStatus: options.postStatus ?? 'inherit', state,
+    attachment: { url: `https://example.test/uploads/${id}.png`, currentFileSha256: options.currentFileSha256 === undefined ? originalSha : options.currentFileSha256, width: 640, height: 480 },
+    ownership: [{ version: 1, siteId, entityId: logicalId, kind: 'attachment', assetSha256: originalSha, lastAppliedHash: managedStateHash(baseline) }] };
+}
+
 function transportFor(observed: SiteSnapshot, templates: SiteTemplateSnapshot) {
   return {
     snapshotTransport: async () => JSON.stringify(observed),
@@ -108,6 +116,69 @@ describe('read-only site drift inspection', () => {
       expect.objectContaining({ status: 'orphaned', code: 'orphaned-owned-entity', entityId: 'page:removed' }),
       expect.objectContaining({ status: 'changed', code: 'managed-option-changed', entityId: 'show_on_front' }),
       expect.objectContaining({ status: 'blocked', code: 'outstanding-operation' }),
+    ]));
+  });
+
+  it('reports missing, trashed, and byte-changed owned attachments despite unchanged page markup', async () => {
+    const fixture = await bundleFixture();
+    const siteId = fixture.input.source.sourceIntent.siteId;
+    const asset = fixture.input.source.assets.find(candidate => candidate.role === 'attachment')!;
+    const pageId = fixture.input.source.sourceIntent.pages[0]!.id;
+    const content = '<!-- wp:image {"id":41} /-->';
+    const pageState = { content, title: 'Home', status: 'publish', slug: 'home', parentId: 0, template: 'index' };
+    const page: SiteEntity = { id: 20, kind: 'page', route: '/', state: pageState, ownership: [{ version: 1, siteId, entityId: pageId, kind: 'page', lastAppliedHash: managedStateHash(pageState) }] };
+    const siteRecord = { version: 1 as const, siteId, entities: { [`page:${pageId}`]: 20, [`attachment:${asset.id}@${asset.sha256}`]: 41 }, options: {}, operation: null };
+    const run = async (entities: SiteEntity[]) => {
+      const observed = snapshot(fixture.input.source.sourceIntent.theme.slug, { entities, siteRecord });
+      return inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
+    };
+
+    const trashed = await run([page, attachmentEntity(siteId, 41, asset.id, asset.sha256, { postStatus: 'trash' })]);
+    expect(trashed.status).toBe('actionable');
+    expect(trashed.findings).toContainEqual(expect.objectContaining({ kind: 'attachment', status: 'missing', code: 'owned-attachment-unavailable', wpId: 41 }));
+    expect(trashed.findings).not.toContainEqual(expect.objectContaining({ code: 'verified-owned-attachment-dependency', wpId: 41 }));
+
+    const missing = await run([page]);
+    expect(missing.status).toBe('actionable');
+    expect(missing.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'attachment', status: 'missing', code: 'missing-owned-attachment', entityId: `attachment:${asset.id}@${asset.sha256}`, wpId: 41 }),
+      expect.objectContaining({ kind: 'dependency', status: 'dependency', code: 'unresolved-dependency', entityId: 'core/image:41' }),
+    ]));
+
+    const changed = await run([page, attachmentEntity(siteId, 41, asset.id, asset.sha256, { stateSha: 'f'.repeat(64) })]);
+    expect(changed.status).toBe('actionable');
+    expect(changed.findings).toContainEqual(expect.objectContaining({ kind: 'attachment', status: 'changed', code: 'managed-attachment-changed', wpId: 41 }));
+  });
+
+  it('resolves image and cover IDs only to version-verified owned attachments', async () => {
+    const fixture = await bundleFixture();
+    const siteId = fixture.input.source.sourceIntent.siteId;
+    const asset = fixture.input.source.assets.find(candidate => candidate.role === 'attachment')!;
+    const pageId = fixture.input.source.sourceIntent.pages[0]!.id;
+    const content = '<!-- wp:image {"id":41} /--><!-- wp:cover {"id":41} /-->';
+    const pageState = { content, title: 'Home', status: 'publish', slug: 'home', parentId: 0, template: 'index' };
+    const page: SiteEntity = { id: 20, kind: 'page', route: '/', state: pageState, ownership: [{ version: 1, siteId, entityId: pageId, kind: 'page', lastAppliedHash: managedStateHash(pageState) }] };
+    const attachment = attachmentEntity(siteId, 41, asset.id, asset.sha256);
+    const record = { version: 1 as const, siteId, entities: { [`page:${pageId}`]: 20, [`attachment:${asset.id}@${asset.sha256}`]: 41 }, options: {}, operation: null };
+    const observed = snapshot(fixture.input.source.sourceIntent.theme.slug, { entities: [page, attachment], siteRecord: record });
+    const report = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(observed, templateSnapshot(observed.theme.slug, fixture.entities)) });
+    expect(report.status).toBe('clean');
+    expect(report.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ kind: 'attachment', status: 'clean', code: 'managed-attachment-match', entityId: `attachment:${asset.id}@${asset.sha256}` }),
+      expect.objectContaining({ status: 'clean', code: 'verified-owned-attachment-dependency', entityId: 'core/image:41' }),
+      expect.objectContaining({ status: 'clean', code: 'verified-owned-attachment-dependency', entityId: 'core/cover:41' }),
+    ]));
+
+    const unownedContent = '<!-- wp:image {"id":55} /--><!-- wp:cover {"id":56} /-->';
+    const unownedState = { ...pageState, content: unownedContent };
+    const unownedPage: SiteEntity = { ...page, state: unownedState, ownership: [{ ...page.ownership[0]!, lastAppliedHash: managedStateHash(unownedState) }] };
+    const unowned = snapshot(fixture.input.source.sourceIntent.theme.slug, { entities: [unownedPage, attachmentEntity(siteId, 55, 'elsewhere', 'a'.repeat(64))], navigation: [],
+      siteRecord: { version: 1, siteId, entities: { [`page:${pageId}`]: 20 }, options: {}, operation: null } });
+    const unownedReport = await inspectSiteDrift(fixture.bundle, { wpPath: '/wp', ...transportFor(unowned, templateSnapshot(unowned.theme.slug, fixture.entities)) });
+    expect(unownedReport.status).toBe('actionable');
+    expect(unownedReport.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ status: 'dependency', code: 'unowned-attachment-dependency', entityId: 'core/image:55' }),
+      expect.objectContaining({ status: 'dependency', code: 'unresolved-dependency', entityId: 'core/cover:56' }),
     ]));
   });
 
