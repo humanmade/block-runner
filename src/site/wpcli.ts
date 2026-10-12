@@ -9,6 +9,21 @@ export function siteRecordOption(siteId: string): string {
 }
 export interface SiteWpCliOptions { wpPath: string; wpUrl?: string; wpBinary?: string; wpUser?: string }
 export type SiteReadTransport = (executable: string, args: string[]) => Promise<string>;
+export interface SiteTemplateObservation {
+  id: string;
+  theme: string;
+  type: 'wp_template' | 'wp_template_part';
+  source: 'theme' | 'custom' | 'plugin';
+  wpId: number;
+  raw: string;
+}
+export interface SiteTemplateSnapshot {
+  target: SiteSnapshot['target'];
+  theme: string;
+  principal: { userId: number; userLogin: string; canReadEditContext: boolean };
+  runtime: { wordpress: string };
+  entities: SiteTemplateObservation[];
+}
 const run = promisify(execFile);
 const localRead: SiteReadTransport = async (executable, args) => {
   try {
@@ -35,6 +50,88 @@ export async function readSiteSnapshot(options: SiteWpCliOptions, siteId: string
   try { snapshot = JSON.parse(output) as SiteSnapshot; } catch { throw new Error('WP-CLI returned an invalid snapshot'); }
   validateSnapshot(snapshot);
   return snapshot;
+}
+
+/** Read theme templates and parts through the native REST edit context; this helper has no write path. */
+export async function readSiteTemplateSnapshot(options: SiteWpCliOptions, expectedTheme: string, transport: SiteReadTransport = localRead): Promise<SiteTemplateSnapshot> {
+  if (!options.wpPath || options.wpPath.includes('\0')) throw new Error('wpPath is required');
+  if (!/^[a-z0-9][a-z0-9-]*$/.test(expectedTheme)) throw new Error('invalid expected theme slug');
+  const args = [`--path=${options.wpPath}`];
+  for (const value of [options.wpUrl, options.wpUser, options.wpBinary]) if (value?.includes('\0')) throw new Error('WP-CLI arguments cannot contain NUL bytes');
+  if (options.wpUrl) args.push(`--url=${options.wpUrl}`);
+  if (options.wpUser) args.push(`--user=${options.wpUser}`);
+  args.push('eval', templateSnapshotScript(expectedTheme));
+  const output = await transport(options.wpBinary ?? 'wp', args);
+  let snapshot: SiteTemplateSnapshot;
+  try { snapshot = JSON.parse(output) as SiteTemplateSnapshot; } catch { throw new Error('WP-CLI returned an invalid template snapshot'); }
+  if (!snapshot || !snapshot.target || !Number.isInteger(snapshot.target.blogId) || snapshot.target.blogId < 1
+    || snapshot.theme !== expectedTheme || !snapshot.principal || !Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1 || typeof snapshot.principal.userLogin !== 'string' || !snapshot.principal.userLogin
+    || !snapshot.runtime || !Array.isArray(snapshot.entities)) throw new Error('WP-CLI returned an incomplete template snapshot');
+  if (!snapshot.principal.canReadEditContext) throw new Error('selected WordPress principal lacks edit_posts for edit-context template inspection');
+  const ids = new Set<string>();
+  for (const entity of snapshot.entities) {
+    const identity = entity && `${entity.type}:${entity.id}`;
+    if (!entity || typeof entity.id !== 'string' || ids.has(identity) || entity.theme !== expectedTheme
+      || !['wp_template', 'wp_template_part'].includes(entity.type) || !['theme', 'custom', 'plugin'].includes(entity.source)
+      || !Number.isInteger(entity.wpId) || entity.wpId < 0 || typeof entity.raw !== 'string'
+      || (entity.source === 'custom' && entity.wpId < 1) || (entity.source !== 'custom' && entity.wpId !== 0)) {
+      throw new Error('WP-CLI returned an invalid or conflicting edit-context template entity');
+    }
+    ids.add(identity);
+  }
+  for (const url of [snapshot.target.homeUrl, snapshot.target.siteUrl]) {
+    const parsed = new URL(url);
+    if (!['http:', 'https:'].includes(parsed.protocol) || parsed.username || parsed.password || parsed.search || parsed.hash) throw new Error('template snapshot URL contains unsupported identity or secret fields');
+  }
+  return snapshot;
+}
+
+function templateSnapshotScript(expectedTheme: string): string {
+  const theme = JSON.stringify(expectedTheme);
+  return `
+if (defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON) throw new Exception('alternate cron bootstrap is unsupported for read-only site inspection');
+remove_action('shutdown','_wp_cron');
+$expected = ${theme}; $active = get_stylesheet();
+if ($active !== $expected) throw new Exception('active theme differs from the explicit bundle theme');
+$entities = array();
+foreach (array('templates'=>'wp_template','template-parts'=>'wp_template_part') as $route=>$type) {
+  $request = new WP_REST_Request('GET','/wp/v2/' . $route);
+  $request->set_param('context','edit'); $request->set_param('theme',$expected);
+  $response = rest_do_request($request);
+  if (is_wp_error($response)) throw new Exception('edit-context template REST request failed');
+  if (!($response instanceof WP_REST_Response) || $response->get_status() >= 400) throw new Exception('edit-context template REST request was denied');
+  $headers = $response->get_headers();
+  if (isset($headers['X-WP-TotalPages']) && (int) $headers['X-WP-TotalPages'] !== 1) throw new Exception('edit-context template REST pagination cannot be verified');
+  $items = $response->get_data(); if (!is_array($items)) throw new Exception('edit-context template REST response is incomplete');
+  foreach ($items as $item) {
+    if (!is_array($item) || !is_string($item['theme'] ?? null) || !is_string($item['id'] ?? null) || ($item['type'] ?? null) !== $type
+      || !is_string($item['source'] ?? null) || !is_numeric($item['wp_id'] ?? null)
+      || !is_array($item['content'] ?? null) || !is_string($item['content']['raw'] ?? null)) throw new Exception('edit-context template REST response omitted required raw identity fields');
+    if ($item['theme'] !== $expected) continue;
+    $raw = $item['content']['raw'];
+    $wpId = (int) $item['wp_id'];
+    if ($item['source'] === 'custom') {
+      if ($wpId < 1) throw new Exception('custom template has no verified numeric wp_id');
+      $post = get_post($wpId); $terms = get_the_terms($wpId,'wp_theme');
+      if (!$post || $post->post_type !== $type || !is_array($terms) || count($terms) !== 1 || $terms[0]->name !== $expected
+        || $item['id'] !== $expected . '//' . $post->post_name || !is_string($post->post_content)) throw new Exception('custom template identity does not match its numeric post and active theme taxonomy');
+      $raw = $post->post_content;
+    } elseif ($item['source'] === 'theme') {
+      if ($wpId !== 0 || !str_starts_with($item['id'],$expected . '//')) throw new Exception('theme template identity does not match the active theme');
+      $slug = substr($item['id'],strlen($expected) + 2); $parts = explode('/',$slug);
+      foreach ($parts as $part) if ($part === '' || $part === '.' || $part === '..' || !preg_match('/^[A-Za-z0-9._-]+$/',$part)) throw new Exception('theme template ID has an unsafe source path');
+      $folders = get_block_theme_folders($expected); $base = realpath(get_stylesheet_directory() . '/' . $folders[$type]);
+      $candidate = get_stylesheet_directory() . '/' . $folders[$type] . '/' . $slug . '.html'; $cursor = get_stylesheet_directory();
+      foreach (array_merge(array($folders[$type]),$parts) as $part) { $cursor .= '/' . $part; if (is_link($cursor)) throw new Exception('theme template source contains a symbolic link'); }
+      $file = realpath($candidate);
+      if (!$base || !$file || !is_file($file) || !str_starts_with($file,trailingslashit($base)) || !is_string($raw = file_get_contents($file))) throw new Exception('theme template source file is missing or cannot be read exactly');
+    } elseif ($item['source'] === 'plugin' && $wpId !== 0) throw new Exception('plugin template returned an unexpected database ID');
+    $entities[] = array('id'=>$item['id'],'theme'=>$item['theme'],'type'=>$type,'source'=>$item['source'],'wpId'=>$wpId,'raw'=>$raw);
+  }
+}
+echo wp_json_encode(array('target'=>array('homeUrl'=>home_url(),'siteUrl'=>site_url(),'blogId'=>get_current_blog_id()),'theme'=>$active,
+  'principal'=>array('userId'=>get_current_user_id(),'userLogin'=>wp_get_current_user()->user_login,'canReadEditContext'=>current_user_can('edit_posts')),
+  'runtime'=>array('wordpress'=>get_bloginfo('version')),'entities'=>$entities));`;
 }
 
 function validateSnapshot(value: SiteSnapshot): void {
