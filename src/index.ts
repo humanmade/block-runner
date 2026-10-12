@@ -122,6 +122,8 @@ export const {
 } = library;
 
 export { prepareSiteSource } from './site/input.js';
+export { compileSite, compileThemeDocuments } from './site/compile.js';
+export type { CompileSiteOptions, CompileSiteResult, CompileThemeDocumentsResult } from './site/compile.js';
 
 export type * from './index-implementation.js';
 export type * from './site/types.js';
