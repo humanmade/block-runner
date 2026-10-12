@@ -308,6 +308,22 @@ describe('CLI', () => {
     expect(report.hint).toBeUndefined();
   });
 
+  it('prints convert warnings to stderr while keeping markup on stdout', async () => {
+    const [warning, json, clean] = await Promise.all([
+      runCli(['convert', '-'], '<script>alert(1)</script><p>Hello</p>'),
+      runCli(['convert', '-', '--json'], '<script>alert(1)</script><p>Hello</p>'),
+      runCli(['convert', '-'], '<p>Hello</p>'),
+    ]);
+    const report = JSON.parse(json.stdout) as { output: string; items: Array<{ reason: string }> };
+
+    expect(warning.code).toBe(0);
+    expect(report.items.some((item) => item.reason === '<script> stripped from input')).toBe(true);
+    expect(warning.stderr).toContain('<script> stripped from input');
+    expect(warning.stdout).toBe(report.output.endsWith('\n') ? report.output : `${report.output}\n`);
+    expect(clean.code).toBe(0);
+    expect(clean.stderr).toBe('');
+  });
+
   it('validates stdin and emits JSON', async () => {
     const result = await runCli(['validate', '-', '--json'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->');
     const report = JSON.parse(result.stdout) as { ok: boolean; command: string };
@@ -436,6 +452,23 @@ describe('CLI', () => {
     expect(report.output).toContain('has-primary-background-color');
   });
 
+  it('prints assemble warnings to stderr while keeping markup on stdout', async () => {
+    const intent = JSON.stringify({ blocks: [{ block: 'core/paragraph', text: 'Hello', attrs: { textAlign: 'center' } }] });
+    const [warning, json, clean] = await Promise.all([
+      runCli(['assemble', '-'], intent),
+      runCli(['assemble', '-', '--json'], intent),
+      runCli(['assemble', '-'], JSON.stringify({ blocks: [{ block: 'core/paragraph', text: 'Hello' }] })),
+    ]);
+    const report = JSON.parse(json.stdout) as { output: string; items: Array<{ code?: string }> };
+
+    expect(warning.code).toBe(0);
+    expect(report.items.some((item) => item.code === 'intent-attribute-dropped')).toBe(true);
+    expect(warning.stderr).toContain('intent-attribute-dropped');
+    expect(warning.stdout).toBe(report.output.endsWith('\n') ? report.output : `${report.output}\n`);
+    expect(clean.code).toBe(0);
+    expect(clean.stderr).toBe('');
+  });
+
   it('returns exit code 1 for malformed inline intent', async () => {
     const result = await runCli(['assemble', 'not-json', '--json']);
     const report = JSON.parse(result.stdout) as { ok: boolean; items: Array<{ reason: string }> };
@@ -549,6 +582,23 @@ describe('CLI', () => {
     expect(repair.stderr).toContain('--out is only written when the command succeeds');
     await expect(stat(outPath)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(inputPath, 'utf8')).toBe(markup);
+  });
+
+  it('prints fix warnings to stderr while keeping markup on stdout', async () => {
+    const markup = '<!-- wp:image --><img src="https://example.com/a.jpg" alt="A"/><!-- /wp:image -->';
+    const [warning, json, clean] = await Promise.all([
+      runCli(['fix', '-'], markup),
+      runCli(['fix', '-', '--json'], markup),
+      runCli(['fix', '-'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->'),
+    ]);
+    const report = JSON.parse(json.stdout) as { output: string; items: Array<{ reason: string }> };
+
+    expect(warning.code).toBe(0);
+    expect(report.items.some((item) => item.reason.includes('Invalid block rebuilt from parsed attributes'))).toBe(true);
+    expect(warning.stderr).toContain('Invalid block rebuilt from parsed attributes');
+    expect(warning.stdout).toBe(report.output.endsWith('\n') ? report.output : `${report.output}\n`);
+    expect(clean.code).toBe(0);
+    expect(clean.stderr).toBe('');
   });
 
   it('offers source retention when plugin inspect cannot integrate a host layout', async () => {
