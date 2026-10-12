@@ -8,7 +8,7 @@ import { readSiteSnapshot, readSiteTemplateSnapshot, type SiteReadTransport, typ
 
 export type SiteDriftFindingStatus = 'clean' | 'equivalent-override' | 'changed' | 'missing' | 'orphaned' | 'conflict' | 'dependency' | 'blocked';
 export interface SiteDriftFinding {
-  kind: 'template' | 'part' | 'page' | 'pattern' | 'option' | 'dependency' | 'inspection';
+  kind: 'template' | 'part' | 'page' | 'pattern' | 'attachment' | 'option' | 'dependency' | 'inspection';
   status: SiteDriftFindingStatus;
   entityId?: string;
   sourcePath?: string;
@@ -165,14 +165,14 @@ export async function inspectSiteDrift(bundlePath: string, options: SiteDriftOpt
     }
   }
 
-  inspectManagedEntities(snapshot, source.sourceIntent.siteId, source.sourceIntent.pages.map(page => `page:${page.id}`), Object.keys(source.sourceIntent.syncedPatterns?.definitions ?? {}).map(id => `pattern:${id}`), add);
+  const attachmentInspection = inspectManagedEntities(snapshot, source.sourceIntent.siteId, source.sourceIntent.pages.map(page => `page:${page.id}`), Object.keys(source.sourceIntent.syncedPatterns?.definitions ?? {}).map(id => `pattern:${id}`), add);
   inspectManagedOptions(snapshot, add);
   const ownedIds = new Set(snapshot.entities.filter(entity => entity.ownership.some(owner => owner.siteId === source.sourceIntent.siteId && owner.kind === 'pattern' && owner.lastAppliedHash === managedStateHash(entity.state))).map(entity => entity.id));
   for (const entity of snapshot.entities) {
     if (!entity.ownership.some(owner => owner.siteId === source.sourceIntent.siteId) || typeof entity.state.content !== 'string') continue;
-    inspectDependencies(entity.state.content, entity, snapshot, ownedIds, add);
+    inspectDependencies(entity.state.content, entity, snapshot, ownedIds, attachmentInspection.verified, attachmentInspection.unavailable, add);
   }
-  for (const entity of templates.entities) inspectDependencies(entity.raw, undefined, snapshot, ownedIds, add);
+  for (const entity of templates.entities) inspectDependencies(entity.raw, undefined, snapshot, ownedIds, attachmentInspection.verified, attachmentInspection.unavailable, add);
 
   for (const entry of manifest.bundleFiles) {
     const currentFile = await readStableRegularFile(path.join(absoluteBundle, ...entry.path.split('/')), 'retained bundle file changed during drift inspection');
@@ -189,18 +189,52 @@ function targetIdentity(value: Pick<SiteSnapshot, 'target'> | Pick<SiteTemplateS
   return { homeUrl: value.target.homeUrl, siteUrl: value.target.siteUrl, blogId: value.target.blogId };
 }
 
-function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredPages: string[], desiredPatterns: string[], add: (finding: SiteDriftFinding) => void): void {
+function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredPages: string[], desiredPatterns: string[], add: (finding: SiteDriftFinding) => void): { verified: Set<number>; unavailable: Set<number> } {
   const record = snapshot.siteRecord;
   const byKey = new Map<string, SiteEntity[]>();
+  const attachmentsByKey = new Map<string, SiteEntity[]>();
+  const verifiedAttachmentIds = new Set<number>();
+  const unavailableAttachmentIds = new Set<number>();
   const allIds = new Set<number>();
   for (const entity of snapshot.entities) {
     if (!Number.isInteger(entity.id) || entity.id < 1 || allIds.has(entity.id)) {
       add({ kind: 'inspection', status: 'blocked', code: 'entity-id-conflict', entityId: String(entity.id), wpId: entity.id, message: 'Observed site entities contain an invalid or duplicate numeric ID.' });
     }
     allIds.add(entity.id);
-    if (entity.kind === 'attachment') continue;
     for (const owner of entity.ownership) {
       if (owner.siteId !== siteId) continue;
+      if (entity.kind === 'attachment') {
+        const baselineMatches = managedStateHash(entity.state) === owner.lastAppliedHash;
+        const originalSha = owner.assetSha256 ?? (baselineMatches && typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+        const valid = owner.version === 1 && owner.kind === 'attachment' && Boolean(owner.entityId)
+          && /^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash)
+          && typeof originalSha === 'string' && /^[a-f0-9]{64}$/.test(originalSha);
+        if (!valid) {
+          add({ kind: 'attachment', status: 'blocked', entityId: `attachment:${owner.entityId}`, wpId: entity.id, code: 'invalid-attachment-baseline', message: 'Owned attachment metadata does not prove an exact logical identity, version, and full original-byte SHA-256 baseline.' });
+          continue;
+        }
+        const key = `attachment:${owner.entityId}@${originalSha}`;
+        const matches = attachmentsByKey.get(key) ?? [];
+        matches.push(entity); attachmentsByKey.set(key, matches);
+        const indexed = record?.entities[key] === entity.id
+          || (owner.assetSha256 === undefined && record?.entities[`attachment:${owner.entityId}`] === entity.id);
+        if (!baselineMatches || entity.state.sha256 !== originalSha) {
+          unavailableAttachmentIds.add(entity.id);
+          add({ kind: 'attachment', status: 'changed', entityId: key, wpId: entity.id, code: 'managed-attachment-changed', message: 'The owned attachment original-byte state differs from its complete last-applied baseline.' });
+        } else if (entity.postStatus !== 'inherit') {
+          unavailableAttachmentIds.add(entity.id);
+          add({ kind: 'attachment', status: entity.postStatus === 'trash' ? 'missing' : 'changed', entityId: key, wpId: entity.id, code: 'owned-attachment-unavailable', message: `The owned attachment is unavailable because its observed WordPress status is ${entity.postStatus || 'unknown'}, not inherit.` });
+        } else if (!entity.attachment?.currentFileSha256) {
+          unavailableAttachmentIds.add(entity.id);
+          add({ kind: 'attachment', status: 'missing', entityId: key, wpId: entity.id, code: 'owned-attachment-file-missing', message: 'The owned attachment record exists but its current file is unavailable.' });
+        } else if (!indexed) {
+          add({ kind: 'attachment', status: 'conflict', entityId: key, wpId: entity.id, code: 'ownership-record-missing', message: 'Owned attachment metadata has no matching version-qualified site-record ID.' });
+        } else {
+          verifiedAttachmentIds.add(entity.id);
+          add({ kind: 'attachment', status: 'clean', entityId: key, wpId: entity.id, code: 'managed-attachment-match', sourceSha256: originalSha, observedSha256: originalSha, message: 'The exact logical attachment version, original-byte SHA-256 baseline, inherited status, and current file are present.' });
+        }
+        continue;
+      }
       const key = `${owner.kind}:${owner.entityId}`;
       const matches = byKey.get(key) ?? [];
       matches.push(entity); byKey.set(key, matches);
@@ -216,7 +250,17 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
   for (const [key, entities] of byKey) if (entities.length > 1) add({ kind: 'inspection', status: 'conflict', entityId: key, code: 'duplicate-logical-owner', message: 'Multiple WordPress entities claim the same site ownership identity.' });
   const previous = record?.entities ?? {};
   for (const [key, id] of Object.entries(previous)) {
-    if (key.startsWith('attachment:')) continue;
+    if (key.startsWith('attachment:')) {
+      const version = /^attachment:([^@]+)@([a-f0-9]{64})$/.exec(key);
+      const legacy = /^attachment:([^@]+)$/.exec(key);
+      const entity = snapshot.entities.find(item => item.id === id && item.kind === 'attachment' && item.ownership.some(owner => {
+        if (owner.siteId !== siteId || owner.kind !== 'attachment' || owner.entityId !== (version?.[1] ?? legacy?.[1])) return false;
+        if (version) return (owner.assetSha256 ?? (owner.lastAppliedHash === managedStateHash(item.state) ? item.state.sha256 : undefined)) === version[2];
+        return Boolean(legacy && owner.assetSha256 === undefined && typeof item.state.sha256 === 'string' && /^[a-f0-9]{64}$/.test(item.state.sha256));
+      }));
+      if (!entity) add({ kind: 'attachment', status: 'missing', entityId: key, wpId: id, code: 'missing-owned-attachment', message: 'A previously managed exact attachment version is absent or its numeric ID/ownership identity changed.' });
+      continue;
+    }
     const entity = snapshot.entities.find(item => item.id === id && item.ownership.some(owner => owner.siteId === siteId && `${owner.kind}:${owner.entityId}` === key));
     if (!entity) add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'missing', entityId: key, wpId: id, code: 'missing-owned-entity', message: 'A previously managed numeric entity ID is absent or its ownership identity changed.' });
     if (!desiredPages.includes(key) && !desiredPatterns.includes(key)) add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'orphaned', entityId: key, wpId: id, code: 'orphaned-owned-entity', message: 'A previously managed entity is not declared by the current source bundle.' });
@@ -225,10 +269,15 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
     if (!Object.hasOwn(previous, key)) add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'conflict', entityId: key, wpId: entities[0]?.id, code: 'ownership-record-missing', message: 'Ownership metadata exists without a matching site record entity baseline.' });
     else if (entities[0]?.id !== previous[key]) add({ kind: 'inspection', status: 'conflict', entityId: key, wpId: entities[0]?.id, code: 'ownership-id-conflict', message: 'Ownership metadata ID differs from the numeric ID in the site record.' });
   }
+  for (const [key, entities] of attachmentsByKey) {
+    if (entities.length > 1) add({ kind: 'attachment', status: 'conflict', entityId: key, code: 'duplicate-logical-owner', message: 'Multiple attachment records claim the same exact site, logical ID, and original-byte version.' });
+  }
   for (const key of [...desiredPages, ...desiredPatterns]) if (Object.hasOwn(previous, key) && !byKey.has(key)) {
     add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'missing', entityId: key, wpId: previous[key], code: 'missing-owned-entity', message: 'A previously managed entity is missing from the fresh site snapshot.' });
   }
   if (!record && byKey.size > 0) add({ kind: 'inspection', status: 'blocked', code: 'ownership-baseline-missing', message: 'Owned entities exist but the site baseline record is unavailable.' });
+  if (!record && attachmentsByKey.size > 0) add({ kind: 'inspection', status: 'blocked', code: 'ownership-baseline-missing', message: 'Owned attachments exist but the site baseline record is unavailable.' });
+  return { verified: verifiedAttachmentIds, unavailable: unavailableAttachmentIds };
 }
 
 function inspectManagedOptions(snapshot: SiteSnapshot, add: (finding: SiteDriftFinding) => void): void {
@@ -238,29 +287,36 @@ function inspectManagedOptions(snapshot: SiteSnapshot, add: (finding: SiteDriftF
   }
 }
 
-function inspectDependencies(content: string, owner: SiteEntity | undefined, snapshot: SiteSnapshot, ownedPatternIds: Set<number>, add: (finding: SiteDriftFinding) => void): void {
+function inspectDependencies(content: string, owner: SiteEntity | undefined, snapshot: SiteSnapshot, ownedPatternIds: Set<number>, ownedAttachmentIds: Set<number>, unavailableAttachmentIds: Set<number>, add: (finding: SiteDriftFinding) => void): void {
   const blockOpen = /<!--\s*wp:((?:[a-z0-9-]+\/)?[a-z0-9-]+)(?:\s+([^]*?))?\s*\/?-->/g;
   for (const match of content.matchAll(blockOpen)) {
     const name = match[1]!.includes('/') ? match[1]! : `core/${match[1]}`;
-    if (name !== 'core/navigation' && name !== 'core/block') continue;
+    const isImage = name === 'core/image' || name === 'core/cover';
+    if (name !== 'core/navigation' && name !== 'core/block' && !isImage) continue;
     const attributesText = (match[2] ?? '').replace(/\s*\/\s*$/, '').trim();
     let attributes: Record<string, unknown> = {};
     if (attributesText) {
       try { attributes = JSON.parse(attributesText) as Record<string, unknown>; }
       catch { add({ kind: 'dependency', status: 'blocked', entityId: owner ? `${owner.kind}:${owner.id}` : undefined, code: 'unreadable-dependency', message: `A ${name} dependency has malformed block-comment attributes.` }); continue; }
     }
-    if (!Object.hasOwn(attributes, 'ref')) continue;
-    const ref = attributes.ref;
+    const refKey = isImage ? 'id' : 'ref';
+    if (!Object.hasOwn(attributes, refKey)) continue;
+    const ref = attributes[refKey];
     if (!Number.isInteger(ref) || (ref as number) < 1) {
-      add({ kind: 'dependency', status: 'dependency', entityId: `${name}:invalid`, code: 'invalid-dependency-ref', message: `A ${name} reference is not a positive numeric WordPress ID.` });
+      add({ kind: 'dependency', status: 'dependency', entityId: `${name}:invalid`, code: isImage ? 'invalid-attachment-dependency' : 'invalid-dependency-ref', message: `A ${name} reference is not a positive numeric WordPress ID.` });
       continue;
     }
     const id = ref as number;
     const isNavigation = name === 'core/navigation';
-    const observed = isNavigation ? snapshot.navigation.some(item => item.id === id) : snapshot.entities.some(item => item.kind === 'pattern' && item.id === id);
-    const isOwned = !isNavigation && ownedPatternIds.has(id);
+    const attachment = isImage ? snapshot.entities.find(item => item.kind === 'attachment' && item.id === id) : undefined;
+    const observed = isNavigation ? snapshot.navigation.some(item => item.id === id)
+      : isImage ? Boolean(attachment)
+        : snapshot.entities.some(item => item.kind === 'pattern' && item.id === id);
+    const isOwned = isImage ? ownedAttachmentIds.has(id) : !isNavigation && ownedPatternIds.has(id);
+    const isUnavailableOwnedAttachment = isImage && unavailableAttachmentIds.has(id);
+    const entityName = isImage ? 'attachment' : name;
     add({ kind: 'dependency', status: observed && isOwned ? 'clean' : 'dependency', entityId: `${name}:${id}`, wpId: id,
-      code: !observed ? 'unresolved-dependency' : isNavigation ? 'unowned-navigation-dependency' : isOwned ? 'verified-owned-pattern-dependency' : 'unowned-pattern-dependency',
-      message: !observed ? `The referenced ${name} entity ID ${id} is not present in the fresh WordPress snapshot.` : isOwned ? 'The reference resolves to a verified owned synced pattern.' : `The referenced ${name} entity ID ${id} is resolved but its ownership is not verified; inspection did not expand or adopt it.` });
+      code: !observed ? 'unresolved-dependency' : isNavigation ? 'unowned-navigation-dependency' : isImage ? isOwned ? 'verified-owned-attachment-dependency' : isUnavailableOwnedAttachment ? 'unavailable-attachment-dependency' : 'unowned-attachment-dependency' : isOwned ? 'verified-owned-pattern-dependency' : 'unowned-pattern-dependency',
+      message: !observed ? `The referenced ${entityName} entity ID ${id} is not present in the fresh WordPress snapshot.` : isOwned ? `The reference resolves to a verified owned ${entityName}.` : `The referenced ${entityName} entity ID ${id} is resolved but its ownership is not verified; inspection did not expand or adopt it.` });
   }
 }
