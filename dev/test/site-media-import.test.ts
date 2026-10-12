@@ -7,6 +7,7 @@ import { promisify } from 'node:util';
 import { describe, expect, it } from 'vitest';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { importPlannedSiteAttachment, SiteMediaImportOutcomeUnknown } from '../../src/site/media-import.js';
+import { hashCanonicalJson } from '../../src/proof/receipt.js';
 import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
 import type { SitePlan, SiteSnapshot } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, ThemeArtifact } from '../../src/site/types.js';
@@ -27,7 +28,22 @@ function snapshot(): SiteSnapshot {
   };
 }
 
-async function fixture() {
+function previousVersion() {
+  const sha256 = 'a'.repeat(64);
+  const state = { sha256 };
+  return { id: 8, kind: 'attachment' as const, route: null, postStatus: 'inherit', state,
+    attachment: { url: 'https://example.test/uploads/hero.png', currentFileSha256: sha256, width: 900, height: 600,
+      sizes: { full: { url: 'https://example.test/uploads/hero.png', width: 900, height: 600 } } },
+    ownership: [{ version: 1 as const, siteId: 'sample', entityId: 'hero', kind: 'attachment' as const, assetSha256: sha256,
+      lastAppliedHash: managedStateHash(state) }] };
+}
+
+function resign(plan: SitePlan): SitePlan {
+  const { confirmationHash: _previous, ...body } = plan;
+  return { ...body, confirmationHash: hashCanonicalJson(body) };
+}
+
+async function fixture(retainOld = false) {
   const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'site-media-import-'));
   await mkdir(path.join(root, 'media'));
   const fixtureImage = fileURLToPath(new URL('./fixtures/site-intent/media/hero.png', import.meta.url));
@@ -51,7 +67,9 @@ async function fixture() {
   };
   const compiledPage = { id: 'home', route: '/', title: 'Home', template: 'index', status: 'draft' as const,
     content: '<!-- wp:paragraph --><p>Home</p><!-- /wp:paragraph -->', diagnostics: [] };
-  const plan = reconcileSitePlan(source, theme, [compiledPage], snapshot());
+  const observed = snapshot();
+  if (retainOld) observed.entities.push(previousVersion());
+  const plan = reconcileSitePlan(source, theme, [compiledPage], observed);
   if (!plan.executable) throw new Error(JSON.stringify(plan.conflicts));
   const token = 'started-token';
   const key = `attachment:hero@${source.assets[0]!.sha256}`;
@@ -59,19 +77,19 @@ async function fixture() {
   const journalPath = path.join(root, 'journal.json');
   await writeFile(journalPath, JSON.stringify({ version: 1, siteId: plan.siteId, planHash: plan.confirmationHash, token,
     target: plan.snapshot.target, principalId: plan.snapshot.principal.userId, status: 'started', currentStep: step }));
-  const marked = snapshot();
+  const marked = structuredClone(observed);
   marked.siteRecord!.operation = { token, planHash: plan.confirmationHash, status: 'started', currentStep: step };
   return { root, source, plan, journalPath, token, marked };
 }
 
 function createdSnapshot(plan: SitePlan, assetHash: string): SiteSnapshot {
   const observed = structuredClone(plan.snapshot);
-  observed.entities = [{ id: 44, kind: 'attachment', route: null, postStatus: 'inherit', state: { sha256: assetHash },
+  observed.entities.push({ id: 44, kind: 'attachment', route: null, postStatus: 'inherit', state: { sha256: assetHash },
     attachment: { url: 'https://example.test/uploads/hero-3.png', linkUrl: 'https://example.test/?attachment_id=44',
       currentFileSha256: assetHash, width: 1200, height: 800,
       sizes: { full: { url: 'https://example.test/uploads/hero-3.png', width: 1200, height: 800 } } },
     ownership: [{ version: 1, siteId: plan.siteId, entityId: 'hero', kind: 'attachment', assetSha256: assetHash,
-      lastAppliedHash: managedStateHash({ sha256: assetHash }) }] }];
+      lastAppliedHash: managedStateHash({ sha256: assetHash }) }] });
   return observed;
 }
 
@@ -123,7 +141,11 @@ describe('private declared attachment import primitive', () => {
   });
 
   it('returns only the exact new owned attachment and observed native metadata with matching PHP baseline hashes', async ({ skip }) => {
-    const ready = await fixture();
+    const ready = await fixture(true);
+    expect(ready.plan.operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ action: 'create', kind: 'attachment', entityId: 'hero', desired: { sha256: ready.source.assets[0]!.sha256, assetSha256: ready.source.assets[0]!.sha256 } }),
+      expect.objectContaining({ action: 'retain', kind: 'attachment', entityId: 'hero', id: 8, desired: { orphaned: true } }),
+    ]));
     const hash = ready.source.assets[0]!.sha256;
     const after = createdSnapshot(ready.plan, hash);
     let reads = 0;
@@ -168,6 +190,29 @@ echo json_encode(array($legacyHash, $ownershipHash));`;
     expect(JSON.parse(hashOutput)).toEqual([managedStateHash({ sha256: hash }), managedStateHash({ sha256: hash })]);
     expect(binding).toMatchObject({ id: 44, url: 'https://example.test/uploads/hero-3.png', observedSize: { width: 1200, height: 800 },
       imageSizes: { full: { url: 'https://example.test/uploads/hero-3.png', width: 1200, height: 800 } } });
+  });
+
+  it('requires one exact-hash create while allowing retained prior versions', async () => {
+    const duplicate = await fixture(true);
+    const create = duplicate.plan.operations.find(operation => operation.kind === 'attachment' && operation.action === 'create')!;
+    duplicate.plan = resign({ ...duplicate.plan, operations: [...duplicate.plan.operations, { ...create }] });
+    let calls = 0;
+    await expect(importPlannedSiteAttachment({ plan: duplicate.plan, source: duplicate.source, assetId: 'hero',
+      wp: { wpPath: '/wp' }, authority: { token: duplicate.token, journalPath: duplicate.journalPath },
+      readTransport: async () => JSON.stringify(duplicate.marked), mutationTransport: async () => { calls += 1; return ''; },
+    })).rejects.toThrow('no unique create operation');
+    expect(calls).toBe(0);
+
+    const incorrect = await fixture(true);
+    const wrongPlan = structuredClone(incorrect.plan);
+    const wrongCreate = wrongPlan.operations.find(operation => operation.kind === 'attachment' && operation.action === 'create')!;
+    wrongCreate.desired = { ...wrongCreate.desired, sha256: 'b'.repeat(64), assetSha256: 'b'.repeat(64) };
+    incorrect.plan = resign(wrongPlan);
+    await expect(importPlannedSiteAttachment({ plan: incorrect.plan, source: incorrect.source, assetId: 'hero',
+      wp: { wpPath: '/wp' }, authority: { token: incorrect.token, journalPath: incorrect.journalPath },
+      mutationTransport: async () => { calls += 1; return ''; },
+    })).rejects.toThrow('no unique create operation');
+    expect(calls).toBe(0);
   });
 
   it('treats an ambiguous or unavailable post-import attachment as unknown', async () => {

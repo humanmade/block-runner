@@ -128,10 +128,12 @@ function validateSelectedCreate(plan: SitePlan, source: PreparedSiteSource, asse
   const declarations = source.sourceIntent.assets.filter(asset => asset.id === assetId && asset.role === 'attachment' && asset.kind === 'image');
   const prepared = source.assets.filter(asset => asset.id === assetId && asset.role === 'attachment' && asset.kind === 'image');
   const planned = plan.assets.filter(asset => asset.id === assetId);
-  const createOps = plan.operations.filter(operation => operation.kind === 'attachment' && operation.entityId === assetId);
+  const versionOps = plan.operations.filter(operation => operation.kind === 'attachment' && operation.entityId === assetId);
+  const createOps = versionOps.filter(operation => operation.action === 'create');
   if (declarations.length !== 1 || prepared.length !== 1 || planned.length !== 1 || createOps.length !== 1
+      || versionOps.some(operation => operation.action !== 'create' && operation.action !== 'retain')
       || planned[0]!.path !== declarations[0]!.path || planned[0]!.sha256 !== prepared[0]!.sha256
-      || createOps[0]!.action !== 'create' || createOps[0]!.desired?.sha256 !== prepared[0]!.sha256
+      || createOps[0]!.desired?.sha256 !== prepared[0]!.sha256
       || createOps[0]!.desired?.assetSha256 !== prepared[0]!.sha256) {
     throw new Error('plan has no unique create operation for the exact declared attachment version');
   }
