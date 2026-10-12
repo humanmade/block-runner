@@ -121,7 +121,10 @@ export const {
   writePluginOutput,
 } = library;
 
+export { prepareSiteSource } from './site/input.js';
+
 export type * from './index-implementation.js';
+export type * from './site/types.js';
 
 export type AuthoringGenerationError = import('./index-implementation.js').AuthoringGenerationError;
 export type AuthoringPlanValidationError = import('./index-implementation.js').AuthoringPlanValidationError;

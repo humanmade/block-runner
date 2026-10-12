@@ -1,0 +1,106 @@
+{
+  "version": 1,
+  "siteId": "sample-studio",
+  "theme": {
+    "slug": "sample-studio",
+    "title": "Sample Studio",
+    "themeJson": {
+      "version": 3,
+      "settings": { "appearanceTools": true },
+      "styles": { "color": { "background": "#f8f7f4", "text": "#20201e" } }
+    }
+  },
+  "templates": {
+    "index": {
+      "body": {
+        "blocks": [
+          { "block": "core/template-part", "attrs": { "slug": "header" } },
+          { "block": "core/post-content" },
+          { "block": "core/template-part", "attrs": { "slug": "footer" } }
+        ]
+      }
+    }
+  },
+  "parts": {
+    "header": {
+      "body": {
+        "blocks": [
+          { "block": "core/group", "attrs": { "layout": { "type": "constrained" } }, "children": [
+            { "block": "core/site-title" },
+            { "block": "core/navigation", "attrs": { "overlayMenu": "mobile" }, "children": [
+              { "block": "core/navigation-link", "attrs": { "label": "Home", "url": "/" } },
+              { "block": "core/navigation-submenu", "attrs": { "label": "Services" }, "children": [
+                { "block": "core/navigation-link", "attrs": { "label": "Consulting", "url": "/services/consulting" } }
+              ] },
+              { "block": "core/navigation-link", "attrs": { "label": "Contact", "url": "/contact" } }
+            ] }
+          ] }
+        ]
+      }
+    },
+    "footer": {
+      "body": { "blocks": [ { "block": "core/group", "children": [ { "block": "core/paragraph", "text": "Made with care." } ] } ] }
+    }
+  },
+  "patterns": {
+    "featured-services": {
+      "title": "Featured services",
+      "slug": "featured-services",
+      "body": { "blocks": [ { "block": "core/group", "children": [ { "block": "core/heading", "text": "Work that moves you forward", "level": 2 } ] } ] }
+    }
+  },
+  "pages": [
+    {
+      "id": "home",
+      "route": "/",
+      "title": "Home",
+      "template": "index",
+      "status": "publish",
+      "body": { "blocks": [
+        { "block": "core/heading", "text": "Clear ideas, well made", "level": 1 },
+        { "block": "core/paragraph", "text": "A small independent studio for ambitious work." },
+        { "block": "core/image", "attrs": { "id": 0, "url": "", "alt": "Studio team planning together" } }
+      ] }
+    },
+    {
+      "id": "about",
+      "route": "/about",
+      "title": "About",
+      "template": "index",
+      "status": "publish",
+      "body": { "blocks": [ { "block": "core/heading", "text": "A thoughtful studio", "level": 1 }, { "block": "core/paragraph", "text": "We bring strategy and craft together." } ] }
+    },
+    {
+      "id": "services",
+      "route": "/services",
+      "title": "Services",
+      "template": "index",
+      "status": "publish",
+      "body": { "blocks": [ { "block": "core/heading", "text": "Services", "level": 1 }, { "block": "core/paragraph", "text": "Focused support from first question to finished work." } ] }
+    },
+    {
+      "id": "consulting",
+      "route": "/services/consulting",
+      "title": "Consulting",
+      "parentId": "services",
+      "template": "index",
+      "status": "draft",
+      "body": { "blocks": [ { "block": "core/heading", "text": "Consulting", "level": 1 }, { "block": "core/paragraph", "text": "A practical partner for complex decisions." } ] }
+    },
+    {
+      "id": "contact",
+      "route": "/contact",
+      "title": "Contact",
+      "template": "index",
+      "status": "publish",
+      "body": { "blocks": [ { "block": "core/heading", "text": "Start a conversation", "level": 1 }, { "block": "core/paragraph", "text": "Tell us what you are working on." } ] }
+    }
+  ],
+  "assets": [
+    { "id": "home-hero", "path": "media/hero.svg", "kind": "image", "role": "attachment" },
+    { "id": "site-styles", "path": "styles/site.css", "kind": "stylesheet", "role": "theme-file" }
+  ],
+  "assetUses": [
+    { "documentId": "page:home", "nodePath": [2], "attribute": "attrs.id", "assetId": "home-hero" }
+  ]
+}
