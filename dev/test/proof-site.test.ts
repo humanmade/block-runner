@@ -2,7 +2,7 @@ import { cp, mkdtemp, readFile, realpath, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { compileSite } from '../../src/site/compile.js';
 import { writeCompiledSite } from '../../src/site/write.js';
@@ -42,6 +42,23 @@ describe('controlled site proof', () => {
     const input = await bundle();
     await writeFile(path.join(input.directory, 'theme/style.css'), 'changed');
     await expect(prepareSiteProof(input.directory, input.evidence)).rejects.toThrow('inventory mismatch');
+  });
+  it('rejects an asset mutation between inventory verification and source preparation', async () => {
+    const input = await bundle();
+    const assetPath = path.join(input.directory, 'source/assets/media/hero.png');
+    const originalBytes = await readFile(assetPath);
+    const originalPut = input.evidence.put.bind(input.evidence);
+    let mutated = false;
+    vi.spyOn(input.evidence, 'put').mockImplementation(async (value, options) => {
+      const reference = await originalPut(value, options);
+      if (!mutated && value instanceof Uint8Array && Buffer.from(value).equals(originalBytes)) {
+        mutated = true;
+        await writeFile(assetPath, Buffer.concat([originalBytes, Buffer.from('mutation')]));
+      }
+      return reference;
+    });
+    await expect(prepareSiteProof(input.directory, input.evidence)).rejects.toThrow('Prepared source asset differs from verified bundle inventory');
+    expect(mutated).toBe(true);
   });
   it('requires every independent gate and refuses failed, skipped, blocked or missing outcomes', () => {
     const profile = PROOF_PROFILES.site;

@@ -1,6 +1,7 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, readFile, writeFile, mkdtemp } from 'node:fs/promises';
 import path from 'node:path';
+import { readStableRegularFile } from '../publication.js';
 import { prepareSiteSource } from '../site/input.js';
 import { compileSite } from '../site/compile.js';
 import type { PreparedSiteSource, CompiledSite } from '../site/types.js';
@@ -23,10 +24,12 @@ const hash = (bytes: Uint8Array | string) => `sha256:${createHash('sha256').upda
 export async function prepareSiteProof(directory: string, evidence: EvidenceStore): Promise<PreparedSiteProof> {
   const root = path.resolve(directory);
   if ((await lstat(root)).isSymbolicLink()) throw new Error('Site proof requires a direct bundle directory.');
-  const manifestBytes = await readFile(path.join(root, 'site.manifest.json'));
+  const { content: manifestBytes } = await readStableRegularFile(path.join(root, 'site.manifest.json'), 'Site bundle manifest changed during preparation.');
   const manifest = JSON.parse(manifestBytes.toString());
   if (manifest.formatVersion !== 1 || !Array.isArray(manifest.bundleFiles)) throw new Error('Site proof requires a version 1 site bundle inventory.');
   const seen = new Set<string>();
+  const verified = new Map<string, { sha256: string; size: number }>();
+  let intentBytes: Buffer | undefined;
   for (const entry of manifest.bundleFiles) {
     if (typeof entry.path !== 'string' || entry.path.includes('\\') || entry.path.split('/').some((part: string) => !part || part === '.' || part === '..') || path.isAbsolute(entry.path) || seen.has(entry.path)) throw new Error('Unsafe or duplicate site bundle inventory path.');
     seen.add(entry.path);
@@ -35,17 +38,27 @@ export async function prepareSiteProof(directory: string, evidence: EvidenceStor
       cursor = path.join(cursor, segment);
       if ((await lstat(cursor)).isSymbolicLink()) throw new Error('Site proof refuses symlinked bundle files.');
     }
-    const bytes = await readFile(cursor);
+    const { content: bytes } = await readStableRegularFile(cursor, `Site bundle file changed during preparation: ${entry.path}`);
     if (hash(bytes).slice(7) !== entry.sha256.replace(/^sha256:/, '') || bytes.length !== entry.size) throw new Error(`Site bundle inventory mismatch: ${entry.path}`);
+    verified.set(entry.path, { sha256: hash(bytes), size: bytes.byteLength });
+    if (entry.path === 'site.intent.json') intentBytes = bytes;
     await evidence.put(bytes);
   }
-  if (!seen.has('site.intent.json')) throw new Error('Site bundle does not pin its source intent.');
-  const intent = JSON.parse(await readFile(path.join(root, 'site.intent.json'), 'utf8'));
+  if (!intentBytes) throw new Error('Site bundle does not pin its source intent.');
+  const intent = JSON.parse(intentBytes.toString('utf8'));
   if (intent.pages?.length !== 5 || intent.pages.some((page: { status?: string }) => page.status !== 'publish')) throw new Error('Site proof requires a controlled source declaring exactly five published pages; draft statuses are never promoted.');
   const prepared = await prepareSiteSource(intent, path.join(root, 'source/assets'));
   if (!prepared.ok) throw new Error(JSON.stringify(prepared.diagnostics));
   const theme = await prepareThemeProof(path.join(root, 'theme'), evidence);
   if (theme.manifest.files.some((file) => !seen.has(`theme/${file.file}`)) || prepared.source.assets.some((asset) => !seen.has(`source/assets/${asset.path}`))) throw new Error('Site bundle contains unpinned theme or source asset bytes.');
+  for (const asset of prepared.source.assets) {
+    const pinned = verified.get(`source/assets/${asset.path}`);
+    if (!pinned || pinned.sha256 !== `sha256:${asset.sha256}` || pinned.size !== asset.bytes.byteLength) throw new Error(`Prepared source asset differs from verified bundle inventory: ${asset.path}`);
+  }
+  for (const file of theme.manifest.files) {
+    const pinned = verified.get(`theme/${file.file}`);
+    if (!pinned || pinned.sha256 !== file.sha256 || pinned.size !== file.bytes) throw new Error(`Prepared theme file differs from verified bundle inventory: ${file.file}`);
+  }
   if (!intent.parts?.header || !intent.parts?.footer) throw new Error('Controlled site fixture requires declared header and footer parts.');
   theme.slug = prepared.source.sourceIntent.theme.slug;
   const ref = await evidence.put(manifestBytes, { mediaType: 'application/json' });
