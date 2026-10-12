@@ -84,6 +84,51 @@ describe('site theme assets', () => {
     }
   });
 
+  it('refuses quoted and url-form CSS @import dependencies', async () => {
+    for (const importRule of ['@import "nested.css";', '@import url("nested.css");']) {
+      const root = await setup();
+      try {
+        const intent = JSON.parse(await readFile(intentPath, 'utf8')) as any;
+        await writeFile(path.join(root, 'styles/site.css'), `${importRule}\n:root { color: black; }`);
+        const prepared = await prepareSiteSource(intent, root);
+        expect(prepared.ok).toBe(true);
+        if (!prepared.ok) continue;
+
+        const result = buildSiteThemeAssets(prepared.source);
+        expect(result.diagnostics).toContainEqual(expect.objectContaining({ code: 'css-import-unsupported' }));
+        expect(result.files.some(({ path: filePath }) => filePath === 'assets/styles/site.css')).toBe(false);
+      } finally {
+        await rm(root, { recursive: true, force: true });
+      }
+    }
+  });
+
+  it('requires theme.json file references to match exact emitted theme asset paths', async () => {
+    const root = await setup();
+    try {
+      const intent = JSON.parse(await readFile(intentPath, 'utf8')) as any;
+      intent.theme.themeJson.validationCases = [
+        'file:./assets/styles/site.css',
+        'file:./assets/missing.woff2',
+        'file:./assets/../outside.woff2',
+        'file:../outside.woff2',
+      ];
+      const prepared = await prepareSiteSource(intent, root);
+      expect(prepared.ok).toBe(true);
+      if (!prepared.ok) return;
+
+      const result = buildSiteThemeAssets(prepared.source);
+      expect(result.diagnostics).toEqual(expect.arrayContaining([
+        expect.objectContaining({ path: '/theme/themeJson/validationCases/1', code: 'undeclared-theme-json-file-reference' }),
+        expect.objectContaining({ path: '/theme/themeJson/validationCases/2', code: 'unsafe-theme-json-file-reference' }),
+        expect.objectContaining({ path: '/theme/themeJson/validationCases/3', code: 'unsafe-theme-json-file-reference' }),
+      ]));
+      expect(result.diagnostics.some(({ path: diagnosticPath }) => diagnosticPath.endsWith('/validationCases/0'))).toBe(false);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('does not generate executable PHP when a site declares no theme stylesheet', async () => {
     const root = await setup();
     try {
