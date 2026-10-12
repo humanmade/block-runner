@@ -1,5 +1,6 @@
 import { createHash } from 'node:crypto';
 import path from 'node:path';
+import postcss from 'postcss';
 import { scanCssUrlReferences } from '../author/assets.js';
 import { assertStaticSvg } from '../authoring/svg.js';
 import type { PreparedSiteSource, SiteAssetIntent, SiteFile, SiteInputDiagnostic } from './types.js';
@@ -20,6 +21,7 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
   const preparedById = new Map(source.assets.map((asset) => [asset.id, asset]));
   const outputPaths = new Map<string, string>();
   const emittedStylesheets: string[] = [];
+  const emittedDeclaredThemeFiles = new Set<string>();
 
   if (assetsById.size !== source.sourceIntent.assets.length || preparedById.size !== source.assets.length) {
     diagnostics.push(issue('/assets', 'duplicate-asset-id', 'site assets must have unique stable ids'));
@@ -83,6 +85,7 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
       if (rewritten === undefined) continue;
       const cssBytes = Buffer.from(rewritten, 'utf8');
       files.push(siteFile(outputPath, cssBytes));
+      emittedDeclaredThemeFiles.add(outputPath);
       emittedStylesheets.push(outputPath);
       continue;
     }
@@ -91,6 +94,7 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
       continue;
     }
     files.push(siteFile(outputPath, bytes));
+    emittedDeclaredThemeFiles.add(outputPath);
     if (declaration.kind === 'font' && declaration.fontLicense) {
       const noticePath = `${outputPath}.LICENSE.txt`;
       const noticeKey = noticePath.toLowerCase();
@@ -117,6 +121,8 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
       diagnostics.push(issue(`/assets/${source.sourceIntent.assets.indexOf(asset)}/cssUrls`, 'css-url-scope', 'only a stylesheet can declare CSS URL uses'));
     }
   }
+
+  validateThemeJsonFileReferences(source.sourceIntent.theme.themeJson, emittedDeclaredThemeFiles, '/theme/themeJson', diagnostics);
 
   if (emittedStylesheets.length > 0) files.push(siteFile('functions.php', Buffer.from(stylesheetBootstrap(emittedStylesheets), 'utf8')));
   return { files: sortFiles(files), diagnostics };
@@ -146,6 +152,20 @@ function rewriteStylesheet(
   diagnosticPath: string,
   diagnostics: SiteInputDiagnostic[],
 ): string | undefined {
+  try {
+    const parsed = postcss.parse(css, { from: stylesheet.path });
+    let hasImport = false;
+    parsed.walkAtRules((rule) => {
+      if (rule.name.toLowerCase() !== 'import') return;
+      hasImport = true;
+      diagnostics.push(issue(diagnosticPath, 'css-import-unsupported', 'stylesheet @import dependencies are unsupported; declare each stylesheet as a theme-file asset instead'));
+    });
+    if (hasImport) return undefined;
+  } catch (error) {
+    diagnostics.push(issue(diagnosticPath, 'css-parse', `stylesheet parse failed: ${error instanceof Error ? error.message : String(error)}`));
+    return undefined;
+  }
+
   const declarations = stylesheet.cssUrls ?? [];
   const declarationMap = new Map<string, string>();
   for (const [index, declaration] of declarations.entries()) {
@@ -196,6 +216,34 @@ function rewriteStylesheet(
     output = `${output.slice(0, replacement.start)}${replacement.value}${output.slice(replacement.end)}`;
   }
   return output;
+}
+
+function validateThemeJsonFileReferences(
+  value: unknown,
+  emitted: ReadonlySet<string>,
+  jsonPath: string,
+  diagnostics: SiteInputDiagnostic[],
+): void {
+  if (typeof value === 'string') {
+    if (!/^file:/i.test(value)) return;
+    const match = /^file:\.\/(.+)$/.exec(value);
+    const outputPath = match?.[1];
+    if (!outputPath || !SAFE_ASSET_PATH.test(outputPath)) {
+      diagnostics.push(issue(jsonPath, 'unsafe-theme-json-file-reference', 'theme.json file references must use an exact safe file:./<declared-public-theme-path> value'));
+    } else if (!emitted.has(outputPath)) {
+      diagnostics.push(issue(jsonPath, 'undeclared-theme-json-file-reference', `theme.json file reference "${value}" does not name an emitted declared theme-file asset`));
+    }
+    return;
+  }
+  if (Array.isArray(value)) {
+    value.forEach((entry, index) => validateThemeJsonFileReferences(entry, emitted, `${jsonPath}/${index}`, diagnostics));
+    return;
+  }
+  if (value && typeof value === 'object') {
+    for (const [key, entry] of Object.entries(value)) {
+      validateThemeJsonFileReferences(entry, emitted, `${jsonPath}/${key.replaceAll('~', '~0').replaceAll('/', '~1')}`, diagnostics);
+    }
+  }
 }
 
 function isImage(bytes: Buffer, extension: string, diagnosticPath: string, diagnostics: SiteInputDiagnostic[]): boolean {

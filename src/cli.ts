@@ -200,10 +200,11 @@ program.command('site')
     }
 
     const attachmentBindings = options.bindings ? await readAttachmentBindings(path.resolve(options.bindings)) : undefined;
+    const strict = options.strict ?? ((await loadConfig()).strict === true);
     const compileOptions = {
       attachmentBindings,
       themeAssetBaseUrl: options.themeAssetBaseUrl,
-      strict: options.strict,
+      strict,
     };
     const compiled = options.themeOnly
       ? await compileThemeDocuments(prepared.source, compileOptions)
@@ -729,8 +730,31 @@ function emitSiteCompileFailure(diagnostics: unknown[], json: boolean): void {
 
 function formatSiteDiagnostic(diagnostic: unknown): string {
   if (!diagnostic || typeof diagnostic !== 'object') return String(diagnostic);
-  const value = diagnostic as { path?: unknown; code?: unknown; message?: unknown };
-  return [value.path, value.code, value.message].filter((part) => typeof part === 'string').join(': ');
+  const value = diagnostic as {
+    path?: unknown;
+    code?: unknown;
+    message?: unknown;
+    reason?: unknown;
+    source?: { path?: unknown; selector?: unknown; htmlLine?: unknown; htmlColumn?: unknown; offset?: unknown };
+    details?: unknown;
+  };
+  const location = value.source && typeof value.source === 'object'
+    ? [value.source.path, value.source.selector,
+      typeof value.source.htmlLine === 'number' ? `line ${value.source.htmlLine}` : undefined,
+      typeof value.source.htmlColumn === 'number' ? `column ${value.source.htmlColumn}` : undefined,
+      typeof value.source.offset === 'number' ? `offset ${value.source.offset}` : undefined]
+      .filter((part): part is string => typeof part === 'string').join(' ')
+    : undefined;
+  const description = typeof value.reason === 'string' ? value.reason
+    : typeof value.message === 'string' ? value.message : undefined;
+  const details = value.details === undefined ? undefined : `details=${safeJson(value.details)}`;
+  return [typeof value.path === 'string' ? value.path : location, typeof value.code === 'string' ? value.code : undefined,
+    description, details].filter((part): part is string => typeof part === 'string' && part.length > 0).join(': ');
+}
+
+function safeJson(value: unknown): string {
+  try { return JSON.stringify(value); }
+  catch { return '[unserializable details]'; }
 }
 
 async function readRegularJsonText(file: string): Promise<string> {
