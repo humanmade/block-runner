@@ -1,4 +1,4 @@
-import { mkdtemp, realpath, writeFile, readFile, copyFile } from 'node:fs/promises';
+import { mkdtemp, realpath, writeFile, readFile, copyFile, chmod } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { hashCanonicalJson } from '../../src/proof/receipt.js';
@@ -7,7 +7,8 @@ import { applySite, type SiteApplyOptions } from '../../src/site/apply.js';
 import { readSitePlanInput, reconcileSitePlan, managedStateHash } from '../../src/site/plan.js';
 import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { SiteSnapshot } from '../../src/site/plan-types.js';
-import type { SiteApplyBoundary, SiteApplyRequest } from '../../src/site/apply-wpcli.js';
+import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from '../../src/site/apply-wpcli.js';
+import { siteRecordOption } from '../../src/site/wpcli.js';
 async function fixture(extra?: 'media'|'patterns') {
  const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-apply-'));
  const source=path.join(root,'source.json');
@@ -53,6 +54,27 @@ async function fixture(extra?: 'media'|'patterns') {
  return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:()=>{lock='stale';}};
 }
 describe('confirmed database apply',()=>{
+ it('streams a large default mutation script to a short eval-file stdin invocation',async()=>{
+  const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-apply-stdin-'));
+  const capture=path.join(root,'capture.json');
+  const executable=path.join(root,'fake-wp');
+  await writeFile(executable,`#!/usr/bin/env node\nlet input='';process.stdin.setEncoding('utf8');process.stdin.on('data',chunk=>input+=chunk);process.stdin.on('end',()=>{require('node:fs').writeFileSync(${JSON.stringify(capture)},JSON.stringify({args:process.argv.slice(2),input,eof:true}));process.stdout.write('{"status":"complete"}');});\n`);
+  await chmod(executable,0o755);
+  const longMarkup=`<!-- wp:paragraph --><p>${'Native paragraph content. '.repeat(12_000)}</p><!-- /wp:paragraph -->`;
+  const boundary:SiteApplyBoundary={siteId:'sample',planHash:'plan-hash',token:'token',target:{homeUrl:'https://example.test',siteUrl:'https://example.test',blogId:1},principal:{userId:7,capabilities:{edit_pages:true}},theme:{slug:'sample',assetBaseUrl:'https://example.test/theme',inventory:[]}};
+  const request:SiteApplyRequest={action:'marker',operation:{token:boundary.token,planHash:boundary.planHash,status:'started',target:boundary.target,principalId:boundary.principal.userId,stepEvidence:{operation:{action:'create',kind:'page',entityId:'home',desired:{title:'Home',content:longMarkup,status:'draft',slug:'home',parentId:0,template:'default'}},beforeState:{}}}};
+  const result=await siteApplyWpCli({wpPath:'/wp',wpUrl:'https://example.test',wpUser:'7',wpBinary:executable},boundary,request);
+  expect(result).toEqual({status:'complete'});
+  const received=JSON.parse(await readFile(capture,'utf8')) as {args:string[];input:string;eof:boolean};
+  expect(received.args).toEqual(['--path=/wp','--url=https://example.test','--user=7','eval-file','-']);
+  expect(received.args.join(' ').length).toBeLessThan(200);
+  expect(received.eof).toBe(true);
+  expect(received.input.startsWith('<?php\n')).toBe(true);
+  expect(Buffer.byteLength(received.input)).toBeGreaterThan(300_000);
+  const encoded=received.input.match(/base64_decode\('([^']+)'\)/)?.[1];
+  expect(encoded).toBe(Buffer.from(JSON.stringify({...boundary,request,option:siteRecordOption(boundary.siteId),lock:`${siteRecordOption(boundary.siteId)}_lock`})).toString('base64'));
+  expect(Buffer.from(encoded!,'base64').toString()).toContain(longMarkup);
+ });
  it('creates once, reads back every field and explicit options, then replays before obsolete before-state',async()=>{
   const f=await fixture();const first=await applySite(f.plan,f.options,f.transports);expect(first.status).toBe('completed');expect(first.steps.map(item=>item.step.key)).toEqual(['page:home','option:show_on_front','option:page_on_front']);expect(f.count()).toBe(3);
   await writeFile(f.source,'source no longer present');expect(await applySite(f.plan,f.options,f.transports)).toEqual(first);expect(f.count()).toBe(3);
