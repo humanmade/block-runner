@@ -178,7 +178,8 @@ async function compileDocuments(
       sourcePath: sourceLabel(intent.siteId, document.id),
       resolver: 'noop',
       tokenResolver: 'noop',
-      styling: 'strict',
+      // Intent trees have no source HTML styling pass; use the normal default to avoid a spurious warning.
+      styling: 'relaxed',
       strict: options.strict,
       config: isolatedConfig(intent, options.strict),
       isolateConfig: true,
@@ -248,14 +249,13 @@ function setIntentAttribute(node: IntentNode, use: SiteAssetUse, url: string, bi
   else {
     node.attrs ??= {};
     if (use.attribute === 'attrs.url' || use.attribute === 'attrs.src') node.attrs[use.attribute.slice(6)] = url;
-    else if (binding) {
-      node.attrs.id = binding.id;
-      // Core image/cover require both native identity and source URL; retain both from one explicit use.
-      if (node.block === 'core/image' || node.block === 'core/cover') {
-        node.attrs.url = url;
-        if (node.block === 'core/image') node.url = url;
-        else node.url = url;
-      }
+  }
+  if (binding) {
+    node.attrs ??= {};
+    node.attrs.id = binding.id;
+    if (node.block === 'core/image' || node.block === 'core/cover') {
+      node.url = url;
+      node.attrs.url = url;
     }
   }
 }

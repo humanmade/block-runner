@@ -77,6 +77,33 @@ describe('site compiler', () => {
       .toContain('<!-- wp:group {"tagName":"section","className":"ordered","layout":{"type":"constrained"}} -->');
   });
 
+  it('binds both attachment ID and URL for native image and cover URL-use forms', async () => {
+    const binding = { 'home-hero': { id: 731, url: 'https://media.example.test/hero.png' } };
+    for (const block of ['core/image', 'core/cover'] as const) {
+      for (const attribute of ['url', 'attrs.url', 'attrs.src'] as const) {
+        const input = JSON.parse(await readFile(intentPath, 'utf8')) as SiteIntent;
+        const node = {
+          block,
+          attrs: { id: 0, ...(attribute === 'attrs.src' ? { src: '' } : { url: '' }) },
+          ...(attribute === 'url' ? { url: '' } : {}),
+        };
+        input.pages[0]!.body.blocks[2] = node;
+        input.assetUses = [{ documentId: 'page:home', nodePath: [2], attribute, assetId: 'home-hero' }];
+        const prepared = await prepareSiteSource(input, fixtureRoot);
+        expect(prepared.ok, `${block} ${attribute} source preparation`).toBe(true);
+        if (!prepared.ok) continue;
+        const source = prepared.source;
+        const result = await compileSite(source, { attachmentBindings: binding });
+        expect(result.ok, `${block} ${attribute}`).toBe(true);
+        if (result.ok) {
+          const content = result.site.pages[0]!.content;
+          expect(content).toContain('https://media.example.test/hero.png');
+          expect(content).toContain('"id":731');
+        }
+      }
+    }
+  });
+
   it('reports an unknown native block against its source document and emits no partial site', async () => {
     const source = await prepareAssetFreeIntent((intent) => {
       intent.parts.header!.body.blocks[0]!.block = 'core/not-a-registered-block';
