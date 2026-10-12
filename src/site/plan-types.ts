@@ -8,13 +8,22 @@ export interface SiteOwnership {
   entityId: string;
   kind: SiteEntity['kind'];
   lastAppliedHash: string;
+  /** Exact original bytes for one owned attachment version. Omitted on legacy records. */
+  assetSha256?: string;
 }
 export interface SiteEntity {
   id: number;
   kind: 'page' | 'attachment' | 'pattern';
   route: string | null;
   state: Record<string, unknown>;
-  attachment?: { url: string | null; currentFileSha256: string | null; width: number | null; height: number | null };
+  attachment?: {
+    url: string | null;
+    linkUrl?: string | null;
+    currentFileSha256: string | null;
+    width: number | null;
+    height: number | null;
+    sizes?: Record<string, { url: string; width: number; height: number }>;
+  };
   ownership: SiteOwnership[];
 }
 export interface SiteSnapshot {
