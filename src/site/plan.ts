@@ -24,7 +24,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
   if (source.assets.some(asset => asset.role === 'attachment')) capabilities.push('upload_files');
   if (!Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1) issue('/target/principal', 'unauthenticated-principal', 'select an authenticated WordPress principal with --wp-user or WP-CLI configuration');
   for (const capability of capabilities) if (snapshot.principal.capabilities[capability] !== true) issue('/target/principal', 'missing-capability', `selected principal requires ${capability}`);
-  if (snapshot.siteRecord?.operation && ['started','outcome_unknown'].includes(snapshot.siteRecord.operation.status)) issue('/target/operations', 'outstanding-operation', 'reconcile the outstanding started or unknown operation before producing a fresh plan');
+  if (snapshot.siteRecord?.operation && snapshot.siteRecord.operation.status !== 'completed') issue('/target/operations', 'outstanding-operation', 'reconcile the outstanding started or unknown operation before producing a fresh plan');
 
   if (snapshot.siteRecord && (snapshot.siteRecord.version !== 1 || snapshot.siteRecord.siteId !== intent.siteId)) issue('/target/siteRecord', 'invalid-site-record', 'site operation record identity is inconsistent');
   for (const override of snapshot.overrides) if (override.theme.includes(snapshot.theme.slug)) issue(`/target/overrides/${override.id}`, 'theme-shadow', 'database template or part shadows the installed theme; resolve it explicitly');
