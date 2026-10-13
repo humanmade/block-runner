@@ -1,9 +1,11 @@
-import { mkdtemp, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
+import { createHash, randomUUID } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { prepareSiteSource, validateSiteIntent } from '../../src/site/input.js';
+import { prepareSiteSource, siteSourceIdentityMatches, validateSiteIntent } from '../../src/site/input.js';
+import { verifyPreparedSiteAssets } from '../../src/site/assets.js';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent', import.meta.url));
 const intentPath = fileURLToPath(new URL('./fixtures/site-intent/site.intent.json', import.meta.url));
@@ -61,6 +63,17 @@ describe('site intent contract', () => {
     expect(baseline.ok).toBe(true);
     expect(reversed.ok).toBe(true);
     if (baseline.ok && reversed.ok) expect(reversed.source.sourceIdentity).toBe(baseline.source.sourceIdentity);
+  });
+
+  it('accepts a legacy insertion-order source identity and verifies its source bytes unchanged', async () => {
+    const prepared = await prepareSiteSource(await loadIntent(), fixtureRoot);
+    expect(prepared.ok).toBe(true);
+    if (!prepared.ok) return;
+    const legacyIdentity = createHash('sha256').update(JSON.stringify(prepared.source.sourceIntent)).digest('hex');
+    const legacySource = { ...prepared.source, sourceIdentity: legacyIdentity };
+    expect(siteSourceIdentityMatches(legacySource.sourceIntent, legacyIdentity)).toBe(true);
+    await expect(verifyPreparedSiteAssets(legacySource)).resolves.toBeUndefined();
+    expect(siteSourceIdentityMatches(legacySource.sourceIntent, 'sha256-not-current')).toBe(false);
   });
 
   it('reports malformed native tree nodes and children without throwing during graph preparation', async () => {
@@ -201,6 +214,27 @@ describe('site intent contract', () => {
       const result = await prepareSiteSource(input, root);
       expect(result.ok).toBe(false);
       if (!result.ok) expect(result.diagnostics).toContainEqual(expect.objectContaining({ path: '/assets/0/path', code: 'asset-read' }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores unrelated changes to ancestor directory metadata while preparing stable assets', async () => {
+    const temporaryBase = await realpath(tmpdir());
+    const root = await mkdtemp(path.join(temporaryBase, 'block-runner-site-parent-mutation-'));
+    try {
+      await cp(path.join(fixtureRoot, 'media'), path.join(root, 'media'), { recursive: true });
+      await cp(path.join(fixtureRoot, 'styles'), path.join(root, 'styles'), { recursive: true });
+      const input = await loadIntent();
+      const mutateAncestor = async (): Promise<void> => {
+        for (let index = 0; index < 60; index += 1) {
+          const sibling = path.join(temporaryBase, `site-asset-noise-${randomUUID()}`);
+          await mkdir(sibling);
+          await rm(sibling, { recursive: true });
+        }
+      };
+      const [prepared] = await Promise.all([prepareSiteSource(input, root), mutateAncestor()]);
+      expect(prepared.ok).toBe(true);
     } finally {
       await rm(root, { recursive: true, force: true });
     }

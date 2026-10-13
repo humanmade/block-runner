@@ -11,7 +11,7 @@ import { buildSiteThemeAssets } from './assets.js';
 import { bindNativeImage, declaredEmbedAspectRatio, validateNativeImageSettings } from './media.js';
 import { patternOverrideContent } from '../authoring/pattern-overrides.js';
 import { compileSyncedPatterns, type CompiledSyncedPattern } from './patterns.js';
-import { validateSiteIntent } from './input.js';
+import { siteSourceIdentityMatches, validateSiteIntent } from './input.js';
 import type {
   CompiledSite,
   CompiledSitePage,
@@ -48,6 +48,7 @@ export type CompileSiteSyncedPatternResult =
 
 /** Recompute compiler provenance from the retained source and current artifact payload. */
 export function calculateSiteArtifactIdentity(source: PreparedSiteSource, artifact: CompiledSite | ThemeArtifact): string {
+  if (!siteSourceIdentityMatches(source.sourceIntent, source.sourceIdentity)) throw new Error('prepared source identity does not match its site intent');
   const targetBindingFingerprint = hashTargetContext(artifact.targetBindings, artifact.themeAssetBaseUrl);
   if (artifact.targetBindingFingerprint !== targetBindingFingerprint) throw new Error('compiled artifact target bindings do not match their fingerprint');
   const themeFiles = artifact.themeFiles.map((file) => {
@@ -59,7 +60,7 @@ export function calculateSiteArtifactIdentity(source: PreparedSiteSource, artifa
   const inventory = artifact.inventory.slice().sort((left, right) => left.path.localeCompare(right.path));
   if (canonicalJson(inventory) !== canonicalJson(themeFiles)) throw new Error('compiled artifact inventory does not match its theme files');
   const identityInput = {
-    sourceIdentity: createHash('sha256').update(canonicalJson(source.sourceIntent)).digest('hex'),
+    sourceIdentity: source.sourceIdentity,
     sourceAssets: source.assets.map(({ id, path, sha256, bytes }) => {
       if (createHash('sha256').update(bytes).digest('hex') !== sha256) throw new Error(`prepared source asset ${id} no longer matches its SHA-256`);
       return { id, path, sha256 };
@@ -564,8 +565,7 @@ function validatePreparedSource(source: PreparedSiteSource): { ok: true; intent:
   if (!intent) {
     return { ok: false, diagnostics: inputDiagnostics.map((entry) => ({ status: 'invalid', reason: entry.message, source: { path: entry.path }, code: entry.code })) };
   }
-  const expectedSourceIdentity = createHash('sha256').update(canonicalJson(intent)).digest('hex');
-  if (source.sourceIdentity !== expectedSourceIdentity) {
+  if (!siteSourceIdentityMatches(intent, source.sourceIdentity)) {
     return { ok: false, diagnostics: [invalid('site', 'prepared-source-identity-mismatch', 'prepared source identity does not match its canonical site intent')] };
   }
   if (!Array.isArray(source?.assets)) {

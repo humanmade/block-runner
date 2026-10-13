@@ -117,6 +117,20 @@ describe('site bundle publication', () => {
     }
   });
 
+  it('publishes a previously prepared source without rewriting its legacy source identity', async () => {
+    const { root, source } = await setup();
+    try {
+      const legacyIdentity = createHash('sha256').update(JSON.stringify(source.sourceIntent)).digest('hex');
+      const legacySource = { ...source, sourceIdentity: legacyIdentity };
+      const output = path.join(root, 'legacy-bundle');
+      await writeCompiledSite(output, legacySource, artifact(legacySource));
+      const manifest = JSON.parse(await readFile(path.join(output, 'site.manifest.json'), 'utf8')) as { sourceIdentity: string };
+      expect(manifest.sourceIdentity).toBe(legacyIdentity);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('rejects an existing target without changing its contents', async () => {
     const { root, source } = await setup();
     try {

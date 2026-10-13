@@ -81,6 +81,18 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
   };
 }
 
+/** Match both current canonical and previously persisted insertion-order source identities. */
+export function siteSourceIdentityMatches(sourceIntent: unknown, identity: unknown): identity is string {
+  if (typeof identity !== 'string') return false;
+  const diagnostics: SiteInputDiagnostic[] = [];
+  const validated = validateSiteIntent(sourceIntent, diagnostics);
+  if (!validated || diagnostics.length > 0) return false;
+  const canonicalIdentity = createHash('sha256').update(canonicalJson(validated)).digest('hex');
+  if (identity === canonicalIdentity) return true;
+  const legacyIdentity = createHash('sha256').update(JSON.stringify(validated)).digest('hex');
+  return identity === legacyIdentity;
+}
+
 /** Graph and envelope checks are intentionally local to this contract, not a general schema engine. */
 export function validateSiteIntent(input: unknown, diagnostics: SiteInputDiagnostic[] = []): SiteIntent | undefined {
   if (!isRecord(input)) {
@@ -728,7 +740,10 @@ async function inspectPathChain(root: string, relative?: string): Promise<PathSn
 function samePathChain(before: PathSnapshot[], after: PathSnapshot[]): boolean {
   return before.length === after.length && before.every((snapshot, index) => {
     const next = after[index];
-    return next !== undefined && snapshot.path === next.path && snapshot.dev === next.dev && snapshot.ino === next.ino && snapshot.mode === next.mode && snapshot.size === next.size && snapshot.mtimeMs === next.mtimeMs && snapshot.ctimeMs === next.ctimeMs;
+    if (!next || snapshot.path !== next.path || snapshot.dev !== next.dev || snapshot.ino !== next.ino || snapshot.mode !== next.mode) return false;
+    // Directory contents can change because unrelated files are created beside the asset.
+    // The final file still requires full metadata stability; its descriptor read is checked too.
+    return index !== before.length - 1 || (snapshot.size === next.size && snapshot.mtimeMs === next.mtimeMs && snapshot.ctimeMs === next.ctimeMs);
   });
 }
 
