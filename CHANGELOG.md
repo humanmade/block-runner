@@ -1,6 +1,6 @@
 # Changelog
 
-## Unreleased
+## 0.9.11 — 2026-10-13
 
 - Add block-theme folder validation, in-place markup repair, WordPress 7.1 theme.json schema checks and local part/pattern/preset references.
 - Align native attribute order with WordPress server definitions; send unknown-block warnings to stderr and preserve native Accordion icon placement.
@@ -10,6 +10,7 @@
 - Update Wesper to 0.5.0 and require Node.js ^22.13.0 || >=24.0.0, dropping Node 20 support.
 - Preserve unmanaged page fields and native publication dates on apply, allow pending first-install pattern media, canonicalise site identity and reduce repeated compilation, snapshots and source scans.
 - Document current theme/site routes and guarded manual interrupted-apply recovery; remove the public proof failure-seeding option and fixed five-page fixture requirement.
+- Remove redundant tests and run benchmark/evidence tooling separately, with required CI and release coverage.
 
 ## 0.9.10 — 2026-10-04
 

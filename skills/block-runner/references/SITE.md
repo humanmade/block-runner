@@ -1,8 +1,7 @@
 # Block themes and whole sites
 
-These routes are in the current repository source and are unreleased. The published
-0.9.10 package predates them. Use a build containing these commands and check
-`block-runner site --help`; do not assume an older installed package supports them.
+These routes require Block Runner 0.9.11 or later; 0.9.10 predates them. Check your
+installed version and `block-runner site --help` before using these commands.
 
 ## Check an existing theme
 

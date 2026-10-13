@@ -11,7 +11,7 @@ Turn HTML into editable WordPress blocks, generate reusable block source, or com
 
 Block Runner is an open-source CLI and JavaScript library from Human Made. It converts supported HTML into native Gutenberg blocks and checks the generated markup with the Gutenberg packages used by the WordPress editor. It can also generate a static registered block: source files you build into a plugin, with native editable blocks inside. Whole-site intent produces a block theme and page content, with separate planning and confirmed apply to WordPress.
 
-This README describes the current repository source. Theme-folder and whole-site workflows, Wesper 0.5.0 and the new Node floor are unreleased; npm 0.9.10 predates them. See [Unreleased changes](CHANGELOG.md#unreleased) before assuming an installed version has these capabilities.
+Theme-folder and whole-site workflows, Wesper 0.5.0 and the Node 22.13/24 floor were introduced in 0.9.11. See the [release notes](CHANGELOG.md#0911--2026-10-13) and check your installed version before using these routes.
 
 **The package makes no AI model calls.** Built-in rules can convert HTML on their own. An external agent can interpret a design and give Block Runner a structured plan to assemble or compile. The optional skill provides instructions for that agent.
 

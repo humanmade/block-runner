@@ -2,7 +2,7 @@
 
 Start with the [README](../README.md) for a first conversion, or the [architecture guide](architecture.md) for the code paths. This reference covers commands, configuration and compatibility details. The [registered-block delivery guide](../skills/block-runner/references/AUTHORING.md#shipped-notice-source-to-standalone-zip) owns the complete source-to-ZIP procedure.
 
-This reference describes current source. Theme-folder and whole-site commands, Wesper 0.5.0 and the Node 22.13/24 floor are unreleased; the published 0.9.10 package predates them. The [theme and site guide](../skills/block-runner/references/SITE.md) owns the whole-site input and lifecycle examples.
+Theme-folder and whole-site commands, Wesper 0.5.0 and the Node 22.13/24 floor require 0.9.11 or later; 0.9.10 predates them. The [theme and site guide](../skills/block-runner/references/SITE.md) owns the whole-site input and lifecycle examples.
 
 ## Native block support boundaries
 
@@ -280,7 +280,7 @@ Use the CLI in shell scripts, pre-commit hooks or CI.
 
 ```yaml
 - repo: https://github.com/humanmade/block-runner
-  rev: v0.9.10
+  rev: v0.9.11
   hooks:
     - id: block-runner
       args: ['content/**/*.html']   # glob of files that contain block markup

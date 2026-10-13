@@ -1,6 +1,6 @@
 # Architecture
 
-Block Runner produces Gutenberg page markup, reusable registered-block source and whole-site block-theme bundles. These are available through the CLI and library. The optional skill teaches an external coding agent how to use them; the package does not call a model. Theme/site routes are current-source features, unreleased after npm 0.9.10.
+Block Runner produces Gutenberg page markup, reusable registered-block source and whole-site block-theme bundles. These are available through the CLI and library. The optional skill teaches an external coding agent how to use them; the package does not call a model. Theme/site routes were introduced in 0.9.11.
 
 ## Choose a workflow
 
