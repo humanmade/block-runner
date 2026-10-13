@@ -245,9 +245,31 @@ export async function compileSiteSyncedPattern(
 ): Promise<CompileSiteSyncedPatternResult> {
   const prepared = validatePreparedSource(source);
   if (!prepared.ok) return { ok: false, diagnostics: prepared.diagnostics };
-  const intent = prepared.intent;
+  return compileSiteSyncedPatternFromIntent(source, prepared.intent, patternId, options, allowPendingBindings);
+}
+
+/** Validate one prepared source once, then compile current pattern definitions with fresh bindings. */
+export function createSiteSyncedPatternCompiler(source: PreparedSiteSource):
+  | { ok: true; compile: (patternId: string, options?: CompileSiteOptions, allowPendingBindings?: boolean) => Promise<CompileSiteSyncedPatternResult> }
+  | { ok: false; diagnostics: ReportItem[] } {
+  const prepared = validatePreparedSource(source);
+  if (!prepared.ok) return { ok: false, diagnostics: prepared.diagnostics };
+  return {
+    ok: true,
+    compile: (patternId, options = {}, allowPendingBindings = true) =>
+      compileSiteSyncedPatternFromIntent(source, prepared.intent, patternId, options, allowPendingBindings),
+  };
+}
+
+function compileSiteSyncedPatternFromIntent(
+  source: PreparedSiteSource,
+  intent: SiteIntent,
+  patternId: string,
+  options: CompileSiteOptions,
+  allowPendingBindings: boolean,
+): Promise<CompileSiteSyncedPatternResult> {
   const definition = intent.syncedPatterns?.definitions[patternId];
-  if (!definition) return { ok: false, diagnostics: [invalid(`synced-pattern:${patternId}`, 'unknown-pattern-id', `unknown synced pattern "${patternId}"`)] };
+  if (!definition) return Promise.resolve({ ok: false, diagnostics: [invalid(`synced-pattern:${patternId}`, 'unknown-pattern-id', `unknown synced pattern "${patternId}"`)] });
 
   const selected: SiteIntent = {
     ...intent,
@@ -257,11 +279,12 @@ export async function compileSiteSyncedPattern(
       uses: intent.syncedPatterns!.uses.filter((use) => use.documentId === `synced-pattern:${patternId}`),
     },
   };
-  const patterns = await compileSiteSyncedPatternsFromIntent(source, selected, options, allowPendingBindings);
-  const pattern = patterns[0];
-  if (!pattern) return { ok: false, diagnostics: [invalid(`synced-pattern:${patternId}`, 'pattern-compilation-failed', 'synced pattern definition was not compiled')] };
-  if (!pattern.ok) return { ok: false, diagnostics: pattern.diagnostics };
-  return { ok: true, pattern };
+  return compileSiteSyncedPatternsFromIntent(source, selected, options, allowPendingBindings).then((patterns) => {
+    const pattern = patterns[0];
+    if (!pattern) return { ok: false as const, diagnostics: [invalid(`synced-pattern:${patternId}`, 'pattern-compilation-failed', 'synced pattern definition was not compiled')] };
+    if (!pattern.ok) return { ok: false as const, diagnostics: pattern.diagnostics };
+    return { ok: true as const, pattern };
+  });
 }
 
 function compileSiteSyncedPatternsFromIntent(

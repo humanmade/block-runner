@@ -6,7 +6,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validateSiteIntent } from '../../src/site/input.js';
-import { compileSite, compileSitePageDocuments, compileSiteSyncedPattern, compileSiteSyncedPatterns } from '../../src/site/compile.js';
+import { compileSite, compileSitePageDocuments, compileSiteSyncedPattern, compileSiteSyncedPatterns, createSiteSyncedPatternCompiler } from '../../src/site/compile.js';
 import type { PreparedSiteSource, SiteIntent, ThemeArtifact } from '../../src/site/types.js';
 import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
 import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
@@ -246,6 +246,13 @@ describe('site synced pattern contract and compiler', () => {
     expect(bound[0]!.content).toContain('"id":73');
     const single = await compileSiteSyncedPattern(prepared.source, 'card', { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
     expect(single).toMatchObject({ ok: true, pattern: { id: 'card', content: expect.stringContaining('"id":73') } });
+    const compiler = createSiteSyncedPatternCompiler(prepared.source);
+    expect(compiler.ok).toBe(true);
+    if (compiler.ok) {
+      const current = await compiler.compile('card', { attachmentBindings: { 'home-hero': { id: 74, url: 'https://example.test/current.png' } } });
+      expect(current).toMatchObject({ ok: true, pattern: { id: 'card', content: expect.stringContaining('"id":74') } });
+    }
+    expect(createSiteSyncedPatternCompiler({ ...prepared.source, sourceIdentity: 'stale' })).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'prepared-source-identity-mismatch' })] });
     const missing = await compileSiteSyncedPattern(prepared.source, 'missing');
     expect(missing).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'unknown-pattern-id' })] });
     const invalidSource = await compileSiteSyncedPattern({ ...prepared.source, sourceIdentity: 'stale' }, 'card');
