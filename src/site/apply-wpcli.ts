@@ -135,11 +135,6 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
   usort($inventory,function($a,$b){return strcmp($a['path'],$b['path']);});
   if(!$same($inventory,$e['theme']['inventory'])) return array('status'=>'refused');
   if($r['action']==='lock') {
-   // A previous namespace lock cannot be silently bypassed during the transition.
-   global $wpdb;
-   $pattern=$wpdb->esc_like('_block_runner_site_').'%' . $wpdb->esc_like('_lock');
-   $legacyLocks=$wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",$pattern));
-   foreach($legacyLocks as $legacy) if(preg_match('/^_block_runner_site_[a-f0-9]{64}_lock$/',$legacy) && get_option($legacy,null)!==null) return array('status'=>'refused');
    // A matching token identifies an operation, not one still-running process.
    return array('status'=>add_option($e['lock'],$e['token'],'',false)?'complete':'refused');
   }

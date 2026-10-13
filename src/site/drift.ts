@@ -207,7 +207,7 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
       if (owner.siteId !== siteId) continue;
       if (entity.kind === 'attachment') {
         const baselineMatches = managedStateHash(entity.state) === owner.lastAppliedHash;
-        const originalSha = owner.assetSha256 ?? (baselineMatches && typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+        const originalSha = owner.assetSha256;
         const valid = owner.version === 1 && owner.kind === 'attachment' && Boolean(owner.entityId)
           && /^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash)
           && typeof originalSha === 'string' && /^[a-f0-9]{64}$/.test(originalSha);
@@ -259,12 +259,9 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
   for (const [key, id] of Object.entries(previous)) {
     if (key.startsWith('attachment:')) {
       const version = /^attachment:([^@]+)@([a-f0-9]{64})$/.exec(key);
-      const legacy = /^attachment:([^@]+)$/.exec(key);
-      const entity = snapshot.entities.find(item => item.id === id && item.kind === 'attachment' && item.ownership.some(owner => {
-        if (owner.siteId !== siteId || owner.kind !== 'attachment' || owner.entityId !== (version?.[1] ?? legacy?.[1])) return false;
-        if (version) return (owner.assetSha256 ?? (owner.lastAppliedHash === managedStateHash(item.state) ? item.state.sha256 : undefined)) === version[2];
-        return Boolean(legacy && owner.assetSha256 === undefined && typeof item.state.sha256 === 'string' && /^[a-f0-9]{64}$/.test(item.state.sha256));
-      }));
+      const entity = version && snapshot.entities.find(item => item.id === id && item.kind === 'attachment' && item.ownership.some(owner =>
+        owner.siteId === siteId && owner.kind === 'attachment' && owner.entityId === version[1] && owner.assetSha256 === version[2]
+      ));
       if (!entity) add({ kind: 'attachment', status: 'missing', entityId: key, wpId: id, code: 'missing-owned-attachment', message: 'A previously managed exact attachment version is absent or its numeric ID/ownership identity changed.' });
       continue;
     }

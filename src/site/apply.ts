@@ -4,10 +4,9 @@ import path from 'node:path';
 import { readStableRegularFile } from '../publication.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import { compileSite, createSiteSyncedPatternCompiler, compileThemeDocuments } from './compile.js';
-import { readSitePlanInput, planPreparedSite, observedAttachmentBindings, managedStateHash } from './plan.js';
+import { readSitePlanInput, planPreparedSite, observedAttachmentBindings, managedStateHash, assertSitePlanDocumentsUnchanged } from './plan.js';
 import { importPlannedSiteAttachmentStep, SiteMediaImportOutcomeUnknown } from './media-import.js';
 import { attachmentVersionKey } from './media.js';
-import { siteSourceIdentityMatches } from './input.js';
 import { syncedPatternOrder } from './patterns.js';
 import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from './apply-wpcli.js';
@@ -108,7 +107,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
   }
   // Use the confirmed routes even when they have no current numeric ID.
   const desiredRoutes = plan.snapshot.routing.routes.map(route => route.route);
-  // Retain explicit byte authority in existing confirmations, including legacy whole-library snapshots.
+  // Retain explicit byte authority in existing confirmations, for explicitly referenced media IDs.
   const mediaHashIds = plan.snapshot.entities.filter(entity => entity.kind === 'attachment' && typeof entity.state.sha256 === 'string').map(entity => entity.id);
   const read = () => readSiteSnapshot(options, plan.siteId, transports.read, desiredRoutes, mediaHashIds);
   let live = await read();
@@ -137,7 +136,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
   }
   if (!plan.executable || plan.conflicts.length) throw new Error('plan is not executable');
   const input = await readSitePlanInput(options.source, options.assetRoot);
-  if (!siteSourceIdentityMatches(input.source.sourceIntent, plan.sourceIdentity) || input.source.sourceIntent.siteId !== plan.siteId || !same(input.source.assets.map(({
+  if (input.source.sourceIdentity !== plan.sourceIdentity || input.source.sourceIntent.siteId !== plan.siteId || !same(input.source.assets.map(({
     id,
     path,
     sha256
@@ -146,7 +145,6 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     path,
     sha256
   })), plan.assets)) throw new Error('source or asset bytes changed after confirmation');
-  input.source.sourceIdentity = plan.sourceIdentity;
   // Reconstruct the semantic plan from retained source and its confirmed baseline, never trusting edited operation claims.
   const semantic = await planPreparedSite(input, plan.snapshot, options);
   if (semantic.confirmationHash !== plan.confirmationHash) throw new Error('confirmed plan operations do not match source and baseline reconciliation');
@@ -308,16 +306,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       // Retained operations have no effects. Initial and final full observations bind them.
       if (op.action === 'retain') return;
       // mark() performs the fresh full read and comparison before the effect, after journal persistence.
-      const refreshed = await readSitePlanInput(options.source, options.assetRoot);
-      if (!siteSourceIdentityMatches(refreshed.source.sourceIntent, plan.sourceIdentity) || !same(refreshed.source.assets.map(({
-        id,
-        path,
-        sha256
-      }) => ({
-        id,
-        path,
-        sha256
-      })), plan.assets)) throw new Error('source bytes changed immediately before mutation');
+      await assertSitePlanDocumentsUnchanged(input);
       if (op.action === 'update') {
         const entity = live.entities.find(entity => entity.id === op.id);
         const owner = entity?.ownership.length === 1 ? entity.ownership[0] : undefined;
@@ -520,7 +509,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     assertIdentity();
     if (!same(comparable(live), comparable(journal.observed))) throw new Error('live state changed before completion; prepare a fresh plan');
     const finalSource = await readSitePlanInput(options.source, options.assetRoot);
-    if (!siteSourceIdentityMatches(finalSource.source.sourceIntent, plan.sourceIdentity) || !same(finalSource.source.assets.map(({
+    if (finalSource.source.sourceIdentity !== plan.sourceIdentity || !same(finalSource.source.assets.map(({
       id,
       path,
       sha256

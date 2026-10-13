@@ -2,8 +2,8 @@ import { compileThemeDocuments, compileSitePageDocuments } from './compile.js';
 import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { hashBytes, readStableRegularFile } from '../publication.js';
-import { prepareSiteSource, siteSourceIdentityMatches } from './input.js';
+import { hashBytes, readStableRegularFile, regularFileIdentity, sameFileIdentity, type PublicationFileIdentity } from '../publication.js';
+import { prepareSiteSource } from './input.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import type { PreparedSiteSource, CompiledSitePage, SiteInputDiagnostic, ThemeArtifact, SiteAttachmentBinding } from './types.js';
 import type { SiteEntity, SitePlan, SitePlanOperation, SiteSnapshot } from './plan-types.js';
@@ -88,8 +88,8 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     if (ownership.version !== 1 || ownership.kind !== entity.kind || !ownership.entityId || !ownership.lastAppliedHash || entity.kind !== 'attachment' && ownership.assetSha256 !== undefined || ownership.assetSha256 !== undefined && !/^[a-f0-9]{64}$/.test(ownership.assetSha256)) issue(`/target/entities/${entity.id}`, 'invalid-ownership', 'ownership metadata is incomplete or inconsistent');else if (!baselineMatches) issue(`/target/entities/${entity.id}`, 'managed-state-changed', 'current managed fields differ from the complete last-applied baseline');
     if (entity.kind === 'attachment') {
       if (entity.postStatus !== 'inherit') issue(`/target/entities/${entity.id}`, 'unavailable-owned-attachment', 'only inherited attachments are available for exact owned media reuse');
-      const sha256 = ownership.assetSha256 ?? (baselineMatches && typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
-      if (!sha256 || !/^[a-f0-9]{64}$/.test(sha256) || ownership.assetSha256 !== undefined && entity.state.sha256 !== sha256) {
+      const sha256 = ownership.assetSha256;
+      if (!sha256 || !/^[a-f0-9]{64}$/.test(sha256) || entity.state.sha256 !== sha256) {
         issue(`/target/entities/${entity.id}`, 'invalid-attachment-version', 'owned attachment has no verified original-byte version');
         continue;
       }
@@ -104,8 +104,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     if (!siteRecordIndexesEntity(snapshot, intent.siteId, entity)) issue(`/target/entities/${entity.id}`, 'ownership-record-missing', `owned entity ${key} has no matching site-record ID`);
   }
   for (const [key, id] of Object.entries(snapshot.siteRecord?.entities ?? {})) {
-    const legacyMatch = /^attachment:([^@]+)$/.exec(key);
-    const entity = owned.get(key) ?? (legacyMatch ? snapshot.entities.find(item => item.kind === 'attachment' && item.id === id && item.ownership.some(meta => meta.siteId === intent.siteId && meta.entityId === legacyMatch[1] && meta.assetSha256 === undefined && meta.lastAppliedHash === managedStateHash(item.state))) : undefined);
+    const entity = owned.get(key);
     if (!entity || entity.id !== id) issue(`/target/entities/${id}`, 'missing-owned-id', `previously owned entity ${key} is missing or its metadata changed`);
   }
   const desiredKeys = new Set<string>();
@@ -116,7 +115,7 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     const existing = owned.get(key);
     const external = !existing && bindings[asset.id];
     const boundEntity = external ? snapshot.entities.find(entity => entity.id === external.id && entity.kind === 'attachment') : undefined;
-    if (external && (!boundEntity || boundEntity.state.sha256 !== asset.sha256 || boundEntity.attachment?.url !== external.url || !boundEntity.ownership.some(meta => meta.siteId === intent.siteId && meta.entityId === asset.id && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(boundEntity.state) ? boundEntity.state.sha256 : undefined)) === asset.sha256))) {
+    if (external && (!boundEntity || boundEntity.state.sha256 !== asset.sha256 || boundEntity.attachment?.url !== external.url || !boundEntity.ownership.some(meta => meta.siteId === intent.siteId && meta.entityId === asset.id && meta.assetSha256 === asset.sha256))) {
       issue(`/assets/${asset.id}`, 'binding-target-mismatch', 'attachment binding does not match exact owned destination identity and bytes');
     }
     const desired = {
@@ -320,6 +319,21 @@ export interface SitePlanInput {
   artifactIdentity?: string;
 }
 
+// Ephemeral identities come from the reads that supplied this invocation's approved bytes.
+const sourceDocuments = new WeakMap<SitePlanInput, Map<string, PublicationFileIdentity>>();
+
+/** Check source documents before an effect without rereading every declared asset. */
+export async function assertSitePlanDocumentsUnchanged(input: SitePlanInput): Promise<void> {
+  const documents = sourceDocuments.get(input);
+  if (!documents) throw new Error('site input has no captured source document identities');
+  for (const [file, identity] of documents) {
+    await assertSafePath(file);
+    if (!sameFileIdentity(identity, await regularFileIdentity(file, 'source bytes changed immediately before mutation'))) {
+      throw new Error('source bytes changed immediately before mutation');
+    }
+  }
+}
+
 /** Read either an explicit source file or the retained source of a stable compiled bundle. */
 export async function readSitePlanInput(inputPath: string, assetRoot?: string): Promise<SitePlanInput> {
   const input = path.resolve(inputPath);
@@ -330,17 +344,23 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
     const file = await readStableRegularFile(input, 'site intent changed while reading');
     const prepared = await prepareSiteSource(JSON.parse(file.content.toString('utf8')), assetRoot);
     if (!prepared.ok) throw new Error(prepared.diagnostics.map(item => `${item.path}: ${item.message}`).join('\n'));
-    return {
-      source: prepared.source,
-      retainedBindings: {}
-    };
+    const result: SitePlanInput = { source: prepared.source, retainedBindings: {} };
+    sourceDocuments.set(result, new Map([[input, file.identity]]));
+    return result;
   }
   if (!info.isDirectory()) throw new Error('site plan input must be a regular source file or bundle directory');
+  const documents = new Map<string, PublicationFileIdentity>();
   const read = async (relative: string): Promise<Buffer> => {
     if (!relative || relative.includes('\\') || relative.includes('\0') || relative.split('/').some(component => !component || component === '.' || component === '..') || path.isAbsolute(relative)) throw new Error('unsafe retained bundle path');
     const file = path.join(input, ...relative.split('/'));
     await assertSafePath(file);
-    return (await readStableRegularFile(file, 'retained bundle file changed while reading')).content;
+    const observed = await readStableRegularFile(file, 'retained bundle file changed while reading');
+    if (relative === 'site.intent.json' || relative === 'site.manifest.json') {
+      const previous = documents.get(file);
+      if (previous && !sameFileIdentity(previous, observed.identity)) throw new Error('retained source document changed while reading bundle');
+      documents.set(file, observed.identity);
+    }
+    return observed.content;
   };
   const manifestBytes = await read('site.manifest.json');
   const manifest = JSON.parse(manifestBytes.toString('utf8')) as {
@@ -380,9 +400,7 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
   const prepared = await prepareSiteSource(retainedIntent, retainedAssetRoot);
   if (!prepared.ok) throw new Error(prepared.diagnostics.map(item => `${item.path}: ${item.message}`).join('\n'));
   const source = prepared.source;
-  if (source.sourceIntent.siteId !== manifest.siteId || !siteSourceIdentityMatches(source.sourceIntent, manifest.sourceIdentity)) throw new Error('retained source identity differs from bundle manifest');
-  // Keep persisted identity exact: accepting old insertion-order hashes must not rewrite confirmations.
-  source.sourceIdentity = manifest.sourceIdentity;
+  if (source.sourceIntent.siteId !== manifest.siteId || source.sourceIdentity !== manifest.sourceIdentity) throw new Error('retained source identity differs from bundle manifest');
   const assets = source.assets.map(asset => ({
     id: asset.id,
     path: asset.path,
@@ -394,7 +412,7 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
   if (hashCanonicalJson(assets) !== hashCanonicalJson(manifest.sourceAssets)) throw new Error('retained source asset inventory differs from bundle manifest');
   if (source.assets.some(asset => !paths.has(`source/assets/${asset.path}`))) throw new Error('retained manifest omits declared source asset bytes');
   if (!(await read('site.manifest.json')).equals(manifestBytes)) throw new Error('retained manifest changed while reading bundle');
-  return {
+  const result: SitePlanInput = {
     source,
     retainedBindings: manifest.targetBindings,
     ...(manifest.themeAssetBaseUrl !== undefined ? {
@@ -407,6 +425,8 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
       artifactIdentity: manifest.artifactIdentity
     } : {})
   };
+  sourceDocuments.set(result, documents);
+  return result;
 }
 async function assertSafePath(file: string): Promise<void> {
   const root = path.parse(file).root;
@@ -424,14 +444,14 @@ export function observedAttachmentBindings(input: SitePlanInput, snapshot: SiteS
   for (const asset of input.source.assets.filter(item => item.role === 'attachment')) {
     const retained = input.retainedBindings[asset.id];
     const ownedVersions = snapshot.entities.filter(entity => entity.kind === 'attachment' && entity.ownership.some(meta => meta.siteId === input.source.sourceIntent.siteId && meta.entityId === asset.id));
-    const candidates = ownedVersions.filter(entity => entity.ownership.some(meta => meta.siteId === input.source.sourceIntent.siteId && meta.entityId === asset.id && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(entity.state) ? entity.state.sha256 : undefined)) === asset.sha256));
+    const candidates = ownedVersions.filter(entity => entity.ownership.some(meta => meta.siteId === input.source.sourceIntent.siteId && meta.entityId === asset.id && meta.assetSha256 === asset.sha256));
     if (candidates.length > 1) throw new Error(`duplicate owned attachment version for ${asset.id}`);
     const observed = retained ? snapshot.entities.find(entity => entity.kind === 'attachment' && entity.id === retained.id) : candidates[0];
     if (!observed) {
       if (retained) throw new Error(`retained attachment binding ${asset.id} is absent on the observed target`);
       continue;
     }
-    const exactOwner = observed.ownership.some(meta => meta.siteId === input.source.sourceIntent.siteId && meta.entityId === asset.id && (meta.assetSha256 ?? (meta.lastAppliedHash === managedStateHash(observed.state) ? observed.state.sha256 : undefined)) === asset.sha256);
+    const exactOwner = observed.ownership.some(meta => meta.siteId === input.source.sourceIntent.siteId && meta.entityId === asset.id && meta.assetSha256 === asset.sha256);
     if (observed.postStatus !== 'inherit' || !exactOwner || observed.state.sha256 !== asset.sha256 || typeof observed.attachment?.url !== 'string' || retained && observed.attachment?.url !== retained.url) throw new Error(`attachment binding ${asset.id} is unavailable or differs from exact owned destination bytes or URL`);
     const url = new URL(observed.attachment!.url!);
     if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.search || url.hash) throw new Error('attachment URL contains unsupported identity or secret fields');

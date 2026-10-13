@@ -3,14 +3,14 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { compileThemeDocuments } from '../../src/site/compile.js';
 import { writeCompiledSite } from '../../src/site/write.js';
-import { mkdtemp, mkdir, writeFile, symlink, realpath, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, symlink, realpath, readFile, rename, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { hashBytes } from '../../src/publication.js';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { describe, expect, it } from 'vitest';
 import { readSiteSnapshot, siteRecordOption } from '../../src/site/wpcli.js';
-import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings, planSite } from '../../src/site/plan.js';
+import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings, planSite, assertSitePlanDocumentsUnchanged } from '../../src/site/plan.js';
 import type { SiteSnapshot, SiteEntity } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../src/site/types.js';
 
@@ -112,15 +112,45 @@ describe('source and retained bundle boundaries',()=>{
     const input=source().sourceIntent;input.templates.index!.body.blocks=[{block:'core/template-part',attrs:{slug:'missing'}}];await writeFile(file,JSON.stringify(input));
     await expect(readSitePlanInput(file,root)).rejects.toThrow('unknown template part');
   });
+  it.each(['same-length edit', 'replacement'])('detects a source %s from its captured file identity', async (change) => {
+    const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'site-plan-identity-'));
+    const file = path.join(root, 'intent.json');
+    const bytes = JSON.stringify(source().sourceIntent);
+    await writeFile(file, bytes);
+    const input = await readSitePlanInput(file, root);
+    await assertSitePlanDocumentsUnchanged(input);
+    if (change === 'replacement') {
+      const replacement = path.join(root, 'replacement.json');
+      await writeFile(replacement, bytes);
+      await rename(replacement, file);
+    } else await writeFile(file, bytes.replace('Hello', 'World'));
+    await expect(assertSitePlanDocumentsUnchanged(input)).rejects.toThrow('source bytes changed');
+  });
+  it('checks source documents without rereading unused assets, then detects asset drift on full verification', async () => {
+    const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'site-plan-asset-scan-'));
+    const file = path.join(root, 'intent.json');
+    const image = path.join(root, 'unused.png');
+    await copyFile(new URL('./fixtures/site-intent/media/hero.png', import.meta.url), image);
+    const intent = source().sourceIntent;
+    intent.assets = [{ id: 'unused', path: 'unused.png', kind: 'image', role: 'attachment' }];
+    await writeFile(file, JSON.stringify(intent));
+    const input = await readSitePlanInput(file, root);
+    await writeFile(image, Buffer.from('changed image'));
+    await expect(assertSitePlanDocumentsUnchanged(input)).resolves.toBeUndefined();
+    const refreshed = await readSitePlanInput(file, root);
+    expect(refreshed.source.assets[0]!.sha256).not.toBe(input.source.assets[0]!.sha256);
+  });
   it('verifies retained source bytes/inventory and rejects corruption and symlink input',async()=>{
     const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-bundle-'));const assetRoot=root;
     const input=source().sourceIntent;const bytes=Buffer.from(JSON.stringify(input));await writeFile(path.join(root,'site.intent.json'),bytes);
     const prepared=await prepareSiteSource(input,assetRoot);if(!prepared.ok)throw new Error('fixture invalid');
     const manifest={formatVersion:1,siteId:input.siteId,sourceIdentity:prepared.source.sourceIdentity,sourceAssets:[],targetBindings:{},bundleFiles:[{path:'site.intent.json',sha256:hashBytes(bytes),size:bytes.length}]};await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
-    expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(prepared.source.sourceIdentity);
+    const captured = await readSitePlanInput(root);
+    expect(captured.source.sourceIdentity).toBe(prepared.source.sourceIdentity);
     manifest.sourceIdentity=hashBytes(Buffer.from(JSON.stringify(prepared.source.sourceIntent)));
     await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
-    expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(manifest.sourceIdentity);
+    await expect(assertSitePlanDocumentsUnchanged(captured)).rejects.toThrow('source bytes changed');
+    await expect(readSitePlanInput(root)).rejects.toThrow('retained source identity differs');
     await writeFile(path.join(root,'site.intent.json'),Buffer.from('corrupt'));await expect(readSitePlanInput(root)).rejects.toThrow('retained bundle bytes differ');
     const linked=path.join(root,'linked');await symlink(root,linked);await expect(readSitePlanInput(linked)).rejects.toThrow('symlinks');
   });

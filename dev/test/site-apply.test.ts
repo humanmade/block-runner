@@ -2,7 +2,6 @@ import { mkdtemp, realpath, writeFile, readFile, copyFile, chmod } from 'node:fs
 import path from 'node:path';
 import os from 'node:os';
 import { hashCanonicalJson } from '../../src/proof/receipt.js';
-import { hashBytes } from '../../src/publication.js';
 import { describe, it, expect } from 'vitest';
 import { applySite, type SiteApplyOptions } from '../../src/site/apply.js';
 import { readSitePlanInput, reconcileSitePlan, planPreparedSite, managedStateHash } from '../../src/site/plan.js';
@@ -69,13 +68,6 @@ describe('confirmed database apply',()=>{
    return response;
   }});
   expect(result.status).toBe('partial');expect(result.error).toContain('live state changed during marker persistence');expect(f.count()).toBe(0);
- });
- it('keeps previously confirmed insertion-order source identities exact during semantic reconstruction',async()=>{
-  const f=await fixture();const input=await readSitePlanInput(f.source,f.root);
-  input.source.sourceIdentity=hashBytes(Buffer.from(JSON.stringify(input.source.sourceIntent)));
-  const plan=await planPreparedSite(input,structuredClone(f.live));const confirmed=plan.confirmationHash;
-  const result=await applySite(plan,{...f.options,confirm:confirmed},f.transports);
-  expect(result.status).toBe('completed');expect(result.planHash).toBe(confirmed);expect(plan.sourceIdentity).toBe(input.source.sourceIdentity);expect(f.count()).toBe(3);
  });
  it.each(['none','live','source'] as const)('checks retained items together and refuses late %s changes',async(change)=>{
   const f=await fixture();expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');

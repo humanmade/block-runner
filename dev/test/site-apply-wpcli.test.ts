@@ -22,8 +22,8 @@ async function execute(request:SiteApplyRequest,flags:Record<string,unknown>={},
   const stub=`
 $d=json_decode(base64_decode('${data}'),true);$flags=$d['flags'];$writes=0;
 $options=array($d['option']=>array('version'=>1,'siteId'=>'sample','entities'=>array(),'options'=>array(),'operation'=>array('token'=>'token','planHash'=>'confirmed','status'=>'started','currentStep'=>$d['step'],'stepEvidence'=>$d['evidence'])),$d['lock']=>'token','show_on_front'=>'posts','page_on_front'=>'0');
-if(isset($flags['noLock']))unset($options[$d['lock']]);if(isset($flags['legacyLock']))$options[$d['option'].'_lock']='legacy';
-class TestWpdb {public $options='options';function esc_like($s){return addcslashes($s,'_%');}function prepare($sql,$pattern){return $sql;}function get_col($sql){global $options;return array_keys($options);}}$wpdb=new TestWpdb();
+if(isset($flags['noLock']))unset($options[$d['lock']]);
+
 if(isset($flags['wrongToken']))$options[$d['lock']]='foreign';if(isset($flags['wrongStep']))$options[$d['option']]['operation']['currentStep']['entityId']='foreign';
 $p=(object)array('ID'=>22,'post_type'=>'page','post_content'=>$d['state']['content'],'post_title'=>$d['state']['title'],'post_status'=>$d['state']['status'],'post_name'=>'home','post_parent'=>0,'post_author'=>31,'post_excerpt'=>'Human excerpt','post_date'=>'2025-02-03 04:05:06','post_date_gmt'=>'2025-02-03 03:05:06','menu_order'=>19);
 if(isset($flags['humanStatus']))$p->post_status='private';
@@ -44,10 +44,9 @@ function add_post_meta($id,$k,$v,$unique){global $meta,$flags;if(isset($flags['o
 describe('fixed PHP mutation boundary executed with bounded WordPress stubs',()=>{
  it('sanitizes thrown transport stderr without attaching raw output or a cause',async()=>{let error:unknown;try{await siteApplyWpCli({wpPath:'/wp'},boundary,{action:'lock'},async()=>{throw Object.assign(new Error('bootstrap SENTINEL_PRIVATE_WP_CREDENTIAL'),{stderr:'SENTINEL_PRIVATE_WP_CREDENTIAL'});});}catch(value){error=value;}expect(error).toBeInstanceOf(Error);expect((error as Error).message).toContain('site apply transport failed');expect(String(error)).not.toContain('SENTINEL_PRIVATE_WP_CREDENTIAL');expect(JSON.stringify(error)).not.toContain('SENTINEL_PRIVATE_WP_CREDENTIAL');});
  it.each(['SENTINEL_PRIVATE_WP_CREDENTIAL','null'])('sanitizes invalid boundary output %s',async(output)=>{await expect(siteApplyWpCli({wpPath:'/wp'},boundary,{action:'lock'},async()=>output)).rejects.toThrow('invalid boundary readback');});
- it('locks the blog across namespaces, refuses the same token and legacy locks, and releases only its owner',async()=>{
+ it('locks the blog across namespaces, refuses the same token, and releases only its owner',async()=>{
   expect((await execute({action:'lock'})).response.status).toBe('refused');
   expect((await execute({action:'lock'},{},{...boundary,siteId:'other',token:'other-token'})).response.status).toBe('refused');
-  expect((await execute({action:'lock'},{noLock:true,legacyLock:true})).response.status).toBe('refused');
   expect((await execute({action:'lock'},{noLock:true})).response.status).toBe('complete');
   expect((await execute({action:'lock'},{noLock:true,blogId:2},{...boundary,target:{...boundary.target,blogId:2}})).response.status).toBe('complete');
   expect((await execute({action:'unlock'},{wrongToken:true})).response.status).toBe('refused');
