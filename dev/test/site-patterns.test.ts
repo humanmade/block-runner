@@ -5,7 +5,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validateSiteIntent } from '../../src/site/input.js';
-import { compileSite, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
+import { compileSite, compileSitePageDocuments, compileSiteSyncedPattern, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { PreparedSiteSource, SiteIntent, ThemeArtifact } from '../../src/site/types.js';
 import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
 import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
@@ -154,7 +154,10 @@ describe('site synced pattern contract and compiler', () => {
     ]));
 
     intent.syncedPatterns!.definitions.card!.title = 'Renamed card';
-    const renamed: PreparedSiteSource = { ...source, sourceIntent: intent };
+    const renamedResult = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(renamedResult.ok).toBe(true);
+    if (!renamedResult.ok) return;
+    const renamed: PreparedSiteSource = renamedResult.source;
     const updated = await compileSiteSyncedPatterns(renamed, { patternBindings: { card: 642 } });
     const updatePlan = reconcileSitePlan(renamed, { ...theme, sourceIntent: intent }, [], snapshot, {}, [], updated, { card: 642 });
     expect(updatePlan.operations.find((operation) => operation.kind === 'pattern')).toMatchObject({ action: 'update', id: 642, entityId: 'card', desired: { title: 'Renamed card' } });
@@ -239,5 +242,11 @@ describe('site synced pattern contract and compiler', () => {
     expect(pending[0]).not.toHaveProperty('content');
     const bound = await compileSiteSyncedPatterns(prepared.source, { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
     expect(bound[0]!.content).toContain('"id":73');
+    const single = await compileSiteSyncedPattern(prepared.source, 'card', { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
+    expect(single).toMatchObject({ ok: true, pattern: { id: 'card', content: expect.stringContaining('"id":73') } });
+    const missing = await compileSiteSyncedPattern(prepared.source, 'missing');
+    expect(missing).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'unknown-pattern-id' })] });
+    const invalidSource = await compileSiteSyncedPattern({ ...prepared.source, sourceIdentity: 'stale' }, 'card');
+    expect(invalidSource).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'prepared-source-identity-mismatch' })] });
   });
 });

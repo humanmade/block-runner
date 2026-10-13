@@ -1,10 +1,11 @@
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { lstat, mkdir, mkdtemp, readFile, realpath, rm, stat, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { prepareSiteSource } from '../../src/site/input.js';
+import { calculateSiteArtifactIdentity, compileSite } from '../../src/site/compile.js';
 import { SiteWriteError, writeCompiledSite } from '../../src/site/write.js';
 import type { CompiledSite, PreparedSiteSource, SiteFile } from '../../src/site/types.js';
 
@@ -26,19 +27,24 @@ function file(filePath: string, text: string): SiteFile {
 }
 
 function artifact(source: PreparedSiteSource): CompiledSite {
-  return {
+  const themeFiles = [file('style.css', 'body { color: #20201e; }')];
+  const targetBindings = {};
+  const targetBindingFingerprint = createHash('sha256').update(JSON.stringify({ attachmentBindings: targetBindings })).digest('hex');
+  const value: CompiledSite = {
     sourceIntent: source.sourceIntent,
     sourceAssets: source.assets,
-    targetBindings: {},
-    targetBindingFingerprint: 'empty-bindings',
-    themeFiles: [file('style.css', 'body { color: #20201e; }')],
+    targetBindings,
+    targetBindingFingerprint,
+    themeFiles,
     pages: [],
     syncedPatterns: [],
     assets: [],
     diagnostics: [],
-    inventory: [],
-    artifactIdentity: 'compiled-site-test',
+    inventory: themeFiles.map(({ path: filePath, sha256, bytes }) => ({ path: filePath, sha256, size: bytes.byteLength })),
+    artifactIdentity: '',
   };
+  value.artifactIdentity = calculateSiteArtifactIdentity(source, value);
+  return value;
 }
 
 describe('site bundle publication', () => {
@@ -78,19 +84,23 @@ describe('site bundle publication', () => {
     const { root, source } = await setup();
     try {
       const pendingPageBindings = source.unresolvedAssetUses.filter(({ documentId }) => documentId.startsWith('page:'));
+      const themeFiles = [file('style.css', 'body { color: #20201e; }')];
+      const targetBindings = {};
+      const targetBindingFingerprint = createHash('sha256').update(JSON.stringify({ attachmentBindings: targetBindings, themeAssetBaseUrl: 'https://example.test/wp-content/themes/sample-studio' })).digest('hex');
       const themeArtifact = {
         sourceIntent: source.sourceIntent,
         sourceAssets: source.assets,
-        targetBindings: {},
-        targetBindingFingerprint: 'theme-bindings-test',
+        targetBindings,
+        targetBindingFingerprint,
         themeAssetBaseUrl: 'https://example.test/wp-content/themes/sample-studio',
-        themeFiles: [file('style.css', 'body { color: #20201e; }')],
+        themeFiles,
         syncedPatterns: [],
         pendingPageBindings,
         diagnostics: [],
-        inventory: [],
-        artifactIdentity: 'compiled-theme-test',
+        inventory: themeFiles.map(({ path: filePath, sha256, bytes }) => ({ path: filePath, sha256, size: bytes.byteLength })),
+        artifactIdentity: '',
       };
+      themeArtifact.artifactIdentity = calculateSiteArtifactIdentity(source, themeArtifact);
       const output = path.join(root, 'theme-bundle');
       const result = await writeCompiledSite(output, source, themeArtifact);
       expect(result.artifactType).toBe('theme');
@@ -99,7 +109,7 @@ describe('site bundle publication', () => {
       expect(record.pendingPageBindings).toEqual(pendingPageBindings);
       expect(record).toMatchObject({
         targetBindings: {},
-        targetBindingFingerprint: 'theme-bindings-test',
+        targetBindingFingerprint,
         themeAssetBaseUrl: 'https://example.test/wp-content/themes/sample-studio',
       });
     } finally {
@@ -147,6 +157,21 @@ describe('site bundle publication', () => {
     }
   });
 
+  it('accepts and canonicalizes the trusted macOS /tmp output alias', async () => {
+    const { root, source } = await setup();
+    const name = `block-runner-site-alias-${randomUUID()}`;
+    const aliasOutput = path.join('/tmp', name);
+    const canonicalOutput = path.join(await realpath('/tmp'), name);
+    try {
+      const result = await writeCompiledSite(aliasOutput, source, artifact(source));
+      expect(result.directory).toBe(canonicalOutput);
+      expect(await stat(path.join(canonicalOutput, 'site.manifest.json'))).toBeDefined();
+    } finally {
+      await rm(canonicalOutput, { recursive: true, force: true });
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   it('retains staging and refuses publication when source bytes change after staging', async () => {
     const { root, source } = await setup();
     try {
@@ -164,6 +189,20 @@ describe('site bundle publication', () => {
       expect(failure?.message).toContain('source assets changed');
       expect(await readFile(path.join(failure!.stagingPath, 'source/assets/media/hero.png'))).toEqual(Buffer.from(source.assets[0]!.bytes));
       await expect(lstat(output)).rejects.toMatchObject({ code: 'ENOENT' });
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('rejects compiler payload changes after the artifact identity was sealed', async () => {
+    const { root, source } = await setup();
+    try {
+      const compiled = await compileSite(source, { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
+      expect(compiled.ok).toBe(true);
+      if (!compiled.ok) return;
+      compiled.site.pages[0]!.content += '<!-- changed after compile -->';
+      await expect(writeCompiledSite(path.join(root, 'mutated-bundle'), source, compiled.site)).rejects.toThrow('compiled artifact no longer matches its compiler identity');
+      await expect(lstat(path.join(root, 'mutated-bundle'))).rejects.toMatchObject({ code: 'ENOENT' });
     } finally {
       await rm(root, { recursive: true, force: true });
     }

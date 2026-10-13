@@ -42,6 +42,40 @@ export type CompileThemeDocumentsResult =
   | { ok: true; artifact: ThemeArtifact; diagnostics: ReportItem[] }
   | { ok: false; diagnostics: ReportItem[] };
 
+export type CompileSiteSyncedPatternResult =
+  | { ok: true; pattern: CompiledSyncedPattern }
+  | { ok: false; diagnostics: ReportItem[] };
+
+/** Recompute compiler provenance from the retained source and current artifact payload. */
+export function calculateSiteArtifactIdentity(source: PreparedSiteSource, artifact: CompiledSite | ThemeArtifact): string {
+  const targetBindingFingerprint = hashTargetContext(artifact.targetBindings, artifact.themeAssetBaseUrl);
+  if (artifact.targetBindingFingerprint !== targetBindingFingerprint) throw new Error('compiled artifact target bindings do not match their fingerprint');
+  const themeFiles = artifact.themeFiles.map((file) => {
+    const bytes = Buffer.from(file.bytes);
+    const sha256 = createHash('sha256').update(bytes).digest('hex');
+    if (file.sha256 !== sha256) throw new Error(`compiled file ${file.path} no longer matches its SHA-256`);
+    return { path: file.path, sha256, size: bytes.byteLength };
+  }).sort((left, right) => left.path.localeCompare(right.path));
+  const inventory = artifact.inventory.slice().sort((left, right) => left.path.localeCompare(right.path));
+  if (canonicalJson(inventory) !== canonicalJson(themeFiles)) throw new Error('compiled artifact inventory does not match its theme files');
+  const identityInput = {
+    sourceIdentity: createHash('sha256').update(canonicalJson(source.sourceIntent)).digest('hex'),
+    sourceAssets: source.assets.map(({ id, path, sha256, bytes }) => {
+      if (createHash('sha256').update(bytes).digest('hex') !== sha256) throw new Error(`prepared source asset ${id} no longer matches its SHA-256`);
+      return { id, path, sha256 };
+    }).sort((left, right) => left.id.localeCompare(right.id)),
+    targetBindingFingerprint,
+    themeFiles,
+    ...('pendingPageBindings' in artifact ? {
+      syncedPatterns: artifact.syncedPatterns.map(({ id, title, content, pendingUses, pendingBindings, diagnostics }) => ({ id, title, content, pendingUses, pendingBindings, diagnostics })),
+    } : {
+      pages: artifact.pages.map(({ id, route, title, parentId, template, content, status }) => ({ id, route, title, parentId, template, content, status })),
+      syncedPatterns: artifact.syncedPatterns.map(({ id, title, content, diagnostics }) => ({ id, title, content, diagnostics })),
+    }),
+  };
+  return hashJson(identityInput);
+}
+
 const HARD_REFERENCE_CODES = new Set(['unresolved-template-part', 'unresolved-pattern', 'undeclared-preset']);
 
 interface CompiledDocument {
@@ -100,9 +134,9 @@ export async function compileThemeDocuments(
       && !options.attachmentBindings?.[use.assetId]),
     diagnostics,
     inventory,
-    artifactIdentity: hashJson({ sourceIdentity: source.sourceIdentity, sourceAssets: sourceAssetIdentity(source), targetBindingFingerprint, themeFiles: inventory,
-      syncedPatterns: syncedPatterns.map(({ id, title, content, pendingUses, pendingBindings, diagnostics }) => ({ id, title, content, pendingUses, pendingBindings, diagnostics })) }),
+    artifactIdentity: '',
   };
+  artifact.artifactIdentity = calculateSiteArtifactIdentity(source, artifact);
   return { ok: true, artifact, diagnostics };
 }
 
@@ -165,15 +199,9 @@ export async function compileSite(
     assets,
     diagnostics,
     inventory,
-    artifactIdentity: hashJson({
-      sourceIdentity: source.sourceIdentity,
-      sourceAssets: sourceAssetIdentity(source),
-      targetBindingFingerprint,
-      themeFiles: inventory,
-      pages: pages.map(({ id, route, title, parentId, template, content, status }) => ({ id, route, title, parentId, template, content, status })),
-      syncedPatterns: syncedPatterns.map(({ id, title, content, diagnostics }) => ({ id, title, content, diagnostics })),
-    }),
+    artifactIdentity: '',
   };
+  site.artifactIdentity = calculateSiteArtifactIdentity(source, site);
   return { ok: true, site, diagnostics };
 }
 
@@ -204,7 +232,43 @@ export async function compileSitePageDocuments(source: PreparedSiteSource, optio
 export async function compileSiteSyncedPatterns(source: PreparedSiteSource, options: CompileSiteOptions = {}, allowPendingBindings = true): Promise<CompiledSyncedPattern[]> {
   const prepared = validatePreparedSource(source);
   if (!prepared.ok) return [];
+  return compileSiteSyncedPatternsFromIntent(source, prepared.intent, options, allowPendingBindings);
+}
+
+/** Compile one current database-owned definition with the caller's current destination bindings. */
+export async function compileSiteSyncedPattern(
+  source: PreparedSiteSource,
+  patternId: string,
+  options: CompileSiteOptions = {},
+  allowPendingBindings = true,
+): Promise<CompileSiteSyncedPatternResult> {
+  const prepared = validatePreparedSource(source);
+  if (!prepared.ok) return { ok: false, diagnostics: prepared.diagnostics };
   const intent = prepared.intent;
+  const definition = intent.syncedPatterns?.definitions[patternId];
+  if (!definition) return { ok: false, diagnostics: [invalid(`synced-pattern:${patternId}`, 'unknown-pattern-id', `unknown synced pattern "${patternId}"`)] };
+
+  const selected: SiteIntent = {
+    ...intent,
+    syncedPatterns: {
+      version: 1,
+      definitions: { [patternId]: definition },
+      uses: intent.syncedPatterns!.uses.filter((use) => use.documentId === `synced-pattern:${patternId}`),
+    },
+  };
+  const patterns = await compileSiteSyncedPatternsFromIntent(source, selected, options, allowPendingBindings);
+  const pattern = patterns[0];
+  if (!pattern) return { ok: false, diagnostics: [invalid(`synced-pattern:${patternId}`, 'pattern-compilation-failed', 'synced pattern definition was not compiled')] };
+  if (!pattern.ok) return { ok: false, diagnostics: pattern.diagnostics };
+  return { ok: true, pattern };
+}
+
+function compileSiteSyncedPatternsFromIntent(
+  source: PreparedSiteSource,
+  intent: SiteIntent,
+  options: CompileSiteOptions,
+  allowPendingBindings: boolean,
+): Promise<CompiledSyncedPattern[]> {
   return compileSyncedPatterns(intent, options.patternBindings, (body, documentId) => {
     const result = bindDocument(body, documentId, intent, source, options, allowPendingBindings);
     return result.diagnostics;
@@ -500,6 +564,10 @@ function validatePreparedSource(source: PreparedSiteSource): { ok: true; intent:
   if (!intent) {
     return { ok: false, diagnostics: inputDiagnostics.map((entry) => ({ status: 'invalid', reason: entry.message, source: { path: entry.path }, code: entry.code })) };
   }
+  const expectedSourceIdentity = createHash('sha256').update(canonicalJson(intent)).digest('hex');
+  if (source.sourceIdentity !== expectedSourceIdentity) {
+    return { ok: false, diagnostics: [invalid('site', 'prepared-source-identity-mismatch', 'prepared source identity does not match its canonical site intent')] };
+  }
   if (!Array.isArray(source?.assets)) {
     return { ok: false, diagnostics: [invalid('site', 'prepared-asset-mismatch', 'prepared asset inventory is missing')] };
   }
@@ -509,7 +577,8 @@ function validatePreparedSource(source: PreparedSiteSource): { ok: true; intent:
   }
   for (const declaration of intent.assets) {
     const prepared = byId.get(declaration.id);
-    if (!prepared || prepared.sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(prepared.sha256)
+    if (!prepared || !(prepared.bytes instanceof Uint8Array) || prepared.bytes.byteLength === 0 || prepared.bytes.byteLength > 20 * 1024 * 1024
+      || prepared.sha256.length !== 64 || !/^[a-f0-9]{64}$/.test(prepared.sha256)
       || createHash('sha256').update(prepared.bytes).digest('hex') !== prepared.sha256
       || prepared.path !== declaration.path || prepared.role !== declaration.role || prepared.kind !== declaration.kind) {
       return { ok: false, diagnostics: [invalid('site', 'prepared-asset-mismatch', `prepared asset ${declaration.id} does not match the declared source asset`)] };
@@ -553,10 +622,6 @@ function usedBindings(
   const ids = [...new Set(intent.assetUses.filter((use) => !documentIds || documentIds.has(use.documentId))
     .map((use) => use.assetId).filter((id) => assetRole(intent, id) === 'attachment'))].sort();
   return Object.fromEntries(ids.map((id) => [id, structuredClone(bindings[id]!)]));
-}
-
-function sourceAssetIdentity(source: PreparedSiteSource): Array<{ id: string; path: string; sha256: string }> {
-  return source.assets.map(({ id, path, sha256 }) => ({ id, path, sha256 })).sort((left, right) => left.id.localeCompare(right.id));
 }
 
 function assetRole(intent: SiteIntent, id: string): SiteIntent['assets'][number]['role'] | undefined {
