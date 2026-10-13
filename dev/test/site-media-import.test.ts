@@ -68,7 +68,10 @@ async function fixture(retainOld = false) {
   const compiledPage = { id: 'home', route: '/', title: 'Home', template: 'index', status: 'draft' as const,
     content: '<!-- wp:paragraph --><p>Home</p><!-- /wp:paragraph -->', diagnostics: [] };
   const observed = snapshot();
-  if (retainOld) observed.entities.push(previousVersion());
+  if (retainOld) {
+    observed.entities.push(previousVersion());
+    observed.siteRecord!.entities[`attachment:hero@${'a'.repeat(64)}`]=8;
+  }
   const plan = reconcileSitePlan(source, theme, [compiledPage], observed);
   if (!plan.executable) throw new Error(JSON.stringify(plan.conflicts));
   const token = 'started-token';

@@ -8,6 +8,7 @@ import { hashCanonicalJson } from '../proof/receipt.js';
 import type { PreparedSiteSource, CompiledSitePage, SiteInputDiagnostic, ThemeArtifact, SiteAttachmentBinding } from './types.js';
 import type { SiteEntity, SitePlan, SitePlanOperation, SiteSnapshot } from './plan-types.js';
 import { attachmentVersionKey } from './media.js';
+import { siteRecordIndexesEntity } from './ownership.js';
 import type { CompiledSyncedPattern } from './patterns.js';
 
 export function managedStateHash(state: Record<string, unknown>): string { return hashCanonicalJson(state); }
@@ -90,6 +91,9 @@ export function reconcileSitePlan(source: PreparedSiteSource, theme: ThemeArtifa
     }
   }
 
+  for (const [key, entity] of owned) {
+    if (!siteRecordIndexesEntity(snapshot, intent.siteId, entity)) issue(`/target/entities/${entity.id}`, 'ownership-record-missing', `owned entity ${key} has no matching site-record ID`);
+  }
   for (const [key, id] of Object.entries(snapshot.siteRecord?.entities ?? {})) {
     const legacyMatch = /^attachment:([^@]+)$/.exec(key);
     const entity = owned.get(key) ?? (legacyMatch ? snapshot.entities.find(item => item.kind === 'attachment' && item.id === id

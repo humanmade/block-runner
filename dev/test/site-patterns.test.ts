@@ -136,6 +136,7 @@ describe('site synced pattern contract and compiler', () => {
     const state = { title: 'Card', content: compiled[0]!.content!, status: 'publish' };
     const entity: SiteEntity = { id: 642, kind: 'pattern', route: null, state, ownership: [{ version: 1, siteId: intent.siteId, entityId: 'card', kind: 'pattern', lastAppliedHash: managedStateHash(state) }] };
     const snapshot: SiteSnapshot = { target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 1 }, runtime: { wordpress: '7.1.0', php: '8.4.0' }, principal: { userId: 1, capabilities: { edit_pages: true, edit_others_pages: true, edit_posts: true, edit_others_posts: true, publish_posts: true, publish_blocks: true, edit_published_posts: true, manage_options: true, edit_theme_options: true, upload_files: true } }, theme: { slug: intent.theme.slug, assetBaseUrl: 'https://example.test/theme', inventory: [] }, routing: { permalinkStructure: '/%postname%/', rewriteRulesHash: 'rules', routes: [] }, entities: [entity], overrides: [], navigation: [], options: { show_on_front: 'page', page_on_front: 0 }, siteRecord: null };
+    snapshot.siteRecord={version:1,siteId:intent.siteId,entities:{'pattern:card':642},options:{},operation:null};
     const plan = reconcileSitePlan(source, theme, [], snapshot, {}, [], compiled, { card: 642 });
     expect(plan.executable).toBe(true);
     expect(plan.operations.find((operation) => operation.kind === 'pattern')).toMatchObject({ action: 'retain', id: 642, entityId: 'card' });

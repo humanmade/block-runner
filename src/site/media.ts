@@ -2,6 +2,7 @@ import type { IntentNode } from '../types.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import type { SiteSnapshot } from './plan-types.js';
 import type { SiteAttachmentBinding } from './types.js';
+import { siteRecordIndexesEntity } from './ownership.js';
 
 export interface ImageBindingResult {
   url: string;
@@ -43,12 +44,7 @@ export function verifiedOwnedAttachment(
         || (claim.assetSha256 === undefined && claim.lastAppliedHash === hashCanonicalJson(candidate.state) && candidate.state.sha256 === originalSha256)))
     .map(claim => ({ candidate, claim })));
   if (versionClaims.length !== 1 || versionClaims[0]!.candidate.id !== wpId) return false;
-  const record = snapshot.siteRecord;
-  if (!record || record.version !== 1 || record.siteId !== siteId) return false;
-  const versionId = record.entities[attachmentVersionKey(entityId, originalSha256)];
-  const legacyId = owner.assetSha256 === undefined ? record.entities[`attachment:${entityId}`] : undefined;
-  if (versionId !== undefined && legacyId !== undefined && versionId !== legacyId) return false;
-  return versionId === wpId || legacyId === wpId;
+  return siteRecordIndexesEntity(snapshot, siteId, entity);
 }
 
 /** Validate authored core/image settings that do not depend on destination metadata. */

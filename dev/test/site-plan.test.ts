@@ -59,8 +59,14 @@ describe('bounded site reconciliation',()=>{
     expect(plan(observed).conflicts.some(item=>item.code==='managed-state-changed')).toBe(true);
   });
   it('preserves ownership across desired title and route changes',()=>{
-    const observed=snapshot();observed.entities=[owned()];const input=source();input.sourceIntent.pages[0]!.title='New title';
+    const observed=snapshot();observed.entities=[owned()];observed.siteRecord={version:1,siteId:'sample',entities:{'page:home':14},options:{},operation:null};const input=source();input.sourceIntent.pages[0]!.title='New title';
     const result=plan(observed,input);expect(result.executable).toBe(true);expect(result.operations.find(op=>op.kind==='page')).toMatchObject({action:'update',id:14});
+  });
+  it('refuses ownership metadata without the matching site index instead of retaining or updating it',()=>{
+    const observed=snapshot();observed.entities=[owned()];
+    expect(plan(observed)).toMatchObject({executable:false,conflicts:expect.arrayContaining([expect.objectContaining({code:'ownership-record-missing'})])});
+    observed.siteRecord={version:1,siteId:'sample',entities:{'page:home':14},options:{},operation:null};expect(plan(observed).executable).toBe(true);
+    observed.siteRecord.entities['page:home']=15;expect(plan(observed).executable).toBe(false);
   });
   it('blocks duplicate keys, changed theme/runtime, insufficient capability and outstanding unknown operations',()=>{
     const observed=snapshot();const duplicate=owned();duplicate.id=15;observed.entities=[owned(),duplicate];observed.theme.slug='wrong';observed.runtime.wordpress='7.0';observed.principal.capabilities.manage_options=false;observed.siteRecord={version:1,siteId:'sample',entities:{},options:{},operation:{token:'x',planHash:'x',status:'outcome_unknown'}};
