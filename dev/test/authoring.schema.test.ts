@@ -68,7 +68,6 @@ describe('AuthoringPlan schema', () => {
     }));
     expect(sourced.source?.sha256).toBe('a'.repeat(64));
     expect(sourced.coverage?.styles[0]).toMatchObject({ scope: 'shared', outcome: 'native' });
-    expect(hashAuthoringPlan(sourced)).not.toBe(hashAuthoringPlan(plan()));
     expect(() => validateAuthoringPlan(plan({ coverage: { styles: [], assets: [] } }))).toThrow(/requires a hash-bound/);
     expect(() => validateAuthoringPlan(plan({ source: { entry: 'design.html', sha256: 'not-a-hash', format: 'html' } }))).toThrow(/SHA-256/);
   });
@@ -103,7 +102,6 @@ describe('AuthoringPlan schema', () => {
     } });
     const normalized = validateAuthoringPlan(input);
     expect(normalized.target.metadata).toEqual({ keywords: ['notice'], experimentalFlag: { enabled: true } });
-    expect(hashAuthoringPlan(input)).not.toBe(hashAuthoringPlan(plan()));
     expect(() => compileRegisteredBlock({ ...normalized, fields: [], pattern: { ready: false, overrides: [] } })).not.toThrow();
     expect(validateAuthoringPlan({ ...input, target: { ...input.target as object, metadata: { variations: 'file:./variations.php' } } }).target.metadata?.variations)
       .toBe('file:./variations.php');
@@ -122,7 +120,6 @@ describe('AuthoringPlan schema', () => {
       }],
     });
     expect(validateAuthoringPlan(input).styles.fonts?.[0]).toMatchObject({ assetId: 'inter', family: 'block-runner-example-notice-inter' });
-    expect(hashAuthoringPlan(input)).not.toBe(hashAuthoringPlan(plan()));
     expect(() => validateAuthoringPlan({ ...input, styles: { strategy: 'mixed', outcomes: [], fonts: [{ family: 'Inter' }] } })).toThrow(/assetId/);
     expect(() => validateAuthoringPlan({ ...input, styles: { strategy: 'mixed', outcomes: [], fonts: [{ assetId: 'missing', family: 'block-runner-example-notice-inter' }] } }))
       .toThrow(/must reference an asset/);

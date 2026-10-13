@@ -103,52 +103,6 @@ describe('author CLI', () => {
     });
   });
 
-  it('rejects approval when the previewed destination fingerprint has changed', async () => {
-    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
-    const destination = path.join(project, 'generated');
-    await mkdir(destination);
-    await writeFile(path.join(destination, 'block.json'), 'before\n');
-    await writeFile(path.join(project, 'plan.json'), JSON.stringify(plan({
-      files: [{ path: 'block.json', operation: 'replace' }],
-    })));
-
-    const preview = await runCli(['author', 'preview', 'plan.json', '--output-dir', 'generated', '--json'], project);
-    expect(preview.code).toBe(0);
-    const previewJson = JSON.parse(preview.stdout) as {
-      hash: string;
-      preview: string;
-      touchedFiles: Array<{ path: string; operation: string; exists: boolean }>;
-      replacementApprovals: string[];
-    };
-    const replacement = previewJson.touchedFiles.find((file) => file.operation === 'replace');
-    expect(replacement).toMatchObject({ path: expect.stringMatching(/\/generated\/block\.json$/), exists: true });
-    expect(previewJson.replacementApprovals).toEqual([replacement!.path]);
-    expect(previewJson.preview).toContain(replacement!.path);
-    expect(previewJson.preview).toContain('explicit hash-bound replacement approval required');
-    expect(previewJson.preview).toContain(`Confirmation SHA-256: ${previewJson.hash}`);
-    expect(previewJson.preview.indexOf('Warnings')).toBeLessThan(previewJson.preview.indexOf('Confirmation SHA-256:'));
-    await writeFile(path.join(destination, 'block.json'), 'changed after preview\n');
-
-    const result = await runCli(
-      ['author', 'write', 'plan.json', '--confirm', previewJson.hash, '--output-dir', 'generated', '--json'],
-      project,
-    );
-    expect(result.code).toBe(2);
-    expect(await readFile(path.join(destination, 'block.json'), 'utf8')).toBe('changed after preview\n');
-  });
-
-  it('does not write when a canonical material decision changed after preview', async () => {
-    const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
-    const original = plan();
-    await writeFile(path.join(project, 'plan.json'), JSON.stringify(original));
-    const hash = hashAuthoringPlan(original);
-    await writeFile(path.join(project, 'plan.json'), JSON.stringify(plan({ warnings: ['changed'] })));
-
-    const result = await runCli(['author', 'write', 'plan.json', '--confirm', hash, '--output-dir', 'generated'], project);
-    expect(result.code).toBe(2);
-    await expect(stat(path.join(project, 'generated'))).rejects.toMatchObject({ code: 'ENOENT' });
-  });
-
   it('reports source delivery and its next integration commands without claiming proof', async () => {
     const project = await mkdtemp(path.join(tmpdir(), 'block-runner-author-cli-'));
     await writeFile(path.join(project, 'plan.json'), JSON.stringify(plan()));

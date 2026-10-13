@@ -328,35 +328,6 @@ describe('registered-block authoring parity ledger', () => {
     expect(report.package?.files['edit.js']).toContain('"color"');
   });
 
-  it('uses an exact category-and-value target theme preset without editing its snapshot', async () => {
-    const settings = { color: { palette: [{ slug: 'brand', color: '#112233' }] } };
-    const report = await author('<style>.notice { color: #112233; }</style><p class="notice">Hello</p>', {
-      author: {
-        name: 'acme/notice',
-        styles: { mode: 'css', context: { theme: { slug: 'fixture', settings } } },
-      },
-    });
-
-    expect(report.ok).toBe(true);
-    expect(report.package?.canonicalPlan?.structure[0]?.attributes).toMatchObject({ textColor: 'brand' });
-    expect(report.package?.canonicalPlan?.coverage?.styleContext?.theme?.settingsSha256).toMatch(/^[a-f0-9]{64}$/);
-    expect(settings).toEqual({ color: { palette: [{ slug: 'brand', color: '#112233' }] } });
-  });
-
-  it('lifts only an exact target WordPress mobile interval onto its unique native child', async () => {
-    const report = await author(
-      '<style>.notice { color: red; } @media (width <= 480px) { .notice { color: blue; } }</style><p class="notice">Hello</p>',
-      { author: { name: 'acme/notice', styles: { mode: 'css', context: { theme: { settings: { viewport: { mobile: '480px', tablet: '782px' } } } } } } },
-    );
-
-    expect(report.ok).toBe(true);
-    expect(report.package?.canonicalPlan?.structure[0]?.attributes).toMatchObject({ style: { '@mobile': { color: { text: 'blue' } } } });
-    expect(report.package?.canonicalPlan?.coverage?.styles).toContainEqual(expect.objectContaining({
-      property: 'color', value: 'blue', outcome: 'native', responsive: 'mobile', node: 'source.0', atRules: ['@media (width <= 480px)'],
-    }));
-    expect(report.package?.files['style.scss']).not.toContain('@media (width <= 480px)');
-  });
-
   it('refuses to write a package after dropping a blocked selector or declaration', async () => {
     const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
     scratch.push(directory);
@@ -476,59 +447,34 @@ describe('registered-block authoring parity ledger', () => {
     await expect(readFile(path.join(outDir, 'block.json'), 'utf8')).rejects.toMatchObject({ code: 'ENOENT' });
   });
 
-  it('accounts for object data and SVG href asset forms', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
-    scratch.push(directory);
-    const design = path.join(directory, 'design.html');
-    const source = path.join(directory, 'photo.png');
-    await writeFile(design, '');
-    await writeFile(source, 'photo');
-
-    const report = await author(
-      '<object data="photo.png"></object><svg><image href="photo.png" /><use xlink:href="photo.png#symbol" /></svg>',
-      { sourcePath: design, outDir: path.join(directory, 'package'), author: { name: 'acme/assets' } },
-    );
-
-    expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png'))).toHaveLength(3);
-    expect(report.ok).toBe(false);
-    expect(report.package).toBeUndefined();
-    expect(report.assets?.filter((asset) => asset.reference.startsWith('photo.png')).every((asset) => asset.outcome === 'prepared')).toBe(true);
-  });
-
-  it('accounts for SVG presentation URLs, SVG href variants, and link href asset forms', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
-    scratch.push(directory);
-    const design = path.join(directory, 'design.html');
-    await writeFile(design, '');
-    await writeFile(path.join(directory, 'photo.png'), 'photo');
-
-    const report = await author(
-      '<link rel="icon" href="photo.png"><link rel="preload" as="image" href="photo.png"><link rel="manifest" href="photo.png"><link rel="stylesheet" href="photo.png"><svg><path fill="url(photo.png#paint)" filter="url(photo.png#filter)"/><mpath href="photo.png#motion"/><textPath href="photo.png#text">Text</textPath></svg>',
-      {
-        sourcePath: design,
-        outDir: path.join(directory, 'package'),
-        author: { name: 'acme/assets', styles: { mode: 'css', css: ' ' } },
+  it.each([
+    {
+      title: 'object data and SVG href asset forms',
+      file: 'photo.png',
+      html: '<object data="photo.png"></object><svg><image href="photo.png" /><use xlink:href="photo.png#symbol" /></svg>',
+      authorOptions: {},
+      check: (assets: NonNullable<Awaited<ReturnType<typeof author>>['assets']>) => {
+        const references = assets.filter((asset) => asset.reference.startsWith('photo.png'));
+        expect(references).toHaveLength(3);
+        expect(references.every((asset) => asset.outcome === 'prepared')).toBe(true);
       },
-    );
-
-    expect(report.ok).toBe(false);
-    expect(report.package).toBeUndefined();
-    const assetReferences = report.assets?.filter((asset) => asset.reference.startsWith('photo.png')) ?? [];
-    expect(assetReferences).toHaveLength(8);
-    expect(assetReferences.every((asset) => asset.outcome === 'prepared')).toBe(true);
-    expect(assetReferences.map((asset) => asset.kind)).toEqual(expect.arrayContaining(['image', 'stylesheet', 'other']));
-  });
-
-  it('accounts for SVG gradient, pattern, and animation href references without treating SVG links as navigation', async () => {
-    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
-    scratch.push(directory);
-    const design = path.join(directory, 'design.html');
-    const outDir = path.join(directory, 'package');
-    await writeFile(design, '');
-    await writeFile(path.join(directory, 'gradients.svg'), '<svg/>');
-
-    const report = await author(
-      `<a href="guide.pdf">Guide</a><svg>
+    },
+    {
+      title: 'SVG presentation URLs, SVG href variants, and link href asset forms',
+      file: 'photo.png',
+      html: '<link rel="icon" href="photo.png"><link rel="preload" as="image" href="photo.png"><link rel="manifest" href="photo.png"><link rel="stylesheet" href="photo.png"><svg><path fill="url(photo.png#paint)" filter="url(photo.png#filter)"/><mpath href="photo.png#motion"/><textPath href="photo.png#text">Text</textPath></svg>',
+      authorOptions: { styles: { mode: 'css' as const, css: ' ' } },
+      check: (assets: NonNullable<Awaited<ReturnType<typeof author>>['assets']>) => {
+        const references = assets.filter((asset) => asset.reference.startsWith('photo.png'));
+        expect(references).toHaveLength(8);
+        expect(references.every((asset) => asset.outcome === 'prepared')).toBe(true);
+        expect(references.map((asset) => asset.kind)).toEqual(expect.arrayContaining(['image', 'stylesheet', 'other']));
+      },
+    },
+    {
+      title: 'SVG gradient, pattern, and animation href references without treating SVG links as navigation',
+      file: 'gradients.svg',
+      html: `<a href="guide.pdf">Guide</a><svg>
         <linearGradient href="gradients.svg#linear" />
         <radialGradient href="https://cdn.example/gradients.svg#radial" />
         <pattern xlink:href="#pattern" />
@@ -538,20 +484,34 @@ describe('registered-block authoring parity ledger', () => {
         <set xlink:href="gradients.svg#set" />
         <discard href="gradients.svg#discard" />
       </svg>`,
-      { sourcePath: design, outDir, author: { name: 'acme/assets' } },
-    );
+      authorOptions: {},
+      check: (assets: NonNullable<Awaited<ReturnType<typeof author>>['assets']>) => {
+        expect(assets).toHaveLength(8);
+        expect(assets.filter((asset) => asset.reference.startsWith('gradients.svg')).every((asset) => asset.outcome === 'prepared')).toBe(true);
+        expect(assets).toContainEqual(expect.objectContaining({
+          reference: 'https://cdn.example/gradients.svg#radial',
+          outcome: 'external',
+        }));
+        expect(assets).toContainEqual(expect.objectContaining({ reference: '#pattern', outcome: 'external' }));
+        expect(assets.some((asset) => asset.reference === 'guide.pdf')).toBe(false);
+      },
+    },
+  ])('accounts for $title', async ({ file, html, authorOptions, check }) => {
+    const directory = await mkdtemp(path.join(tmpdir(), 'block-runner-author-'));
+    scratch.push(directory);
+    const design = path.join(directory, 'design.html');
+    await writeFile(design, '');
+    await writeFile(path.join(directory, file), 'asset');
+
+    const report = await author(html, {
+      sourcePath: design,
+      outDir: path.join(directory, 'package'),
+      author: { name: 'acme/assets', ...authorOptions },
+    });
 
     expect(report.ok).toBe(false);
     expect(report.package).toBeUndefined();
-    const assets = report.assets ?? [];
-    expect(assets).toHaveLength(8);
-    expect(assets.filter((asset) => asset.reference.startsWith('gradients.svg')).every((asset) => asset.outcome === 'prepared')).toBe(true);
-    expect(assets).toContainEqual(expect.objectContaining({
-      reference: 'https://cdn.example/gradients.svg#radial',
-      outcome: 'external',
-    }));
-    expect(assets).toContainEqual(expect.objectContaining({ reference: '#pattern', outcome: 'external' }));
-    expect(assets.some((asset) => asset.reference === 'guide.pdf')).toBe(false);
+    check(report.assets ?? []);
   });
 
   it('blocks an unrecognized SVG href form instead of silently leaving it source-relative', async () => {

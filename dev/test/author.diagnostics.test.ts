@@ -9,22 +9,6 @@ function sourceRef(html: string, tag: string): string {
 }
 
 describe('author diagnostics', () => {
-  it('locates stale proposal references without treating their old hash as a current binding', async () => {
-    const html = '<p>Hello</p>';
-    const report = await author(html, {
-      sourcePath: '/tmp/block-runner-diagnostic/stale.html',
-      author: { name: 'example/diagnostic-stale' },
-      proposal: { structure: [{ id: 'copy', block: 'core/paragraph', sourceRef: `${'0'.repeat(64)}:0-12` }] },
-    });
-    const item = report.items[0]!;
-    expect(report.ok).toBe(false);
-    expect(item).toMatchObject({ code: 'stale-proposal-source-ref', source: { path: '/tmp/block-runner-diagnostic/stale.html' } });
-    expect(item.source).not.toHaveProperty('offset');
-    expect(item.reason).not.toMatch(/offset|stale\.html:/i);
-    expect(item.details).toMatchObject({ sourceRef: `${'0'.repeat(64)}:0-12`, node: 'copy', action: 'refresh-source-analysis', referenceVerified: false });
-    expect(JSON.parse(JSON.stringify(report)).items[0].reason).toMatch(/stale, missing, or belongs to another source/i);
-  });
-
   it('reports deterministic coverage differences and resolves them when the canonical plan is restored', async () => {
     const html = '<p class="notice">Hello</p>';
     const options = { author: { name: 'example/diagnostic-coverage', styles: { mode: 'css' as const, css: '.notice { color: red; }' } } };

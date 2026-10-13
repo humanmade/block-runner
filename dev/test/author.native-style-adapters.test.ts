@@ -230,23 +230,6 @@ describe('native source-style adapters', () => {
     expect(() => compileRegisteredBlock(forged)).toThrow(/without overriding generated image CSS/);
   });
 
-  it('locates an unsupported relationship on its matched unwrapped anchor, not the first binding', async () => {
-    const html = '<div>                <a class="move" href="/go">Go</a></div>';
-    const report = await author(html, {
-      sourcePath: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html',
-      author: { name: 'example/unwrapped-button', styles: { mode: 'css', css: 'div .move:hover { color: red; }' } },
-      proposal: { structure: [{ id: 'section', block: 'core/group', sourceRef: refs(html)('div') }, { id: 'button', block: 'core/button', sourceRef: refs(html)('a') }] },
-    });
-    const item = report.items.find((candidate) => candidate.code === 'invalid-proposal-relationship')!;
-    expect(report.package).toBeUndefined();
-    expect(item.source).toMatchObject({ path: '/Users/warden/Library/Application Support/Block Runner/previews/2026-09-05/export/long-project/preview.html', offset: 21, htmlLine: 1, htmlColumn: 22 });
-    expect(item.details).toMatchObject({
-      sourceRef: refs(html)('a'), node: 'button', selectedParent: null,
-      requiredRelationship: { parentBlock: 'core/buttons', relationship: 'direct-child' },
-      action: 'place-core-button-under-core-buttons', stage: 'final-proposal',
-    });
-  });
-
   it('retains every matched unwrapped anchor for an unsupported relationship', async () => {
     const html = '<div>                <a class="move" href="/go">Go</a>  <a class="move" href="/next">Next</a></div>';
     const report = await author(html, {

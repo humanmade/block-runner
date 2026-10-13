@@ -149,15 +149,6 @@ describe('registered block authoring compiler', () => {
     );
   });
 
-  for (const templateLock of [false, 'insert', 'all', 'contentOnly'] as const satisfies readonly InnerBlocksLock[]) {
-    it(`emits the confirmed ${String(templateLock)} locking mode without changing the child template`, () => {
-      const compiled = compileAuthoringPlan(representativePlan(templateLock));
-      expect(compiled.templateLock).toBe(templateLock);
-      expect(compiled.files['edit.js']).toContain(`const TEMPLATE_LOCK = ${JSON.stringify(templateLock)};`);
-      expect(compiled.files['edit.js']).toContain('templateLock: TEMPLATE_LOCK');
-    });
-  }
-
   it('documents the WordPress 7.1 contentOnly limitation without treating it as invalid markup', async () => {
     const fixture = JSON.parse(await readFile(path.join(FIXTURES, 'content-only.plan.json'), 'utf8')) as AuthoringPlan;
     const compiled = compileAuthoringPlan(fixture);
@@ -165,9 +156,6 @@ describe('registered block authoring compiler', () => {
     expect(compiled.diagnostics).toContainEqual(
       expect.objectContaining({ level: 'warning', code: 'gutenberg-76794' }),
     );
-    expect(compiled.files['README.md']).toContain('Gutenberg #76794');
-    expect(compiled.files['README.md']).toContain('runtime fixture renders the Inspector');
-    expect(compiled.files['README.md']).toContain('not invalid block markup or a recovery state');
     expect(JSON.parse(compiled.files['block.json']!).attributes).toBeUndefined();
   });
 

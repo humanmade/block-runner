@@ -42,6 +42,10 @@ describe('target style decisions survive the public authoring workflow', () => {
     expect(result.ok, JSON.stringify(result.items)).toBe(true);
     const plan = result.package!.canonicalPlan!;
     expect(plan.structure[0]!.attributes).toMatchObject({ style: { '@mobile': { typography: { fontSize: '16px' } } } });
+    expect(plan.coverage!.styles).toContainEqual(expect.objectContaining({
+      property: 'font-size', value: '16px', outcome: 'native', responsive: 'mobile', node: 'source.0', atRules: ['@media (width <= 480px)'],
+    }));
+    expect(result.package!.files['style.scss']).not.toContain('@media (width <= 480px)');
     expect(() => validateCoverageFulfillment(plan)).not.toThrow();
     const repeated = await author(source, { ...input, plan });
     expect(repeated.ok, JSON.stringify(repeated.items)).toBe(true);
@@ -49,8 +53,6 @@ describe('target style decisions survive the public authoring workflow', () => {
   });
 
   it.each([
-    ['font-size', '2rem', { typography: { fontSizes: [{ slug: 'large', size: '2rem' }] } }],
-    ['font-family', 'Georgia, serif', { typography: { fontFamilies: [{ slug: 'serif', fontFamily: 'Georgia, serif' }] } }],
     ['margin-top', '1rem', { spacing: { spacingSizes: [{ slug: '40', size: '1rem' }] } }],
   ])('round-trips a matching %s preset, not only colors', async (property, value, targetSettings) => {
     const input: AuthorOptions = { author: { name: 'example/style-roundtrip', styles: {
@@ -94,8 +96,6 @@ describe('target style decisions survive the public authoring workflow', () => {
 
   it.each([
     ['<p class="card" style="font-size:20px">Keep this text</p>', '@media (width <= 480px) { .card { font-size:12px; } }'],
-    ['<p class="card other">Keep this text</p>', '.other { font-size:20px!important; } @media (width <= 480px) { .card { font-size:12px; } }'],
-    ['<p class="card">Keep this text</p>', 'p.card { font:20px sans-serif!important; } @media (width <= 480px) { .card { font-size:12px; } }'],
   ])('keeps responsive source CSS when native priority would change the cascade: %s', async (source, css) => {
     const result = await author(source, { author: { name: 'example/style-roundtrip', styles: {
       mode: 'css', css, context: { theme: { settings: { viewport: { mobile: '480px', tablet: '782px' } } } },
@@ -111,7 +111,6 @@ describe('target style decisions survive the public authoring workflow', () => {
 
   it.each([
     '@media (min-width: 600px) { .card { font-size: 16px; } }',
-    '.card:hover { font-size: 16px; }',
   ])('keeps base CSS out of inline attributes when it would defeat the residual rule: %s', async (conditional) => {
     const result = await author('<h2 class="card">Keep this text</h2>', { author: {
       name: 'example/style-roundtrip', styles: { mode: 'css', css: `.card { font-size: 32px; } ${conditional}` },

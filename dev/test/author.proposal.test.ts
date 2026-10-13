@@ -95,9 +95,10 @@ describe('author proposal boundary', () => {
     expect(reason).toContain('proposal sourceRef');
     expect(reason).toMatch(/stale|another source/i);
     expect(reason).not.toContain('(offset 12)');
-    expect(report.items[0]).toMatchObject({ code: 'stale-proposal-source-ref', source: { path: '/design/multiline.html' }, details: { sourceRef: foreignRef, referenceVerified: false } });
+    expect(report.items[0]).toMatchObject({ code: 'stale-proposal-source-ref', source: { path: '/design/multiline.html' }, details: { sourceRef: foreignRef, node: 'copy', action: 'refresh-source-analysis', referenceVerified: false } });
     expect(report.items[0]!.source).not.toHaveProperty('offset');
     expect(report.items[0]!.source).not.toHaveProperty('htmlLine');
+    expect(JSON.parse(JSON.stringify(report)).items[0].reason).toMatch(/stale, missing, or belongs to another source/i);
   });
 
   it('locates a source-decision stale reference from a foreign source hash', async () => {
