@@ -38,7 +38,7 @@ function wp_update_post($v,$errors){global $p,$writes;$writes++;if($p->post_stat
 function update_post_meta($id,$k,$v){global $meta,$flags;if(isset($flags['ownershipCrash'])&&$k==='_block_runner_site')throw new Exception('crash');$meta[$id][$k]=$k==='_block_runner_site'?array($v):$v;return true;}
 function add_post_meta($id,$k,$v,$unique){global $meta,$flags;if(isset($flags['ownershipCrash']))throw new Exception('crash');$meta[$id][$k]=array($v);return true;}
 `;
-  const {stdout}=await run('php',['-r',stub+args.at(-1)!+'\necho "\\n" . json_encode(array("writes"=>$writes,"options"=>$options,"meta"=>$meta,"post"=>$p,"clock"=>$d['clock']));'],{encoding:'utf8'});const lines=stdout.split('\n');output=lines[1]!;return lines[0]!;
+  const {stdout}=await run('php',['-r',stub+args.at(-1)!+'\necho "\\n" . json_encode(array("writes"=>$writes,"options"=>$options,"meta"=>$meta,"post"=>$p,"clock"=>$d["clock"]));'],{encoding:'utf8'});const lines=stdout.split('\n');output=lines[1]!;return lines[0]!;
  });
  return {response,evidence:JSON.parse(output) as {writes:number;options:Record<string,unknown>;meta:Record<string,unknown>;post:Record<string,unknown>;clock:string},argsSeen};
 }
