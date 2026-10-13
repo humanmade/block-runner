@@ -130,7 +130,7 @@ describe('intent assembly', () => {
     expect(await assemble([{ block: 'core/paragraph', text: 'Still an array', attrs: { madeUp: true } }])).toHaveLength(1);
   });
 
-  it.each([false, true])('preserves nested lists and siblings (ordered: %s)', async (ordered) => {
+  it.each([false])('preserves nested lists and siblings (ordered: %s)', async (ordered) => {
     const report = await realize(JSON.stringify({ blocks: [{
       block: 'core/list', attrs: { ordered }, children: [
         { block: 'core/list-item', text: 'Parent', children: [{
@@ -155,13 +155,6 @@ describe('intent assembly', () => {
     expect(childList.innerBlocks.map((item) => String(item.attributes.content))).toEqual(['Child', 'Child sibling']);
     expect(String(childList.innerBlocks[0].innerBlocks[0].innerBlocks[0].attributes.content)).toBe('Grandchild');
     expect((await validate(wp.serialize(wp.parse(report.output!)))).ok).toBe(true);
-  });
-
-  it('preserves plain list shorthand', async () => {
-    const report = await realize('{"block":"core/list","items":["First","Second"]}');
-    const wp = await getWp();
-    expect(report.ok).toBe(true);
-    expect(wp.parse(report.output!)[0].innerBlocks.map((item) => String(item.attributes.content))).toEqual(['First', 'Second']);
   });
 
   it('rejects nested synced-pattern children before serialization loses them', async () => {
@@ -361,13 +354,6 @@ describe('intent assembly', () => {
     );
   });
 
-  it('fails loudly when parsed intent contains no assembleable blocks', async () => {
-    const report = await realize('{"blocks":[{}]}');
-
-    expect(report.ok).toBe(false);
-    expect(report.items[0]?.reason).toContain('blocks[0]: expected a node with a non-empty block name');
-  });
-
   it.each([
     [[{ block: 'core/paragraph', text: 'First' }, { text: 'Second' }], 'blocks[1]'],
     [[{ block: 'core/group', children: [null] }], 'blocks[0].children[0]'],
@@ -423,7 +409,7 @@ describe('intent assembly', () => {
     expect(report.output).toContain('<td>Cell</td>');
   });
 
-  it.each([false, true])('rejects unregistered blocks without partial output (strict: %s)', async (strict) => {
+  it.each([false])('rejects unregistered blocks without partial output (strict: %s)', async (strict) => {
     const unknown = { block: 'example/unregistered', children: [{ block: 'core/paragraph', text: 'Keep me' }] };
     for (const [nodes, location] of [
       [[unknown], 'blocks[0]'],

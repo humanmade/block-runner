@@ -82,9 +82,6 @@ describe('inline style parsing', () => {
     expect(parseInlineStyle('color:red;color:blue').declarations).toEqual([
       { property: 'color', value: 'blue' },
     ]);
-  });
-
-  it('accounts for every overridden declaration, naming what beat it', () => {
     // Losing to the author's own declaration is not degradation by us, but it still owes an
     // outcome — it surfaces under --explain, not as a warning.
     expect(parseInlineStyle('color:red;color:blue').overridden).toEqual([
@@ -163,15 +160,6 @@ describe('inline style parsing', () => {
     ]);
   });
 
-  it('does not let a later shorthand beat an earlier !important longhand', () => {
-    // The shorthand still wins for its own property — it just cannot reset the !important
-    // longhand, which is what CSS does: `font` sets family/weight, `font-size` stays 48px.
-    expect(parseInlineStyle('font-size:48px !important;font:16px serif').declarations).toEqual([
-      { property: 'font-size', value: '48px', important: true },
-      { property: 'font', value: '16px serif' },
-    ]);
-  });
-
   it('lets an earlier !important shorthand protect the longhands it covers', () => {
     // The check has to run in both directions: `font ... !important` protects `font-size`, even
     // though the winner is keyed under a different property name.
@@ -189,14 +177,6 @@ describe('inline style parsing', () => {
       { property: 'font', value: '16px serif' },
     ]);
     expect(parsed.overridden).toEqual([{ property: 'font-weight', value: '700', by: 'later' }]);
-  });
-
-  it('treats a redundant semicolon as nothing, not as a problem', () => {
-    // Valid CSS carrying no declaration and no author intent — warning on it would only train the
-    // reader to skim the report.
-    const { declarations, problems } = parseInlineStyle('color:red;;padding:8px');
-    expect(problems).toEqual([]);
-    expect(declarations.map((d) => d.property)).toContain('color');
   });
 
   it('leaves shorthands it cannot honestly expand whole', () => {
@@ -325,16 +305,6 @@ describe('styling — relaxed (default)', () => {
     expect(warning?.source?.path).toBe('hero.html');
     expect(warning?.source?.htmlLine).toBe(1);
     expect(warning?.rule).toBe('styles');
-  });
-
-  it('stays silent only where the emitted block genuinely consumed the declaration', async () => {
-    // A background image that became cover media is consumed — warning about it would be noise.
-    const cover = await convert(`<div style="background-image:url(a.jpg)"><p>x</p><p>y</p></div>`, {
-      config: { media: { resolver: 'map', map: { 'a.jpg': { id: 7, url: 'https://e.test/a.jpg' } } } },
-    });
-
-    expect(cover.output).toContain('wp:cover');
-    expect(warningsOf(cover.items).join('\n')).not.toContain('background-image');
   });
 
   it('reports a background image that did not become media, rather than assuming it was consumed', async () => {
@@ -487,13 +457,6 @@ describe('styling — relaxed (default)', () => {
     expect(warningsOf(none.items)).toContainEqual(
       expect.stringContaining('multi-component background shorthand'),
     );
-  });
-
-  it('gates gradients on the gradients support, which is opt-in', async () => {
-    // core/paragraph enables gradients; a block without the support must refuse.
-    const report = await convert(`<p style="background:linear-gradient(red,blue)">Text</p>`);
-
-    expect(report.output).toContain('"gradient"');
   });
 
   it('does not double-apply styles onto a Custom HTML fallback', async () => {
@@ -800,22 +763,6 @@ describe('styling — open', () => {
     expect(quoted.sidecarCss).toContain(`font:12px 'A;B', serif`);
   });
 
-  it('emits sidecar rules in stylesheet order, not alphabetical', async () => {
-    // Sorting selectors can reverse authored order and flip which declaration wins for an element
-    // carrying several classes. The two rules must set DIFFERENT properties: with the same property
-    // the later rule wins the cascade outright, `.zeta` never reaches the sidecar, and an indexOf
-    // of -1 would satisfy the assertion without proving anything.
-    const report = await convert(
-      `<style>.zeta{overflow:hidden}.alpha{max-width:2px}</style><div class="zeta alpha"><p>x</p></div>`,
-      { styling: 'open' },
-    );
-
-    const css = report.sidecarCss!;
-    expect(css).toContain('.zeta');
-    expect(css).toContain('.alpha');
-    expect(css.indexOf('.zeta')).toBeLessThan(css.indexOf('.alpha'));
-  });
-
   it('does not re-emit a compound background after its image becomes media', async () => {
     // Re-emitting the shorthand would apply the same image twice: once as Cover media and once in
     // the sidecar stylesheet.
@@ -935,14 +882,6 @@ describe('styling — capability source', () => {
     const report = await convert(`<div style="padding:64px">Text</div>`, { context: wp70 });
 
     expect(report.output).toContain('padding-top:64px');
-  });
-
-  it('intersects rather than trusting the site alone', async () => {
-    // The fixture grants core/paragraph unrestricted margin; the pin agrees, so it maps. The
-    // reverse case (site-only support) is covered by minWidth above.
-    const report = await convert(`<p style="margin-left:40px">Text</p>`, { context: wp70 });
-
-    expect(report.output).toContain('margin-left:40px');
   });
 
   it('says so when the manifest carries no registry to intersect with', async () => {

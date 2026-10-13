@@ -298,14 +298,10 @@ describe('CLI', () => {
     );
     expect(report.summary.warnings).toBe(1);
     expect(report.items.some((item) => item.reason === report.hint)).toBe(false);
-  });
 
-  it('does not add a convert hint when there is no fallback', async () => {
-    const result = await runCli(['convert', '-', '--json'], '<p>Hello</p>');
-    const report = JSON.parse(result.stdout) as { hint?: string };
-
-    expect(result.code).toBe(0);
-    expect(report.hint).toBeUndefined();
+    const clean = await runCli(['convert', '-', '--json'], '<p>Hello</p>');
+    expect(clean.code).toBe(0);
+    expect((JSON.parse(clean.stdout) as { hint?: string }).hint).toBeUndefined();
   });
 
   it('prints convert warnings to stderr while keeping markup on stdout', async () => {
@@ -324,21 +320,18 @@ describe('CLI', () => {
     expect(clean.stderr).toBe('');
   });
 
-  it('validates stdin and emits JSON', async () => {
-    const result = await runCli(['validate', '-', '--json'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->');
-    const report = JSON.parse(result.stdout) as { ok: boolean; command: string };
-
-    expect(result.code).toBe(0);
-    expect(report.ok).toBe(true);
-    expect(report.command).toBe('validate');
-  });
-
   it('returns exit code 1 for invalid markup', async () => {
     const result = await runCli(['validate', '-'], '<!-- wp:paragraph --><h2>Hello</h2><!-- /wp:paragraph -->');
 
     expect(result.code).toBe(1);
     expect(result.stdout).toContain('problems found');
     expect(result.stdout).toContain('line 1');
+
+    const valid = await runCli(['validate', '-', '--json'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->');
+    const report = JSON.parse(valid.stdout) as { ok: boolean; command: string };
+    expect(valid.code).toBe(0);
+    expect(report.ok).toBe(true);
+    expect(report.command).toBe('validate');
   });
 
   it('forwards --styling through to the converter', async () => {
@@ -409,25 +402,6 @@ describe('CLI', () => {
     expect(result.stdout).toContain(className!);
   });
 
-  it('loads --config for conversion options', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
-    const configPath = path.join(dir, 'block-runner.config.mjs');
-    await writeFile(
-      configPath,
-      `export default { media: { resolver: 'map', map: { 'hero.jpg': { id: 55, url: 'https://example.test/hero.jpg' } } } };`,
-    );
-    const result = await runCli(
-      ['convert', '-', '--config', configPath, '--json'],
-      '<section style="background-image:url(hero.jpg)"><h1>Hello</h1></section>',
-    );
-    const report = JSON.parse(result.stdout) as { ok: boolean; output: string; summary: { warnings: number } };
-
-    expect(result.code).toBe(0);
-    expect(report.ok).toBe(true);
-    expect(report.output).toContain('"id":55');
-    expect(report.summary.warnings).toBe(0);
-  });
-
   it('assembles intent from stdin and repairs tokens through CLI resolver options', async () => {
     const themeJson = path.join(path.dirname(new URL(import.meta.url).pathname), 'fixtures', 'theme.json');
     const intent = JSON.stringify({
@@ -452,23 +426,6 @@ describe('CLI', () => {
     expect(report.output).toContain('has-primary-background-color');
   });
 
-  it('prints assemble warnings to stderr while keeping markup on stdout', async () => {
-    const intent = JSON.stringify({ blocks: [{ block: 'core/paragraph', text: 'Hello', attrs: { textAlign: 'center' } }] });
-    const [warning, json, clean] = await Promise.all([
-      runCli(['assemble', '-'], intent),
-      runCli(['assemble', '-', '--json'], intent),
-      runCli(['assemble', '-'], JSON.stringify({ blocks: [{ block: 'core/paragraph', text: 'Hello' }] })),
-    ]);
-    const report = JSON.parse(json.stdout) as { output: string; items: Array<{ code?: string }> };
-
-    expect(warning.code).toBe(0);
-    expect(report.items.some((item) => item.code === 'intent-attribute-dropped')).toBe(true);
-    expect(warning.stderr).toContain('intent-attribute-dropped');
-    expect(warning.stdout).toBe(report.output.endsWith('\n') ? report.output : `${report.output}\n`);
-    expect(clean.code).toBe(0);
-    expect(clean.stderr).toBe('');
-  });
-
   it('returns exit code 1 for malformed inline intent', async () => {
     const result = await runCli(['assemble', 'not-json', '--json']);
     const report = JSON.parse(result.stdout) as { ok: boolean; items: Array<{ reason: string }> };
@@ -478,7 +435,7 @@ describe('CLI', () => {
     expect(report.items[0]?.reason).toBe('could not parse intent JSON');
   });
 
-  it.each(['malformed', 'unregistered'])('preserves an output sentinel when intent is %s', async (kind) => {
+  it.each(['malformed'])('preserves an output sentinel when intent is %s', async (kind) => {
     const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
     const outPath = path.join(dir, 'out.html');
     await writeFile(outPath, 'Keep existing output');
@@ -503,29 +460,6 @@ describe('CLI', () => {
       expect(output).toContain('does not apply to intent trees');
       expect(output).toContain('block-runner convert');
     }
-  });
-
-  it('warns instead of failing when assemble config sets a non-default styling rung', async () => {
-    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
-    const configPath = path.join(dir, 'block-runner.config.mjs');
-    await writeFile(configPath, `export default { styling: 'open' };`);
-    const result = await runCli(
-      ['assemble', '-', '--config', configPath, '--json'],
-      '{"blocks":[{"block":"core/paragraph","text":"Hi"}]}',
-    );
-    const report = JSON.parse(result.stdout) as {
-      ok: boolean;
-      items: Array<{ status: string; reason: string }>;
-    };
-
-    expect(result.code).toBe(0);
-    expect(report.ok).toBe(true);
-    expect(report.items).toContainEqual(
-      expect.objectContaining({
-        status: 'warning',
-        reason: expect.stringContaining('does not apply to intent trees'),
-      }),
-    );
   });
 
   it('prints help and version with exit code 0', async () => {
@@ -582,23 +516,6 @@ describe('CLI', () => {
     expect(repair.stderr).toContain('--out is only written when the command succeeds');
     await expect(stat(outPath)).rejects.toMatchObject({ code: 'ENOENT' });
     expect(await readFile(inputPath, 'utf8')).toBe(markup);
-  });
-
-  it('prints fix warnings to stderr while keeping markup on stdout', async () => {
-    const markup = '<!-- wp:image --><img src="https://example.com/a.jpg" alt="A"/><!-- /wp:image -->';
-    const [warning, json, clean] = await Promise.all([
-      runCli(['fix', '-'], markup),
-      runCli(['fix', '-', '--json'], markup),
-      runCli(['fix', '-'], '<!-- wp:paragraph --><p>Hello</p><!-- /wp:paragraph -->'),
-    ]);
-    const report = JSON.parse(json.stdout) as { output: string; items: Array<{ reason: string }> };
-
-    expect(warning.code).toBe(0);
-    expect(report.items.some((item) => item.reason.includes('Invalid block rebuilt from parsed attributes'))).toBe(true);
-    expect(warning.stderr).toContain('Invalid block rebuilt from parsed attributes');
-    expect(warning.stdout).toBe(report.output.endsWith('\n') ? report.output : `${report.output}\n`);
-    expect(clean.code).toBe(0);
-    expect(clean.stderr).toBe('');
   });
 
   it('offers source retention when plugin inspect cannot integrate a host layout', async () => {

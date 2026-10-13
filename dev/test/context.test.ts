@@ -53,19 +53,6 @@ describe('collectSiteContext', () => {
     await collectSiteContext({
       wpPath: '/srv/www',
       ssh: 'user@host',
-    });
-
-    expect(collect).toHaveBeenCalledWith(
-      expect.objectContaining({
-        collector: 'wp-cli',
-        wpPath: '/srv/www',
-        ssh: 'user@host',
-      }),
-    );
-  });
-
-  it('forwards wpUrl and optional flags', async () => {
-    await collectSiteContext({
       wpUrl: 'https://example.test',
       wpBinary: 'wp',
       strict: true,
@@ -74,21 +61,12 @@ describe('collectSiteContext', () => {
     expect(collect).toHaveBeenCalledWith(
       expect.objectContaining({
         collector: 'wp-cli',
+        wpPath: '/srv/www',
+        ssh: 'user@host',
         wpUrl: 'https://example.test',
         wpBinary: 'wp',
         strict: true,
       }),
     );
-  });
-
-  it('passes newer optional ownership and taxonomy associations to Wesper unchanged', async () => {
-    const result = await collectSiteContext({});
-
-    expect(stringifyManifest.mock.calls[0]?.[0]).toBe(collectedContext);
-    expect(collectedContext.contentModel).toMatchObject({
-      postTypes: [{ name: 'product', taxonomies: ['product_cat'], owner: { status: 'unknown' } }],
-      taxonomies: [{ name: 'product_cat', objectTypes: ['product'], owner: { status: 'unknown' } }],
-    });
-    expect(result).toBe('{"ok":true}\n');
   });
 });

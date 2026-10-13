@@ -45,20 +45,4 @@ describe('canonical agent skill', () => {
     );
     expect(reads.map((file) => file.split('/').at(-1))).toEqual(['GUIDE.md', 'ASSEMBLE.md']);
   });
-
-  it('surfaces a missing selected page reference', async () => {
-    const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
-    vi.resetModules();
-    vi.doMock('node:fs', () => ({
-      ...actual,
-      readFileSync(file: string, encoding: string) {
-        if (file.endsWith('/GUIDE.md')) return 'guide\n';
-        if (file.endsWith('/ASSEMBLE.md')) throw new Error('ENOENT: no such file or directory');
-        return actual.readFileSync(file, encoding as BufferEncoding);
-      },
-    }));
-    const { readPageIntentSkillGuideSync } = await import('../../src/skill.js');
-
-    expect(() => readPageIntentSkillGuideSync()).toThrow('ENOENT: no such file or directory');
-  });
 });

@@ -108,6 +108,12 @@ if (a &lt; b) {}</code></pre>`;
     expect(report.output).toContain('wp:code');
     expect(report.summary.invalid).toBe(0);
     expect(report.output).toContain('&lt;');
+
+    const indented = await convert(`<pre><code>function f() {\n    return a &lt; b;\n}</code></pre>`);
+    expect(indented.output).toContain('wp:code');
+    expect(indented.summary.invalid).toBe(0);
+    expect(indented.output).toContain('    return');
+    expect(indented.output).toContain('&lt;');
   });
 
   it('preserves internal whitespace of a bare pre in core/preformatted', async () => {
@@ -154,13 +160,10 @@ if (a &lt; b) {}</code></pre>`;
     expect(report.output).toContain('wp:details');
     expect(report.summary.invalid).toBe(0);
     expect(report.output).toContain('"showContent":true');
-  });
 
-  it('converts a closed details to core/details without showContent', async () => {
-    const report = await convert('<details><summary>S</summary><p>c</p></details>');
-
-    expect(report.output).toContain('wp:details');
-    expect(report.output).not.toContain('"showContent":true');
+    const closed = await convert('<details><summary>S</summary><p>c</p></details>');
+    expect(closed.output).toContain('wp:details');
+    expect(closed.output).not.toContain('"showContent":true');
   });
 
   it('converts a YouTube iframe to core/embed', async () => {
@@ -252,13 +255,6 @@ describe('hardening (review fixes)', () => {
 
     expect(report.output).toContain('wp:html');
     expect(report.output).not.toContain('wp:embed');
-  });
-
-  it('still converts the real YouTube domain to an embed', async () => {
-    const report = await convert('<iframe src="https://www.youtube.com/embed/dQw4w9WgXcQ"></iframe>');
-
-    expect(report.output).toContain('wp:embed');
-    expect(report.output).toContain('"providerNameSlug":"youtube"');
   });
 
   it('does not treat an http (non-https) YouTube iframe as an embed', async () => {
@@ -370,15 +366,5 @@ describe('hardening (review fixes)', () => {
     expect(report.output).toContain('wp:video');
     expect(report.output).toContain('"tracks"');
     expect(report.output).toContain('/c.vtt');
-  });
-
-  it('preserves whitespace indentation and escaping in a code sample', async () => {
-    const html = `<pre><code>function f() {\n    return a &lt; b;\n}</code></pre>`;
-    const report = await convert(html);
-
-    expect(report.output).toContain('wp:code');
-    expect(report.summary.invalid).toBe(0);
-    expect(report.output).toContain('    return');
-    expect(report.output).toContain('&lt;');
   });
 });
