@@ -61,7 +61,17 @@ function runWithInput(executable: string, args: string[], input: string): Promis
 }
 
 function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string {
-  const encoded = Buffer.from(JSON.stringify({ ...boundary, request, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
+  // The executor keeps complete transition evidence. PHP needs only this mutation's baseline.
+  const payloadRequest = request.action === 'mutate' ? {
+    ...request,
+    before: {
+      entities: request.operation.id ? request.before.entities.filter(entity => entity.id === request.operation.id) : [],
+      options: request.operation.kind === 'option'
+        ? { [request.operation.entityId]: request.before.options[request.operation.entityId] }
+        : {},
+    },
+  } : request;
+  const encoded = Buffer.from(JSON.stringify({ ...boundary, request: payloadRequest, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
   return `
 $e=json_decode(base64_decode('${encoded}'),true); $r=$e['request']; $attempted=false;
 $same=function($a,$b) use (&$same) { if (is_array($a) && is_array($b)) { if(count($a)!==count($b)) return false; foreach($a as $k=>$v) if(!array_key_exists($k,$b)||!$same($v,$b[$k])) return false; return true; } return $a===$b; };

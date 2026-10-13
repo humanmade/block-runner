@@ -47,6 +47,19 @@ describe('fixed PHP mutation boundary executed with bounded WordPress stubs',()=
  });
  it('rejects a forged unowned update at the fixed PHP boundary with zero mutations',async()=>{const unowned=structuredClone(before);unowned.entities[0]!.ownership=[];const r=await execute({action:'mutate',step,operation:{kind:'page',entityId:'home',action:'update',id:22,desired:{...state,title:'Forged'}},before:unowned,stateHash:managedStateHash({...state,title:'Forged'})});expect(r.response.status).toBe('refused');expect(r.evidence.writes).toBe(0);});
  it('writes exact managed fields and ownership without shell evaluation',async()=>{const r=await execute({action:'mutate',step,operation:{kind:'page',entityId:'home',action:'update',id:22,desired:{...state,title:'New'}},before,stateHash:managedStateHash({...state,title:'New'})});expect(r.response).toEqual({status:'complete',id:22});expect(r.evidence.post).toMatchObject({post_title:'New',post_author:31,post_excerpt:'Human excerpt',post_date:'2025-02-03 04:05:06',post_date_gmt:'2025-02-03 03:05:06',menu_order:19});expect(r.argsSeen.slice(0,3)).toEqual(['--path=/wp path;$(false)','--user=7','eval']);});
+ it('does not transmit unrelated content or snapshot inventories with a selected mutation',async()=>{
+  const request:SiteApplyRequest={action:'mutate',step,operation:{kind:'page',entityId:'home',action:'update',id:22,desired:{...state,title:'New'}},before,stateHash:managedStateHash({...state,title:'New'})};
+  const capture=async(value:SiteApplyRequest)=>{
+   let encoded='';await siteApplyWpCli({wpPath:'/wp'},boundary,value,async(_exe,args)=>{encoded=args.at(-1)!.match(/base64_decode\('([^']+)'\)/)![1]!;return JSON.stringify({status:'complete',id:22});});return encoded;
+  };
+  const baseline=await capture(request);
+  const larger=structuredClone(request);if(larger.action!=='mutate')throw new Error('fixture action');
+  larger.before.entities.push({id:9001,kind:'page',route:'/unrelated',state:{content:'x'.repeat(500_000)},ownership:[]});
+  larger.before.overrides.push({id:9002,kind:'wp_template',theme:['other'],content:'x'.repeat(500_000)});
+  expect(await capture(larger)).toBe(baseline);
+  const payload=JSON.parse(Buffer.from(baseline,'base64').toString());
+  expect(payload.request.before).toEqual({entities:[before.entities[0]],options:{}});
+ });
  it('refuses occupied slug/parent creation before insert',async()=>{const r=await execute({action:'mutate',step,operation:{kind:'page',entityId:'home',action:'create',desired:state},before,stateHash:managedStateHash(state)},{occupied:true});expect(r.response.status).toBe('refused');expect(r.evidence.writes).toBe(0);});
  it('reports insertion before ownership failure as uncertain',async()=>{const r=await execute({action:'mutate',step,operation:{kind:'page',entityId:'home',action:'create',desired:state},before,stateHash:managedStateHash(state)},{ownershipCrash:true});expect(r.response.status).toBe('outcome_unknown');expect(r.evidence.writes).toBe(1);});
  it('normalizes the native numeric front-page option only for its exact before-state check',async()=>{const r=await execute({action:'mutate',step:{key:'option:page_on_front',kind:'option',entityId:'page_on_front',status:'started'},operation:{action:'set-option',kind:'option',entityId:'page_on_front',desired:{value:22}},before,stateHash:managedStateHash({value:22})});expect(r.response.status).toBe('complete');expect(r.evidence.options.page_on_front).toBe(22);});
