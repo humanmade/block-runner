@@ -112,6 +112,9 @@ describe('source and retained bundle boundaries',()=>{
     const prepared=await prepareSiteSource(input,assetRoot);if(!prepared.ok)throw new Error('fixture invalid');
     const manifest={formatVersion:1,siteId:input.siteId,sourceIdentity:prepared.source.sourceIdentity,sourceAssets:[],targetBindings:{},bundleFiles:[{path:'site.intent.json',sha256:hashBytes(bytes),size:bytes.length}]};await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
     expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(prepared.source.sourceIdentity);
+    manifest.sourceIdentity=hashBytes(Buffer.from(JSON.stringify(prepared.source.sourceIntent)));
+    await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
+    expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(manifest.sourceIdentity);
     await writeFile(path.join(root,'site.intent.json'),Buffer.from('corrupt'));await expect(readSitePlanInput(root)).rejects.toThrow('retained bundle bytes differ');
     const linked=path.join(root,'linked');await symlink(root,linked);await expect(readSitePlanInput(linked)).rejects.toThrow('symlinks');
   });

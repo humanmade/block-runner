@@ -3,7 +3,7 @@ import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from 
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
 import { hashBytes, readStableRegularFile } from '../publication.js';
-import { prepareSiteSource } from './input.js';
+import { prepareSiteSource, siteSourceIdentityMatches } from './input.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import type { PreparedSiteSource, CompiledSitePage, SiteInputDiagnostic, ThemeArtifact, SiteAttachmentBinding } from './types.js';
 import type { SiteEntity, SitePlan, SitePlanOperation, SiteSnapshot } from './plan-types.js';
@@ -236,7 +236,9 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
   const prepared = await prepareSiteSource(retainedIntent, retainedAssetRoot);
   if (!prepared.ok) throw new Error(prepared.diagnostics.map(item=>`${item.path}: ${item.message}`).join('\n'));
   const source = prepared.source;
-  if (source.sourceIntent.siteId !== manifest.siteId || source.sourceIdentity !== manifest.sourceIdentity) throw new Error('retained source identity differs from bundle manifest');
+  if (source.sourceIntent.siteId !== manifest.siteId || !siteSourceIdentityMatches(source.sourceIntent, manifest.sourceIdentity)) throw new Error('retained source identity differs from bundle manifest');
+  // Keep persisted identity exact: accepting old insertion-order hashes must not rewrite confirmations.
+  source.sourceIdentity = manifest.sourceIdentity;
   const assets = source.assets.map(asset=>({id:asset.id,path:asset.path,kind:asset.kind,role:asset.role,sha256:asset.sha256,size:asset.bytes.byteLength}));
   if (hashCanonicalJson(assets) !== hashCanonicalJson(manifest.sourceAssets)) throw new Error('retained source asset inventory differs from bundle manifest');
   if (source.assets.some(asset=>!paths.has(`source/assets/${asset.path}`))) throw new Error('retained manifest omits declared source asset bytes');
@@ -286,6 +288,11 @@ export interface SitePlanOptions extends SiteWpCliOptions { assetRoot?: string; 
 export async function planSite(inputPath: string, options: SitePlanOptions, transport?: SiteReadTransport): Promise<SitePlan> {
   const input = await readSitePlanInput(inputPath, options.assetRoot);
   const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport, input.source.sourceIntent.pages.map(page=>page.route));
+  return planPreparedSite(input, observed, options);
+}
+
+/** Reconstruct semantics from already verified source and an explicit snapshot, without filesystem or WordPress reads. */
+export async function planPreparedSite(input: SitePlanInput, observed: SiteSnapshot, options: Pick<SitePlanOptions, 'strict'> = {}): Promise<SitePlan> {
   if (input.sourceIntentState === 'unreconciled') {
     const body = {
       version: 1 as const,

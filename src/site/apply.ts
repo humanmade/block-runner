@@ -3,10 +3,11 @@ import { lstat, open, rename } from 'node:fs/promises';
 import path from 'node:path';
 import { readStableRegularFile } from '../publication.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
-import { compileSite, compileSiteSyncedPatterns, compileThemeDocuments } from './compile.js';
-import { readSitePlanInput, planSite, observedAttachmentBindings, managedStateHash } from './plan.js';
+import { compileSite, compileSiteSyncedPattern, compileThemeDocuments } from './compile.js';
+import { readSitePlanInput, planPreparedSite, observedAttachmentBindings, managedStateHash } from './plan.js';
 import { importPlannedSiteAttachment, SiteMediaImportOutcomeUnknown } from './media-import.js';
 import { attachmentVersionKey } from './media.js';
+import { siteSourceIdentityMatches } from './input.js';
 import { syncedPatternOrder } from './patterns.js';
 import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from './apply-wpcli.js';
@@ -73,9 +74,10 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
   }
   if(!plan.executable||plan.conflicts.length) throw new Error('plan is not executable');
   const input=await readSitePlanInput(options.source,options.assetRoot);
-  if(input.source.sourceIdentity!==plan.sourceIdentity||input.source.sourceIntent.siteId!==plan.siteId||!same(input.source.assets.map(({id,path,sha256})=>({id,path,sha256})),plan.assets)) throw new Error('source or asset bytes changed after confirmation');
+  if(!siteSourceIdentityMatches(input.source.sourceIntent,plan.sourceIdentity)||input.source.sourceIntent.siteId!==plan.siteId||!same(input.source.assets.map(({id,path,sha256})=>({id,path,sha256})),plan.assets)) throw new Error('source or asset bytes changed after confirmation');
+  input.source.sourceIdentity=plan.sourceIdentity;
   // Reconstruct the semantic plan from retained source and its confirmed baseline, never trusting edited operation claims.
-  const semantic=await planSite(options.source,options,async()=>JSON.stringify(plan.snapshot));
+  const semantic=await planPreparedSite(input,plan.snapshot,options);
   if(semantic.confirmationHash!==plan.confirmationHash)throw new Error('confirmed plan operations do not match source and baseline reconciliation');
   const marker=live.siteRecord?.operation;
   if(marker && marker.status!=='completed' && (!journal || marker.planHash!==confirmationHash||marker.token!==journal.token)) throw new Error('outstanding site operation blocks apply; preserve its receipt and reconcile explicitly');
@@ -123,10 +125,11 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     const perform=async(op:SitePlanOperation):Promise<void>=>{
       const key=op.kind==='attachment'?attachmentVersionKey(op.entityId,String(op.desired?.sha256)):`${op.kind}:${op.entityId}`;
       const done=journal!.steps.find(item=>item.step.key===key&&item.step.status==='completed'); if(done){prove(done,live);return;}
+      // Retained operations have no effects. Initial and final full observations bind them.
+      if(op.action==='retain') return;
       live=await read(); assertIdentity(); if(!same(comparable(live),comparable(journal!.observed))) throw new Error('live state changed immediately before mutation');
       const refreshed=await readSitePlanInput(options.source,options.assetRoot);
-      if(refreshed.source.sourceIdentity!==plan.sourceIdentity||!same(refreshed.source.assets.map(({id,path,sha256})=>({id,path,sha256})),plan.assets)) throw new Error('source bytes changed immediately before mutation');
-      if(op.action==='retain') return;
+      if(!siteSourceIdentityMatches(refreshed.source.sourceIntent,plan.sourceIdentity)||!same(refreshed.source.assets.map(({id,path,sha256})=>({id,path,sha256})),plan.assets)) throw new Error('source bytes changed immediately before mutation');
       if(op.action==='update'){const entity=live.entities.find(entity=>entity.id===op.id);const owner=entity?.ownership.length===1?entity.ownership[0]:undefined;if(!entity||!owner||owner.version!==1||owner.siteId!==plan.siteId||owner.entityId!==op.entityId||owner.kind!==op.kind||owner.lastAppliedHash!==managedStateHash(entity.state))throw new Error('update requires exact existing ownership and full managed baseline');}
       const step:SiteApplyStep={key,kind:op.kind,entityId:op.entityId,...(op.kind==='attachment'?{assetSha256:String(op.desired?.sha256)}:{}),status:'started'};
       const record={step,operation:op,beforeState:op.kind==='option'?live.options[op.entityId]:live.entities.find(entity=>entity.id===op.id)??null} as SiteApplyReceipt['steps'][number]; journal!.steps.push(record);journal!.currentStep=step; journal!.status='started';await save();await mark('started');
@@ -161,7 +164,8 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     attachments=observedAttachmentBindings(input,live);
     for(const id of syncedPatternOrder(input.source.sourceIntent)) {
       const op=plan.operations.find(op=>op.kind==='pattern'&&op.entityId===id);if(!op)throw new Error('missing planned pattern');
-      const compiled=(await compileSiteSyncedPatterns(input.source,compileOptions())).find(pattern=>pattern.id===id);
+      const result=await compileSiteSyncedPattern(input.source,id,compileOptions());
+      const compiled=result.ok?result.pattern:undefined;
       if(!compiled?.ok||compiled.content===undefined||compiled.pendingUses.length||compiled.pendingBindings.length) throw new Error('pattern dependency finalization failed');
       const desired={title:compiled.title,content:compiled.content,status:'publish'};
       const existing=op.id?live.entities.find(entity=>entity.id===op.id):undefined;
@@ -185,7 +189,11 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     for(const op of plan.operations.filter(op=>op.kind==='option')) {
       let value=op.desired?.value;if(value&&typeof value==='object'&&'pendingPageId' in value)value=ids.get(String(value.pendingPageId));if(value===undefined)throw new Error('option page binding absent');await perform({...op,desired:{value}});
     }
-    live=await read();assertIdentity();for(const record of journal.steps)prove(record,live);
+    live=await read();assertIdentity();
+    if(!same(comparable(live),comparable(journal.observed)))throw new Error('live state changed before completion; prepare a fresh plan');
+    const finalSource=await readSitePlanInput(options.source,options.assetRoot);
+    if(!siteSourceIdentityMatches(finalSource.source.sourceIntent,plan.sourceIdentity)||!same(finalSource.source.assets.map(({id,path,sha256})=>({id,path,sha256})),plan.assets))throw new Error('source bytes changed before completion');
+    for(const record of journal.steps)prove(record,live);
     for(const page of compiled.site.pages){const entity=live.entities.find(entity=>entity.id===ids.get(page.id));if(!entity||entity.route!==page.route)throw new Error('actual page route differs from confirmed route');}
     delete journal.currentStep;await save();await mark('completed');journal.status='completed';journal.observed=live;await save();return journal;
   } catch(error) {

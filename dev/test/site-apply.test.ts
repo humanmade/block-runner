@@ -2,9 +2,10 @@ import { mkdtemp, realpath, writeFile, readFile, copyFile, chmod } from 'node:fs
 import path from 'node:path';
 import os from 'node:os';
 import { hashCanonicalJson } from '../../src/proof/receipt.js';
+import { hashBytes } from '../../src/publication.js';
 import { describe, it, expect } from 'vitest';
 import { applySite, type SiteApplyOptions } from '../../src/site/apply.js';
-import { readSitePlanInput, reconcileSitePlan, managedStateHash } from '../../src/site/plan.js';
+import { readSitePlanInput, reconcileSitePlan, planPreparedSite, managedStateHash } from '../../src/site/plan.js';
 import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { SiteSnapshot } from '../../src/site/plan-types.js';
 import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from '../../src/site/apply-wpcli.js';
@@ -59,6 +60,25 @@ async function fixture(extra?: 'media'|'patterns',normalizeMarkerEmptyObjects=fa
  return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:(token='stale')=>{lock=token;},releaseLock:()=>{lock=null;}};
 }
 describe('confirmed database apply',()=>{
+ it('keeps previously confirmed insertion-order source identities exact during semantic reconstruction',async()=>{
+  const f=await fixture();const input=await readSitePlanInput(f.source,f.root);
+  input.source.sourceIdentity=hashBytes(Buffer.from(JSON.stringify(input.source.sourceIntent)));
+  const plan=await planPreparedSite(input,structuredClone(f.live));const confirmed=plan.confirmationHash;
+  const result=await applySite(plan,{...f.options,confirm:confirmed},f.transports);
+  expect(result.status).toBe('completed');expect(result.planHash).toBe(confirmed);expect(plan.sourceIdentity).toBe(input.source.sourceIdentity);expect(f.count()).toBe(3);
+ });
+ it.each(['none','live','source'] as const)('checks retained items together and refuses late %s changes',async(change)=>{
+  const f=await fixture();expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');
+  const input=await readSitePlanInput(f.source,f.root);const plan=await planPreparedSite(input,structuredClone(f.live));
+  expect(plan.operations.every(op=>op.action==='retain')).toBe(true);
+  let reads=0;const originalRead=f.transports.read;
+  const result=await applySite(plan,{...f.options,confirm:plan.confirmationHash,journal:path.join(f.root,'retained.json')},{...f.transports,read:async()=>{
+   reads++;if(reads===4){if(change==='live')f.live.navigation.push({id:99,content:'human edit',status:'publish'});if(change==='source'){const source=JSON.parse(await readFile(f.source,'utf8'));source.pages[0].title='Human edit';await writeFile(f.source,JSON.stringify(source));}}
+   return originalRead();
+  }});
+  expect(result.status).toBe(change==='none'?'completed':'partial');expect(reads).toBe(change==='none'?5:4);expect(f.count()).toBe(3);
+  if(change!=='none')expect(result.error).toContain(change==='live'?'live state changed before completion':'source bytes changed before completion');
+ });
  it('streams a large default mutation script to a short eval-file stdin invocation',async()=>{
   const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-apply-stdin-'));
   const capture=path.join(root,'capture.json');
