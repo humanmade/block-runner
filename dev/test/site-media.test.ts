@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { compileSitePageDocuments } from '../../src/site/compile.js';
 import { attachmentVersionKey, bindNativeImage, declaredEmbedAspectRatio } from '../../src/site/media.js';
 import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
-import { prepareSiteSource } from '../../src/site/input.js';
+import { prepareSiteSource, validateSiteIntent } from '../../src/site/input.js';
+import { canonicalJson } from '../../src/proof/receipt.js';
 import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, SiteAttachmentBinding, ThemeArtifact } from '../../src/site/types.js';
 import type { IntentNode } from '../../src/types.js';
@@ -32,6 +33,12 @@ function source(sha256: string): PreparedSiteSource {
     assets: [{ id: 'hero', path: 'hero.jpg', kind: 'image' as const, role: 'attachment' as const }], assetUses: [] };
   return { sourceIntent, assetRoot: '/assets', assets: [{ ...sourceIntent.assets[0]!, sha256, bytes: new Uint8Array([1]) }], sourceIdentity: 'source', unresolvedAssetUses: [] };
 }
+function refreshSource(input: PreparedSiteSource): PreparedSiteSource {
+  const diagnostics: Array<{ path: string; code: string; message: string }> = [];
+  const sourceIntent = validateSiteIntent(input.sourceIntent, diagnostics);
+  if (!sourceIntent) throw new Error(JSON.stringify(diagnostics));
+  return { ...input, sourceIntent, sourceIdentity: createHash('sha256').update(canonicalJson(sourceIntent)).digest('hex') };
+}
 function theme(input: PreparedSiteSource): ThemeArtifact {
   return { sourceIntent: input.sourceIntent, sourceAssets: input.assets, targetBindings: {}, targetBindingFingerprint: 'bindings', themeFiles: [], syncedPatterns: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'theme' };
 }
@@ -43,7 +50,9 @@ describe('owned attachment versions', () => {
     const unrelated = attachment(22, nextHash, 'other');
     unrelated.ownership = [];
     const input = source(oldHash);
-    const result = reconcileSitePlan(input, theme(input), compiledPages, snapshot([exact, unrelated]));
+    const observed = snapshot([exact, unrelated]);
+    observed.siteRecord!.entities[attachmentVersionKey('hero', oldHash)] = exact.id;
+    const result = reconcileSitePlan(input, theme(input), compiledPages, observed);
     expect(result.executable).toBe(true);
     expect(result.operations.find(operation => operation.kind === 'attachment')).toMatchObject({ action: 'retain', id: 21, entityId: 'hero' });
   });
@@ -138,7 +147,7 @@ describe('native media metadata before Gutenberg finalization', () => {
     input.sourceIntent.pages[0]!.body.blocks = [{ block: 'core/image', url: 'source/hero.jpg', attrs: { id: 0, ...attrs } }];
     input.sourceIntent.assetUses = [{ documentId: 'page:home', nodePath: [0], attribute: 'attrs.id', assetId: 'hero' }];
 
-    const result = await compileSitePageDocuments(input);
+    const result = await compileSitePageDocuments(refreshSource(input));
     expect(result.ok).toBe(false);
     expect(result.diagnostics).toContainEqual(expect.objectContaining({
       status: 'invalid', code: 'attachment-image-metadata', reason: expect.stringContaining(reason),
@@ -159,7 +168,7 @@ describe('native media metadata before Gutenberg finalization', () => {
     input.sourceIntent.pages[0]!.body.blocks = [{ block: 'core/image', url: 'source/hero.jpg', attrs: { id: 0, ...attrs } }];
     input.sourceIntent.assetUses = [{ documentId: 'page:home', nodePath: [0], attribute: 'attrs.id', assetId: 'hero' }];
 
-    const result = await compileSitePageDocuments(input);
+    const result = await compileSitePageDocuments(refreshSource(input));
     expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
     expect(result.pendingPages).toHaveLength(1);
   });
