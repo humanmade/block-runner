@@ -147,5 +147,8 @@ browser target. This proves save persistence for the exercised files, not visual
 `proof --site ./site-bundle --wp-env-config ./wp-env.json` exercises a controlled
 owned sandbox, with a nonempty set of explicitly published pages and declared header
 and footer parts. The minimal draft example above needs those additions first.
-Never use production as the proof fixture. Both routes require the optional pinned
-WordPress/browser tooling; save proof and visual/editor acceptance are separate claims.
+Never use production as the proof fixture. Site proof requires PHP 8.4 in wp-env;
+theme proof checks the theme's declared PHP requirement. Both routes require the
+optional pinned WordPress/browser tooling. They pin the captured theme snapshot
+automatically, so a separate plugin-style `--input` is unnecessary. Save proof and
+visual/editor acceptance are separate claims.
