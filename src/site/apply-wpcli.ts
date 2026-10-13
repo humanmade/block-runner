@@ -3,33 +3,69 @@ import { siteRecordOption, SITE_OWNERSHIP_META, SITE_APPLY_LOCK_OPTION, type Sit
 import { managedStateHash } from './plan.js';
 import type { SiteSnapshot, SiteApplyStep, SitePlanOperation } from './plan-types.js';
 export interface SiteApplyBoundary {
-  siteId: string; planHash: string; token: string; target: SiteSnapshot['target']; principal: SiteSnapshot['principal']; theme: SiteSnapshot['theme'];
+  siteId: string;
+  planHash: string;
+  token: string;
+  target: SiteSnapshot['target'];
+  principal: SiteSnapshot['principal'];
+  theme: SiteSnapshot['theme'];
 }
-export type SiteApplyRequest =
-  | { action: 'lock' | 'unlock' }
-  | { action: 'marker'; index?: { key: string; id: number }; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed'; target: SiteSnapshot['target']; principalId: number; currentStep?: SiteApplyStep; stepEvidence?: { operation: SitePlanOperation; beforeState: unknown } } }
-  | { action: 'mutate'; step: SiteApplyStep; operation: SitePlanOperation; before: SiteSnapshot; stateHash: string };
+export type SiteApplyRequest = {
+  action: 'lock' | 'unlock';
+} | {
+  action: 'marker';
+  index?: {
+    key: string;
+    id: number;
+  };
+  operation: {
+    token: string;
+    planHash: string;
+    status: 'started' | 'outcome_unknown' | 'completed';
+    target: SiteSnapshot['target'];
+    principalId: number;
+    currentStep?: SiteApplyStep;
+    stepEvidence?: {
+      operation: SitePlanOperation;
+      beforeState: unknown;
+    };
+  };
+} | {
+  action: 'mutate';
+  step: SiteApplyStep;
+  operation: SitePlanOperation;
+  before: SiteSnapshot;
+  stateHash: string;
+};
 /** Only fixed operations are exposed. A transport error after invocation has uncertain effects. */
-export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{status: string; id?: number}> {
-  if (!wp.wpPath || [wp.wpPath,wp.wpUrl,wp.wpUser,wp.wpBinary].some(value=>value?.includes('\0'))) throw new Error('invalid WP-CLI selection');
+export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{
+  status: string;
+  id?: number;
+}> {
+  if (!wp.wpPath || [wp.wpPath, wp.wpUrl, wp.wpUser, wp.wpBinary].some(value => value?.includes('\0'))) throw new Error('invalid WP-CLI selection');
   const selection = [`--path=${wp.wpPath}`, ...(wp.wpUrl ? [`--url=${wp.wpUrl}`] : []), ...(wp.wpUser ? [`--user=${wp.wpUser}`] : [])];
   let output: string;
   try {
-    output = transport
-      ? await transport(wp.wpBinary ?? 'wp',[...selection,'eval',script(boundary,request)])
-      : await runWithInput(wp.wpBinary ?? 'wp',[...selection,'eval-file','-'],`<?php\n${script(boundary,request)}`);
+    output = transport ? await transport(wp.wpBinary ?? 'wp', [...selection, 'eval', script(boundary, request)]) : await runWithInput(wp.wpBinary ?? 'wp', [...selection, 'eval-file', '-'], `<?php\n${script(boundary, request)}`);
+  } catch {
+    throw new Error('WP-CLI site apply transport failed; preserve operation evidence and inspect the selected local installation');
   }
-  catch { throw new Error('WP-CLI site apply transport failed; preserve operation evidence and inspect the selected local installation'); }
   try {
-    const result = JSON.parse(output) as {status:string;id?:number};
-    if (!result || !['complete','refused','outcome_unknown'].includes(result.status)) throw new Error();
+    const result = JSON.parse(output) as {
+      status: string;
+      id?: number;
+    };
+    if (!result || !['complete', 'refused', 'outcome_unknown'].includes(result.status)) throw new Error();
     return result;
-  } catch { throw new Error('WP-CLI site apply returned invalid boundary readback; preserve operation evidence'); }
+  } catch {
+    throw new Error('WP-CLI site apply returned invalid boundary readback; preserve operation evidence');
+  }
 }
-
 function runWithInput(executable: string, args: string[], input: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'] });
+    const child = spawn(executable, args, {
+      stdio: ['pipe', 'pipe', 'ignore']
+    });
     let output = '';
     let settled = false;
     const fail = () => {
@@ -56,22 +92,33 @@ function runWithInput(executable: string, args: string[], input: string): Promis
       settled = true;
       resolve(output);
     });
-    try { child.stdin.end(input); } catch { fail(); }
+    try {
+      child.stdin.end(input);
+    } catch {
+      fail();
+    }
   });
 }
-
 function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string {
   // The executor keeps complete transition evidence. PHP needs only this mutation's baseline.
   const payloadRequest = request.action === 'mutate' ? {
     ...request,
     before: {
       entities: request.operation.id ? request.before.entities.filter(entity => entity.id === request.operation.id) : [],
-      options: request.operation.kind === 'option'
-        ? { [request.operation.entityId]: request.before.options[request.operation.entityId] }
-        : {},
-    },
+      options: request.operation.kind === 'option' ? {
+        [request.operation.entityId]: request.before.options[request.operation.entityId]
+      } : {}
+    }
   } : request;
-  const encoded = Buffer.from(JSON.stringify({ ...boundary, request: payloadRequest, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: SITE_APPLY_LOCK_OPTION })).toString('base64');
+  const encoded = Buffer.from(JSON.stringify({
+    ...boundary,
+    request: payloadRequest,
+    ...(request.action === 'mutate' && request.operation.id ? {
+      beforeStateHash: managedStateHash(request.before.entities.find(entity => entity.id === request.operation.id)?.state ?? {})
+    } : {}),
+    option: siteRecordOption(boundary.siteId),
+    lock: SITE_APPLY_LOCK_OPTION
+  })).toString('base64');
   return `
 $e=json_decode(base64_decode('${encoded}'),true); $r=$e['request']; $attempted=false;
 $same=function($a,$b) use (&$same) { if (is_array($a) && is_array($b)) { if(count($a)!==count($b)) return false; foreach($a as $k=>$v) if(!array_key_exists($k,$b)||!$same($v,$b[$k])) return false; return true; } return $a===$b; };

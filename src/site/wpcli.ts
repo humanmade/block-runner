@@ -2,14 +2,18 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { SiteSnapshot } from './plan-types.js';
-
 export const SITE_OWNERSHIP_META = '_block_runner_site';
 /** WordPress options are blog-local; ownership namespaces share this mutation lock. */
 export const SITE_APPLY_LOCK_OPTION = '_block_runner_site_apply_lock';
 export function siteRecordOption(siteId: string): string {
   return `_block_runner_site_${createHash('sha256').update(siteId).digest('hex')}`;
 }
-export interface SiteWpCliOptions { wpPath: string; wpUrl?: string; wpBinary?: string; wpUser?: string }
+export interface SiteWpCliOptions {
+  wpPath: string;
+  wpUrl?: string;
+  wpBinary?: string;
+  wpUser?: string;
+}
 export type SiteReadTransport = (executable: string, args: string[]) => Promise<string>;
 export interface SiteTemplateObservation {
   id: string;
@@ -22,14 +26,25 @@ export interface SiteTemplateObservation {
 export interface SiteTemplateSnapshot {
   target: SiteSnapshot['target'];
   theme: string;
-  principal: { userId: number; userLogin: string; canReadEditContext: boolean };
-  runtime: { wordpress: string };
+  principal: {
+    userId: number;
+    userLogin: string;
+    canReadEditContext: boolean;
+  };
+  runtime: {
+    wordpress: string;
+  };
   entities: SiteTemplateObservation[];
 }
 const run = promisify(execFile);
 const localRead: SiteReadTransport = async (executable, args) => {
   try {
-    const { stdout } = await run(executable, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    const {
+      stdout
+    } = await run(executable, args, {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024
+    });
     return stdout;
   } catch {
     // Child stderr can contain credentials from third-party bootstrap code.
@@ -45,12 +60,16 @@ export async function readSiteSnapshot(options: SiteWpCliOptions, siteId: string
   for (const value of [options.wpUrl, options.wpUser, options.wpBinary]) if (value?.includes('\0')) throw new Error('WP-CLI arguments cannot contain NUL bytes');
   if (options.wpUrl) args.push(`--url=${options.wpUrl}`);
   if (options.wpUser) args.push(`--user=${options.wpUser}`);
-  if (desiredRoutes.some(route=>!route.startsWith('/') || route.includes('\0') || route.includes('?') || route.includes('#'))) throw new Error('invalid desired route');
+  if (desiredRoutes.some(route => !route.startsWith('/') || route.includes('\0') || route.includes('?') || route.includes('#'))) throw new Error('invalid desired route');
   if (mediaHashIds.some(id => !Number.isSafeInteger(id) || id < 1)) throw new Error('invalid referenced media ID');
   args.push('eval', snapshotScript(siteId, desiredRoutes, mediaHashIds));
   const output = await transport(options.wpBinary ?? 'wp', args);
   let snapshot: SiteSnapshot;
-  try { snapshot = JSON.parse(output) as SiteSnapshot; } catch { throw new Error('WP-CLI returned an invalid snapshot'); }
+  try {
+    snapshot = JSON.parse(output) as SiteSnapshot;
+  } catch {
+    throw new Error('WP-CLI returned an invalid snapshot');
+  }
   validateSnapshot(snapshot);
   return snapshot;
 }
@@ -66,18 +85,17 @@ export async function readSiteTemplateSnapshot(options: SiteWpCliOptions, expect
   args.push('eval', templateSnapshotScript(expectedTheme));
   const output = await transport(options.wpBinary ?? 'wp', args);
   let snapshot: SiteTemplateSnapshot;
-  try { snapshot = JSON.parse(output) as SiteTemplateSnapshot; } catch { throw new Error('WP-CLI returned an invalid template snapshot'); }
-  if (!snapshot || !snapshot.target || !Number.isInteger(snapshot.target.blogId) || snapshot.target.blogId < 1
-    || snapshot.theme !== expectedTheme || !snapshot.principal || !Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1 || typeof snapshot.principal.userLogin !== 'string' || !snapshot.principal.userLogin
-    || !snapshot.runtime || !Array.isArray(snapshot.entities)) throw new Error('WP-CLI returned an incomplete template snapshot');
+  try {
+    snapshot = JSON.parse(output) as SiteTemplateSnapshot;
+  } catch {
+    throw new Error('WP-CLI returned an invalid template snapshot');
+  }
+  if (!snapshot || !snapshot.target || !Number.isInteger(snapshot.target.blogId) || snapshot.target.blogId < 1 || snapshot.theme !== expectedTheme || !snapshot.principal || !Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1 || typeof snapshot.principal.userLogin !== 'string' || !snapshot.principal.userLogin || !snapshot.runtime || !Array.isArray(snapshot.entities)) throw new Error('WP-CLI returned an incomplete template snapshot');
   if (!snapshot.principal.canReadEditContext) throw new Error('selected WordPress principal lacks edit_posts for edit-context template inspection');
   const ids = new Set<string>();
   for (const entity of snapshot.entities) {
     const identity = entity && `${entity.type}:${entity.id}`;
-    if (!entity || typeof entity.id !== 'string' || ids.has(identity) || entity.theme !== expectedTheme
-      || !['wp_template', 'wp_template_part'].includes(entity.type) || !['theme', 'custom', 'plugin'].includes(entity.source)
-      || !Number.isInteger(entity.wpId) || entity.wpId < 0 || typeof entity.raw !== 'string'
-      || (entity.source === 'custom' && entity.wpId < 1) || (entity.source !== 'custom' && entity.wpId !== 0)) {
+    if (!entity || typeof entity.id !== 'string' || ids.has(identity) || entity.theme !== expectedTheme || !['wp_template', 'wp_template_part'].includes(entity.type) || !['theme', 'custom', 'plugin'].includes(entity.source) || !Number.isInteger(entity.wpId) || entity.wpId < 0 || typeof entity.raw !== 'string' || entity.source === 'custom' && entity.wpId < 1 || entity.source !== 'custom' && entity.wpId !== 0) {
       throw new Error('WP-CLI returned an invalid or conflicting edit-context template entity');
     }
     ids.add(identity);
@@ -88,7 +106,6 @@ export async function readSiteTemplateSnapshot(options: SiteWpCliOptions, expect
   }
   return snapshot;
 }
-
 function templateSnapshotScript(expectedTheme: string): string {
   const theme = JSON.stringify(expectedTheme);
   return `
@@ -136,7 +153,6 @@ echo wp_json_encode(array('target'=>array('homeUrl'=>home_url(),'siteUrl'=>site_
   'principal'=>array('userId'=>get_current_user_id(),'userLogin'=>wp_get_current_user()->user_login,'canReadEditContext'=>current_user_can('edit_posts')),
   'runtime'=>array('wordpress'=>get_bloginfo('version')),'entities'=>$entities));`;
 }
-
 function validateSnapshot(value: SiteSnapshot): void {
   if (!value || !value.target || !Number.isInteger(value.target.blogId) || value.target.blogId < 1 || !value.runtime || !value.routing || !Array.isArray(value.routing.routes) || !value.theme || !Array.isArray(value.theme.inventory) || !Array.isArray(value.entities) || !Array.isArray(value.overrides) || !Array.isArray(value.navigation) || !value.options || !value.principal || !value.principal.capabilities) {
     throw new Error('WP-CLI returned an incomplete snapshot');
@@ -164,10 +180,9 @@ function validateSnapshot(value: SiteSnapshot): void {
   }
   if (!Number.isInteger(value.principal.userId) || value.principal.userId < 1) throw new Error('Select an authenticated WordPress principal with --wp-user or WP-CLI configuration (observed user ID 0)');
 }
-
 function snapshotScript(siteId: string, desiredRoutes: string[], mediaHashIds: readonly number[]): string {
   const option = JSON.stringify(siteRecordOption(siteId));
-  const routes = Buffer.from(JSON.stringify(desiredRoutes.filter(route=>route!=='/'))).toString('base64');
+  const routes = Buffer.from(JSON.stringify(desiredRoutes.filter(route => route !== '/'))).toString('base64');
   const mediaIds = Buffer.from(JSON.stringify([...new Set(mediaHashIds)])).toString('base64');
   return `
 // This process terminates after inspection; restoring core cron would spawn a write at shutdown.
