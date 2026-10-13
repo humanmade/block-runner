@@ -74,10 +74,14 @@ async function importAttachment(options: ImportPlannedSiteMediaOptions, verified
     throw new Error('live theme inventory or principal differs from the confirmed plan');
   }
   const input: SitePlanInput = { source, retainedBindings: {} };
-  if (before.entities.some(entity => entity.kind === 'attachment' && entity.ownership.some(meta =>
-    meta.siteId === plan.siteId && meta.entityId === assetId &&
-    (meta.assetSha256 === selected.asset.sha256 || (meta.assetSha256 === undefined && meta.lastAppliedHash === managedStateHash(entity.state) && entity.state.sha256 === selected.asset.sha256))))) {
-    throw new Error('the exact owned attachment version already exists; reconcile the started operation instead of importing again');
+  for (const entity of before.entities) {
+    if (entity.kind !== 'attachment') continue;
+    const owner = entity.ownership.find(meta => meta.siteId === plan.siteId && meta.entityId === assetId);
+    if (!owner) continue;
+    if (!/^[a-f0-9]{64}$/.test(owner.assetSha256 ?? '')) throw new Error('owned attachment metadata has no source version hash');
+    if (owner.assetSha256 === selected.asset.sha256) {
+      throw new Error('the exact owned attachment version already exists; reconcile the started operation instead of importing again');
+    }
   }
   if (before.siteRecord?.entities[selected.key] !== undefined) throw new Error('site record already indexes the exact attachment version');
 
@@ -259,13 +263,8 @@ $result = (function() use ($expected, &$attempted) {
     foreach (get_posts(array('post_type'=>'attachment', 'post_status'=>array('inherit','private','trash'), 'numberposts'=>-1, 'orderby'=>'ID', 'order'=>'ASC', 'suppress_filters'=>true)) as $existing) {
       $owned = get_post_meta($existing->ID, '${SITE_OWNERSHIP_META}', true);
       if (!is_array($owned) || ($owned['siteId'] ?? null) !== $expected['siteId'] || ($owned['entityId'] ?? null) !== $expected['entityId']) continue;
+      if (!isset($owned['assetSha256']) || !is_string($owned['assetSha256']) || !preg_match('/^[a-f0-9]{64}$/', $owned['assetSha256'])) return array('status'=>'refused');
       if (($owned['assetSha256'] ?? null) === $expected['assetSha256']) return array('status'=>'refused');
-      if (!isset($owned['assetSha256'])) {
-        $existingOriginal = wp_get_original_image_path($existing->ID); if (!$existingOriginal) $existingOriginal = get_attached_file($existing->ID);
-        $existingHash = $existingOriginal && is_file($existingOriginal) && !is_link($existingOriginal) ? hash_file('sha256', $existingOriginal) : null;
-        $legacyHash = 'sha256:' . hash('sha256', wp_json_encode(array('sha256'=>$expected['assetSha256'])));
-        if ($existingHash === $expected['assetSha256'] && ($owned['lastAppliedHash'] ?? null) === $legacyHash) return array('status'=>'refused');
-      }
     }
 
     $attempted = true;

@@ -57,11 +57,10 @@ describe('owned attachment versions', () => {
     expect(result.operations.find(operation => operation.kind === 'attachment')).toMatchObject({ action: 'retain', id: 21, entityId: 'hero' });
   });
 
-  it('plans a new version while retaining the old attachment and legacy indexed ID', () => {
+  it('plans a new version while retaining the old qualified attachment index', () => {
     const previous = attachment(21, oldHash);
-    delete previous.ownership[0]!.assetSha256;
     const observed = snapshot([previous]);
-    observed.siteRecord!.entities = { 'attachment:hero': 21 };
+    observed.siteRecord!.entities = { [attachmentVersionKey('hero', oldHash)]: 21 };
     const input = source(nextHash);
     const result = reconcileSitePlan(input, theme(input), compiledPages, observed);
     expect(result.executable).toBe(true);
@@ -69,6 +68,18 @@ describe('owned attachment versions', () => {
       expect.objectContaining({ action: 'create', kind: 'attachment', entityId: 'hero', desired: { sha256: nextHash, assetSha256: nextHash } }),
       expect.objectContaining({ action: 'retain', kind: 'attachment', id: 21, desired: { orphaned: true } }),
     ]));
+  });
+
+  it('refuses attachment ownership without its source hash or a qualified index', () => {
+    const missingHash = attachment(21, oldHash);
+    delete missingHash.ownership[0]!.assetSha256;
+    expect(reconcileSitePlan(source(oldHash), theme(source(oldHash)), compiledPages, snapshot([missingHash])).executable).toBe(false);
+
+    const unqualifiedIndex = snapshot([attachment(22, oldHash)]);
+    unqualifiedIndex.siteRecord!.entities = { 'attachment:hero': 22 };
+    const result = reconcileSitePlan(source(oldHash), theme(source(oldHash)), compiledPages, unqualifiedIndex);
+    expect(result.executable).toBe(false);
+    expect(result.conflicts.map(item => item.code)).toContain('ownership-record-missing');
   });
 
   it('blocks duplicate versions and human changes to any owned version', () => {

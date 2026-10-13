@@ -173,16 +173,13 @@ describe('private declared attachment import primitive', () => {
     expect(payload).not.toBeNull();
     expect(JSON.parse(Buffer.from(payload![1]!, 'base64').toString('utf8'))).toMatchObject({ assetSha256: hash, relativePath: 'media/hero.png' });
     expect(script).not.toContain(Buffer.from(await readFile(path.join(ready.root, 'media/hero.png'))).toString('base64'));
-    const legacyExpression = script.match(/\$legacyHash\s*=\s*([^;]+);/)?.[1];
     const ownershipExpression = script.match(/'lastAppliedHash'=>(.+?), 'assetSha256'/)?.[1];
-    expect(legacyExpression).toBeDefined();
     expect(ownershipExpression).toBeDefined();
+    expect(script).not.toContain('legacyHash');
     const php = `function wp_json_encode($value) { return json_encode($value); }
-$expected = array('assetSha256'=>'${hash}');
 $state = array('sha256'=>'${hash}');
-$legacyHash = ${legacyExpression};
 $ownershipHash = ${ownershipExpression};
-echo json_encode(array($legacyHash, $ownershipHash));`;
+echo json_encode($ownershipHash);`;
     let hashOutput: string;
     try {
       ({ stdout: hashOutput } = await run('php', ['-r', php], { encoding: 'utf8' }));
@@ -190,7 +187,7 @@ echo json_encode(array($legacyHash, $ownershipHash));`;
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return skip();
       throw error;
     }
-    expect(JSON.parse(hashOutput)).toEqual([managedStateHash({ sha256: hash }), managedStateHash({ sha256: hash })]);
+    expect(JSON.parse(hashOutput)).toBe(managedStateHash({ sha256: hash }));
     expect(binding).toMatchObject({ id: 44, url: 'https://example.test/uploads/hero-3.png', observedSize: { width: 1200, height: 800 },
       imageSizes: { full: { url: 'https://example.test/uploads/hero-3.png', width: 1200, height: 800 } } });
   });

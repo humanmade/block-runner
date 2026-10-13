@@ -36,12 +36,11 @@ export function verifiedOwnedAttachment(
   const owner = entity.ownership[0]!;
   if (owner.version !== 1 || owner.siteId !== siteId || owner.entityId !== entityId || owner.kind !== 'attachment'
     || !/^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash) || owner.lastAppliedHash !== hashCanonicalJson(entity.state)) return false;
-  const ownerSha = owner.assetSha256 ?? (typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+  const ownerSha = owner.assetSha256;
   if (ownerSha !== originalSha256 || entity.state.sha256 !== originalSha256) return false;
   const versionClaims = snapshot.entities.flatMap(candidate => candidate.kind !== 'attachment' ? [] : candidate.ownership
     .filter(claim => claim.siteId === siteId && claim.entityId === entityId
-      && (claim.assetSha256 === originalSha256
-        || (claim.assetSha256 === undefined && claim.lastAppliedHash === hashCanonicalJson(candidate.state) && candidate.state.sha256 === originalSha256)))
+      && claim.assetSha256 === originalSha256)
     .map(claim => ({ candidate, claim })));
   if (versionClaims.length !== 1 || versionClaims[0]!.candidate.id !== wpId) return false;
   return siteRecordIndexesEntity(snapshot, siteId, entity);
