@@ -277,6 +277,21 @@ Use the CLI in shell scripts, pre-commit hooks or CI.
 - run: npx block-runner validate "content/**/*.html" --strict
 ```
 
+### Interrupted site apply
+
+`site apply` holds one lock per WordPress blog, shared by every Block Runner site
+identity. A held lock is refused even when its token matches the journal; a token
+cannot prove that an earlier WP-CLI or PHP process has stopped. Older namespace
+locks also block new applies.
+
+After an interruption, preserve the confirmed plan, journal and WordPress operation
+marker. First establish that every executor and its WP-CLI/PHP descendants have
+stopped. Inspect the exact lock value and native mutation outcome before removing
+only that observed lock through an operator-controlled compare-and-delete. Keep
+the operation marker and journal. Repeating the same confirmed operation can
+continue only when their ownership and readback evidence prove the outcome;
+unknown effects are never retried automatically.
+
 ## Library
 
 The library is ESM-only and requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0. This means

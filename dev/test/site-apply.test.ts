@@ -8,7 +8,7 @@ import { readSitePlanInput, reconcileSitePlan, managedStateHash } from '../../sr
 import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { SiteSnapshot } from '../../src/site/plan-types.js';
 import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from '../../src/site/apply-wpcli.js';
-import { siteRecordOption } from '../../src/site/wpcli.js';
+import { siteRecordOption, SITE_APPLY_LOCK_OPTION } from '../../src/site/wpcli.js';
 function phpAssociateEmptyObjects(value:unknown):unknown {
  if(Array.isArray(value))return value.map(phpAssociateEmptyObjects);
  if(value&&typeof value==='object'){const entries=Object.entries(value);return entries.length?Object.fromEntries(entries.map(([key,item])=>[key,phpAssociateEmptyObjects(item)])):[];}
@@ -56,7 +56,7 @@ async function fixture(extra?: 'media'|'patterns',normalizeMarkerEmptyObjects=fa
   }
   return JSON.stringify({status:'complete'});
  }};
- return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:()=>{lock='stale';}};
+ return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:(token='stale')=>{lock=token;},releaseLock:()=>{lock=null;}};
 }
 describe('confirmed database apply',()=>{
  it('streams a large default mutation script to a short eval-file stdin invocation',async()=>{
@@ -77,7 +77,7 @@ describe('confirmed database apply',()=>{
   expect(received.input.startsWith('<?php\n')).toBe(true);
   expect(Buffer.byteLength(received.input)).toBeGreaterThan(300_000);
   const encoded=received.input.match(/base64_decode\('([^']+)'\)/)?.[1];
-  expect(encoded).toBe(Buffer.from(JSON.stringify({...boundary,request,option:siteRecordOption(boundary.siteId),lock:`${siteRecordOption(boundary.siteId)}_lock`})).toString('base64'));
+  expect(encoded).toBe(Buffer.from(JSON.stringify({...boundary,request,option:siteRecordOption(boundary.siteId),lock:SITE_APPLY_LOCK_OPTION})).toString('base64'));
   expect(Buffer.from(encoded!,'base64').toString()).toContain(longMarkup);
  });
  it('creates once, reads back every field and explicit options, then replays before obsolete before-state',async()=>{
@@ -106,6 +106,14 @@ describe('confirmed database apply',()=>{
  });
  it('refuses completed replay while another operation is unresolved',async()=>{const f=await fixture();expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');f.live.siteRecord!.operation={token:'other',planHash:'other',status:'outcome_unknown'};await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('outstanding');expect(f.count()).toBe(3);});
  it('refuses concurrent/stale lock without steal or expiry',async()=>{const f=await fixture();f.setLock();await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('never stolen');expect(f.count()).toBe(0);});
+ it.each(['owned','noowner'] as const)('refuses a stranded same-operation lock after %s response loss, preserving evidence',async(fault)=>{
+  const f=await fixture();f.setFault(fault);const interrupted=await applySite(f.plan,f.options,f.transports);expect(interrupted.status).toBe('outcome_unknown');
+  f.setLock(interrupted.token);const evidence=await readFile(f.options.journal);
+  await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('never stolen');expect(await readFile(f.options.journal)).toEqual(evidence);expect(f.count()).toBe(1);
+  // Simulate guarded operator reconciliation only after all executors have stopped.
+  f.releaseLock();const resumed=await applySite(f.plan,f.options,f.transports);
+  expect(resumed.status).toBe(fault==='owned'?'completed':'outcome_unknown');expect(f.count()).toBe(fault==='owned'?3:1);expect(f.live.entities).toHaveLength(1);
+ });
  it('retains uncertain create and never duplicates it without exact ownership proof',async()=>{
   const f=await fixture();f.setFault('unknown');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(result.steps[0]!.step.status).toBe('outcome_unknown');expect(f.count()).toBe(1);
   const replay=await applySite(f.plan,f.options,f.transports);expect(replay.status).toBe('outcome_unknown');expect(f.count()).toBe(1);

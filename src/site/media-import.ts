@@ -6,7 +6,7 @@ import { hashCanonicalJson } from '../proof/receipt.js';
 import { verifyPreparedSiteAssets } from './assets.js';
 import { attachmentVersionKey } from './media.js';
 import { managedStateHash, observedAttachmentBindings, type SitePlanInput } from './plan.js';
-import { readSiteSnapshot, siteRecordOption, SITE_OWNERSHIP_META, type SiteReadTransport, type SiteWpCliOptions } from './wpcli.js';
+import { readSiteSnapshot, siteRecordOption, SITE_OWNERSHIP_META, SITE_APPLY_LOCK_OPTION, type SiteReadTransport, type SiteWpCliOptions } from './wpcli.js';
 import type { SitePlan, SiteSnapshot } from './plan-types.js';
 import type { PreparedSiteSource, SiteAttachmentBinding } from './types.js';
 
@@ -209,6 +209,7 @@ function importScript(input: {
     assetRoot: input.assetRoot,
     relativePath: input.relativePath,
     recordOption: siteRecordOption(input.plan.siteId),
+    lockOption: SITE_APPLY_LOCK_OPTION,
   };
   const encoded = Buffer.from(JSON.stringify(expected)).toString('base64');
   return `
@@ -221,6 +222,7 @@ $result = (function() use ($expected, &$attempted) {
     if ((int)get_current_user_id() !== (int)$expected['principalId']) return array('status'=>'refused');
     foreach ($expected['capabilities'] as $capability=>$allowed) if ((bool)current_user_can($capability) !== (bool)$allowed) return array('status'=>'refused');
     if (get_stylesheet() !== $expected['themeSlug']) return array('status'=>'refused');
+    if (get_option($expected['lockOption'], null) !== $expected['token']) return array('status'=>'refused');
     $record = get_option($expected['recordOption'], null);
     $operation = is_array($record) ? ($record['operation'] ?? null) : null;
     $step = is_array($operation) ? ($operation['currentStep'] ?? null) : null;

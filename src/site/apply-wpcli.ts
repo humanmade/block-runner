@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { siteRecordOption, SITE_OWNERSHIP_META, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
+import { siteRecordOption, SITE_OWNERSHIP_META, SITE_APPLY_LOCK_OPTION, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { managedStateHash } from './plan.js';
 import type { SiteSnapshot, SiteApplyStep, SitePlanOperation } from './plan-types.js';
 export interface SiteApplyBoundary {
@@ -71,7 +71,7 @@ function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string 
         : {},
     },
   } : request;
-  const encoded = Buffer.from(JSON.stringify({ ...boundary, request: payloadRequest, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
+  const encoded = Buffer.from(JSON.stringify({ ...boundary, request: payloadRequest, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: SITE_APPLY_LOCK_OPTION })).toString('base64');
   return `
 $e=json_decode(base64_decode('${encoded}'),true); $r=$e['request']; $attempted=false;
 $same=function($a,$b) use (&$same) { if (is_array($a) && is_array($b)) { if(count($a)!==count($b)) return false; foreach($a as $k=>$v) if(!array_key_exists($k,$b)||!$same($v,$b[$k])) return false; return true; } return $a===$b; };
@@ -87,7 +87,15 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
   foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root,FilesystemIterator::SKIP_DOTS)) as $file) { if($file->isLink()) return array('status'=>'refused'); if($file->isFile()) $inventory[]=array('path'=>str_replace(DIRECTORY_SEPARATOR,'/',substr($file->getPathname(),strlen($root)+1)),'sha256'=>hash_file('sha256',$file->getPathname()),'size'=>$file->getSize()); }
   usort($inventory,function($a,$b){return strcmp($a['path'],$b['path']);});
   if(!$same($inventory,$e['theme']['inventory'])) return array('status'=>'refused');
-  if($r['action']==='lock') return array('status'=>add_option($e['lock'],$e['token'],'',false)?'complete':'refused');
+  if($r['action']==='lock') {
+   // A previous namespace lock cannot be silently bypassed during the transition.
+   global $wpdb;
+   $pattern=$wpdb->esc_like('_block_runner_site_').'%' . $wpdb->esc_like('_lock');
+   $legacyLocks=$wpdb->get_col($wpdb->prepare("SELECT option_name FROM {$wpdb->options} WHERE option_name LIKE %s",$pattern));
+   foreach($legacyLocks as $legacy) if(preg_match('/^_block_runner_site_[a-f0-9]{64}_lock$/',$legacy) && get_option($legacy,null)!==null) return array('status'=>'refused');
+   // A matching token identifies an operation, not one still-running process.
+   return array('status'=>add_option($e['lock'],$e['token'],'',false)?'complete':'refused');
+  }
   if(get_option($e['lock'])!==$e['token']) return array('status'=>'refused');
   $record=get_option($e['option'],null);
   if($r['action']==='marker') {

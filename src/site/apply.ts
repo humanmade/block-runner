@@ -80,7 +80,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
   const marker=live.siteRecord?.operation;
   if(marker && marker.status!=='completed' && (!journal || marker.planHash!==confirmationHash||marker.token!==journal.token)) throw new Error('outstanding site operation blocks apply; preserve its receipt and reconcile explicitly');
   if(!journal && !same(comparable(live),comparable(plan.snapshot))) throw new Error('confirmed before-state changed; prepare a fresh plan');
-  if((await call({action:'lock'})).status!=='complete') throw new Error('site apply lock exists; stale locks require explicit operator reconciliation and are never stolen');
+  if((await call({action:'lock'})).status!=='complete') throw new Error(`site apply lock exists for ${plan.snapshot.target.homeUrl}; preserve confirmed plan, native marker and journal ${journalPath}. Stop all executors and WP-CLI descendants before guarded operator lock reconciliation; locks are never stolen`);
   try {
     live=await read(); assertIdentity();
     if(!journal && !same(comparable(live),comparable(plan.snapshot))) throw new Error('confirmed before-state changed while acquiring lock');

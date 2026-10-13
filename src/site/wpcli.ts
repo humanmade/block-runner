@@ -4,6 +4,8 @@ import { promisify } from 'node:util';
 import type { SiteSnapshot } from './plan-types.js';
 
 export const SITE_OWNERSHIP_META = '_block_runner_site';
+/** WordPress options are blog-local; ownership namespaces share this mutation lock. */
+export const SITE_APPLY_LOCK_OPTION = '_block_runner_site_apply_lock';
 export function siteRecordOption(siteId: string): string {
   return `_block_runner_site_${createHash('sha256').update(siteId).digest('hex')}`;
 }
