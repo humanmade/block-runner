@@ -57,7 +57,9 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
   catch(error) { if((error as NodeJS.ErrnoException).code!=='ENOENT') throw error; }
   // Use the confirmed routes even when they have no current numeric ID.
   const desiredRoutes=plan.snapshot.routing.routes.map(route=>route.route);
-  const read=()=>readSiteSnapshot(options,plan.siteId,transports.read,desiredRoutes);
+  // Retain explicit byte authority in existing confirmations, including legacy whole-library snapshots.
+  const mediaHashIds=plan.snapshot.entities.filter(entity=>entity.kind==='attachment'&&typeof entity.state.sha256==='string').map(entity=>entity.id);
+  const read=()=>readSiteSnapshot(options,plan.siteId,transports.read,desiredRoutes,mediaHashIds);
   let live=await read();
   const boundary: SiteApplyBoundary={siteId:plan.siteId,planHash:confirmationHash,token:journal?.token ?? randomUUID(),target:plan.snapshot.target,principal:plan.snapshot.principal,theme:plan.snapshot.theme};
   const call=(request:SiteApplyRequest)=>siteApplyWpCli(options,boundary,request,transports.mutate);

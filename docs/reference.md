@@ -279,6 +279,11 @@ Use the CLI in shell scripts, pre-commit hooks or CI.
 
 ### Interrupted site apply
 
+New site plans hash media files owned by Block Runner or explicitly referenced by
+the source. Other attachments retain their native metadata and numeric IDs for
+collision checks. Apply preserves any additional media-byte authority recorded in
+an older confirmation.
+
 `site apply` holds one lock per WordPress blog, shared by every Block Runner site
 identity. A held lock is refused even when its token matches the journal; a token
 cannot prove that an earlier WP-CLI or PHP process has stopped. Older namespace

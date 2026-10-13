@@ -65,7 +65,8 @@ async function importAttachment(options: ImportPlannedSiteMediaOptions, verified
   }
 
   const routes = plan.snapshot.routing.routes.map(route => route.route);
-  const before = verifiedBefore ?? await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes);
+  const mediaHashIds=plan.snapshot.entities.filter(entity=>entity.kind==='attachment'&&typeof entity.state.sha256==='string').map(entity=>entity.id);
+  const before = verifiedBefore ?? await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes, mediaHashIds);
   assertTargetAndMarker(before, plan, selected.key, selected.asset.id, selected.asset.sha256, authority.token);
   if (before.theme.slug !== plan.snapshot.theme.slug
       || hashCanonicalJson(before.theme.inventory) !== hashCanonicalJson(plan.snapshot.theme.inventory)
@@ -99,7 +100,7 @@ async function importAttachment(options: ImportPlannedSiteMediaOptions, verified
   const createdId = parseMutationResult(mutationResult, selected.asset.sha256);
   let after: SiteSnapshot;
   try {
-    after = await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes);
+    after = await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes, mediaHashIds);
   } catch {
     throw new SiteMediaImportOutcomeUnknown();
   }

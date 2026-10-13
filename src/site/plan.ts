@@ -291,8 +291,20 @@ export interface SitePlanOptions extends SiteWpCliOptions { assetRoot?: string; 
 /** Source-first orchestration reads WordPress once and never publishes or mutates it. */
 export async function planSite(inputPath: string, options: SitePlanOptions, transport?: SiteReadTransport): Promise<SitePlan> {
   const input = await readSitePlanInput(inputPath, options.assetRoot);
-  const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport, input.source.sourceIntent.pages.map(page=>page.route));
+  const observed = await readSiteSnapshot(options, input.source.sourceIntent.siteId, transport, input.source.sourceIntent.pages.map(page=>page.route), referencedMediaIds(input.source.sourceIntent));
   return planPreparedSite(input, observed, options);
+}
+
+function referencedMediaIds(intent: PreparedSiteSource['sourceIntent']): number[] {
+  const ids = new Set<number>();
+  const visit = (nodes: import('../types.js').IntentNode[]): void => {
+    for (const node of nodes) {
+      if ((node.block === 'core/image' || node.block === 'core/cover') && Number.isSafeInteger(node.attrs?.id) && Number(node.attrs?.id) > 0) ids.add(Number(node.attrs!.id));
+      if (node.children) visit(node.children);
+    }
+  };
+  for (const document of [...Object.values(intent.templates), ...Object.values(intent.parts), ...Object.values(intent.patterns), ...Object.values(intent.syncedPatterns?.definitions ?? {}), ...intent.pages]) visit(document.body.blocks);
+  return [...ids].sort((a, b) => a - b);
 }
 
 /** Reconstruct semantics from already verified source and an explicit snapshot, without filesystem or WordPress reads. */
