@@ -39,7 +39,7 @@ export async function seedAccordionHeadingMismatch(markup: string): Promise<stri
   return seeded ? wp.serialize(blocks) : markup;
 }
 
-/** This is deliberately a five-page published proof fixture, never a general site apply adapter. */
+/** Prepare an explicitly published site bundle for an owned proof sandbox. */
 export async function prepareSiteProof(directory: string, evidence: EvidenceStore): Promise<PreparedSiteProof> {
   const root = path.resolve(directory);
   if ((await lstat(root)).isSymbolicLink()) throw new Error('Site proof requires a direct bundle directory.');
@@ -65,8 +65,8 @@ export async function prepareSiteProof(directory: string, evidence: EvidenceStor
   }
   if (!intentBytes) throw new Error('Site bundle does not pin its source intent.');
   const intent = JSON.parse(intentBytes.toString('utf8'));
-  if (intent.pages?.length !== 5 || intent.pages.some((page: { status?: string }) => page.status !== 'publish')) throw new Error('Site proof requires a controlled source declaring exactly five published pages; draft statuses are never promoted.');
-  const prepared = await prepareSiteSource(intent, path.join(root, 'source/assets'));
+  if (!Array.isArray(intent.pages) || intent.pages.length === 0 || intent.pages.some((page: { status?: string }) => page.status !== 'publish')) throw new Error('Site proof requires a controlled source declaring published pages; draft statuses are never promoted.');
+  const prepared = await prepareSiteSource(intent, intent.assets?.length === 0 ? root : path.join(root, 'source/assets'));
   if (!prepared.ok) throw new Error(JSON.stringify(prepared.diagnostics));
   const theme = await prepareThemeProof(path.join(root, 'theme'), evidence);
   if (theme.manifest.files.some((file) => !seen.has(`theme/${file.file}`)) || prepared.source.assets.some((asset) => !seen.has(`source/assets/${asset.path}`))) throw new Error('Site bundle contains unpinned theme or source asset bytes.');

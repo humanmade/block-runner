@@ -14,10 +14,11 @@ import { evaluateProofProfile, PROOF_PROFILES } from '../../src/proof/profiles.j
 import type { ProofCommandResult } from '../../src/proof/runner.js';
 
 const fixture = fileURLToPath(new URL('./fixtures/site-intent', import.meta.url));
-async function bundle(published = true) {
+async function bundle(published = true, pageCount = 5) {
   const root = await mkdtemp(path.join(await realpath(tmpdir()), 'block-runner-proof-site-'));
   await cp(fixture, path.join(root, 'source'), { recursive: true });
   const intent = JSON.parse(await readFile(path.join(root, 'source/site.intent.json'), 'utf8'));
+  if (pageCount !== 5) intent.pages = intent.pages.slice(0, pageCount);
   if (published) for (const page of intent.pages) page.status = 'publish';
   const result = await prepareSiteSource(intent, path.join(root, 'source'));
   if (!result.ok) throw new Error(JSON.stringify(result.diagnostics));
@@ -49,8 +50,9 @@ describe('controlled site proof', () => {
   it('pins the explicit published variant without promoting the ordinary draft fixture', async () => {
     const draft = await bundle(false);
     await expect(prepareSiteProof(draft.directory, draft.evidence)).rejects.toThrow('draft statuses are never promoted');
-    const control = await bundle();
+    const control = await bundle(true, 2);
     const prepared = await prepareSiteProof(control.directory, control.evidence);
+    expect(prepared.source.sourceIntent.pages).toHaveLength(2);
     expect(prepared.theme.slug).toBe('sample-studio');
     expect(prepared.bundleHash).toMatch(/^sha256:/);
     expect(prepared.source.sourceIntent.pages.every((page) => page.status === 'publish')).toBe(true);

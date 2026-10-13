@@ -376,7 +376,7 @@ export interface ProofRunOptions {
   pluginZip?: string;
   /** Local block theme to prove through Site Editor template/part saves. */
   theme?: string;
-  /** Controlled five-page site bundle; fixture deployment only. */
+  /** Explicitly published site bundle; owned sandbox deployment only. */
   site?: string;
   siteNegativeControl?: 'missing-content' | 'broken-asset' | 'wrong-target' | 'accordion-mismatch' | 'broken-mobile';
   /** Confirmed artifact capability contract. Capability-scoped claims bind it to pluginZip. */
