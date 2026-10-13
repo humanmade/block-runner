@@ -328,8 +328,8 @@ export async function assertSitePlanDocumentsUnchanged(input: SitePlanInput): Pr
   if (!documents) throw new Error('site input has no captured source document identities');
   for (const [file, identity] of documents) {
     await assertSafePath(file);
-    if (!sameFileIdentity(identity, await regularFileIdentity(file, 'source bytes changed immediately before mutation'))) {
-      throw new Error('source bytes changed immediately before mutation');
+    if (!sameFileIdentity(identity, await regularFileIdentity(file, 'source bytes changed since preparation'))) {
+      throw new Error('source bytes changed since preparation');
     }
   }
 }

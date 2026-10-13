@@ -430,12 +430,13 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
     if (!theme.ok || !same(theme.artifact.inventory, live.theme.inventory)) throw new Error('theme dependencies must be bound and explicitly deployed before database apply');
     for (const op of plan.operations.filter(op => op.kind === 'attachment')) await perform(op);
     attachments = observedAttachmentBindings(input, live);
-    const patternCompiler = createSiteSyncedPatternCompiler(input.source);
-    if (!patternCompiler.ok) throw new Error(patternCompiler.diagnostics.map(item => item.reason).join('\n'));
-    for (const id of syncedPatternOrder(input.source.sourceIntent)) {
+    const patternOrder = syncedPatternOrder(input.source.sourceIntent);
+    const patternCompiler = patternOrder.length ? createSiteSyncedPatternCompiler(input.source) : undefined;
+    if (patternCompiler && !patternCompiler.ok) throw new Error(patternCompiler.diagnostics.map(item => item.reason).join('\n'));
+    for (const id of patternOrder) {
       const op = plan.operations.find(op => op.kind === 'pattern' && op.entityId === id);
       if (!op) throw new Error('missing planned pattern');
-      const result = await patternCompiler.compile(id, compileOptions());
+      const result = await patternCompiler!.compile(id, compileOptions());
       const compiled = result.ok ? result.pattern : undefined;
       if (!compiled?.ok || compiled.content === undefined || compiled.pendingUses.length || compiled.pendingBindings.length) throw new Error('pattern dependency finalization failed');
       const desired = {
@@ -518,6 +519,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       path,
       sha256
     })), plan.assets)) throw new Error('source bytes changed before completion');
+    await assertSitePlanDocumentsUnchanged(input);
     for (const record of journal.steps) prove(record, live);
     for (const page of compiled.site.pages) {
       const entity = live.entities.find(entity => entity.id === ids.get(page.id));

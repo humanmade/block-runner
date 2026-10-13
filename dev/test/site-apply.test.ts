@@ -4,6 +4,7 @@ import os from 'node:os';
 import { hashCanonicalJson } from '../../src/proof/receipt.js';
 import { describe, it, expect } from 'vitest';
 import { applySite, type SiteApplyOptions } from '../../src/site/apply.js';
+import { writeCompiledSite } from '../../src/site/write.js';
 import { readSitePlanInput, reconcileSitePlan, planPreparedSite, managedStateHash } from '../../src/site/plan.js';
 import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { SiteSnapshot } from '../../src/site/plan-types.js';
@@ -69,17 +70,23 @@ describe('confirmed database apply',()=>{
   }});
   expect(result.status).toBe('partial');expect(result.error).toContain('live state changed during marker persistence');expect(f.count()).toBe(0);
  });
- it.each(['none','live','source'] as const)('checks retained items together and refuses late %s changes',async(change)=>{
+ it.each(['none','live','source','manifest'] as const)('checks retained items together and refuses late %s changes',async(change)=>{
   const f=await fixture();expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');
   const input=await readSitePlanInput(f.source,f.root);const plan=await planPreparedSite(input,structuredClone(f.live));
   expect(plan.operations.every(op=>op.action==='retain')).toBe(true);
+  let source=f.source;
+  if(change==='manifest'){
+   const theme=await compileThemeDocuments(input.source,{themeAssetBaseUrl:f.live.theme.assetBaseUrl});if(!theme.ok)throw new Error('theme');
+   source=path.join(f.root,'bundle');await writeCompiledSite(source,input.source,theme.artifact);
+  }
   let reads=0;const originalRead=f.transports.read;
-  const result=await applySite(plan,{...f.options,confirm:plan.confirmationHash,journal:path.join(f.root,'retained.json')},{...f.transports,read:async()=>{
+  const result=await applySite(plan,{...f.options,confirm:plan.confirmationHash,source,journal:path.join(f.root,'retained.json')},{...f.transports,read:async()=>{
    reads++;if(reads===4){if(change==='live')f.live.navigation.push({id:99,content:'human edit',status:'publish'});if(change==='source'){const source=JSON.parse(await readFile(f.source,'utf8'));source.pages[0].title='Human edit';await writeFile(f.source,JSON.stringify(source));}}
+   if(reads===4&&change==='manifest'){const file=path.join(source,'site.manifest.json');const manifest=JSON.parse(await readFile(file,'utf8'));manifest.sourceIntentState='unreconciled';await writeFile(file,JSON.stringify(manifest));}
    return originalRead();
   }});
   expect(result.status).toBe(change==='none'?'completed':'partial');expect(reads).toBe(change==='none'?5:4);expect(f.count()).toBe(3);
-  if(change!=='none')expect(result.error).toContain(change==='live'?'live state changed before completion':'source bytes changed before completion');
+  if(change!=='none')expect(result.error).toContain(change==='live'?'live state changed before completion':'source bytes changed');
  });
  it('streams a large default mutation script to a short eval-file stdin invocation',async()=>{
   const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-apply-stdin-'));

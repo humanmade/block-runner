@@ -55,7 +55,7 @@ export function calculateSiteArtifactIdentity(source: PreparedSiteSource, artifa
   const targetBindingFingerprint = hashTargetContext(artifact.targetBindings, artifact.themeAssetBaseUrl);
   if (artifact.targetBindingFingerprint !== targetBindingFingerprint) throw new Error('compiled artifact target bindings do not match their fingerprint');
   const themeFiles = artifact.themeFiles.map((file) => {
-    const bytes = Buffer.from(file.bytes);
+    const bytes = file.bytes;
     const sha256 = createHash('sha256').update(bytes).digest('hex');
     if (file.sha256 !== sha256) throw new Error(`compiled file ${file.path} no longer matches its SHA-256`);
     return { path: file.path, sha256, size: bytes.byteLength };
