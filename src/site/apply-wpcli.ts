@@ -130,7 +130,8 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
   }
   $data=array('post_type'=>$type,'post_title'=>$desired['title'],'post_content'=>$desired['content'],'post_status'=>$desired['status']);
   if($id) $data['ID']=$id;
-  if($kind==='page') { $data['post_name']=$desired['slug']; $data['post_parent']=$desired['parentId']; }
+  // Template metadata is assigned below. wp_update_post otherwise inherits and revalidates the old template after writing.
+  if($kind==='page') { $data['post_name']=$desired['slug']; $data['post_parent']=$desired['parentId']; $data['page_template']=''; }
   $attempted=true; $written=$id ? wp_update_post(wp_slash($data),true) : wp_insert_post(wp_slash($data),true); if(is_wp_error($written)||!$written) throw new Exception('save'); $id=(int)$written;
   if($kind==='page') update_post_meta($id,'_wp_page_template',$desired['template']);
   $owner=array('version'=>1,'siteId'=>$e['siteId'],'entityId'=>$op['entityId'],'kind'=>$kind,'lastAppliedHash'=>$r['stateHash']);
