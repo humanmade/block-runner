@@ -87,6 +87,36 @@ describe('site intent contract', () => {
     ]));
   });
 
+  it('reports self and mutual block-tree cycles but permits shared nodes across branches', async () => {
+    for (const makeCycle of [
+      () => { const node: Record<string, unknown> = { block: 'core/group' }; node.children = [node]; return [node]; },
+      () => {
+        const first: Record<string, unknown> = { block: 'core/group' };
+        const second: Record<string, unknown> = { block: 'core/group' };
+        first.children = [second]; second.children = [first];
+        return [first];
+      },
+    ]) {
+      const input = await loadIntent();
+      input.pages[0].body.blocks = makeCycle();
+      input.assetUses = [];
+      const diagnostics: Array<{ path: string; code: string }> = [];
+      expect(() => validateSiteIntent(input, diagnostics as any)).not.toThrow();
+      expect(diagnostics).toContainEqual(expect.objectContaining({ path: expect.stringMatching(/^\/pages\/0\/body\/blocks\//), code: 'intent-tree-cycle' }));
+    }
+
+    const input = await loadIntent();
+    const shared = { block: 'core/paragraph', text: 'shared node' };
+    input.pages[0].body.blocks = [
+      { block: 'core/group', children: [shared] },
+      { block: 'core/group', children: [shared] },
+    ];
+    input.assetUses = [];
+    const diagnostics: Array<{ path: string; code: string }> = [];
+    expect(validateSiteIntent(input, diagnostics as any)).toBeDefined();
+    expect(diagnostics).toEqual([]);
+  });
+
   it('preserves deliberately empty content and permissive native attrs', async () => {
     const input = await loadIntent();
     input.pages[0].body = { blocks: [] };

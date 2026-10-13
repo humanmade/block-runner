@@ -578,22 +578,48 @@ function validateTree(value: unknown, pathName: string, diagnostics: SiteInputDi
   // Preserve native intent trees verbatim. The document compiler/finalizer owns their detailed
   // validity; this boundary consumes only the tree root for references and asset-use paths.
   let valid = true;
-  const pending: Array<{ nodes: unknown[]; path: string }> = [{ nodes: value.blocks, path: `${pathName}/blocks` }];
+  const active = new Set<object>();
+  const pending: Array<{ kind: 'enter' | 'exit'; value: object; path: string }> = [
+    { kind: 'enter', value: value.blocks, path: `${pathName}/blocks` },
+  ];
   while (pending.length > 0) {
-    const current = pending.pop()!;
-    for (let index = current.nodes.length - 1; index >= 0; index -= 1) {
-      const nodePath = `${current.path}/${index}`;
-      const candidate = current.nodes[index];
-      if (!isRecord(candidate) || typeof candidate.block !== 'string' || candidate.block.length === 0) {
-        diagnostics.push(issue(nodePath, 'intent-node-required', 'each block must be an object with a non-empty block name'));
-        valid = false;
-        continue;
-      }
-      if (Object.hasOwn(candidate, 'children')) {
-        if (!Array.isArray(candidate.children)) {
-          diagnostics.push(issue(`${nodePath}/children`, 'array-required', 'block children must be an array when present'));
+    const frame = pending.pop()!;
+    if (frame.kind === 'exit') {
+      active.delete(frame.value);
+      continue;
+    }
+    if (active.has(frame.value)) {
+      diagnostics.push(issue(frame.path, 'intent-tree-cycle', 'block trees must not contain object or array cycles'));
+      valid = false;
+      continue;
+    }
+    active.add(frame.value);
+    pending.push({ kind: 'exit', value: frame.value, path: frame.path });
+    if (Array.isArray(frame.value)) {
+      for (let index = frame.value.length - 1; index >= 0; index -= 1) {
+        const nodePath = `${frame.path}/${index}`;
+        const candidate = frame.value[index];
+        if (candidate !== null && typeof candidate === 'object' && active.has(candidate)) {
+          diagnostics.push(issue(nodePath, 'intent-tree-cycle', 'block trees must not contain object or array cycles'));
           valid = false;
-        } else pending.push({ nodes: candidate.children, path: `${nodePath}/children` });
+          continue;
+        }
+        if (!isRecord(candidate) || typeof candidate.block !== 'string' || candidate.block.length === 0) {
+          diagnostics.push(issue(nodePath, 'intent-node-required', 'each block must be an object with a non-empty block name'));
+          valid = false;
+          continue;
+        }
+        pending.push({ kind: 'enter', value: candidate, path: nodePath });
+      }
+      continue;
+    }
+    const candidate = frame.value as Record<string, unknown>;
+    if (Object.hasOwn(candidate, 'children')) {
+      if (!Array.isArray(candidate.children)) {
+        diagnostics.push(issue(`${frame.path}/children`, 'array-required', 'block children must be an array when present'));
+        valid = false;
+      } else {
+        pending.push({ kind: 'enter', value: candidate.children, path: `${frame.path}/children` });
       }
     }
   }
