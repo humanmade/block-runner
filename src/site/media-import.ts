@@ -43,19 +43,29 @@ export class SiteMediaImportOutcomeUnknown extends Error {
  * started step is durable locally and visible in the selected WordPress site's operation marker.
  */
 export async function importPlannedSiteAttachment(options: ImportPlannedSiteMediaOptions): Promise<SiteAttachmentBinding> {
+  return (await importAttachment(options)).binding;
+}
+
+/** Apply has just verified source and persisted/read back this exact started step. */
+export async function importPlannedSiteAttachmentStep(options: ImportPlannedSiteMediaOptions, before: SiteSnapshot): Promise<{ binding: SiteAttachmentBinding; snapshot: SiteSnapshot }> {
+  return importAttachment(options, before);
+}
+
+async function importAttachment(options: ImportPlannedSiteMediaOptions, verifiedBefore?: SiteSnapshot): Promise<{ binding: SiteAttachmentBinding; snapshot: SiteSnapshot }> {
   const { plan, source, assetId, wp, authority } = options;
   const selected = validateSelectedCreate(plan, source, assetId);
   validateJournalAuthority(plan, selected.asset.id, selected.key, selected.asset.sha256, authority, await readJournal(authority.journalPath));
 
   // Re-read the entire declared source through the regular-file/no-symlink boundary immediately
   // before the one target mutation attempt.
-  await verifyPreparedSiteAssets(source);
+  if (!verifiedBefore) await verifyPreparedSiteAssets(source);
   const refreshedAsset = source.assets.find(asset => asset.id === assetId);
   if (!refreshedAsset || refreshedAsset.sha256 !== selected.asset.sha256 || hashBytes(Buffer.from(refreshedAsset.bytes)) !== selected.asset.sha256) {
     throw new Error('declared attachment bytes changed after confirmation');
   }
 
-  const before = await readSiteSnapshot(wp, plan.siteId, options.readTransport);
+  const routes = plan.snapshot.routing.routes.map(route => route.route);
+  const before = verifiedBefore ?? await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes);
   assertTargetAndMarker(before, plan, selected.key, selected.asset.id, selected.asset.sha256, authority.token);
   if (before.theme.slug !== plan.snapshot.theme.slug
       || hashCanonicalJson(before.theme.inventory) !== hashCanonicalJson(plan.snapshot.theme.inventory)
@@ -89,7 +99,7 @@ export async function importPlannedSiteAttachment(options: ImportPlannedSiteMedi
   const createdId = parseMutationResult(mutationResult, selected.asset.sha256);
   let after: SiteSnapshot;
   try {
-    after = await readSiteSnapshot(wp, plan.siteId, options.readTransport);
+    after = await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes);
   } catch {
     throw new SiteMediaImportOutcomeUnknown();
   }
@@ -106,7 +116,7 @@ export async function importPlannedSiteAttachment(options: ImportPlannedSiteMedi
     if (!binding || binding.id !== createdId || matchingIds.length !== 1 || !exactEntity || exactEntity.postStatus !== 'inherit' || exactEntity.ownership.length !== 1 || exactEntity.state.sha256 !== selected.asset.sha256
         || !exactOwner || exactOwner.lastAppliedHash !== managedStateHash(exactEntity.state)
         || !exactEntity.attachment?.sizes?.full || typeof exactEntity.attachment.url !== 'string') throw new Error('new attachment does not match its declared version and native metadata');
-    return binding;
+    return { binding, snapshot: after };
   } catch {
     throw new SiteMediaImportOutcomeUnknown();
   }

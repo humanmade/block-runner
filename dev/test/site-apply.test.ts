@@ -60,6 +60,16 @@ async function fixture(extra?: 'media'|'patterns',normalizeMarkerEmptyObjects=fa
  return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:(token='stale')=>{lock=token;},releaseLock:()=>{lock=null;}};
 }
 describe('confirmed database apply',()=>{
+ it('uses started-marker readback as the fresh full conflict check before any native effect',async()=>{
+  const f=await fixture();const originalMutate=f.transports.mutate;
+  const result=await applySite(f.plan,f.options,{...f.transports,mutate:async(executable,args)=>{
+   const encoded=args.at(-1)!.match(/base64_decode\('([^']+)'\)/)![1]!;const {request}=JSON.parse(Buffer.from(encoded,'base64').toString());
+   const response=await originalMutate(executable,args);
+   if(request.action==='marker'&&request.operation.currentStep?.status==='started')f.live.navigation.push({id:99,content:'Human edit',status:'publish'});
+   return response;
+  }});
+  expect(result.status).toBe('partial');expect(result.error).toContain('live state changed during marker persistence');expect(f.count()).toBe(0);
+ });
  it('keeps previously confirmed insertion-order source identities exact during semantic reconstruction',async()=>{
   const f=await fixture();const input=await readSitePlanInput(f.source,f.root);
   input.source.sourceIdentity=hashBytes(Buffer.from(JSON.stringify(input.source.sourceIntent)));

@@ -5,7 +5,7 @@ import { readStableRegularFile } from '../publication.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import { compileSite, compileSiteSyncedPattern, compileThemeDocuments } from './compile.js';
 import { readSitePlanInput, planPreparedSite, observedAttachmentBindings, managedStateHash } from './plan.js';
-import { importPlannedSiteAttachment, SiteMediaImportOutcomeUnknown } from './media-import.js';
+import { importPlannedSiteAttachmentStep, SiteMediaImportOutcomeUnknown } from './media-import.js';
 import { attachmentVersionKey } from './media.js';
 import { siteSourceIdentityMatches } from './input.js';
 import { syncedPatternOrder } from './patterns.js';
@@ -127,7 +127,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       const done=journal!.steps.find(item=>item.step.key===key&&item.step.status==='completed'); if(done){prove(done,live);return;}
       // Retained operations have no effects. Initial and final full observations bind them.
       if(op.action==='retain') return;
-      live=await read(); assertIdentity(); if(!same(comparable(live),comparable(journal!.observed))) throw new Error('live state changed immediately before mutation');
+      // mark() performs the fresh full read and comparison before the effect, after journal persistence.
       const refreshed=await readSitePlanInput(options.source,options.assetRoot);
       if(!siteSourceIdentityMatches(refreshed.source.sourceIntent,plan.sourceIdentity)||!same(refreshed.source.assets.map(({id,path,sha256})=>({id,path,sha256})),plan.assets)) throw new Error('source bytes changed immediately before mutation');
       if(op.action==='update'){const entity=live.entities.find(entity=>entity.id===op.id);const owner=entity?.ownership.length===1?entity.ownership[0]:undefined;if(!entity||!owner||owner.version!==1||owner.siteId!==plan.siteId||owner.entityId!==op.entityId||owner.kind!==op.kind||owner.lastAppliedHash!==managedStateHash(entity.state))throw new Error('update requires exact existing ownership and full managed baseline');}
@@ -135,10 +135,11 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
       const record={step,operation:op,beforeState:op.kind==='option'?live.options[op.entityId]:live.entities.find(entity=>entity.id===op.id)??null} as SiteApplyReceipt['steps'][number]; journal!.steps.push(record);journal!.currentStep=step; journal!.status='started';await save();await mark('started');
       const beforeMutation=structuredClone(live);
       let attempted=false;
+      let mediaReadback:SiteSnapshot|undefined;
       try {
         attempted=true;
         if(op.kind==='attachment') {
-          try { await importPlannedSiteAttachment({plan,source:input.source,assetId:op.entityId,wp:options,authority:{token:boundary.token,journalPath},readTransport:transports.read,mutationTransport:transports.mutate}); }
+          try { const imported=await importPlannedSiteAttachmentStep({plan,source:input.source,assetId:op.entityId,wp:options,authority:{token:boundary.token,journalPath},readTransport:transports.read,mutationTransport:transports.mutate},live);mediaReadback=imported.snapshot; }
           catch(error) { if(error instanceof Error && !(error instanceof SiteMediaImportOutcomeUnknown))attempted=false; throw error; }
         }
         else {
@@ -147,7 +148,7 @@ export async function applySite(plan: SitePlan, options: SiteApplyOptions, trans
           if(result.status!=='complete') throw new Error('mutation outcome unknown');
           if(result.id) record.operation={...op,id:result.id};
         }
-        live=await read();assertIdentity();const entity=prove(record,live);
+        live=mediaReadback??await read();assertIdentity();const entity=prove(record,live);
         // Media helper returns exact ownership but does not persist the shared site index.
         assertTransition(beforeMutation,live,op,entity);
         if(entity) record.after=entity;else record.value=live.options[op.entityId];
