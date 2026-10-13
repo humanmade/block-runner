@@ -26,6 +26,8 @@ jobs:
       # and changes pack --json shape — we support both, but stay on the proven line).
       - run: npm install -g npm@11
       - run: npm ci --engine-strict
+      - name: Verify benchmark and evidence tooling
+        run: npm run test:tools
       - run: npx --no-install playwright install --with-deps chromium
       - name: Collect native WordPress Heading control
         env:

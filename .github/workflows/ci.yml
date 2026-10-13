@@ -137,6 +137,8 @@ jobs:
       - run: npm ci --engine-strict
       - name: Verify documentation and skill CLI contracts
         run: npx --no-install vitest run dev/test/skill.test.ts dev/test/node-support.test.ts dev/test/cli.test.ts
+      - name: Verify benchmark and evidence tooling
+        run: npm run test:tools
       - run: npm run check:private
       - name: Check touched documentation whitespace and local links
         env:
@@ -191,6 +193,9 @@ jobs:
       - run: npm ci --engine-strict
       - name: Verify
         run: npm run verify
+      - name: Verify benchmark and evidence tooling
+        if: matrix.node == '22.13.0'
+        run: npm run test:tools
       - name: Smoke the packed CLI in a clean engine-strict consumer
         run: npm run smoke:package
       - name: Reject unsupported Node before packed CLI dependencies load
