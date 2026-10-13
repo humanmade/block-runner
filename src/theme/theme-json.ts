@@ -5,7 +5,12 @@ import type { BlockRunnerReport, CommandName, ReportItem } from '../types.js';
 export const WORDPRESS_THEME_SCHEMA_VERSION = '7.1' as const;
 export const WORDPRESS_THEME_SCHEMA_URL = `https://schemas.wp.org/wp/${WORDPRESS_THEME_SCHEMA_VERSION}/theme.json`;
 
-const validateThemeSchema = new Ajv({ allErrors: true, strict: false }).compile(WORDPRESS_THEME_SCHEMA_7_1);
+let validateThemeSchema: ReturnType<Ajv['compile']> | undefined;
+
+function getThemeSchemaValidator(): NonNullable<typeof validateThemeSchema> {
+  validateThemeSchema ??= new Ajv({ allErrors: true, strict: false }).compile(WORDPRESS_THEME_SCHEMA_7_1);
+  return validateThemeSchema;
+}
 
 /** Validate one theme.json against the vendored WordPress schema, returning parsed JSON for reuse. */
 export function validateThemeJson(content: string, file: string, command: CommandName = 'validate'):
@@ -31,9 +36,10 @@ export function validateThemeJson(content: string, file: string, command: Comman
   }
 
   const items: ReportItem[] = [];
-  const valid = validateThemeSchema(parsed);
+  const schemaValidator = getThemeSchemaValidator();
+  const valid = schemaValidator(parsed);
   if (!valid) {
-    for (const error of validateThemeSchema.errors ?? []) {
+    for (const error of schemaValidator.errors ?? []) {
       const pointer = errorPointer(error);
       items.push({
         status: 'invalid',

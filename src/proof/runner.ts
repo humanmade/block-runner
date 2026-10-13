@@ -1516,8 +1516,7 @@ async function runThemeBrowserProof(
   const reportPath = path.join(work, 'result.json');
   const files = [];
   for (const file of theme.files) {
-    const fixed = await canonicalize(file.content);
-    files.push({ file: file.file, kind: file.kind, content: file.content, fix: fixed.output ?? file.content });
+    files.push({ file: file.file, kind: file.kind, content: file.content });
   }
   let baseUrl: string;
   try {

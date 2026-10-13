@@ -19,6 +19,7 @@ export async function findThemeReferenceIssues(
 ): Promise<ReportItem[]> {
   const references: ReportItem[] = [];
   const skippedKinds = new Set<PresetKind>();
+  const presetRegistries = new Map<string, PresetRegistry>();
 
   for (const entry of templateParts(themeJson)) {
     if (!hasPartFile(files, entry.name)) {
@@ -40,7 +41,11 @@ export async function findThemeReferenceIssues(
       nodes.forEach((block, index) => {
         const blockPath = `${parent}[${index}]`;
         const attributes = isRecord(block.attributes) ? block.attributes : {};
-        const registry = presetRegistry(themeJson, block.name);
+        let registry = presetRegistries.get(block.name);
+        if (!registry) {
+          registry = presetRegistry(themeJson, block.name);
+          presetRegistries.set(block.name, registry);
+        }
         const warn = (code: string, reason: string, details: Record<string, unknown>): void => {
           references.push({
             block: block.name,
