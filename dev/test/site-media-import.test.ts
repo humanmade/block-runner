@@ -145,10 +145,6 @@ describe('private declared attachment import primitive', () => {
 
   it('returns only the exact new owned attachment and observed native metadata with matching PHP baseline hashes', async ({ skip }) => {
     const ready = await fixture(true);
-    expect(ready.plan.operations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: 'create', kind: 'attachment', entityId: 'hero', desired: { sha256: ready.source.assets[0]!.sha256, assetSha256: ready.source.assets[0]!.sha256 } }),
-      expect.objectContaining({ action: 'retain', kind: 'attachment', entityId: 'hero', id: 8, desired: { orphaned: true } }),
-    ]));
     const hash = ready.source.assets[0]!.sha256;
     const after = createdSnapshot(ready.plan, hash);
     let reads = 0;

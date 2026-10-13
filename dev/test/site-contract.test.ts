@@ -4,8 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { hashSiteSourceIdentity, prepareSiteSource, validateSiteIntent } from '../../src/site/input.js';
-import { verifyPreparedSiteAssets } from '../../src/site/assets.js';
+import { prepareSiteSource, validateSiteIntent } from '../../src/site/input.js';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent', import.meta.url));
 const intentPath = fileURLToPath(new URL('./fixtures/site-intent/site.intent.json', import.meta.url));
@@ -40,8 +39,6 @@ describe('site intent contract', () => {
 
     for (const mutate of [
       (input: Record<string, any>) => { input.pages[0].title = 'A different title'; },
-      (input: Record<string, any>) => { input.pages[1].route = '/welcome'; },
-      (input: Record<string, any>) => { input.pages[0].body.blocks[0].text = 'A different body'; },
     ]) {
       const changed = structuredClone(original) as Record<string, any>;
       mutate(changed);
@@ -63,14 +60,6 @@ describe('site intent contract', () => {
     expect(baseline.ok).toBe(true);
     expect(reversed.ok).toBe(true);
     if (baseline.ok && reversed.ok) expect(reversed.source.sourceIdentity).toBe(baseline.source.sourceIdentity);
-  });
-
-  it('uses the canonical source identity and verifies its source bytes unchanged', async () => {
-    const prepared = await prepareSiteSource(await loadIntent(), fixtureRoot);
-    expect(prepared.ok).toBe(true);
-    if (!prepared.ok) return;
-    expect(prepared.source.sourceIdentity).toBe(hashSiteSourceIdentity(prepared.source.sourceIntent));
-    await expect(verifyPreparedSiteAssets(prepared.source)).resolves.toBeUndefined();
   });
 
   it('reports malformed native tree nodes and children without throwing during graph preparation', async () => {

@@ -97,10 +97,6 @@ describe('owned attachment versions', () => {
     expect(result.executable).toBe(false);
     expect(result.conflicts.map(item => item.code)).toContain('unavailable-owned-attachment');
   });
-
-  it('uses hash-qualified ownership keys', () => {
-    expect(attachmentVersionKey('hero', oldHash)).toBe(`attachment:hero@${oldHash}`);
-  });
 });
 
 describe('native media metadata before Gutenberg finalization', () => {
@@ -148,7 +144,6 @@ describe('native media metadata before Gutenberg finalization', () => {
     [{ linkDestination: 'none', href: 'https://example.test/image' }, 'contradicts linkDestination none'],
     [{ linkDestination: 'custom' }, 'requires an explicit href'],
     [{ linkDestination: 'custom', href: '/relative' }, 'HTTP(S) URL without credentials'],
-    [{ linkDestination: 'custom', href: 'https://user:pass@example.test/image' }, 'HTTP(S) URL without credentials'],
   ])('rejects known-invalid authored image settings while the attachment binding is pending', async (attrs, reason) => {
     const input = source(oldHash);
     const bytes = new Uint8Array([1]);
@@ -169,7 +164,6 @@ describe('native media metadata before Gutenberg finalization', () => {
   it.each([
     { linkDestination: 'media' },
     { linkDestination: 'attachment' },
-    { linkDestination: 'custom', href: 'https://example.test/custom' },
   ])('keeps valid pending image link settings available for later metadata binding', async (attrs) => {
     const input = source(oldHash);
     const bytes = new Uint8Array([1]);

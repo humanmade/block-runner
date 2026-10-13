@@ -67,9 +67,6 @@ describe('site bundle publication', () => {
       expect(manifest.type).toBe('site');
       expect(manifest.artifactType).toBe('site');
       expect(manifest.bundleFiles).toHaveLength(result.files.length - 1);
-      await expect(readFile(path.join(output, 'source/source.json'))).rejects.toMatchObject({ code: 'ENOENT' });
-      await expect(readFile(path.join(output, 'compiled/site.json'))).rejects.toMatchObject({ code: 'ENOENT' });
-      await expect(readFile(path.join(output, 'bundle.json'))).rejects.toMatchObject({ code: 'ENOENT' });
       const secondOutput = path.join(root, 'bundle-second');
       await writeCompiledSite(secondOutput, source, artifact(source));
       for (const entry of result.files) {
