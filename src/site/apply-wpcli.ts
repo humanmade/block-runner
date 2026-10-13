@@ -176,7 +176,7 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
    }
   }
   $data=array('post_type'=>$type,'post_title'=>$desired['title'],'post_content'=>$desired['content'],'post_status'=>$desired['status']);
-  if($id) $data['ID']=$id;
+  if($id) { $data['ID']=$id; $data['edit_date']=true; }
   // Template metadata is assigned below. wp_update_post otherwise inherits and revalidates the old template after writing.
   if($kind==='page') { $data['post_name']=$desired['slug']; $data['post_parent']=$desired['parentId']; $data['page_template']=''; }
   $attempted=true; $written=$id ? wp_update_post(wp_slash($data),true) : wp_insert_post(wp_slash($data),true); if(is_wp_error($written)||!$written) throw new Exception('save'); $id=(int)$written;
