@@ -1,5 +1,13 @@
 export { canonicalize } from './gate/canonicalize.js';
 export { validate } from './gate/validate.js';
+export { planSite } from './site/plan.js';
+export { inspectSiteDrift } from './site/drift.js';
+export { confirmSitePull, previewSitePull, SitePullPublicationError } from './site/pull.js';
+export { readSiteSnapshot, readSiteTemplateSnapshot } from './site/wpcli.js';
+export { prepareSiteSource } from './site/input.js';
+export { compileSite, compileThemeDocuments } from './site/compile.js';
+export { SiteWriteError, writeCompiledSite } from './site/write.js';
+export { applySite } from './site/apply.js';
 export { convert } from './convert/assemble.js';
 export { author, collectSourceEvidence } from './author/index.js';
 export {

@@ -5,9 +5,9 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
 import { validateSiteIntent } from '../../src/site/input.js';
-import { compileSite, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
+import { compileSite, compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPattern, compileSiteSyncedPatterns, createSiteSyncedPatternCompiler } from '../../src/site/compile.js';
 import type { PreparedSiteSource, SiteIntent, ThemeArtifact } from '../../src/site/types.js';
-import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
+import { managedStateHash, planPreparedSite, reconcileSitePlan } from '../../src/site/plan.js';
 import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent', import.meta.url));
@@ -135,6 +135,7 @@ describe('site synced pattern contract and compiler', () => {
     const state = { title: 'Card', content: compiled[0]!.content!, status: 'publish' };
     const entity: SiteEntity = { id: 642, kind: 'pattern', route: null, state, ownership: [{ version: 1, siteId: intent.siteId, entityId: 'card', kind: 'pattern', lastAppliedHash: managedStateHash(state) }] };
     const snapshot: SiteSnapshot = { target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 1 }, runtime: { wordpress: '7.1.0', php: '8.4.0' }, principal: { userId: 1, capabilities: { edit_pages: true, edit_others_pages: true, edit_posts: true, edit_others_posts: true, publish_posts: true, publish_blocks: true, edit_published_posts: true, manage_options: true, edit_theme_options: true, upload_files: true } }, theme: { slug: intent.theme.slug, assetBaseUrl: 'https://example.test/theme', inventory: [] }, routing: { permalinkStructure: '/%postname%/', rewriteRulesHash: 'rules', routes: [] }, entities: [entity], overrides: [], navigation: [], options: { show_on_front: 'page', page_on_front: 0 }, siteRecord: null };
+    snapshot.siteRecord={version:1,siteId:intent.siteId,entities:{'pattern:card':642},options:{},operation:null};
     const plan = reconcileSitePlan(source, theme, [], snapshot, {}, [], compiled, { card: 642 });
     expect(plan.executable).toBe(true);
     expect(plan.operations.find((operation) => operation.kind === 'pattern')).toMatchObject({ action: 'retain', id: 642, entityId: 'card' });
@@ -154,7 +155,10 @@ describe('site synced pattern contract and compiler', () => {
     ]));
 
     intent.syncedPatterns!.definitions.card!.title = 'Renamed card';
-    const renamed: PreparedSiteSource = { ...source, sourceIntent: intent };
+    const renamedResult = await (await import('../../src/site/input.js')).prepareSiteSource(intent, fixtureRoot);
+    expect(renamedResult.ok).toBe(true);
+    if (!renamedResult.ok) return;
+    const renamed: PreparedSiteSource = renamedResult.source;
     const updated = await compileSiteSyncedPatterns(renamed, { patternBindings: { card: 642 } });
     const updatePlan = reconcileSitePlan(renamed, { ...theme, sourceIntent: intent }, [], snapshot, {}, [], updated, { card: 642 });
     expect(updatePlan.operations.find((operation) => operation.kind === 'pattern')).toMatchObject({ action: 'update', id: 642, entityId: 'card', desired: { title: 'Renamed card' } });
@@ -229,15 +233,37 @@ describe('site synced pattern contract and compiler', () => {
     const intent = await base();
     intent.syncedPatterns = declaration();
     intent.syncedPatterns.definitions.card!.body = { blocks: [{ block: 'core/image', url: '', attrs: { id: 0 } }] };
-    intent.assetUses = [{ documentId: 'synced-pattern:card', nodePath: [0], attribute: 'attrs.id', assetId: 'home-hero' }];
+    const patternUse = { documentId: 'synced-pattern:card', nodePath: [0], attribute: 'attrs.id', assetId: 'home-hero' } as const;
+    intent.assetUses.push({ ...patternUse, nodePath: [0] });
     const { prepareSiteSource } = await import('../../src/site/input.js');
     const prepared = await prepareSiteSource(intent, fixtureRoot);
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
     const pending = await compileSiteSyncedPatterns(prepared.source);
-    expect(pending[0]).toMatchObject({ pendingBindings: intent.assetUses });
+    expect(pending[0]).toMatchObject({ pendingBindings: [patternUse] });
     expect(pending[0]).not.toHaveProperty('content');
+    const theme = await compileThemeDocuments(prepared.source, { themeAssetBaseUrl: 'https://example.test/theme' });
+    expect(theme.ok, JSON.stringify(theme.diagnostics)).toBe(true);
+    if (!theme.ok) return;
+    expect(theme.artifact.targetBindings).toEqual({});
+    const snapshot: SiteSnapshot = { target: { homeUrl: 'https://example.test', siteUrl: 'https://example.test/wp', blogId: 1 }, runtime: { wordpress: '7.1', php: '8.4' }, principal: { userId: 1, capabilities: { edit_pages: true, edit_others_pages: true, edit_posts: true, edit_others_posts: true, publish_posts: true, publish_blocks: true, publish_pages: true, manage_options: true, edit_theme_options: true, upload_files: true } }, theme: { slug: intent.theme.slug, assetBaseUrl: 'https://example.test/theme', inventory: theme.artifact.inventory }, routing: { permalinkStructure: '/%postname%/', rewriteRulesHash: 'rules', routes: intent.pages.filter(page => page.route !== '/').map(page => ({ route: page.route, kind: 'available', matchedRule: 'native', queryFingerprint: 'native' })) }, entities: [], overrides: [], navigation: [], options: { show_on_front: 'posts', page_on_front: 0 }, siteRecord: null };
+    const firstInstall = await planPreparedSite({ source: prepared.source, retainedBindings: {} }, snapshot);
+    expect(firstInstall.executable, JSON.stringify(firstInstall.conflicts)).toBe(true);
+    expect(firstInstall.operations.find(operation => operation.kind === 'pattern')).toMatchObject({ action: 'create', requiresFinalization: true, pendingBindings: [patternUse] });
     const bound = await compileSiteSyncedPatterns(prepared.source, { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
     expect(bound[0]!.content).toContain('"id":73');
+    const single = await compileSiteSyncedPattern(prepared.source, 'card', { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
+    expect(single).toMatchObject({ ok: true, pattern: { id: 'card', content: expect.stringContaining('"id":73') } });
+    const compiler = createSiteSyncedPatternCompiler(prepared.source);
+    expect(compiler.ok).toBe(true);
+    if (compiler.ok) {
+      const current = await compiler.compile('card', { attachmentBindings: { 'home-hero': { id: 74, url: 'https://example.test/current.png' } } });
+      expect(current).toMatchObject({ ok: true, pattern: { id: 'card', content: expect.stringContaining('"id":74') } });
+    }
+    expect(createSiteSyncedPatternCompiler({ ...prepared.source, sourceIdentity: 'stale' })).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'prepared-source-identity-mismatch' })] });
+    const missing = await compileSiteSyncedPattern(prepared.source, 'missing');
+    expect(missing).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'unknown-pattern-id' })] });
+    const invalidSource = await compileSiteSyncedPattern({ ...prepared.source, sourceIdentity: 'stale' }, 'card');
+    expect(invalidSource).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'prepared-source-identity-mismatch' })] });
   });
 });

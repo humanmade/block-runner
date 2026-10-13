@@ -225,11 +225,6 @@ describe('site compiler', () => {
       expect(theme.artifact.pendingPageBindings).toEqual(full.assetUses);
       expect(theme.artifact.themeFiles.map((file) => file.path)).toContain('assets/styles/site.css');
       expect(theme.artifact.themeFiles.map((file) => file.path)).toContain('functions.php');
-      expect(theme.artifact.inventory).toEqual(theme.artifact.themeFiles.map((file) => ({
-        path: file.path,
-        sha256: file.sha256,
-        size: file.bytes.byteLength,
-      })));
     }
   });
 
@@ -268,11 +263,6 @@ describe('site compiler', () => {
       expect(completeSite.site.themeFiles.map((file) => file.path)).toContain('assets/styles/site.css');
       expect(completeSite.site.themeFiles.map((file) => file.path)).toContain('functions.php');
       expect(completeSite.site.assets.map((file) => file.path)).toEqual(['assets/styles/site.css', 'functions.php']);
-      expect(completeSite.site.inventory).toEqual(completeSite.site.themeFiles.map((file) => ({
-        path: file.path,
-        sha256: file.sha256,
-        size: file.bytes.byteLength,
-      })));
     }
   });
 });

@@ -6,7 +6,7 @@ import { hashCanonicalJson } from '../proof/receipt.js';
 import { verifyPreparedSiteAssets } from './assets.js';
 import { attachmentVersionKey } from './media.js';
 import { managedStateHash, observedAttachmentBindings, type SitePlanInput } from './plan.js';
-import { readSiteSnapshot, siteRecordOption, SITE_OWNERSHIP_META, type SiteReadTransport, type SiteWpCliOptions } from './wpcli.js';
+import { readSiteSnapshot, siteRecordOption, SITE_OWNERSHIP_META, SITE_APPLY_LOCK_OPTION, type SiteReadTransport, type SiteWpCliOptions } from './wpcli.js';
 import type { SitePlan, SiteSnapshot } from './plan-types.js';
 import type { PreparedSiteSource, SiteAttachmentBinding } from './types.js';
 
@@ -43,19 +43,30 @@ export class SiteMediaImportOutcomeUnknown extends Error {
  * started step is durable locally and visible in the selected WordPress site's operation marker.
  */
 export async function importPlannedSiteAttachment(options: ImportPlannedSiteMediaOptions): Promise<SiteAttachmentBinding> {
+  return (await importAttachment(options)).binding;
+}
+
+/** Apply has just verified source and persisted/read back this exact started step. */
+export async function importPlannedSiteAttachmentStep(options: ImportPlannedSiteMediaOptions, before: SiteSnapshot): Promise<{ binding: SiteAttachmentBinding; snapshot: SiteSnapshot }> {
+  return importAttachment(options, before);
+}
+
+async function importAttachment(options: ImportPlannedSiteMediaOptions, verifiedBefore?: SiteSnapshot): Promise<{ binding: SiteAttachmentBinding; snapshot: SiteSnapshot }> {
   const { plan, source, assetId, wp, authority } = options;
   const selected = validateSelectedCreate(plan, source, assetId);
   validateJournalAuthority(plan, selected.asset.id, selected.key, selected.asset.sha256, authority, await readJournal(authority.journalPath));
 
   // Re-read the entire declared source through the regular-file/no-symlink boundary immediately
   // before the one target mutation attempt.
-  await verifyPreparedSiteAssets(source);
+  if (!verifiedBefore) await verifyPreparedSiteAssets(source);
   const refreshedAsset = source.assets.find(asset => asset.id === assetId);
   if (!refreshedAsset || refreshedAsset.sha256 !== selected.asset.sha256 || hashBytes(Buffer.from(refreshedAsset.bytes)) !== selected.asset.sha256) {
     throw new Error('declared attachment bytes changed after confirmation');
   }
 
-  const before = await readSiteSnapshot(wp, plan.siteId, options.readTransport);
+  const routes = plan.snapshot.routing.routes.map(route => route.route);
+  const mediaHashIds=plan.snapshot.entities.filter(entity=>entity.kind==='attachment'&&typeof entity.state.sha256==='string').map(entity=>entity.id);
+  const before = verifiedBefore ?? await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes, mediaHashIds);
   assertTargetAndMarker(before, plan, selected.key, selected.asset.id, selected.asset.sha256, authority.token);
   if (before.theme.slug !== plan.snapshot.theme.slug
       || hashCanonicalJson(before.theme.inventory) !== hashCanonicalJson(plan.snapshot.theme.inventory)
@@ -63,10 +74,14 @@ export async function importPlannedSiteAttachment(options: ImportPlannedSiteMedi
     throw new Error('live theme inventory or principal differs from the confirmed plan');
   }
   const input: SitePlanInput = { source, retainedBindings: {} };
-  if (before.entities.some(entity => entity.kind === 'attachment' && entity.ownership.some(meta =>
-    meta.siteId === plan.siteId && meta.entityId === assetId &&
-    (meta.assetSha256 === selected.asset.sha256 || (meta.assetSha256 === undefined && meta.lastAppliedHash === managedStateHash(entity.state) && entity.state.sha256 === selected.asset.sha256))))) {
-    throw new Error('the exact owned attachment version already exists; reconcile the started operation instead of importing again');
+  for (const entity of before.entities) {
+    if (entity.kind !== 'attachment') continue;
+    const owner = entity.ownership.find(meta => meta.siteId === plan.siteId && meta.entityId === assetId);
+    if (!owner) continue;
+    if (!/^[a-f0-9]{64}$/.test(owner.assetSha256 ?? '')) throw new Error('owned attachment metadata has no source version hash');
+    if (owner.assetSha256 === selected.asset.sha256) {
+      throw new Error('the exact owned attachment version already exists; reconcile the started operation instead of importing again');
+    }
   }
   if (before.siteRecord?.entities[selected.key] !== undefined) throw new Error('site record already indexes the exact attachment version');
 
@@ -89,7 +104,7 @@ export async function importPlannedSiteAttachment(options: ImportPlannedSiteMedi
   const createdId = parseMutationResult(mutationResult, selected.asset.sha256);
   let after: SiteSnapshot;
   try {
-    after = await readSiteSnapshot(wp, plan.siteId, options.readTransport);
+    after = await readSiteSnapshot(wp, plan.siteId, options.readTransport, routes, mediaHashIds);
   } catch {
     throw new SiteMediaImportOutcomeUnknown();
   }
@@ -106,7 +121,7 @@ export async function importPlannedSiteAttachment(options: ImportPlannedSiteMedi
     if (!binding || binding.id !== createdId || matchingIds.length !== 1 || !exactEntity || exactEntity.postStatus !== 'inherit' || exactEntity.ownership.length !== 1 || exactEntity.state.sha256 !== selected.asset.sha256
         || !exactOwner || exactOwner.lastAppliedHash !== managedStateHash(exactEntity.state)
         || !exactEntity.attachment?.sizes?.full || typeof exactEntity.attachment.url !== 'string') throw new Error('new attachment does not match its declared version and native metadata');
-    return binding;
+    return { binding, snapshot: after };
   } catch {
     throw new SiteMediaImportOutcomeUnknown();
   }
@@ -209,6 +224,7 @@ function importScript(input: {
     assetRoot: input.assetRoot,
     relativePath: input.relativePath,
     recordOption: siteRecordOption(input.plan.siteId),
+    lockOption: SITE_APPLY_LOCK_OPTION,
   };
   const encoded = Buffer.from(JSON.stringify(expected)).toString('base64');
   return `
@@ -221,6 +237,7 @@ $result = (function() use ($expected, &$attempted) {
     if ((int)get_current_user_id() !== (int)$expected['principalId']) return array('status'=>'refused');
     foreach ($expected['capabilities'] as $capability=>$allowed) if ((bool)current_user_can($capability) !== (bool)$allowed) return array('status'=>'refused');
     if (get_stylesheet() !== $expected['themeSlug']) return array('status'=>'refused');
+    if (get_option($expected['lockOption'], null) !== $expected['token']) return array('status'=>'refused');
     $record = get_option($expected['recordOption'], null);
     $operation = is_array($record) ? ($record['operation'] ?? null) : null;
     $step = is_array($operation) ? ($operation['currentStep'] ?? null) : null;
@@ -231,8 +248,11 @@ $result = (function() use ($expected, &$attempted) {
       || ($step['kind'] ?? null) !== 'attachment' || ($step['entityId'] ?? null) !== $expected['entityId']
       || ($step['assetSha256'] ?? null) !== $expected['assetSha256'] || ($step['status'] ?? null) !== 'started') return array('status'=>'refused');
 
-    $root = realpath($expected['assetRoot']);
-    if (!$root || !is_dir($root)) return array('status'=>'refused');
+    $rootInput = $expected['assetRoot'];
+    $approvedRoot = rtrim($rootInput, DIRECTORY_SEPARATOR); if ($approvedRoot === '') $approvedRoot = DIRECTORY_SEPARATOR;
+    $root = realpath($rootInput);
+    $resolvedRoot = $root ? rtrim($root, DIRECTORY_SEPARATOR) : ''; if ($resolvedRoot === '') $resolvedRoot = DIRECTORY_SEPARATOR;
+    if (!$root || !is_dir($root) || $resolvedRoot !== $approvedRoot) return array('status'=>'refused');
     $cursor = $root;
     foreach (explode('/', $expected['relativePath']) as $part) {
       $cursor = $cursor . DIRECTORY_SEPARATOR . $part;
@@ -246,13 +266,8 @@ $result = (function() use ($expected, &$attempted) {
     foreach (get_posts(array('post_type'=>'attachment', 'post_status'=>array('inherit','private','trash'), 'numberposts'=>-1, 'orderby'=>'ID', 'order'=>'ASC', 'suppress_filters'=>true)) as $existing) {
       $owned = get_post_meta($existing->ID, '${SITE_OWNERSHIP_META}', true);
       if (!is_array($owned) || ($owned['siteId'] ?? null) !== $expected['siteId'] || ($owned['entityId'] ?? null) !== $expected['entityId']) continue;
+      if (!isset($owned['assetSha256']) || !is_string($owned['assetSha256']) || !preg_match('/^[a-f0-9]{64}$/', $owned['assetSha256'])) return array('status'=>'refused');
       if (($owned['assetSha256'] ?? null) === $expected['assetSha256']) return array('status'=>'refused');
-      if (!isset($owned['assetSha256'])) {
-        $existingOriginal = wp_get_original_image_path($existing->ID); if (!$existingOriginal) $existingOriginal = get_attached_file($existing->ID);
-        $existingHash = $existingOriginal && is_file($existingOriginal) && !is_link($existingOriginal) ? hash_file('sha256', $existingOriginal) : null;
-        $legacyHash = 'sha256:' . hash('sha256', wp_json_encode(array('sha256'=>$expected['assetSha256'])));
-        if ($existingHash === $expected['assetSha256'] && ($owned['lastAppliedHash'] ?? null) === $legacyHash) return array('status'=>'refused');
-      }
     }
 
     $attempted = true;

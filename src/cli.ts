@@ -124,7 +124,6 @@ interface ProofCliOptions {
   wpEnvConfig?: string;
   theme?: string;
   site?: string;
-  siteNegativeControl?: 'missing-content' | 'broken-asset' | 'wrong-target' | 'accordion-mismatch' | 'broken-mobile';
   run?: boolean;
   keepEnvironment?: boolean;
   json?: boolean;
@@ -624,15 +623,13 @@ program
   .option('--receipt-dir <path>', 'directory for immutable evidence and receipts (default: proof-receipts)')
   .option('--wp-env-config <path>', 'wp-env configuration (default: proof/wp-env.json)')
   .option('--theme <directory>', 'prove local theme templates and parts through a real Site Editor save')
-  .option('--site <bundle>', 'prove an explicitly published five-page site fixture in an owned sandbox')
+  .option('--site <bundle>', 'prove an explicitly published site bundle in an owned sandbox')
   .option('--out <path>', 'alias for --receipt-dir')
-  .addOption(new Option('--site-negative-control <control>', 'seed a controlled fixture failure; site proof only').choices(['missing-content', 'broken-asset', 'wrong-target', 'accordion-mismatch', 'broken-mobile']))
   .option('--no-run', 'only produce a blocked receipt; do not start Docker or Playwright')
   .option('--keep-environment', 'leave wp-env running after the proof')
   .option('--json', 'emit the complete receipt result as JSON')
   .action(async (pluginZip: string | undefined, options: ProofCliOptions) => {
     const profile = options.profile ?? 'full';
-    if (options.siteNegativeControl && !options.site) program.error('error: site negative controls require --site');
     if (options.site && (options.theme || pluginZip)) program.error('error: --site is exclusive with --theme and plugin ZIP');
     if (options.theme && pluginZip) program.error('error: proof accepts either a plugin ZIP or --theme, not both');
     if (!options.site && !options.theme && !pluginZip) program.error('error: proof needs a plugin ZIP or --theme <directory>');
@@ -652,7 +649,6 @@ program
       pluginZip,
       theme: options.theme,
       site: options.site,
-      siteNegativeControl: options.siteNegativeControl,
       fixture,
       artifact,
       markup,

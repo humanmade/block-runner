@@ -2,12 +2,18 @@ import { execFile } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { promisify } from 'node:util';
 import type { SiteSnapshot } from './plan-types.js';
-
 export const SITE_OWNERSHIP_META = '_block_runner_site';
+/** WordPress options are blog-local; ownership namespaces share this mutation lock. */
+export const SITE_APPLY_LOCK_OPTION = '_block_runner_site_apply_lock';
 export function siteRecordOption(siteId: string): string {
   return `_block_runner_site_${createHash('sha256').update(siteId).digest('hex')}`;
 }
-export interface SiteWpCliOptions { wpPath: string; wpUrl?: string; wpBinary?: string; wpUser?: string }
+export interface SiteWpCliOptions {
+  wpPath: string;
+  wpUrl?: string;
+  wpBinary?: string;
+  wpUser?: string;
+}
 export type SiteReadTransport = (executable: string, args: string[]) => Promise<string>;
 export interface SiteTemplateObservation {
   id: string;
@@ -20,14 +26,25 @@ export interface SiteTemplateObservation {
 export interface SiteTemplateSnapshot {
   target: SiteSnapshot['target'];
   theme: string;
-  principal: { userId: number; userLogin: string; canReadEditContext: boolean };
-  runtime: { wordpress: string };
+  principal: {
+    userId: number;
+    userLogin: string;
+    canReadEditContext: boolean;
+  };
+  runtime: {
+    wordpress: string;
+  };
   entities: SiteTemplateObservation[];
 }
 const run = promisify(execFile);
 const localRead: SiteReadTransport = async (executable, args) => {
   try {
-    const { stdout } = await run(executable, args, { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });
+    const {
+      stdout
+    } = await run(executable, args, {
+      encoding: 'utf8',
+      maxBuffer: 32 * 1024 * 1024
+    });
     return stdout;
   } catch {
     // Child stderr can contain credentials from third-party bootstrap code.
@@ -36,18 +53,23 @@ const localRead: SiteReadTransport = async (executable, args) => {
 };
 
 /** The adapter exposes only this fixed read operation, never arbitrary commands or mutation methods. */
-export async function readSiteSnapshot(options: SiteWpCliOptions, siteId: string, transport: SiteReadTransport = localRead, desiredRoutes: string[] = []): Promise<SiteSnapshot> {
+export async function readSiteSnapshot(options: SiteWpCliOptions, siteId: string, transport: SiteReadTransport = localRead, desiredRoutes: string[] = [], mediaHashIds: readonly number[] = []): Promise<SiteSnapshot> {
   if (!options.wpPath || options.wpPath.includes('\0')) throw new Error('wpPath is required');
   if (!/^[a-z0-9][a-z0-9-]*$/.test(siteId)) throw new Error('invalid siteId');
   const args = [`--path=${options.wpPath}`];
   for (const value of [options.wpUrl, options.wpUser, options.wpBinary]) if (value?.includes('\0')) throw new Error('WP-CLI arguments cannot contain NUL bytes');
   if (options.wpUrl) args.push(`--url=${options.wpUrl}`);
   if (options.wpUser) args.push(`--user=${options.wpUser}`);
-  if (desiredRoutes.some(route=>!route.startsWith('/') || route.includes('\0') || route.includes('?') || route.includes('#'))) throw new Error('invalid desired route');
-  args.push('eval', snapshotScript(siteId, desiredRoutes));
+  if (desiredRoutes.some(route => !route.startsWith('/') || route.includes('\0') || route.includes('?') || route.includes('#'))) throw new Error('invalid desired route');
+  if (mediaHashIds.some(id => !Number.isSafeInteger(id) || id < 1)) throw new Error('invalid referenced media ID');
+  args.push('eval', snapshotScript(siteId, desiredRoutes, mediaHashIds));
   const output = await transport(options.wpBinary ?? 'wp', args);
   let snapshot: SiteSnapshot;
-  try { snapshot = JSON.parse(output) as SiteSnapshot; } catch { throw new Error('WP-CLI returned an invalid snapshot'); }
+  try {
+    snapshot = JSON.parse(output) as SiteSnapshot;
+  } catch {
+    throw new Error('WP-CLI returned an invalid snapshot');
+  }
   validateSnapshot(snapshot);
   return snapshot;
 }
@@ -63,18 +85,17 @@ export async function readSiteTemplateSnapshot(options: SiteWpCliOptions, expect
   args.push('eval', templateSnapshotScript(expectedTheme));
   const output = await transport(options.wpBinary ?? 'wp', args);
   let snapshot: SiteTemplateSnapshot;
-  try { snapshot = JSON.parse(output) as SiteTemplateSnapshot; } catch { throw new Error('WP-CLI returned an invalid template snapshot'); }
-  if (!snapshot || !snapshot.target || !Number.isInteger(snapshot.target.blogId) || snapshot.target.blogId < 1
-    || snapshot.theme !== expectedTheme || !snapshot.principal || !Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1 || typeof snapshot.principal.userLogin !== 'string' || !snapshot.principal.userLogin
-    || !snapshot.runtime || !Array.isArray(snapshot.entities)) throw new Error('WP-CLI returned an incomplete template snapshot');
+  try {
+    snapshot = JSON.parse(output) as SiteTemplateSnapshot;
+  } catch {
+    throw new Error('WP-CLI returned an invalid template snapshot');
+  }
+  if (!snapshot || !snapshot.target || !Number.isInteger(snapshot.target.blogId) || snapshot.target.blogId < 1 || snapshot.theme !== expectedTheme || !snapshot.principal || !Number.isInteger(snapshot.principal.userId) || snapshot.principal.userId < 1 || typeof snapshot.principal.userLogin !== 'string' || !snapshot.principal.userLogin || !snapshot.runtime || !Array.isArray(snapshot.entities)) throw new Error('WP-CLI returned an incomplete template snapshot');
   if (!snapshot.principal.canReadEditContext) throw new Error('selected WordPress principal lacks edit_posts for edit-context template inspection');
   const ids = new Set<string>();
   for (const entity of snapshot.entities) {
     const identity = entity && `${entity.type}:${entity.id}`;
-    if (!entity || typeof entity.id !== 'string' || ids.has(identity) || entity.theme !== expectedTheme
-      || !['wp_template', 'wp_template_part'].includes(entity.type) || !['theme', 'custom', 'plugin'].includes(entity.source)
-      || !Number.isInteger(entity.wpId) || entity.wpId < 0 || typeof entity.raw !== 'string'
-      || (entity.source === 'custom' && entity.wpId < 1) || (entity.source !== 'custom' && entity.wpId !== 0)) {
+    if (!entity || typeof entity.id !== 'string' || ids.has(identity) || entity.theme !== expectedTheme || !['wp_template', 'wp_template_part'].includes(entity.type) || !['theme', 'custom', 'plugin'].includes(entity.source) || !Number.isInteger(entity.wpId) || entity.wpId < 0 || typeof entity.raw !== 'string' || entity.source === 'custom' && entity.wpId < 1 || entity.source !== 'custom' && entity.wpId !== 0) {
       throw new Error('WP-CLI returned an invalid or conflicting edit-context template entity');
     }
     ids.add(identity);
@@ -85,7 +106,6 @@ export async function readSiteTemplateSnapshot(options: SiteWpCliOptions, expect
   }
   return snapshot;
 }
-
 function templateSnapshotScript(expectedTheme: string): string {
   const theme = JSON.stringify(expectedTheme);
   return `
@@ -133,7 +153,6 @@ echo wp_json_encode(array('target'=>array('homeUrl'=>home_url(),'siteUrl'=>site_
   'principal'=>array('userId'=>get_current_user_id(),'userLogin'=>wp_get_current_user()->user_login,'canReadEditContext'=>current_user_can('edit_posts')),
   'runtime'=>array('wordpress'=>get_bloginfo('version')),'entities'=>$entities));`;
 }
-
 function validateSnapshot(value: SiteSnapshot): void {
   if (!value || !value.target || !Number.isInteger(value.target.blogId) || value.target.blogId < 1 || !value.runtime || !value.routing || !Array.isArray(value.routing.routes) || !value.theme || !Array.isArray(value.theme.inventory) || !Array.isArray(value.entities) || !Array.isArray(value.overrides) || !Array.isArray(value.navigation) || !value.options || !value.principal || !value.principal.capabilities) {
     throw new Error('WP-CLI returned an incomplete snapshot');
@@ -161,10 +180,10 @@ function validateSnapshot(value: SiteSnapshot): void {
   }
   if (!Number.isInteger(value.principal.userId) || value.principal.userId < 1) throw new Error('Select an authenticated WordPress principal with --wp-user or WP-CLI configuration (observed user ID 0)');
 }
-
-function snapshotScript(siteId: string, desiredRoutes: string[]): string {
+function snapshotScript(siteId: string, desiredRoutes: string[], mediaHashIds: readonly number[]): string {
   const option = JSON.stringify(siteRecordOption(siteId));
-  const routes = Buffer.from(JSON.stringify(desiredRoutes.filter(route=>route!=='/'))).toString('base64');
+  const routes = Buffer.from(JSON.stringify(desiredRoutes.filter(route => route !== '/'))).toString('base64');
+  const mediaIds = Buffer.from(JSON.stringify([...new Set(mediaHashIds)])).toString('base64');
   return `
 // This process terminates after inspection; restoring core cron would spawn a write at shutdown.
 if (defined('ALTERNATE_WP_CRON') && ALTERNATE_WP_CRON) throw new Exception('alternate cron bootstrap is unsupported for read-only site planning');
@@ -172,6 +191,7 @@ remove_action('shutdown','_wp_cron');
 $capabilities = array();
 foreach (array('edit_pages','publish_pages','edit_others_pages','edit_posts','edit_others_posts','publish_posts','publish_blocks','edit_published_posts','upload_files','manage_options','edit_theme_options') as $cap) $capabilities[$cap] = current_user_can($cap);
 $entities = array(); $overrides = array(); $navigation = array();
+$mediaHashIds = array_fill_keys(json_decode(base64_decode('${mediaIds}'),true),true);
 $posts = get_posts(array('post_type'=>array('page','attachment','wp_block','wp_template','wp_template_part','wp_navigation'), 'post_status'=>array('publish','future','draft','pending','private','trash','inherit','auto-draft'), 'numberposts'=>-1, 'orderby'=>'ID', 'order'=>'ASC', 'suppress_filters'=>true));
 foreach ($posts as $post) {
   if ($post->post_type === 'wp_template' || $post->post_type === 'wp_template_part') {
@@ -179,6 +199,7 @@ foreach ($posts as $post) {
   }
   if ($post->post_type === 'wp_navigation') { $navigation[] = array('id'=>(int)$post->ID,'content'=>$post->post_content,'status'=>$post->post_status); continue; }
   $kind = $post->post_type === 'page' ? 'page' : ($post->post_type === 'attachment' ? 'attachment' : 'pattern');
+  $meta = get_post_meta($post->ID, '${SITE_OWNERSHIP_META}', false);
   $state = array('content'=>$post->post_content, 'title'=>$post->post_title, 'status'=>$post->post_status);
   $route = null; $attachment = null;
   if ($kind === 'page') {
@@ -191,10 +212,12 @@ foreach ($posts as $post) {
     if ((int)get_option('page_on_front') === (int)$post->ID && get_option('show_on_front') === 'page') $route = '/';
   }
   if ($kind === 'attachment') {
+    // Keep native metadata/collision inventory for all media; read bytes only for owned or referenced IDs.
+    $hashBytes = count($meta) > 0 || isset($mediaHashIds[$post->ID]);
     $file = get_attached_file($post->ID);
     $original = wp_get_original_image_path($post->ID); if (!$original) $original = $file;
     $metadata = wp_get_attachment_metadata($post->ID);
-    $state = array('sha256'=>($original && is_file($original) && !is_link($original)) ? hash_file('sha256',$original) : null);
+    $state = array('sha256'=>($hashBytes && $original && is_file($original) && !is_link($original)) ? hash_file('sha256',$original) : null);
     $sizes = array();
     $full = wp_get_attachment_image_src($post->ID, 'full');
     if ($full) $sizes['full'] = array('url'=>$full[0], 'width'=>(int)$full[1], 'height'=>(int)$full[2]);
@@ -202,9 +225,8 @@ foreach ($posts as $post) {
       $variant = wp_get_attachment_image_src($post->ID, $slug);
       if ($variant) $sizes[$slug] = array('url'=>$variant[0], 'width'=>(int)$variant[1], 'height'=>(int)$variant[2]);
     }
-    $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'linkUrl'=>get_attachment_link($post->ID) ?: null,'currentFileSha256'=>($file && is_file($file) && !is_link($file)) ? hash_file('sha256',$file) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null,'sizes'=>$sizes);
+    $attachment = array('url'=>wp_get_attachment_url($post->ID) ?: null,'linkUrl'=>get_attachment_link($post->ID) ?: null,'currentFileSha256'=>($hashBytes && $file && is_file($file) && !is_link($file)) ? ($file===$original ? $state['sha256'] : hash_file('sha256',$file)) : null,'width'=>isset($metadata['width']) ? (int)$metadata['width'] : null,'height'=>isset($metadata['height']) ? (int)$metadata['height'] : null,'sizes'=>$sizes);
   }
-  $meta = get_post_meta($post->ID, '${SITE_OWNERSHIP_META}', false);
   $entity = array('id'=>(int)$post->ID,'kind'=>$kind,'route'=>$route,'state'=>$state,'postStatus'=>$post->post_status,'ownership'=>$meta);
   if ($attachment) $entity['attachment'] = $attachment;
   $entities[] = $entity;

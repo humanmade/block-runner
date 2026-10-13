@@ -116,6 +116,7 @@ describe('registered block regeneration', () => {
       Object.assign(v2.manifest.files.find((entry) => entry.path === 'save.js')!, mutated.manifest.files.find((entry) => entry.path === 'save.js')!);
     });
     expect((await pending).written).toContain('edit.js');
+    expect(await readFile(path.join(output, 'save.js'), 'utf8')).not.toContain('mutated');
   });
 
   it('keeps an editor-template change distinct from saved markup and refuses a save change without a migration or new identity', async () => {

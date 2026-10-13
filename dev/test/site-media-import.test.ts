@@ -68,7 +68,10 @@ async function fixture(retainOld = false) {
   const compiledPage = { id: 'home', route: '/', title: 'Home', template: 'index', status: 'draft' as const,
     content: '<!-- wp:paragraph --><p>Home</p><!-- /wp:paragraph -->', diagnostics: [] };
   const observed = snapshot();
-  if (retainOld) observed.entities.push(previousVersion());
+  if (retainOld) {
+    observed.entities.push(previousVersion());
+    observed.siteRecord!.entities[`attachment:hero@${'a'.repeat(64)}`]=8;
+  }
   const plan = reconcileSitePlan(source, theme, [compiledPage], observed);
   if (!plan.executable) throw new Error(JSON.stringify(plan.conflicts));
   const token = 'started-token';
@@ -142,10 +145,6 @@ describe('private declared attachment import primitive', () => {
 
   it('returns only the exact new owned attachment and observed native metadata with matching PHP baseline hashes', async ({ skip }) => {
     const ready = await fixture(true);
-    expect(ready.plan.operations).toEqual(expect.arrayContaining([
-      expect.objectContaining({ action: 'create', kind: 'attachment', entityId: 'hero', desired: { sha256: ready.source.assets[0]!.sha256, assetSha256: ready.source.assets[0]!.sha256 } }),
-      expect.objectContaining({ action: 'retain', kind: 'attachment', entityId: 'hero', id: 8, desired: { orphaned: true } }),
-    ]));
     const hash = ready.source.assets[0]!.sha256;
     const after = createdSnapshot(ready.plan, hash);
     let reads = 0;
@@ -170,16 +169,13 @@ describe('private declared attachment import primitive', () => {
     expect(payload).not.toBeNull();
     expect(JSON.parse(Buffer.from(payload![1]!, 'base64').toString('utf8'))).toMatchObject({ assetSha256: hash, relativePath: 'media/hero.png' });
     expect(script).not.toContain(Buffer.from(await readFile(path.join(ready.root, 'media/hero.png'))).toString('base64'));
-    const legacyExpression = script.match(/\$legacyHash\s*=\s*([^;]+);/)?.[1];
     const ownershipExpression = script.match(/'lastAppliedHash'=>(.+?), 'assetSha256'/)?.[1];
-    expect(legacyExpression).toBeDefined();
     expect(ownershipExpression).toBeDefined();
+    expect(script).not.toContain('legacyHash');
     const php = `function wp_json_encode($value) { return json_encode($value); }
-$expected = array('assetSha256'=>'${hash}');
 $state = array('sha256'=>'${hash}');
-$legacyHash = ${legacyExpression};
 $ownershipHash = ${ownershipExpression};
-echo json_encode(array($legacyHash, $ownershipHash));`;
+echo json_encode($ownershipHash);`;
     let hashOutput: string;
     try {
       ({ stdout: hashOutput } = await run('php', ['-r', php], { encoding: 'utf8' }));
@@ -187,7 +183,15 @@ echo json_encode(array($legacyHash, $ownershipHash));`;
       if ((error as NodeJS.ErrnoException).code === 'ENOENT') return skip();
       throw error;
     }
-    expect(JSON.parse(hashOutput)).toEqual([managedStateHash({ sha256: hash }), managedStateHash({ sha256: hash })]);
+    expect(JSON.parse(hashOutput)).toBe(managedStateHash({ sha256: hash }));
+    const rootGuard = script.match(/(\$rootInput = \$expected\['assetRoot'\];[\s\S]*?if \(!\$root \|\| !is_dir\(\$root\) \|\| \$resolvedRoot !== \$approvedRoot\) return array\('status'=>'refused'\);)/)?.[1];
+    expect(rootGuard).toBeDefined();
+    const aliasRoot = path.join(ready.root, 'asset-root-alias');
+    await symlink(ready.root, aliasRoot);
+    const rootCheckPhp = `$check = function($expected) { ${rootGuard} return array('status'=>'approved'); };
+echo json_encode(array($check(array('assetRoot'=>$argv[1]))['status'], $check(array('assetRoot'=>$argv[2]))['status']));`;
+    const { stdout: rootCheckOutput } = await run('php', ['-r', rootCheckPhp, ready.root, aliasRoot], { encoding: 'utf8' });
+    expect(JSON.parse(rootCheckOutput)).toEqual(['approved', 'refused']);
     expect(binding).toMatchObject({ id: 44, url: 'https://example.test/uploads/hero-3.png', observedSize: { width: 1200, height: 800 },
       imageSizes: { full: { url: 'https://example.test/uploads/hero-3.png', width: 1200, height: 800 } } });
   });

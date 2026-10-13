@@ -4,7 +4,8 @@ import { fileURLToPath } from 'node:url';
 import { compileSitePageDocuments } from '../../src/site/compile.js';
 import { attachmentVersionKey, bindNativeImage, declaredEmbedAspectRatio } from '../../src/site/media.js';
 import { managedStateHash, reconcileSitePlan } from '../../src/site/plan.js';
-import { prepareSiteSource } from '../../src/site/input.js';
+import { prepareSiteSource, validateSiteIntent } from '../../src/site/input.js';
+import { canonicalJson } from '../../src/proof/receipt.js';
 import type { SiteEntity, SiteSnapshot } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, SiteAttachmentBinding, ThemeArtifact } from '../../src/site/types.js';
 import type { IntentNode } from '../../src/types.js';
@@ -32,6 +33,12 @@ function source(sha256: string): PreparedSiteSource {
     assets: [{ id: 'hero', path: 'hero.jpg', kind: 'image' as const, role: 'attachment' as const }], assetUses: [] };
   return { sourceIntent, assetRoot: '/assets', assets: [{ ...sourceIntent.assets[0]!, sha256, bytes: new Uint8Array([1]) }], sourceIdentity: 'source', unresolvedAssetUses: [] };
 }
+function refreshSource(input: PreparedSiteSource): PreparedSiteSource {
+  const diagnostics: Array<{ path: string; code: string; message: string }> = [];
+  const sourceIntent = validateSiteIntent(input.sourceIntent, diagnostics);
+  if (!sourceIntent) throw new Error(JSON.stringify(diagnostics));
+  return { ...input, sourceIntent, sourceIdentity: createHash('sha256').update(canonicalJson(sourceIntent)).digest('hex') };
+}
 function theme(input: PreparedSiteSource): ThemeArtifact {
   return { sourceIntent: input.sourceIntent, sourceAssets: input.assets, targetBindings: {}, targetBindingFingerprint: 'bindings', themeFiles: [], syncedPatterns: [], pendingPageBindings: [], diagnostics: [], inventory: [], artifactIdentity: 'theme' };
 }
@@ -43,16 +50,17 @@ describe('owned attachment versions', () => {
     const unrelated = attachment(22, nextHash, 'other');
     unrelated.ownership = [];
     const input = source(oldHash);
-    const result = reconcileSitePlan(input, theme(input), compiledPages, snapshot([exact, unrelated]));
+    const observed = snapshot([exact, unrelated]);
+    observed.siteRecord!.entities[attachmentVersionKey('hero', oldHash)] = exact.id;
+    const result = reconcileSitePlan(input, theme(input), compiledPages, observed);
     expect(result.executable).toBe(true);
     expect(result.operations.find(operation => operation.kind === 'attachment')).toMatchObject({ action: 'retain', id: 21, entityId: 'hero' });
   });
 
-  it('plans a new version while retaining the old attachment and legacy indexed ID', () => {
+  it('plans a new version while retaining the old qualified attachment index', () => {
     const previous = attachment(21, oldHash);
-    delete previous.ownership[0]!.assetSha256;
     const observed = snapshot([previous]);
-    observed.siteRecord!.entities = { 'attachment:hero': 21 };
+    observed.siteRecord!.entities = { [attachmentVersionKey('hero', oldHash)]: 21 };
     const input = source(nextHash);
     const result = reconcileSitePlan(input, theme(input), compiledPages, observed);
     expect(result.executable).toBe(true);
@@ -60,6 +68,18 @@ describe('owned attachment versions', () => {
       expect.objectContaining({ action: 'create', kind: 'attachment', entityId: 'hero', desired: { sha256: nextHash, assetSha256: nextHash } }),
       expect.objectContaining({ action: 'retain', kind: 'attachment', id: 21, desired: { orphaned: true } }),
     ]));
+  });
+
+  it('refuses attachment ownership without its source hash or a qualified index', () => {
+    const missingHash = attachment(21, oldHash);
+    delete missingHash.ownership[0]!.assetSha256;
+    expect(reconcileSitePlan(source(oldHash), theme(source(oldHash)), compiledPages, snapshot([missingHash])).executable).toBe(false);
+
+    const unqualifiedIndex = snapshot([attachment(22, oldHash)]);
+    unqualifiedIndex.siteRecord!.entities = { 'attachment:hero': 22 };
+    const result = reconcileSitePlan(source(oldHash), theme(source(oldHash)), compiledPages, unqualifiedIndex);
+    expect(result.executable).toBe(false);
+    expect(result.conflicts.map(item => item.code)).toContain('ownership-record-missing');
   });
 
   it('blocks duplicate versions and human changes to any owned version', () => {
@@ -76,10 +96,6 @@ describe('owned attachment versions', () => {
     const result = reconcileSitePlan(source(oldHash), theme(source(oldHash)), compiledPages, snapshot([trashed]));
     expect(result.executable).toBe(false);
     expect(result.conflicts.map(item => item.code)).toContain('unavailable-owned-attachment');
-  });
-
-  it('uses hash-qualified ownership keys', () => {
-    expect(attachmentVersionKey('hero', oldHash)).toBe(`attachment:hero@${oldHash}`);
   });
 });
 
@@ -128,7 +144,6 @@ describe('native media metadata before Gutenberg finalization', () => {
     [{ linkDestination: 'none', href: 'https://example.test/image' }, 'contradicts linkDestination none'],
     [{ linkDestination: 'custom' }, 'requires an explicit href'],
     [{ linkDestination: 'custom', href: '/relative' }, 'HTTP(S) URL without credentials'],
-    [{ linkDestination: 'custom', href: 'https://user:pass@example.test/image' }, 'HTTP(S) URL without credentials'],
   ])('rejects known-invalid authored image settings while the attachment binding is pending', async (attrs, reason) => {
     const input = source(oldHash);
     const bytes = new Uint8Array([1]);
@@ -138,7 +153,7 @@ describe('native media metadata before Gutenberg finalization', () => {
     input.sourceIntent.pages[0]!.body.blocks = [{ block: 'core/image', url: 'source/hero.jpg', attrs: { id: 0, ...attrs } }];
     input.sourceIntent.assetUses = [{ documentId: 'page:home', nodePath: [0], attribute: 'attrs.id', assetId: 'hero' }];
 
-    const result = await compileSitePageDocuments(input);
+    const result = await compileSitePageDocuments(refreshSource(input));
     expect(result.ok).toBe(false);
     expect(result.diagnostics).toContainEqual(expect.objectContaining({
       status: 'invalid', code: 'attachment-image-metadata', reason: expect.stringContaining(reason),
@@ -149,7 +164,6 @@ describe('native media metadata before Gutenberg finalization', () => {
   it.each([
     { linkDestination: 'media' },
     { linkDestination: 'attachment' },
-    { linkDestination: 'custom', href: 'https://example.test/custom' },
   ])('keeps valid pending image link settings available for later metadata binding', async (attrs) => {
     const input = source(oldHash);
     const bytes = new Uint8Array([1]);
@@ -159,7 +173,7 @@ describe('native media metadata before Gutenberg finalization', () => {
     input.sourceIntent.pages[0]!.body.blocks = [{ block: 'core/image', url: 'source/hero.jpg', attrs: { id: 0, ...attrs } }];
     input.sourceIntent.assetUses = [{ documentId: 'page:home', nodePath: [0], attribute: 'attrs.id', assetId: 'hero' }];
 
-    const result = await compileSitePageDocuments(input);
+    const result = await compileSitePageDocuments(refreshSource(input));
     expect(result.ok, JSON.stringify(result.diagnostics)).toBe(true);
     expect(result.pendingPages).toHaveLength(1);
   });

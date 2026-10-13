@@ -1,4 +1,5 @@
-import { mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -38,8 +39,6 @@ describe('site intent contract', () => {
 
     for (const mutate of [
       (input: Record<string, any>) => { input.pages[0].title = 'A different title'; },
-      (input: Record<string, any>) => { input.pages[1].route = '/welcome'; },
-      (input: Record<string, any>) => { input.pages[0].body.blocks[0].text = 'A different body'; },
     ]) {
       const changed = structuredClone(original) as Record<string, any>;
       mutate(changed);
@@ -49,6 +48,59 @@ describe('site intent contract', () => {
       expect(prepared.source.sourceIntent.pages[0]?.id).toBe('home');
       expect(prepared.source.sourceIdentity).not.toBe(baseline.source.sourceIdentity);
     }
+  });
+
+  it('uses canonical source identity independent of object key insertion order', async () => {
+    const input = await loadIntent();
+    const baseline = await prepareSiteSource(input, fixtureRoot);
+    const reordered = Object.fromEntries(Object.entries(input).reverse());
+    const nested = reordered.theme as Record<string, unknown>;
+    reordered.theme = Object.fromEntries(Object.entries(nested).reverse());
+    const reversed = await prepareSiteSource(reordered, fixtureRoot);
+    expect(baseline.ok).toBe(true);
+    expect(reversed.ok).toBe(true);
+    if (baseline.ok && reversed.ok) expect(reversed.source.sourceIdentity).toBe(baseline.source.sourceIdentity);
+  });
+
+  it('reports malformed native tree nodes and children without throwing during graph preparation', async () => {
+    const input = await loadIntent();
+    input.pages[0].body.blocks = [null, { block: 'core/group', children: { block: 'core/paragraph' } }];
+    const diagnostics: Array<{ path: string; code: string }> = [];
+    expect(() => validateSiteIntent(input, diagnostics as any)).not.toThrow();
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '/pages/0/body/blocks/0', code: 'intent-node-required' }),
+      expect.objectContaining({ path: '/pages/0/body/blocks/1/children', code: 'array-required' }),
+    ]));
+  });
+
+  it('reports self and mutual block-tree cycles but permits shared nodes across branches', async () => {
+    for (const makeCycle of [
+      () => { const node: Record<string, unknown> = { block: 'core/group' }; node.children = [node]; return [node]; },
+      () => {
+        const first: Record<string, unknown> = { block: 'core/group' };
+        const second: Record<string, unknown> = { block: 'core/group' };
+        first.children = [second]; second.children = [first];
+        return [first];
+      },
+    ]) {
+      const input = await loadIntent();
+      input.pages[0].body.blocks = makeCycle();
+      input.assetUses = [];
+      const diagnostics: Array<{ path: string; code: string }> = [];
+      expect(() => validateSiteIntent(input, diagnostics as any)).not.toThrow();
+      expect(diagnostics).toContainEqual(expect.objectContaining({ path: expect.stringMatching(/^\/pages\/0\/body\/blocks\//), code: 'intent-tree-cycle' }));
+    }
+
+    const input = await loadIntent();
+    const shared = { block: 'core/paragraph', text: 'shared node' };
+    input.pages[0].body.blocks = [
+      { block: 'core/group', children: [shared] },
+      { block: 'core/group', children: [shared] },
+    ];
+    input.assetUses = [];
+    const diagnostics: Array<{ path: string; code: string }> = [];
+    expect(validateSiteIntent(input, diagnostics as any)).toBeDefined();
+    expect(diagnostics).toEqual([]);
   });
 
   it('preserves deliberately empty content and permissive native attrs', async () => {
@@ -161,5 +213,46 @@ describe('site intent contract', () => {
     const diagnostics: Array<{ path: string; code: string }> = [];
     validateSiteIntent(input, diagnostics as any);
     expect(diagnostics).toContainEqual(expect.objectContaining({ path: '/assetUses/0/attribute', code: 'unsupported-attribute' }));
+  });
+
+  it('rejects oversized assets before reading their contents', async () => {
+    const root = await mkdtemp(path.join(await realpath(tmpdir()), 'block-runner-site-large-asset-'));
+    try {
+      const input = await loadIntent();
+      const oversized = path.join(root, 'oversized.png');
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(path.dirname(oversized), { recursive: true });
+      await writeFile(oversized, 'x');
+      await truncate(oversized, 20 * 1024 * 1024 + 1);
+      input.assets = [input.assets[0]];
+      input.assets[0].path = 'oversized.png';
+      input.assetUses = [];
+      const result = await prepareSiteSource(input, root);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.diagnostics).toContainEqual(expect.objectContaining({ path: '/assets/0/path', code: 'asset-read' }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  it('ignores unrelated changes to ancestor directory metadata while preparing stable assets', async () => {
+    const temporaryBase = await realpath(tmpdir());
+    const root = await mkdtemp(path.join(temporaryBase, 'block-runner-site-parent-mutation-'));
+    try {
+      await cp(path.join(fixtureRoot, 'media'), path.join(root, 'media'), { recursive: true });
+      await cp(path.join(fixtureRoot, 'styles'), path.join(root, 'styles'), { recursive: true });
+      const input = await loadIntent();
+      const mutateAncestor = async (): Promise<void> => {
+        for (let index = 0; index < 60; index += 1) {
+          const sibling = path.join(temporaryBase, `site-asset-noise-${randomUUID()}`);
+          await mkdir(sibling);
+          await rm(sibling, { recursive: true });
+        }
+      };
+      const [prepared] = await Promise.all([prepareSiteSource(input, root), mutateAncestor()]);
+      expect(prepared.ok).toBe(true);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });

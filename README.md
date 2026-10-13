@@ -1,6 +1,6 @@
 # Block Runner
 
-Turn HTML into editable WordPress blocks, or generate the source for a reusable registered block.
+Turn HTML into editable WordPress blocks, generate reusable block source, or compile a native block theme and site.
 
 [![npm version](https://img.shields.io/npm/v/block-runner.svg)](https://www.npmjs.com/package/block-runner)
 [![npm downloads](https://img.shields.io/npm/dm/block-runner.svg)](https://www.npmjs.com/package/block-runner)
@@ -9,7 +9,9 @@ Turn HTML into editable WordPress blocks, or generate the source for a reusable 
 
 ![Block Runner driven from Claude Code: preview the registered block, confirm, write it into the plugin](https://cdn.jsdelivr.net/gh/humanmade/block-runner@main/demo/demo.gif)
 
-Block Runner is an open-source CLI and JavaScript library from Human Made. It converts supported HTML into native Gutenberg blocks and checks the generated markup with the Gutenberg packages used by the WordPress editor. It can also generate a static registered block: source files you build into a plugin, with native editable blocks inside.
+Block Runner is an open-source CLI and JavaScript library from Human Made. It converts supported HTML into native Gutenberg blocks and checks the generated markup with the Gutenberg packages used by the WordPress editor. It can also generate a static registered block: source files you build into a plugin, with native editable blocks inside. Whole-site intent produces a block theme and page content, with separate planning and confirmed apply to WordPress.
+
+Theme-folder and whole-site workflows, Wesper 0.5.0 and the Node 22.13/24 floor were introduced in 0.9.11. See the [release notes](CHANGELOG.md#0911--2026-10-13) and check your installed version before using these routes.
 
 **The package makes no AI model calls.** Built-in rules can convert HTML on their own. An external agent can interpret a design and give Block Runner a structured plan to assemble or compile. The optional skill provides instructions for that agent.
 
@@ -48,6 +50,8 @@ The JSON report includes `ok`, block counts, warnings and source locations. Revi
 | Build page content from an agent's block tree | CLI `assemble` | Gutenberg markup, assembled and validated |
 | Create a reusable named block from a design | `author` | A plan and generated block source; preview and confirm before writing |
 | Check or repair existing block markup | `validate` / `fix` | A report or canonicalised markup |
+| Check or repair a block theme | `validate <theme-dir>` / `fix <theme-dir> --write` | Folder, schema and reference checks; eligible markup repairs |
+| Compile and manage a native whole site | `site compile` / `plan` / `apply` / `drift` / `pull` | Local theme bundle, reviewed plan, owned WordPress changes and staged theme edits |
 
 For a block theme, pass its directory to check each discovered template, part and pattern. Pattern
 PHP metadata headers are preserved and excluded from block counts; patterns with PHP in the body
@@ -60,6 +64,8 @@ the theme folder. Preset kinds with core defaults enabled are reported as skippe
 npx --no-install block-runner validate ./my-theme
 npx --no-install block-runner fix ./my-theme --write
 ```
+
+For whole sites, follow the [theme and site guide](skills/block-runner/references/SITE.md). Compile stays local; apply requires the exact reviewed confirmation and a durable journal. Deploy and activate the compiled theme separately before planning.
 
 For straightforward HTML, start with `convert`. For a design that needs interpretation, an agent can choose the block structure and send it to CLI `assemble`. Both page-content routes finish with media resolution, theme-token handling and validation. Neither creates a registered block's source files.
 
@@ -105,7 +111,7 @@ See [skill installation options](https://github.com/humanmade/block-runner/blob/
 
 - Supported HTML becomes native blocks. Unsupported structures can remain as Custom HTML, with warnings; `--strict` fails on fallback blocks and unresolved media.
 - Media IDs can come from a supplied map, WP-CLI or REST. Collecting site context or using WP-CLI resolution needs a site and the selected external tooling.
-- Styles can map to existing theme presets, native block attributes or supported CSS. Block Runner does not rewrite `theme.json`.
+- Styles can map to existing theme presets, native block attributes or supported CSS. Conversion and registered-block authoring do not rewrite the destination's `theme.json`; site compilation emits the caller's explicit local theme configuration.
 - Registered-block generation produces static source. It does not generate arbitrary PHP renderers, custom field editors or JavaScript interactions.
 
 Use the original design HTML rather than scraped frontend markup. **Valid markup does not prove visual fidelity or compatibility with every site.** Inspect warnings and verify the result in its target WordPress environment. The [construction guide](https://github.com/humanmade/block-runner/blob/main/skills/block-runner/references/CONSTRUCTION-PATTERNS.md) explains other approaches when the static generator does not fit.
@@ -142,6 +148,7 @@ These are page-content conversion results, not measurements of registered-block 
 | --- | --- |
 | Commands, flags, exit codes and CI usage | [CLI reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#cli) |
 | Reusable block delivery | [Source-to-ZIP walkthrough](https://github.com/humanmade/block-runner/blob/main/skills/block-runner/references/AUTHORING.md#shipped-notice-source-to-standalone-zip) |
+| Theme folders, whole-site intent and confirmed apply | [Theme and site guide](skills/block-runner/references/SITE.md) |
 | WordPress proof requirements and synced patterns | [Verification profiles](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#wordpress-proof-requirements) and [pattern overrides](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#synced-pattern-overrides-wordpress-71) |
 | Library contracts and regeneration | [API reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#library) |
 | Media, theme tokens and Wesper context | [Configuration](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#configuration) and [media resolution](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#media-resolution) |
@@ -150,7 +157,7 @@ These are page-content conversion results, not measurements of registered-block 
 | Custom HTML conversion rules | [Runnable extension example](https://github.com/humanmade/block-runner/blob/main/docs/extending.md) |
 | Repository checks and benchmarks | [Development guide](https://github.com/humanmade/block-runner/blob/main/docs/development.md) |
 
-The bundled `context` command uses Wesper **0.4.1**. See the [site-context reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#site-context-from-wesper) for what the manifest supplies and its limitations.
+The bundled `context` command uses Wesper **0.5.0**. See the [site-context reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#site-context-from-wesper) for what the manifest supplies and its limitations.
 
 For a real WordPress Site Editor save check of a local block theme, run `block-runner proof --theme <theme-directory> --wp-env-config <wp-env.json>`. The config supplies PHP, a fixed local port and local dependency plugins; `autoPort` is refused. The proof verifies its browser target, then saves each template and part from the mounted editor state and compares a fresh REST read with the pinned source.
 

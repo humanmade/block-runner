@@ -119,24 +119,28 @@ export const {
   writeAuthoringOutput,
   writeGeneratedRegisteredBlock,
   writePluginOutput,
+  planSite,
+  inspectSiteDrift,
+  confirmSitePull,
+  previewSitePull,
+  SitePullPublicationError,
+  readSiteSnapshot,
+  readSiteTemplateSnapshot,
+  prepareSiteSource,
+  compileSite,
+  compileThemeDocuments,
+  SiteWriteError,
+  writeCompiledSite,
+  applySite,
 } = library;
-
-export { planSite } from './site/plan.js';
-export { inspectSiteDrift } from './site/drift.js';
 export type { SiteDriftFinding, SiteDriftFindingStatus, SiteDriftOptions, SiteDriftReport } from './site/drift.js';
-export { confirmSitePull, previewSitePull, SitePullPublicationError } from './site/pull.js';
 export type { SitePullOptions, SitePullResult, SitePullSelection } from './site/pull.js';
-export { readSiteSnapshot } from './site/wpcli.js';
-export { readSiteTemplateSnapshot } from './site/wpcli.js';
 export type { SitePlanOptions } from './site/plan.js';
 export type { SiteWpCliOptions } from './site/wpcli.js';
 export type { SiteTemplateObservation, SiteTemplateSnapshot } from './site/wpcli.js';
 export type { SitePlan, SiteSnapshot } from './site/plan-types.js';
 
-export { prepareSiteSource } from './site/input.js';
-export { compileSite, compileThemeDocuments } from './site/compile.js';
 export type { CompileSiteOptions, CompileSiteResult, CompileThemeDocumentsResult } from './site/compile.js';
-export { SiteWriteError, writeCompiledSite } from './site/write.js';
 export type { SiteWriteOptions, SiteWriteResult } from './site/write.js';
 
 export type * from './index-implementation.js';
@@ -153,5 +157,4 @@ export type UnsupportedPluginLayoutError = import('./index-implementation.js').U
 export type PublicationInterruptedError = import('./index-implementation.js').PublicationInterruptedError;
 export type PluginPublicationInterruptedError = import('./index-implementation.js').PluginPublicationInterruptedError;
 
-export { applySite } from './site/apply.js';
 export type { SiteApplyOptions, SiteApplyReceipt } from './site/apply.js';

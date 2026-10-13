@@ -5,7 +5,7 @@
  * dependencies load.
  */
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdtempSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -27,13 +27,24 @@ try {
   run('npm', ['install', '--engine-strict', '--no-audit', '--no-fund', tarball], consumer);
 
   const cli = path.join(consumer, 'node_modules', 'block-runner', 'dist', 'cli.js');
+  const dependencyEntry = path.join(consumer, 'node_modules', '@wordpress', 'blocks', 'build-module', 'index.mjs');
+  const dependencySentinel = path.join(consumer, 'dependency-loaded');
+  writeFileSync(dependencyEntry, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(dependencySentinel)}, 'loaded');\nthrow new Error('DEPENDENCY_LOAD_SENTINEL');\n`);
   expectUnsupported('CLI', [cli, '--version']);
+  expectDependencyNotLoaded(dependencySentinel);
   expectUnsupported('library', ['--input-type=module', '--eval', "await import('block-runner')"]);
+  expectDependencyNotLoaded(dependencySentinel);
 
   console.log('Packed CLI and library rejected unsupported Node ' + unsupportedNode + ' before dependency loading.');
 } finally {
   trash(packDirectory);
   trash(consumer);
+}
+
+function expectDependencyNotLoaded(sentinel) {
+  if (existsSync(sentinel)) {
+    throw new Error('Packed entry point loaded a production dependency before rejecting unsupported Node.');
+  }
 }
 
 function expectUnsupported(subject, args) {

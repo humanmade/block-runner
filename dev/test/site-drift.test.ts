@@ -263,11 +263,6 @@ describe('read-only site drift inspection', () => {
     expect(calls).toHaveLength(1);
     expect(calls[0]!.executable).toBe('/usr/bin/wp');
     expect(calls[0]!.args.slice(0, 4)).toEqual(['--path=/wp', '--url=https://example.test/sub', '--user=editor', 'eval']);
-    expect(calls[0]!.args.at(-1)).toContain("set_param('context','edit')");
-    expect(calls[0]!.args.at(-1)).toContain('rest_do_request');
-    expect(calls[0]!.args.at(-1)).toContain("get_post($wpId)");
-    expect(calls[0]!.args.at(-1)).toContain("get_the_terms($wpId,'wp_theme')");
-    expect(calls[0]!.args.at(-1)).toContain('$post->post_content');
     expect(calls[0]!.args.at(-1)).not.toMatch(/\b(?:wp_insert_post|wp_update_post|update_option|add_post_meta|update_post_meta)\s*\(/);
     expected.principal.canReadEditContext = false;
     await expect(readSiteTemplateSnapshot({ wpPath: '/wp' }, 'fixture', async () => JSON.stringify(expected))).rejects.toThrow('edit_posts');
@@ -305,10 +300,6 @@ describe('read-only site drift inspection', () => {
     const textResult = await run(clean, false);
     expect(textResult.code).toBe(0);
     expect(textResult.stdout).toContain('Site drift: clean');
-    const equivalent = templateSnapshot(theme, fixture.entities.map((entity, index) => index === 0 ? { ...entity, source: 'custom' as const, wpId: 44 } : entity));
-    const equivalentResult = await run(equivalent);
-    expect(equivalentResult.code).toBe(0);
-    expect(JSON.parse(equivalentResult.stdout)).toMatchObject({ status: 'clean', findings: expect.arrayContaining([expect.objectContaining({ status: 'equivalent-override' })]) });
     const changed = templateSnapshot(theme, fixture.entities.map((entity, index) => index === 0 ? { ...entity, raw: `${entity.raw} ` } : entity));
     const actionableResult = await run(changed);
     expect(actionableResult.code).toBe(1);

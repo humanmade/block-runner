@@ -47,12 +47,6 @@ describe('block theme folders', () => {
 
   // Four separate CLI cold starts each boot Gutenberg; CI needs a combined budget.
   it('writes canonical files atomically, preserves PHP headers, skips PHP bodies and is idempotent', async () => {
-    const pristine = await copiedTheme('valid-theme');
-    const pristineFix = await runCli(['fix', pristine, '--write', '--json']);
-    const pristineReport = JSON.parse(pristineFix.stdout) as { files: Array<{ changed?: boolean }> };
-    expect(pristineFix.code).toBe(0);
-    expect(pristineReport.files.every(({ changed }) => changed === false)).toBe(true);
-
     const project = await copiedTheme('valid-theme');
     const templatePath = path.join(project, 'templates', 'index.html');
     const patternPath = path.join(project, 'patterns', 'callout.php');

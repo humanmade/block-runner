@@ -47,11 +47,11 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
       diagnostics.push(issue(at, 'prepared-asset-mismatch', 'prepared bytes do not match the declared site asset'));
       continue;
     }
-    const bytes = Buffer.from(prepared.bytes);
-    if (bytes.length === 0 || bytes.length > MAX_ASSET_BYTES) {
+    if (prepared.bytes.byteLength === 0 || prepared.bytes.byteLength > MAX_ASSET_BYTES) {
       diagnostics.push(issue(`${at}/path`, 'asset-size', 'asset is empty or exceeds 20 MiB'));
       continue;
     }
+    const bytes = Buffer.from(prepared.bytes);
     const hash = createHash('sha256').update(bytes).digest('hex');
     if (hash !== prepared.sha256) {
       diagnostics.push(issue(`${at}/path`, 'asset-hash', 'prepared asset bytes no longer match their SHA-256'));
@@ -130,10 +130,11 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
 
 /** Re-read the declared source through the same no-symlink boundary and reject changed bytes. */
 export async function verifyPreparedSiteAssets(source: PreparedSiteSource): Promise<void> {
-  const { prepareSiteSource } = await import('./input.js');
+  const { hashSiteSourceIdentity, prepareSiteSource } = await import('./input.js');
   const refreshed = await prepareSiteSource(source.sourceIntent, source.assetRoot);
   if (!refreshed.ok) throw new Error(`site source assets changed or became unsafe: ${refreshed.diagnostics.map(({ path: at, message }) => `${at}: ${message}`).join('; ')}`);
-  if (refreshed.source.sourceIdentity !== source.sourceIdentity) throw new Error('site intent changed after source preparation');
+  if (hashSiteSourceIdentity(source.sourceIntent) !== source.sourceIdentity
+    || refreshed.source.sourceIdentity !== source.sourceIdentity) throw new Error('site intent changed after source preparation');
   const current = new Map(refreshed.source.assets.map((asset) => [asset.id, asset]));
   if (current.size !== source.assets.length || source.assets.some((asset) => current.get(asset.id)?.sha256 !== asset.sha256)) {
     throw new Error('site source assets changed after source preparation');

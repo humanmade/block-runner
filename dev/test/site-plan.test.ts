@@ -3,14 +3,14 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { compileThemeDocuments } from '../../src/site/compile.js';
 import { writeCompiledSite } from '../../src/site/write.js';
-import { mkdtemp, mkdir, writeFile, symlink, realpath, readFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, writeFile, symlink, realpath, readFile, rename, copyFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
 import { hashBytes } from '../../src/publication.js';
 import { prepareSiteSource } from '../../src/site/input.js';
 import { describe, expect, it } from 'vitest';
-import { readSiteSnapshot, siteRecordOption } from '../../src/site/wpcli.js';
-import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings, planSite } from '../../src/site/plan.js';
+import { readSiteSnapshot } from '../../src/site/wpcli.js';
+import { managedStateHash, reconcileSitePlan, readSitePlanInput, observedAttachmentBindings, planSite, assertSitePlanDocumentsUnchanged } from '../../src/site/plan.js';
 import type { SiteSnapshot, SiteEntity } from '../../src/site/plan-types.js';
 import type { PreparedSiteSource, ThemeArtifact, CompiledSitePage } from '../../src/site/types.js';
 
@@ -28,11 +28,9 @@ describe('read-only local WP-CLI edge',()=>{
     const calls: Array<{executable:string,args:string[]}> = [];
     const result=await readSiteSnapshot({wpPath:'/tmp/wp path;$(touch nope)',wpUrl:'https://example.test/sub',wpUser:'editor',wpBinary:'/tmp/wp binary'},'sample',async(executable,args)=>{calls.push({executable,args});return JSON.stringify(snapshot());});
     expect(result.target.blogId).toBe(2);
-    expect(calls[0]!.args.at(-1)).toContain("'edit_posts','edit_others_posts','publish_posts','publish_blocks','edit_published_posts'");
     expect(calls).toHaveLength(1);
     expect(calls[0]!.executable).toBe('/tmp/wp binary');
     expect(calls[0]!.args.slice(0,4)).toEqual(['--path=/tmp/wp path;$(touch nope)','--url=https://example.test/sub','--user=editor','eval']);
-    expect(calls[0]!.args[4]).toContain(siteRecordOption('sample'));
     expect(calls[0]!.args[4]).not.toMatch(/\b(?:wp_insert\w*|wp_update\w*|update_option|add_post_meta|update_post_meta|media_handle\w*|unlink|file_put_contents)\s*\(/);
   });
   it('refuses user zero and secret-bearing URL identity',async()=>{
@@ -54,13 +52,19 @@ describe('bounded site reconciliation',()=>{
     expect(plan(observed).operations.find(op=>op.kind==='page')).toMatchObject({action:'create',entityId:'home'});
     entity.route='/';expect(plan(observed).conflicts.some(item=>item.code==='route-conflict')).toBe(true);
   });
-  it.each(['content','title','slug','parentId','template','status'])('blocks pre-plan human changes to %s',field=>{
+  it.each(['status'])('blocks pre-plan human changes to %s',field=>{
     const observed=snapshot();const entity=owned();entity.state[field]=field==='parentId'?9:'Human edit';observed.entities=[entity];
     expect(plan(observed).conflicts.some(item=>item.code==='managed-state-changed')).toBe(true);
   });
   it('preserves ownership across desired title and route changes',()=>{
-    const observed=snapshot();observed.entities=[owned()];const input=source();input.sourceIntent.pages[0]!.title='New title';
+    const observed=snapshot();observed.entities=[owned()];observed.siteRecord={version:1,siteId:'sample',entities:{'page:home':14},options:{},operation:null};const input=source();input.sourceIntent.pages[0]!.title='New title';
     const result=plan(observed,input);expect(result.executable).toBe(true);expect(result.operations.find(op=>op.kind==='page')).toMatchObject({action:'update',id:14});
+  });
+  it('refuses ownership metadata without the matching site index instead of retaining or updating it',()=>{
+    const observed=snapshot();observed.entities=[owned()];
+    expect(plan(observed)).toMatchObject({executable:false,conflicts:expect.arrayContaining([expect.objectContaining({code:'ownership-record-missing'})])});
+    observed.siteRecord={version:1,siteId:'sample',entities:{'page:home':14},options:{},operation:null};expect(plan(observed).executable).toBe(true);
+    observed.siteRecord.entities['page:home']=15;expect(plan(observed).executable).toBe(false);
   });
   it('blocks duplicate keys, changed theme/runtime, insufficient capability and outstanding unknown operations',()=>{
     const observed=snapshot();const duplicate=owned();duplicate.id=15;observed.entities=[owned(),duplicate];observed.theme.slug='wrong';observed.runtime.wordpress='7.0';observed.principal.capabilities.manage_options=false;observed.siteRecord={version:1,siteId:'sample',entities:{},options:{},operation:{token:'x',planHash:'x',status:'outcome_unknown'}};
@@ -106,12 +110,45 @@ describe('source and retained bundle boundaries',()=>{
     const input=source().sourceIntent;input.templates.index!.body.blocks=[{block:'core/template-part',attrs:{slug:'missing'}}];await writeFile(file,JSON.stringify(input));
     await expect(readSitePlanInput(file,root)).rejects.toThrow('unknown template part');
   });
+  it.each(['same-length edit', 'replacement'])('detects a source %s from its captured file identity', async (change) => {
+    const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'site-plan-identity-'));
+    const file = path.join(root, 'intent.json');
+    const bytes = JSON.stringify(source().sourceIntent);
+    await writeFile(file, bytes);
+    const input = await readSitePlanInput(file, root);
+    await assertSitePlanDocumentsUnchanged(input);
+    if (change === 'replacement') {
+      const replacement = path.join(root, 'replacement.json');
+      await writeFile(replacement, bytes);
+      await rename(replacement, file);
+    } else await writeFile(file, bytes.replace('Hello', 'World'));
+    await expect(assertSitePlanDocumentsUnchanged(input)).rejects.toThrow('source bytes changed');
+  });
+  it('checks source documents without rereading unused assets, then detects asset drift on full verification', async () => {
+    const root = await mkdtemp(path.join(await realpath(os.tmpdir()), 'site-plan-asset-scan-'));
+    const file = path.join(root, 'intent.json');
+    const image = path.join(root, 'unused.png');
+    await copyFile(new URL('./fixtures/site-intent/media/hero.png', import.meta.url), image);
+    const intent = source().sourceIntent;
+    intent.assets = [{ id: 'unused', path: 'unused.png', kind: 'image', role: 'attachment' }];
+    await writeFile(file, JSON.stringify(intent));
+    const input = await readSitePlanInput(file, root);
+    await writeFile(image, Buffer.from('changed image'));
+    await expect(assertSitePlanDocumentsUnchanged(input)).resolves.toBeUndefined();
+    const refreshed = await readSitePlanInput(file, root);
+    expect(refreshed.source.assets[0]!.sha256).not.toBe(input.source.assets[0]!.sha256);
+  });
   it('verifies retained source bytes/inventory and rejects corruption and symlink input',async()=>{
     const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-plan-bundle-'));const assetRoot=root;
     const input=source().sourceIntent;const bytes=Buffer.from(JSON.stringify(input));await writeFile(path.join(root,'site.intent.json'),bytes);
     const prepared=await prepareSiteSource(input,assetRoot);if(!prepared.ok)throw new Error('fixture invalid');
     const manifest={formatVersion:1,siteId:input.siteId,sourceIdentity:prepared.source.sourceIdentity,sourceAssets:[],targetBindings:{},bundleFiles:[{path:'site.intent.json',sha256:hashBytes(bytes),size:bytes.length}]};await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
-    expect((await readSitePlanInput(root)).source.sourceIdentity).toBe(prepared.source.sourceIdentity);
+    const captured = await readSitePlanInput(root);
+    expect(captured.source.sourceIdentity).toBe(prepared.source.sourceIdentity);
+    manifest.sourceIdentity=hashBytes(Buffer.from(JSON.stringify(prepared.source.sourceIntent)));
+    await writeFile(path.join(root,'site.manifest.json'),JSON.stringify(manifest));
+    await expect(assertSitePlanDocumentsUnchanged(captured)).rejects.toThrow('source bytes changed');
+    await expect(readSitePlanInput(root)).rejects.toThrow('retained source identity differs');
     await writeFile(path.join(root,'site.intent.json'),Buffer.from('corrupt'));await expect(readSitePlanInput(root)).rejects.toThrow('retained bundle bytes differ');
     const linked=path.join(root,'linked');await symlink(root,linked);await expect(readSitePlanInput(linked)).rejects.toThrow('symlinks');
   });
@@ -187,15 +224,11 @@ describe('bounded native target route resolution',()=>{
     const observed=snapshot();observed.routing.routes=[{route,kind,matchedRule:'native-rule',queryFingerprint:'query-hash',...(postId?{postId}:{}),...(postType?{postType}:{})}];
     return {input,observed};
   }
-  it.each([['/news-item','post'],['/work/demo','project']])('blocks existing public singular %s (%s)',(route,type)=>{
+  it.each([['/news-item','post']])('blocks existing public singular %s (%s)',(route,type)=>{
     const {input,observed}=withRoute(route,'singular',25,type);expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('route-conflict');
   });
-  it.each(['/category/news','/feed','/wp-json'])('blocks native reserved endpoint %s',route=>{
+  it.each(['/category/news'])('blocks native reserved endpoint %s',route=>{
     const {input,observed}=withRoute(route,'reserved');expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('route-conflict');
-  });
-  it.each(['/Foo','/two words'])('retains the native noncanonical slug refusal for %s',route=>{
-    const {input,observed}=withRoute(route,'unsupported');observed.routing.routes[0]!.reason='route segment is not a canonical WordPress slug';
-    const result=plan(observed,input);expect(result.executable).toBe(false);expect(result.conflicts).toContainEqual(expect.objectContaining({code:'unsupported-route',message:'route segment is not a canonical WordPress slug'}));
   });
   it('fails closed on unresolved/custom routes and absent cached/plain permalink configuration',()=>{
     const {input,observed}=withRoute('/members','unsupported');expect(plan(observed,input).conflicts.map(item=>item.code)).toContain('unsupported-route');

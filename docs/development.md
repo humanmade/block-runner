@@ -25,9 +25,28 @@ npm run typecheck
 ```
 
 `npm run verify` remains the required repository gate. It runs the deterministic repository
-suite.
+product suite. Benchmark and repository-tooling tests run separately with
+`npm run test:tools`; use that command when changing benchmark engines, receipt
+tooling or project-owned-block helpers. Full CI runs it once on Node 22, and the
+skill and release routes also run it. It is not a paid model benchmark run.
 
-CI classifies both pull-request and main-push changes with [`scripts/ci-scope.mjs`](../scripts/ci-scope.mjs). Additions or modifications limited to its root-documentation/demo allowlist use the docs route; eligible shipped-skill changes use the skill route. Runtime, package, proof, workflow, release and unclassified paths use the full route. Deletions, renames and unavailable diffs cannot select a reduced route. New `docs/` files are currently unclassified, so they select full CI.
+CI classifies both pull-request and main-push changes with [`scripts/ci-scope.mjs`](../scripts/ci-scope.mjs). Additions or modifications limited to `README.md`, `CHANGELOG.md`, `ERRORS.md`, `DECISIONS.md` and its demo allowlist use the docs route; eligible shipped-skill changes use the skill route. Runtime, package, proof, workflow, release and unclassified paths use the full route. Deletions, renames and unavailable diffs cannot select a reduced route. All `docs/` paths are currently unclassified, so they select full CI.
+
+For prose-only edits, check local links and run the focused documentation contracts:
+
+```sh
+npx vitest run dev/test/skill.test.ts dev/test/node-support.test.ts
+npm run check:private
+git diff --check
+```
+
+Theme/site changes need their affected `dev/test/theme-*.test.ts`,
+`dev/test/site-*.test.ts` or `dev/test/proof-site.test.ts` files and typecheck. Verify
+native field preservation or save behaviour in a controlled WordPress runtime when
+changing those boundaries; a mocked adapter is insufficient. Refer to the
+[site guide](../skills/block-runner/references/SITE.md) for proof prerequisites and
+manual interrupted-apply recovery. Do not treat retained historical receipts as
+acceptance for changed code.
 
 Run `npm run test:consumer` separately to build the clean standalone release archive and
 the native style-adapter fixture; it needs npm, `unzip`, and enough time for an isolated

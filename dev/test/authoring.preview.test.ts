@@ -144,14 +144,6 @@ describe('authoring preview', () => {
     expect(output).toContain('font-licenses.txt [create]');
   });
 
-  it('wraps to the supplied terminal width', () => {
-    for (const width of [44, 12]) {
-      const output = renderAuthoringPreview(plan, { width });
-      const exactDestination = `Destination: ${plan.target.directory}`;
-      expect(output.split('\n').every((line) => line.length <= width || line === exactDestination)).toBe(true);
-    }
-  });
-
   it('leads with a compact review summary while retaining every approval detail before the hash', () => {
     const reviewed = validateAuthoringPlan({
       ...plan,

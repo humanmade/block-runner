@@ -4,7 +4,8 @@ description: >-
   Turn WordPress page content or authored design HTML into valid, native, editable Gutenberg blocks,
   or plan a reusable named registered block for deterministic source generation. Use when creating
   WordPress page content or sections, converting authored HTML or a design-tool export into block
-  markup, authoring a reusable named block in an existing WordPress project, continuing an
+  markup, checking or compiling native block themes and whole-site intent, planning confirmed
+  owned site changes, inspecting or pulling saved theme edits, authoring a reusable named block in an existing WordPress project, continuing an
   in-scope Gutenberg component through custom PHP or editor code, understanding its block
   integration before generation, validating or repairing Gutenberg
   markup, or before writing blocks to WordPress. Do not use for general WordPress administration,
@@ -28,6 +29,8 @@ self-contained page-content or markup-repair task.
 | Reusable, named static registered block source | [AUTHORING.md](references/AUTHORING.md) | The requested result is a static `namespace/slug` block in code. | Confirmed source at its exact retained destination; build, integration, and WordPress proof remain separate. The complete plan in [AUTHORING-PLAN.md](references/AUTHORING-PLAN.md) is an advanced route, not a prerequisite. |
 | Custom PHP renderer or editor behaviour in an existing project | [GUIDE.md §1.1](references/GUIDE.md) | Static generation cannot satisfy the requested component. | Continue in project-owned code; retain a useful native subtree only when it genuinely helps. Inspect [CONSTRUCTION-PATTERNS.md](references/CONSTRUCTION-PATTERNS.md) only when project facts needed for that implementation are missing. |
 | Supplied block markup to repair or check | [GUIDE.md §5](references/GUIDE.md) | Markup already exists and must be safe to save. | `validate` → `fix` → `validate`; do not save a hard-invalid result. |
+| Block-theme folder to check or repair | [SITE.md](references/SITE.md#check-an-existing-theme) | Templates, parts, patterns and theme.json already exist. | Folder gate and eligible `fix --write` repairs; live save/visual proof remain separate. |
+| Native whole-site theme and owned content | [SITE.md](references/SITE.md) | Caller-authored SiteIntent describes the theme, pages, assets and bindings. | Local compile, separate theme deployment, then reviewed plan and explicitly confirmed apply; drift/pull have their own boundaries. |
 
 If “reusable section” does not say whether it is page `post_content` or a named registered source
 block, ask that one artifact question before writing. Do not use this skill for unrelated WordPress

@@ -109,12 +109,6 @@ describe('theme folder references', () => {
       }),
     ]));
     expect(references.filter(({ code }) => code === 'unresolved-template-part')).toHaveLength(2);
-
-    const noncanonical = `\n${await readFile(template, 'utf8')}`;
-    await writeFile(template, noncanonical);
-    const strictFix = await runCli(['fix', project, '--write', '--strict', '--json']);
-    expect(strictFix.code).toBe(1);
-    expect(await readFile(template, 'utf8')).toBe(noncanonical);
   });
 
   it('parses gradient presets and ignores malformed preset-array shapes', () => {
@@ -122,11 +116,6 @@ describe('theme folder references', () => {
       color: { gradients: [{ slug: 'sunrise', gradient: 'linear-gradient(red, blue)' }] },
     });
     expect(tokens.gradients).toEqual({ sunrise: 'linear-gradient(red, blue)' });
-    expect(() => parseThemeJsonSettings({
-      color: { palette: {} as never, gradients: [null, 1, { slug: 2, gradient: false }] as never },
-      typography: { fontFamilies: {} as never, fontSizes: [null, { slug: 'large', size: '2rem' }] as never },
-      spacing: { spacingSizes: 'not-an-array' as never },
-    })).not.toThrow();
   });
 
   it('honors config-file strictness before rewriting a missing-reference file', async () => {

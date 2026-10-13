@@ -1,35 +1,71 @@
 import { spawn } from 'node:child_process';
-import { siteRecordOption, SITE_OWNERSHIP_META, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
+import { siteRecordOption, SITE_OWNERSHIP_META, SITE_APPLY_LOCK_OPTION, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { managedStateHash } from './plan.js';
 import type { SiteSnapshot, SiteApplyStep, SitePlanOperation } from './plan-types.js';
 export interface SiteApplyBoundary {
-  siteId: string; planHash: string; token: string; target: SiteSnapshot['target']; principal: SiteSnapshot['principal']; theme: SiteSnapshot['theme'];
+  siteId: string;
+  planHash: string;
+  token: string;
+  target: SiteSnapshot['target'];
+  principal: SiteSnapshot['principal'];
+  theme: SiteSnapshot['theme'];
 }
-export type SiteApplyRequest =
-  | { action: 'lock' | 'unlock' }
-  | { action: 'marker'; index?: { key: string; id: number }; operation: { token: string; planHash: string; status: 'started' | 'outcome_unknown' | 'completed'; target: SiteSnapshot['target']; principalId: number; currentStep?: SiteApplyStep; stepEvidence?: { operation: SitePlanOperation; beforeState: unknown } } }
-  | { action: 'mutate'; step: SiteApplyStep; operation: SitePlanOperation; before: SiteSnapshot; stateHash: string };
+export type SiteApplyRequest = {
+  action: 'lock' | 'unlock';
+} | {
+  action: 'marker';
+  index?: {
+    key: string;
+    id: number;
+  };
+  operation: {
+    token: string;
+    planHash: string;
+    status: 'started' | 'outcome_unknown' | 'completed';
+    target: SiteSnapshot['target'];
+    principalId: number;
+    currentStep?: SiteApplyStep;
+    stepEvidence?: {
+      operation: SitePlanOperation;
+      beforeState: unknown;
+    };
+  };
+} | {
+  action: 'mutate';
+  step: SiteApplyStep;
+  operation: SitePlanOperation;
+  before: SiteSnapshot;
+  stateHash: string;
+};
 /** Only fixed operations are exposed. A transport error after invocation has uncertain effects. */
-export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{status: string; id?: number}> {
-  if (!wp.wpPath || [wp.wpPath,wp.wpUrl,wp.wpUser,wp.wpBinary].some(value=>value?.includes('\0'))) throw new Error('invalid WP-CLI selection');
+export async function siteApplyWpCli(wp: SiteWpCliOptions, boundary: SiteApplyBoundary, request: SiteApplyRequest, transport?: SiteReadTransport): Promise<{
+  status: string;
+  id?: number;
+}> {
+  if (!wp.wpPath || [wp.wpPath, wp.wpUrl, wp.wpUser, wp.wpBinary].some(value => value?.includes('\0'))) throw new Error('invalid WP-CLI selection');
   const selection = [`--path=${wp.wpPath}`, ...(wp.wpUrl ? [`--url=${wp.wpUrl}`] : []), ...(wp.wpUser ? [`--user=${wp.wpUser}`] : [])];
   let output: string;
   try {
-    output = transport
-      ? await transport(wp.wpBinary ?? 'wp',[...selection,'eval',script(boundary,request)])
-      : await runWithInput(wp.wpBinary ?? 'wp',[...selection,'eval-file','-'],`<?php\n${script(boundary,request)}`);
+    output = transport ? await transport(wp.wpBinary ?? 'wp', [...selection, 'eval', script(boundary, request)]) : await runWithInput(wp.wpBinary ?? 'wp', [...selection, 'eval-file', '-'], `<?php\n${script(boundary, request)}`);
+  } catch {
+    throw new Error('WP-CLI site apply transport failed; preserve operation evidence and inspect the selected local installation');
   }
-  catch { throw new Error('WP-CLI site apply transport failed; preserve operation evidence and inspect the selected local installation'); }
   try {
-    const result = JSON.parse(output) as {status:string;id?:number};
-    if (!result || !['complete','refused','outcome_unknown'].includes(result.status)) throw new Error();
+    const result = JSON.parse(output) as {
+      status: string;
+      id?: number;
+    };
+    if (!result || !['complete', 'refused', 'outcome_unknown'].includes(result.status)) throw new Error();
     return result;
-  } catch { throw new Error('WP-CLI site apply returned invalid boundary readback; preserve operation evidence'); }
+  } catch {
+    throw new Error('WP-CLI site apply returned invalid boundary readback; preserve operation evidence');
+  }
 }
-
 function runWithInput(executable: string, args: string[], input: string): Promise<string> {
   return new Promise((resolve, reject) => {
-    const child = spawn(executable, args, { stdio: ['pipe', 'pipe', 'ignore'] });
+    const child = spawn(executable, args, {
+      stdio: ['pipe', 'pipe', 'ignore']
+    });
     let output = '';
     let settled = false;
     const fail = () => {
@@ -56,12 +92,33 @@ function runWithInput(executable: string, args: string[], input: string): Promis
       settled = true;
       resolve(output);
     });
-    try { child.stdin.end(input); } catch { fail(); }
+    try {
+      child.stdin.end(input);
+    } catch {
+      fail();
+    }
   });
 }
-
 function script(boundary: SiteApplyBoundary, request: SiteApplyRequest): string {
-  const encoded = Buffer.from(JSON.stringify({ ...boundary, request, ...(request.action==='mutate'&&request.operation.id?{beforeStateHash:managedStateHash(request.before.entities.find(entity=>entity.id===request.operation.id)?.state ?? {})}:{}), option:siteRecordOption(boundary.siteId), lock: `${siteRecordOption(boundary.siteId)}_lock` })).toString('base64');
+  // The executor keeps complete transition evidence. PHP needs only this mutation's baseline.
+  const payloadRequest = request.action === 'mutate' ? {
+    ...request,
+    before: {
+      entities: request.operation.id ? request.before.entities.filter(entity => entity.id === request.operation.id) : [],
+      options: request.operation.kind === 'option' ? {
+        [request.operation.entityId]: request.before.options[request.operation.entityId]
+      } : {}
+    }
+  } : request;
+  const encoded = Buffer.from(JSON.stringify({
+    ...boundary,
+    request: payloadRequest,
+    ...(request.action === 'mutate' && request.operation.id ? {
+      beforeStateHash: managedStateHash(request.before.entities.find(entity => entity.id === request.operation.id)?.state ?? {})
+    } : {}),
+    option: siteRecordOption(boundary.siteId),
+    lock: SITE_APPLY_LOCK_OPTION
+  })).toString('base64');
   return `
 $e=json_decode(base64_decode('${encoded}'),true); $r=$e['request']; $attempted=false;
 $same=function($a,$b) use (&$same) { if (is_array($a) && is_array($b)) { if(count($a)!==count($b)) return false; foreach($a as $k=>$v) if(!array_key_exists($k,$b)||!$same($v,$b[$k])) return false; return true; } return $a===$b; };
@@ -77,7 +134,10 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
   foreach(new RecursiveIteratorIterator(new RecursiveDirectoryIterator($root,FilesystemIterator::SKIP_DOTS)) as $file) { if($file->isLink()) return array('status'=>'refused'); if($file->isFile()) $inventory[]=array('path'=>str_replace(DIRECTORY_SEPARATOR,'/',substr($file->getPathname(),strlen($root)+1)),'sha256'=>hash_file('sha256',$file->getPathname()),'size'=>$file->getSize()); }
   usort($inventory,function($a,$b){return strcmp($a['path'],$b['path']);});
   if(!$same($inventory,$e['theme']['inventory'])) return array('status'=>'refused');
-  if($r['action']==='lock') return array('status'=>add_option($e['lock'],$e['token'],'',false)?'complete':'refused');
+  if($r['action']==='lock') {
+   // A matching token identifies an operation, not one still-running process.
+   return array('status'=>add_option($e['lock'],$e['token'],'',false)?'complete':'refused');
+  }
   if(get_option($e['lock'])!==$e['token']) return array('status'=>'refused');
   $record=get_option($e['option'],null);
   if($r['action']==='marker') {
@@ -111,9 +171,10 @@ $result=(function() use($e,$r,&$attempted,$same,$state) {
    }
   }
   $data=array('post_type'=>$type,'post_title'=>$desired['title'],'post_content'=>$desired['content'],'post_status'=>$desired['status']);
-  if($id) $data['ID']=$id;
-  if($kind==='page') { $data['post_name']=$desired['slug']; $data['post_parent']=$desired['parentId']; }
-  $attempted=true; $written=wp_insert_post(wp_slash($data),true); if(is_wp_error($written)||!$written) throw new Exception('insert'); $id=(int)$written;
+  if($id) { $data['ID']=$id; if($desired['status']==='draft') $data['edit_date']=true; }
+  // Template metadata is assigned below. wp_update_post otherwise inherits and revalidates the old template after writing.
+  if($kind==='page') { $data['post_name']=$desired['slug']; $data['post_parent']=$desired['parentId']; $data['page_template']=''; }
+  $attempted=true; $written=$id ? wp_update_post(wp_slash($data),true) : wp_insert_post(wp_slash($data),true); if(is_wp_error($written)||!$written) throw new Exception('save'); $id=(int)$written;
   if($kind==='page') update_post_meta($id,'_wp_page_template',$desired['template']);
   $owner=array('version'=>1,'siteId'=>$e['siteId'],'entityId'=>$op['entityId'],'kind'=>$kind,'lastAppliedHash'=>$r['stateHash']);
   if(isset($op['id'])) update_post_meta($id,'${SITE_OWNERSHIP_META}',$owner); else if(!add_post_meta($id,'${SITE_OWNERSHIP_META}',$owner,true)) throw new Exception('ownership');

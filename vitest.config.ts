@@ -13,6 +13,14 @@ export default defineConfig({
       'dev/test/proof-gutenberg-compat.test.ts',
       'dev/test/plugin.consumer.test.ts',
       'dev/test/proof-native-style-adapter-builder.test.ts',
+      // Benchmark and repository tooling under scripts/ runs with `npm run test:tools`.
+      'dev/test/authoring-benchmark.test.ts',
+      'dev/test/authoring.receipts.test.ts',
+      'dev/test/authoring.runner.test.ts',
+      'dev/test/authoring.style-ledger.test.ts',
+      'dev/test/benchmark.test.ts',
+      'dev/test/engine-skill.test.ts',
+      'dev/test/project-owned-blocks.test.ts',
     ],
     // Each file boots a full headless Gutenberg runtime. Parallel boots contend heavily enough
     // to cross the timeout together on developer machines, so serialize files for a stable gate.

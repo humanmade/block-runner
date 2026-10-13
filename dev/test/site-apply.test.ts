@@ -4,11 +4,12 @@ import os from 'node:os';
 import { hashCanonicalJson } from '../../src/proof/receipt.js';
 import { describe, it, expect } from 'vitest';
 import { applySite, type SiteApplyOptions } from '../../src/site/apply.js';
-import { readSitePlanInput, reconcileSitePlan, managedStateHash } from '../../src/site/plan.js';
+import { writeCompiledSite } from '../../src/site/write.js';
+import { readSitePlanInput, reconcileSitePlan, planPreparedSite, managedStateHash } from '../../src/site/plan.js';
 import { compileThemeDocuments, compileSitePageDocuments, compileSiteSyncedPatterns } from '../../src/site/compile.js';
 import type { SiteSnapshot } from '../../src/site/plan-types.js';
 import { siteApplyWpCli, type SiteApplyBoundary, type SiteApplyRequest } from '../../src/site/apply-wpcli.js';
-import { siteRecordOption } from '../../src/site/wpcli.js';
+import { siteRecordOption, SITE_APPLY_LOCK_OPTION } from '../../src/site/wpcli.js';
 function phpAssociateEmptyObjects(value:unknown):unknown {
  if(Array.isArray(value))return value.map(phpAssociateEmptyObjects);
  if(value&&typeof value==='object'){const entries=Object.entries(value);return entries.length?Object.fromEntries(entries.map(([key,item])=>[key,phpAssociateEmptyObjects(item)])):[];}
@@ -56,9 +57,37 @@ async function fixture(extra?: 'media'|'patterns',normalizeMarkerEmptyObjects=fa
   }
   return JSON.stringify({status:'complete'});
  }};
- return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:()=>{lock='stale';}};
+ return {root,source,plan,options,live,transports,requests,setFault:(value:typeof fault)=>{fault=value;},setRouteMutation:(value:typeof routeMutation)=>{routeMutation=value;},count:()=>mutations,setLock:(token='stale')=>{lock=token;},releaseLock:()=>{lock=null;}};
 }
 describe('confirmed database apply',()=>{
+ it('uses started-marker readback as the fresh full conflict check before any native effect',async()=>{
+  const f=await fixture();const originalMutate=f.transports.mutate;
+  const result=await applySite(f.plan,f.options,{...f.transports,mutate:async(executable,args)=>{
+   const encoded=args.at(-1)!.match(/base64_decode\('([^']+)'\)/)![1]!;const {request}=JSON.parse(Buffer.from(encoded,'base64').toString());
+   const response=await originalMutate(executable,args);
+   if(request.action==='marker'&&request.operation.currentStep?.status==='started')f.live.navigation.push({id:99,content:'Human edit',status:'publish'});
+   return response;
+  }});
+  expect(result.status).toBe('partial');expect(result.error).toContain('live state changed during marker persistence');expect(f.count()).toBe(0);
+ });
+ it.each(['none','live','source','manifest'] as const)('checks retained items together and refuses late %s changes',async(change)=>{
+  const f=await fixture();expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');
+  const input=await readSitePlanInput(f.source,f.root);const plan=await planPreparedSite(input,structuredClone(f.live));
+  expect(plan.operations.every(op=>op.action==='retain')).toBe(true);
+  let source=f.source;
+  if(change==='manifest'){
+   const theme=await compileThemeDocuments(input.source,{themeAssetBaseUrl:f.live.theme.assetBaseUrl});if(!theme.ok)throw new Error('theme');
+   source=path.join(f.root,'bundle');await writeCompiledSite(source,input.source,theme.artifact);
+  }
+  let reads=0;const originalRead=f.transports.read;
+  const result=await applySite(plan,{...f.options,confirm:plan.confirmationHash,source,journal:path.join(f.root,'retained.json')},{...f.transports,read:async()=>{
+   reads++;if(reads===4){if(change==='live')f.live.navigation.push({id:99,content:'human edit',status:'publish'});if(change==='source'){const source=JSON.parse(await readFile(f.source,'utf8'));source.pages[0].title='Human edit';await writeFile(f.source,JSON.stringify(source));}}
+   if(reads===4&&change==='manifest'){const file=path.join(source,'site.manifest.json');const manifest=JSON.parse(await readFile(file,'utf8'));manifest.sourceIntentState='unreconciled';await writeFile(file,JSON.stringify(manifest));}
+   return originalRead();
+  }});
+  expect(result.status).toBe(change==='none'?'completed':'partial');expect(reads).toBe(change==='none'?5:4);expect(f.count()).toBe(3);
+  if(change!=='none')expect(result.error).toContain(change==='live'?'live state changed before completion':'source bytes changed');
+ });
  it('streams a large default mutation script to a short eval-file stdin invocation',async()=>{
   const root=await mkdtemp(path.join(await realpath(os.tmpdir()),'site-apply-stdin-'));
   const capture=path.join(root,'capture.json');
@@ -77,7 +106,7 @@ describe('confirmed database apply',()=>{
   expect(received.input.startsWith('<?php\n')).toBe(true);
   expect(Buffer.byteLength(received.input)).toBeGreaterThan(300_000);
   const encoded=received.input.match(/base64_decode\('([^']+)'\)/)?.[1];
-  expect(encoded).toBe(Buffer.from(JSON.stringify({...boundary,request,option:siteRecordOption(boundary.siteId),lock:`${siteRecordOption(boundary.siteId)}_lock`})).toString('base64'));
+  expect(encoded).toBe(Buffer.from(JSON.stringify({...boundary,request,option:siteRecordOption(boundary.siteId),lock:SITE_APPLY_LOCK_OPTION})).toString('base64'));
   expect(Buffer.from(encoded!,'base64').toString()).toContain(longMarkup);
  });
  it('creates once, reads back every field and explicit options, then replays before obsolete before-state',async()=>{
@@ -106,14 +135,18 @@ describe('confirmed database apply',()=>{
  });
  it('refuses completed replay while another operation is unresolved',async()=>{const f=await fixture();expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');f.live.siteRecord!.operation={token:'other',planHash:'other',status:'outcome_unknown'};await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('outstanding');expect(f.count()).toBe(3);});
  it('refuses concurrent/stale lock without steal or expiry',async()=>{const f=await fixture();f.setLock();await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('never stolen');expect(f.count()).toBe(0);});
+ it.each(['owned','noowner'] as const)('refuses a stranded same-operation lock after %s response loss, preserving evidence',async(fault)=>{
+  const f=await fixture();f.setFault(fault);const interrupted=await applySite(f.plan,f.options,f.transports);expect(interrupted.status).toBe('outcome_unknown');
+  f.setLock(interrupted.token);const evidence=await readFile(f.options.journal);
+  await expect(applySite(f.plan,f.options,f.transports)).rejects.toThrow('never stolen');expect(await readFile(f.options.journal)).toEqual(evidence);expect(f.count()).toBe(1);
+  // Simulate guarded operator reconciliation only after all executors have stopped.
+  f.releaseLock();const resumed=await applySite(f.plan,f.options,f.transports);
+  expect(resumed.status).toBe(fault==='owned'?'completed':'outcome_unknown');expect(f.count()).toBe(fault==='owned'?3:1);expect(f.live.entities).toHaveLength(1);
+ });
  it('retains uncertain create and never duplicates it without exact ownership proof',async()=>{
   const f=await fixture();f.setFault('unknown');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(result.steps[0]!.step.status).toBe('outcome_unknown');expect(f.count()).toBe(1);
   const replay=await applySite(f.plan,f.options,f.transports);expect(replay.status).toBe('outcome_unknown');expect(f.count()).toBe(1);
   const fresh={...f.options,journal:path.join(f.root,'fresh.json')};await expect(applySite(f.plan,fresh,f.transports)).rejects.toThrow('outstanding');expect(f.count()).toBe(1);
- });
- it('proves a created owned entity after response loss, then resumes options without duplicate create',async()=>{
-  const f=await fixture();f.setFault('owned');expect((await applySite(f.plan,f.options,f.transports)).status).toBe('outcome_unknown');expect(f.count()).toBe(1);
-  const resumed=await applySite(f.plan,f.options,f.transports);expect(resumed.status).toBe('completed');expect(f.live.entities).toHaveLength(1);expect(f.count()).toBe(3);
  });
  it.each(['media','patterns'] as const)('recovers after %s dependency creation without duplicating its ID',async(extra)=>{
   const f=await fixture(extra);f.setFault('owned');const first=await applySite(f.plan,f.options,f.transports);expect(first.status).toBe('outcome_unknown');expect(f.count()).toBe(1);
@@ -127,7 +160,6 @@ describe('confirmed database apply',()=>{
  });
  it('never retains third-party transport stderr in the journal or returned CLI receipt',async()=>{const f=await fixture();f.setFault('secret');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(result.error).toContain('WP-CLI site apply transport failed');expect(JSON.stringify(result)).not.toContain('SENTINEL_PRIVATE_WP_CREDENTIAL');expect(await readFile(f.options.journal,'utf8')).not.toContain('SENTINEL_PRIVATE_WP_CREDENTIAL');expect(result.steps).toHaveLength(1);expect(f.count()).toBe(1);});
  it('retains media step authority when an ordinary snapshot error occurs after the import helper succeeds',async()=>{const f=await fixture('media');f.setFault('mediareadback');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(result.steps).toHaveLength(1);expect(result.steps[0]!.step.status).toBe('outcome_unknown');expect(f.live.siteRecord!.operation!.currentStep!.kind).toBe('attachment');expect(f.count()).toBe(1);expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');expect(f.live.entities.filter(entity=>entity.kind==='attachment')).toHaveLength(1);expect(f.count()).toBe(4);});
- it('preserves an unowned create as unknown and refuses all repeats',async()=>{const f=await fixture();f.setFault('noowner');expect((await applySite(f.plan,f.options,f.transports)).status).toBe('outcome_unknown');expect((await applySite(f.plan,f.options,f.transports)).status).toBe('outcome_unknown');expect(f.count()).toBe(1);expect(f.live.entities).toHaveLength(1);});
  it.each(['readback','marker'] as const)('recovers exact owned state after %s interruption without another create',async(fault)=>{const f=await fixture();f.setFault(fault);expect((await applySite(f.plan,f.options,f.transports)).status).toBe('outcome_unknown');expect((await applySite(f.plan,f.options,f.transports)).status).toBe('completed');expect(f.count()).toBe(3);expect(f.live.entities).toHaveLength(1);});
  it('retains completed dependency effects and precise pending inventory when source bytes change before page writes',async()=>{const f=await fixture('media');f.setFault('source');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('partial');expect(result.steps).toHaveLength(1);expect(result.steps[0]!.step.status).toBe('completed');expect(result.pending.map(op=>op.kind)).toEqual(['page','option','option']);expect(f.live.entities.map(entity=>entity.kind)).toEqual(['attachment']);expect(f.count()).toBe(1);});
  it('stops on status-only readback edits and preserves unknown evidence',async()=>{const f=await fixture();f.setFault('changed');const result=await applySite(f.plan,f.options,f.transports);expect(result.status).toBe('outcome_unknown');expect(f.count()).toBe(1);});

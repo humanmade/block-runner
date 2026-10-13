@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { compileRegisteredBlock, planRegisteredBlockOutput } from '../../src/authoring/generate.js';
+import { patternOverrideName } from '../../src/authoring/overrides.js';
 import { hashAuthoringPlan, type AuthoringPlan } from '../../src/authoring/schema.js';
 
 function plan(): AuthoringPlan {
@@ -46,7 +47,7 @@ describe('confirmed editor fields in the production generator', () => {
     input.fields = ['text', 'url', 'linkTarget', 'rel'].map((attribute) => ({ id: attribute, label: attribute, mode: 'override', node: 'cta', attribute }));
     input.pattern.overrides = input.fields.map(({ id }) => ({ field: id }));
     expect(compileRegisteredBlock(input).template[0]?.[2]?.[0]?.[1].metadata).toMatchObject({
-      name: expect.any(String), bindings: { __default: { source: 'core/pattern-overrides' } },
+      name: patternOverrideName('cta'), bindings: { __default: { source: 'core/pattern-overrides' } },
     });
   });
 

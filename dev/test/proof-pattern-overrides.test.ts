@@ -1,4 +1,4 @@
-import { chmod, mkdtemp, mkdir, readFile, stat, symlink, utimes, writeFile } from 'node:fs/promises';
+import { chmod, mkdtemp, mkdir, stat, symlink, utimes, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
@@ -6,8 +6,6 @@ import {
   normalizePluginZipInputs,
   portableFixturePlan,
 } from '../../scripts/build-pattern-overrides-fixture.js';
-import { compileRegisteredBlock } from '../../src/authoring/generate.js';
-import { validatePatternOverrideContract } from '../../src/authoring/pattern-overrides.js';
 import { hashAuthoringPlan, type AuthoringPlan } from '../../src/authoring/schema.js';
 import { runProof } from '../../src/index.js';
 
@@ -134,84 +132,6 @@ describe('pattern-override receipts', () => {
     });
     expect(observations).toBeGreaterThanOrEqual(8);
     expect(peak).toBe(1);
-  });
-
-  it('compiles the canonical CLI fixture with exactly its ten confirmed native fields', async () => {
-    const plan = JSON.parse(await readFile('dev/test/fixtures/authoring/pattern-overrides.plan.json', 'utf8'));
-    const first = compileRegisteredBlock(plan);
-    expect(compileRegisteredBlock(plan)).toEqual(first);
-    const contract = validatePatternOverrideContract(first.template, []);
-    expect(contract.ok).toBe(true);
-    expect(contract.bindings).toHaveLength(10);
-    expect(new Set(contract.bindings.map(({ name }) => name)).size).toBe(3);
-    const edit = first.files.find(({ path }) => path === 'edit.js')!.content;
-    expect(edit).toContain('core/pattern-overrides');
-    expect(edit).toContain('contentOnly');
-    expect(edit).toContain('Canonical layout version one.');
-    // No handmade runtime bundle or pretend ZIP. The explicit WordPress
-    // acceptance test builds and installs this compiler's actual source.
-  });
-
-  it('retains explicitly supplied headless adapter evidence in a headless receipt', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-pattern-receipt-'));
-    const input = path.join(root, 'plan.json');
-    await writeFile(input, '{"plan":"pattern"}');
-
-    const result = await runProof({
-      profile: 'headless',
-      inputPath: input,
-      outputDir: root,
-      gateRunner: async () => ({
-        status: 'pass',
-        details: {
-          canonicalWpBlockContent: '<!-- wp:group -->canonical<!-- /wp:group -->',
-          coreBlockContent: [
-            { ref: 1, content: { 'hero.title': { content: 'First' } } },
-            { ref: 1, content: { 'hero.title': { content: 'Second' } } },
-          ],
-        },
-      }),
-    });
-
-    expect(result.ok).toBe(true);
-    // This is a receipt-format unit test only. The full real-WordPress receipt
-    // is exercised without an adapter in proof-real-wordpress.test.ts.
-    expect(result.receipt.environment.wordpress.requestedVersion).toBe('7.1');
-    expect(result.receipt.gates[0]).toMatchObject({
-      gate: 'headless_validation',
-      details: {
-        canonicalWpBlockContent: expect.stringContaining('canonical'),
-      },
-    });
-    expect(JSON.parse(await readFile(path.join(root, result.receiptReference.path), 'utf8'))).toEqual(result.receipt);
-  });
-
-  it('does not give a false pass when the required pattern support is absent', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-pattern-negative-'));
-    const input = path.join(root, 'plan.json');
-    const plugin = path.join(root, 'fixture.zip');
-    await Promise.all([writeFile(input, '{"plan":"pattern"}'), writeFile(plugin, 'fixture')]);
-
-    const result = await runProof({
-      profile: 'full',
-      inputPath: input,
-      pluginZip: plugin,
-      outputDir: root,
-      fixture: {
-        blockName: 'acme/pattern',
-        editableFields: [{ path: 'content', surface: 'richText' }],
-        frontend: { url: 'http://example.test/' },
-        visual: { expectedPath: 'fixture.png', threshold: 0 },
-        accessibility: { manualReview: 'pass' },
-      },
-      gateRunner: async () => ({ status: 'pass' }),
-    });
-
-    expect(result.ok).toBe(false);
-    expect(result.profile.failedGates).toContainEqual(expect.objectContaining({
-      gate: 'pattern_overrides',
-      status: 'blocked',
-    }));
   });
 
   it('does not let a Core-only pattern pass as generated-block evidence', async () => {

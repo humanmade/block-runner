@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
+import { canonicalJson } from '../proof/receipt.js';
 import { validateSyncedPatternOverrideContent } from './patterns.js';
 import { readStableRegularFile } from '../publication.js';
 import type { IntentNode, IntentTree } from '../types.js';
@@ -19,6 +20,7 @@ import type {
 const SAFE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const ROUTE_SEGMENT = /^[^/?#\\\u0000]+$/;
 const ASSET_ATTRIBUTES = new Set(['url', 'attrs.url', 'attrs.src', 'attrs.id']);
+const MAX_ASSET_BYTES = 20 * 1024 * 1024;
 
 /** Validate a site envelope and read each declared asset from the caller's explicit asset root. */
 export async function prepareSiteSource(input: unknown, assetRoot: string): Promise<PreparedSiteSourceResult> {
@@ -42,7 +44,7 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
       const absolutePath = path.resolve(canonicalRoot, ...declaration.path.split('/'));
       if (!isWithin(canonicalRoot, absolutePath)) throw new Error('path escapes the asset root');
       const beforeChain = await inspectPathChain(canonicalRoot, declaration.path);
-      const stable = await readStableRegularFile(absolutePath, 'asset changed or is not a regular file');
+      const stable = await readStableRegularFile(absolutePath, 'asset changed or is not a regular file', MAX_ASSET_BYTES);
       const afterChain = await inspectPathChain(canonicalRoot, declaration.path);
       if (!samePathChain(beforeChain, afterChain) || stable.content.byteLength !== afterChain.at(-1)?.size) {
         throw new Error('asset changed while it was being prepared');
@@ -62,7 +64,6 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
   }
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
-  const intentJson = JSON.stringify(validated);
   return {
     ok: true,
     diagnostics: [],
@@ -70,13 +71,18 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
       sourceIntent: validated,
       assetRoot: canonicalRoot,
       assets: assets.sort((a, b) => a.path.localeCompare(b.path)),
-      sourceIdentity: createHash('sha256').update(intentJson).digest('hex'),
+      sourceIdentity: hashSiteSourceIdentity(validated),
       unresolvedAssetUses: validated.assetUses.filter((use) => {
         const asset = validated.assets.find((candidate) => candidate.id === use.assetId);
         return asset?.role === 'attachment';
       }),
     },
   };
+}
+
+/** Hash an already validated intent without repeating envelope or graph validation. */
+export function hashSiteSourceIdentity(sourceIntent: SiteIntent): string {
+  return createHash('sha256').update(canonicalJson(sourceIntent)).digest('hex');
 }
 
 /** Graph and envelope checks are intentionally local to this contract, not a general schema engine. */
@@ -563,7 +569,53 @@ function validateTree(value: unknown, pathName: string, diagnostics: SiteInputDi
   checkKeys(value, ['blocks'], pathName, diagnostics);
   // Preserve native intent trees verbatim. The document compiler/finalizer owns their detailed
   // validity; this boundary consumes only the tree root for references and asset-use paths.
-  return value as unknown as IntentTree;
+  let valid = true;
+  const active = new Set<object>();
+  const pending: Array<{ kind: 'enter' | 'exit'; value: object; path: string }> = [
+    { kind: 'enter', value: value.blocks, path: `${pathName}/blocks` },
+  ];
+  while (pending.length > 0) {
+    const frame = pending.pop()!;
+    if (frame.kind === 'exit') {
+      active.delete(frame.value);
+      continue;
+    }
+    if (active.has(frame.value)) {
+      diagnostics.push(issue(frame.path, 'intent-tree-cycle', 'block trees must not contain object or array cycles'));
+      valid = false;
+      continue;
+    }
+    active.add(frame.value);
+    pending.push({ kind: 'exit', value: frame.value, path: frame.path });
+    if (Array.isArray(frame.value)) {
+      for (let index = frame.value.length - 1; index >= 0; index -= 1) {
+        const nodePath = `${frame.path}/${index}`;
+        const candidate = frame.value[index];
+        if (candidate !== null && typeof candidate === 'object' && active.has(candidate)) {
+          diagnostics.push(issue(nodePath, 'intent-tree-cycle', 'block trees must not contain object or array cycles'));
+          valid = false;
+          continue;
+        }
+        if (!isRecord(candidate) || typeof candidate.block !== 'string' || candidate.block.length === 0) {
+          diagnostics.push(issue(nodePath, 'intent-node-required', 'each block must be an object with a non-empty block name'));
+          valid = false;
+          continue;
+        }
+        pending.push({ kind: 'enter', value: candidate, path: nodePath });
+      }
+      continue;
+    }
+    const candidate = frame.value as Record<string, unknown>;
+    if (Object.hasOwn(candidate, 'children')) {
+      if (!Array.isArray(candidate.children)) {
+        diagnostics.push(issue(`${frame.path}/children`, 'array-required', 'block children must be an array when present'));
+        valid = false;
+      } else {
+        pending.push({ kind: 'enter', value: candidate.children, path: `${frame.path}/children` });
+      }
+    }
+  }
+  return valid ? value as unknown as IntentTree : undefined;
 }
 
 function collectTrees(
@@ -706,7 +758,10 @@ async function inspectPathChain(root: string, relative?: string): Promise<PathSn
 function samePathChain(before: PathSnapshot[], after: PathSnapshot[]): boolean {
   return before.length === after.length && before.every((snapshot, index) => {
     const next = after[index];
-    return next !== undefined && snapshot.path === next.path && snapshot.dev === next.dev && snapshot.ino === next.ino && snapshot.mode === next.mode && snapshot.size === next.size && snapshot.mtimeMs === next.mtimeMs && snapshot.ctimeMs === next.ctimeMs;
+    if (!next || snapshot.path !== next.path || snapshot.dev !== next.dev || snapshot.ino !== next.ino || snapshot.mode !== next.mode) return false;
+    // Directory contents can change because unrelated files are created beside the asset.
+    // The final file still requires full metadata stability; its descriptor read is checked too.
+    return index !== before.length - 1 || (snapshot.size === next.size && snapshot.mtimeMs === next.mtimeMs && snapshot.ctimeMs === next.ctimeMs);
   });
 }
 

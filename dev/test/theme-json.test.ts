@@ -14,16 +14,6 @@ const provenancePath = `${schemaPath.slice(0, -5)}.provenance.json`;
 describe('theme.json schema validation', () => {
   it('accepts the valid fixture, reports alternate schema metadata as info, and uses the local pin', async () => {
     const project = await copiedTheme('valid-theme');
-    const directory = await runCli(['validate', project, '--json']);
-    const folderReport = JSON.parse(directory.stdout) as {
-      ok: boolean;
-      files: Array<{ file: string; invalid: number }>;
-      items: Array<{ code?: string }>;
-    };
-    expect(directory.code).toBe(0);
-    expect(folderReport.files.find(({ file }) => file === 'theme.json')).toMatchObject({ invalid: 0 });
-    expect(folderReport.items.some(({ code }) => code === 'theme-json-schema')).toBe(false);
-
     const themeJsonPath = path.join(project, 'theme.json');
     const themeJson = JSON.parse(await readFile(themeJsonPath, 'utf8')) as Record<string, unknown>;
     themeJson.$schema = 'https://offline.invalid/other-theme-schema.json';

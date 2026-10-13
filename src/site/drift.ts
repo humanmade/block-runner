@@ -5,6 +5,7 @@ import { hashBytes, readStableRegularFile } from '../publication.js';
 import type { SiteEntity, SiteSnapshot } from './plan-types.js';
 import { managedStateHash, readSitePlanInput } from './plan.js';
 import { verifiedOwnedAttachment } from './media.js';
+import { siteRecordIndexesEntity } from './ownership.js';
 import { readSiteSnapshot, readSiteTemplateSnapshot, type SiteReadTransport, type SiteTemplateSnapshot, type SiteWpCliOptions } from './wpcli.js';
 
 export type SiteDriftFindingStatus = 'clean' | 'equivalent-override' | 'changed' | 'missing' | 'orphaned' | 'conflict' | 'dependency' | 'blocked';
@@ -206,7 +207,7 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
       if (owner.siteId !== siteId) continue;
       if (entity.kind === 'attachment') {
         const baselineMatches = managedStateHash(entity.state) === owner.lastAppliedHash;
-        const originalSha = owner.assetSha256 ?? (baselineMatches && typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+        const originalSha = owner.assetSha256;
         const valid = owner.version === 1 && owner.kind === 'attachment' && Boolean(owner.entityId)
           && /^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash)
           && typeof originalSha === 'string' && /^[a-f0-9]{64}$/.test(originalSha);
@@ -217,8 +218,7 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
         const key = `attachment:${owner.entityId}@${originalSha}`;
         const matches = attachmentsByKey.get(key) ?? [];
         matches.push(entity); attachmentsByKey.set(key, matches);
-        const indexed = record?.entities[key] === entity.id
-          || (owner.assetSha256 === undefined && record?.entities[`attachment:${owner.entityId}`] === entity.id);
+        const indexed = siteRecordIndexesEntity(snapshot, siteId, entity);
         if (!baselineMatches || entity.state.sha256 !== originalSha) {
           unavailableAttachmentIds.add(entity.id);
           add({ kind: 'attachment', status: 'changed', entityId: key, wpId: entity.id, code: 'managed-attachment-changed', message: 'The owned attachment original-byte state differs from its complete last-applied baseline.' });
@@ -228,6 +228,8 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
         } else if (!entity.attachment?.currentFileSha256) {
           unavailableAttachmentIds.add(entity.id);
           add({ kind: 'attachment', status: 'missing', entityId: key, wpId: entity.id, code: 'owned-attachment-file-missing', message: 'The owned attachment record exists but its current file is unavailable.' });
+        } else if (entity.ownership.length !== 1) {
+          add({ kind: 'attachment', status: 'conflict', entityId: key, wpId: entity.id, code: 'ambiguous-attachment-ownership', message: 'The attachment has more than one ownership claim.' });
         } else if (!indexed) {
           add({ kind: 'attachment', status: 'conflict', entityId: key, wpId: entity.id, code: 'ownership-record-missing', message: 'Owned attachment metadata has no matching version-qualified site-record ID.' });
         } else {
@@ -257,12 +259,9 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
   for (const [key, id] of Object.entries(previous)) {
     if (key.startsWith('attachment:')) {
       const version = /^attachment:([^@]+)@([a-f0-9]{64})$/.exec(key);
-      const legacy = /^attachment:([^@]+)$/.exec(key);
-      const entity = snapshot.entities.find(item => item.id === id && item.kind === 'attachment' && item.ownership.some(owner => {
-        if (owner.siteId !== siteId || owner.kind !== 'attachment' || owner.entityId !== (version?.[1] ?? legacy?.[1])) return false;
-        if (version) return (owner.assetSha256 ?? (owner.lastAppliedHash === managedStateHash(item.state) ? item.state.sha256 : undefined)) === version[2];
-        return Boolean(legacy && owner.assetSha256 === undefined && typeof item.state.sha256 === 'string' && /^[a-f0-9]{64}$/.test(item.state.sha256));
-      }));
+      const entity = version && snapshot.entities.find(item => item.id === id && item.kind === 'attachment' && item.ownership.some(owner =>
+        owner.siteId === siteId && owner.kind === 'attachment' && owner.entityId === version[1] && owner.assetSha256 === version[2]
+      ));
       if (!entity) add({ kind: 'attachment', status: 'missing', entityId: key, wpId: id, code: 'missing-owned-attachment', message: 'A previously managed exact attachment version is absent or its numeric ID/ownership identity changed.' });
       continue;
     }
@@ -271,8 +270,10 @@ function inspectManagedEntities(snapshot: SiteSnapshot, siteId: string, desiredP
     if (!desiredPages.includes(key) && !desiredPatterns.includes(key)) add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'orphaned', entityId: key, wpId: id, code: 'orphaned-owned-entity', message: 'A previously managed entity is not declared by the current source bundle.' });
   }
   for (const [key, entities] of byKey) {
-    if (!Object.hasOwn(previous, key)) add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'conflict', entityId: key, wpId: entities[0]?.id, code: 'ownership-record-missing', message: 'Ownership metadata exists without a matching site record entity baseline.' });
-    else if (entities[0]?.id !== previous[key]) add({ kind: 'inspection', status: 'conflict', entityId: key, wpId: entities[0]?.id, code: 'ownership-id-conflict', message: 'Ownership metadata ID differs from the numeric ID in the site record.' });
+    if (!siteRecordIndexesEntity(snapshot, siteId, entities[0]!)) {
+      if (!Object.hasOwn(previous, key)) add({ kind: key.startsWith('pattern:') ? 'pattern' : 'page', status: 'conflict', entityId: key, wpId: entities[0]?.id, code: 'ownership-record-missing', message: 'Ownership metadata exists without a matching site record entity baseline.' });
+      else add({ kind: 'inspection', status: 'conflict', entityId: key, wpId: entities[0]?.id, code: 'ownership-id-conflict', message: 'Ownership metadata ID differs from the numeric ID in the site record.' });
+    }
   }
   for (const [key, entities] of attachmentsByKey) {
     if (entities.length > 1) add({ kind: 'attachment', status: 'conflict', entityId: key, code: 'duplicate-logical-owner', message: 'Multiple attachment records claim the same exact site, logical ID, and original-byte version.' });

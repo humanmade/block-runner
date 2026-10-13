@@ -22,6 +22,19 @@ describe('Node support contract', () => {
     );
   });
 
+  it('retains runtime site APIs on the guarded library entry point', async () => {
+    const library = await import('../../src/index.js');
+    for (const name of [
+      'planSite', 'inspectSiteDrift', 'confirmSitePull', 'previewSitePull',
+      'readSiteSnapshot', 'readSiteTemplateSnapshot', 'prepareSiteSource',
+      'compileSite', 'compileThemeDocuments', 'writeCompiledSite', 'applySite',
+    ] as const) {
+      expect(library[name], name).toBeTypeOf('function');
+    }
+    expect(library.SitePullPublicationError).toBeTypeOf('function');
+    expect(library.SiteWriteError).toBeTypeOf('function');
+  });
+
   it('keeps package, documentation, skill, and CI declarations aligned', async () => {
     const packageJson = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
     const readme = await readFile(new URL('../../README.md', import.meta.url), 'utf8');

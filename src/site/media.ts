@@ -2,6 +2,7 @@ import type { IntentNode } from '../types.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import type { SiteSnapshot } from './plan-types.js';
 import type { SiteAttachmentBinding } from './types.js';
+import { siteRecordIndexesEntity } from './ownership.js';
 
 export interface ImageBindingResult {
   url: string;
@@ -35,20 +36,14 @@ export function verifiedOwnedAttachment(
   const owner = entity.ownership[0]!;
   if (owner.version !== 1 || owner.siteId !== siteId || owner.entityId !== entityId || owner.kind !== 'attachment'
     || !/^sha256:[a-f0-9]{64}$/.test(owner.lastAppliedHash) || owner.lastAppliedHash !== hashCanonicalJson(entity.state)) return false;
-  const ownerSha = owner.assetSha256 ?? (typeof entity.state.sha256 === 'string' ? entity.state.sha256 : undefined);
+  const ownerSha = owner.assetSha256;
   if (ownerSha !== originalSha256 || entity.state.sha256 !== originalSha256) return false;
   const versionClaims = snapshot.entities.flatMap(candidate => candidate.kind !== 'attachment' ? [] : candidate.ownership
     .filter(claim => claim.siteId === siteId && claim.entityId === entityId
-      && (claim.assetSha256 === originalSha256
-        || (claim.assetSha256 === undefined && claim.lastAppliedHash === hashCanonicalJson(candidate.state) && candidate.state.sha256 === originalSha256)))
+      && claim.assetSha256 === originalSha256)
     .map(claim => ({ candidate, claim })));
   if (versionClaims.length !== 1 || versionClaims[0]!.candidate.id !== wpId) return false;
-  const record = snapshot.siteRecord;
-  if (!record || record.version !== 1 || record.siteId !== siteId) return false;
-  const versionId = record.entities[attachmentVersionKey(entityId, originalSha256)];
-  const legacyId = owner.assetSha256 === undefined ? record.entities[`attachment:${entityId}`] : undefined;
-  if (versionId !== undefined && legacyId !== undefined && versionId !== legacyId) return false;
-  return versionId === wpId || legacyId === wpId;
+  return siteRecordIndexesEntity(snapshot, siteId, entity);
 }
 
 /** Validate authored core/image settings that do not depend on destination metadata. */

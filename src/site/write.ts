@@ -1,7 +1,8 @@
 import { randomUUID } from 'node:crypto';
 import { chmod, lstat, mkdir, open, rename, rmdir } from 'node:fs/promises';
 import path from 'node:path';
-import { hashBytes } from '../publication.js';
+import { canonicalizeTrustedSystemAlias, hashBytes } from '../publication.js';
+import { calculateSiteArtifactIdentity } from './compile.js';
 import { verifyPreparedSiteAssets } from './assets.js';
 import type { CompiledSite, PreparedSiteSource, SiteFile, ThemeArtifact } from './types.js';
 
@@ -40,7 +41,7 @@ export async function writeCompiledSite(
   assertArtifactSource(source, artifact);
   await verifyPreparedSiteAssets(source);
 
-  const target = path.resolve(outputDirectory);
+  const target = await canonicalizeTrustedSystemAlias(outputDirectory);
   const parent = path.dirname(target);
   const name = path.basename(target);
   if (!name || name === '.' || name === path.parse(target).root) throw new Error('bundle output needs a named new directory');
@@ -106,6 +107,7 @@ function buildBundleFiles(source: PreparedSiteSource, artifact: CompiledSite | T
   };
   add('site.intent.json', `${JSON.stringify(source.sourceIntent, null, 2)}\n`);
   for (const asset of source.assets) {
+    assertBoundedAsset(asset.id, asset.bytes);
     const bytes = Buffer.from(asset.bytes);
     if (hashBytes(bytes) !== asset.sha256) throw new Error(`prepared source asset ${asset.id} no longer matches its SHA-256`);
     add(`source/assets/${asset.path}`, bytes);
@@ -218,12 +220,24 @@ function assertArtifactSource(source: PreparedSiteSource, artifact: CompiledSite
   const compiledAssets = new Map(artifact.sourceAssets.map((asset) => [asset.id, asset]));
   if (compiledAssets.size !== source.assets.length || source.assets.some((asset) => {
     const compiled = compiledAssets.get(asset.id);
-    return !compiled || compiled.sha256 !== asset.sha256 || compiled.path !== asset.path || !Buffer.from(compiled.bytes).equals(Buffer.from(asset.bytes));
+    return !compiled || !isBoundedAssetBytes(asset.bytes) || !isBoundedAssetBytes(compiled.bytes)
+      || compiled.sha256 !== asset.sha256 || compiled.path !== asset.path || !Buffer.from(compiled.bytes).equals(Buffer.from(asset.bytes));
   })) throw new Error('compiled artifact does not retain the exact prepared source assets');
   if (!artifact.artifactIdentity || !artifact.targetBindingFingerprint || !artifact.targetBindings
     || !Array.isArray(artifact.themeFiles) || ('assets' in artifact && !Array.isArray(artifact.assets))) {
     throw new Error('compiled artifact is incomplete');
   }
+  if (calculateSiteArtifactIdentity(source, artifact) !== artifact.artifactIdentity) {
+    throw new Error('compiled artifact no longer matches its compiler identity');
+  }
+}
+
+function assertBoundedAsset(id: string, bytes: Uint8Array): void {
+  if (!isBoundedAssetBytes(bytes)) throw new Error(`prepared source asset ${id} is empty or exceeds 20 MiB`);
+}
+
+function isBoundedAssetBytes(bytes: unknown): bytes is Uint8Array {
+  return bytes instanceof Uint8Array && bytes.byteLength > 0 && bytes.byteLength <= 20 * 1024 * 1024;
 }
 
 function assertRelativePath(value: string): void {

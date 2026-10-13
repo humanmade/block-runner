@@ -297,4 +297,66 @@ describe('theme Site Editor proof profile', () => {
     });
     expect(blogdescription).toBe('Original site description');
   });
+
+  it('omits the redundant browser fix payload and retains the final fix comparison', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-theme-roundtrip-fix-'));
+    const theme = path.join(root, 'fixture-theme');
+    const config = path.join(root, 'wp-env.json');
+    const outputDir = path.join(root, 'receipts');
+    const markup = '<!-- wp:paragraph --><p>Fixture</p><!-- /wp:paragraph -->';
+    await mkdir(path.join(theme, 'templates'), { recursive: true });
+    await writeFile(path.join(theme, 'style.css'), '/*\nTheme Name: Fixture\nVersion: 1.0.0\n*/\n');
+    await writeFile(path.join(theme, 'templates', 'index.html'), markup);
+    await writeFile(config, JSON.stringify({ core: 'WordPress/WordPress#7.1', phpVersion: '8.4' }));
+    let blogdescription = 'Original site description';
+    let browserFiles: Array<Record<string, unknown>> = [];
+    const result = await runProof({
+      theme,
+      wpEnvConfig: config,
+      outputDir,
+      commandRunner: async (command, args, options) => {
+        if (args.includes('option') && args.includes('get') && args.includes('blogdescription')) {
+          return { command, args: [...args], exitCode: 0, stdout: JSON.stringify(blogdescription), stderr: '' };
+        }
+        if (args.includes('option') && args.includes('update') && args.includes('blogdescription')) {
+          blogdescription = args[args.indexOf('blogdescription') + 1]!;
+          return { command, args: [...args], exitCode: 0, stdout: 'Success', stderr: '' };
+        }
+        if (options.phase === 'browser-theme-save') {
+          const configPath = args[args.indexOf('--config') + 1]!;
+          const browserConfig = JSON.parse(await readFile(configPath, 'utf8')) as { files: Array<Record<string, unknown>> };
+          browserFiles = browserConfig.files;
+          const output = args[args.indexOf('--out') + 1]!;
+          await writeFile(output, JSON.stringify({
+            theme: 'fixture-theme',
+            runtimeBinding: { verified: true },
+            files: [{
+              file: 'templates/index.html',
+              status: 'pass',
+              loadedRaw: markup,
+              savedRaw: markup,
+              editorSave: { serialized: markup },
+            }],
+          }));
+          return { command, args: [...args], exitCode: 0, stdout: '', stderr: '' };
+        }
+        return { command, args: [...args], exitCode: 0, stdout: '', stderr: '' };
+      },
+    });
+
+    expect(browserFiles).toHaveLength(1);
+    expect(browserFiles[0]).not.toHaveProperty('fix');
+    const roundtrip = result.receipt.gates.find((gate) => gate.gate === 'theme_roundtrip');
+    expect(roundtrip?.status).toBe('pass');
+    expect(roundtrip?.details).toMatchObject({
+      files: [{
+        file: 'templates/index.html',
+        fixComparison: { equal: false },
+        sourceLoadComparison: { equal: true },
+        sourceComparison: { equal: true },
+        editorRestComparison: { equal: true },
+      }],
+    });
+    expect(blogdescription).toBe('Original site description');
+  });
 });
