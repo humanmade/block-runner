@@ -5,7 +5,8 @@
  * abstraction: each adapter owns its plan, approval policy, journal schema and presentation.
  */
 import { createHash, randomUUID } from 'node:crypto';
-import { link, lstat, open, readFile, rename, unlink } from 'node:fs/promises';
+import { link, lstat, open, readFile, readlink, rename, unlink } from 'node:fs/promises';
+import path from 'node:path';
 
 export interface PublicationFileIdentity {
   dev: string;
@@ -25,6 +26,27 @@ export function publicationHash(value: Buffer): string {
   return `sha256:${hashBytes(value)}`;
 }
 
+/** Resolve only verified macOS compatibility aliases; caller-owned symlinks remain disallowed. */
+export async function canonicalizeTrustedSystemAlias(outputDirectory: string): Promise<string> {
+  const directory = path.resolve(outputDirectory);
+  for (const [alias, physical] of [
+    ['/tmp', '/private/tmp'],
+    ['/var', '/private/var'],
+    ['/etc', '/private/etc'],
+  ] as const) {
+    if (directory !== alias && !directory.startsWith(`${alias}${path.sep}`)) continue;
+    let stats;
+    try { stats = await lstat(alias); } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
+    }
+    if (!stats?.isSymbolicLink()) return directory;
+    const target = path.resolve(path.dirname(alias), await readlink(alias));
+    if (target !== physical) throw new Error(`symbolic-link path is not allowed in authoring destination: ${alias}`);
+    return path.join(physical, path.relative(alias, directory));
+  }
+  return directory;
+}
+
 export function sameFileIdentity(left: PublicationFileIdentity, right: PublicationFileIdentity | undefined): boolean {
   return Boolean(right) && JSON.stringify(left) === JSON.stringify(right);
 }
@@ -42,12 +64,44 @@ export async function regularFileIdentity(file: string, error: string, includeCo
 }
 
 /** Read only a stable regular file; an identity change during the read is rejected. */
-export async function readStableRegularFile(file: string, error: string): Promise<{ content: Buffer; identity: PublicationFileIdentity }> {
+export async function readStableRegularFile(file: string, error: string, maximumBytes?: number): Promise<{ content: Buffer; identity: PublicationFileIdentity }> {
   const before = await regularFileIdentity(file, error);
-  const content = await readFile(file);
+  if (maximumBytes !== undefined && Number(before.size) > maximumBytes) throw new Error(error);
+  let content: Buffer;
+  if (maximumBytes === undefined) {
+    content = await readFile(file);
+  } else {
+    const handle = await open(file, 'r');
+    try {
+      const opened = await handle.stat();
+      if (!opened.isFile() || !sameFileIdentity(before, identityFromStats(opened))) throw new Error(error);
+      const chunks: Buffer[] = [];
+      let total = 0;
+      while (total <= maximumBytes) {
+        const chunk = Buffer.allocUnsafe(Math.min(64 * 1024, maximumBytes + 1 - total));
+        const { bytesRead } = await handle.read(chunk, 0, chunk.byteLength, null);
+        if (bytesRead === 0) break;
+        chunks.push(chunk.subarray(0, bytesRead));
+        total += bytesRead;
+      }
+      if (total > maximumBytes) throw new Error(error);
+      content = Buffer.concat(chunks, total);
+    } finally {
+      await handle.close();
+    }
+  }
   const after = await regularFileIdentity(file, error);
   if (!sameFileIdentity(before, after)) throw new Error(error);
   return { content, identity: after };
+}
+
+function identityFromStats(stats: Awaited<ReturnType<import('node:fs/promises').FileHandle['stat']>>): PublicationFileIdentity {
+  const withNs = stats as typeof stats & { mtimeNs?: bigint; ctimeNs?: bigint };
+  return {
+    dev: String(stats.dev), ino: String(stats.ino), mode: Number(stats.mode), size: String(stats.size),
+    mtimeNs: String(withNs.mtimeNs ?? BigInt(Math.round(Number(stats.mtimeMs) * 1_000_000))),
+    ctimeNs: String(withNs.ctimeNs ?? BigInt(Math.round(Number(stats.ctimeMs) * 1_000_000))),
+  };
 }
 
 /** Stage bytes exclusively and durably before any target can be published. */

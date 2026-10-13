@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
+import { canonicalJson } from '../proof/receipt.js';
 import { validateSyncedPatternOverrideContent } from './patterns.js';
 import { readStableRegularFile } from '../publication.js';
 import type { IntentNode, IntentTree } from '../types.js';
@@ -19,6 +20,7 @@ import type {
 const SAFE_SLUG = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
 const ROUTE_SEGMENT = /^[^/?#\\\u0000]+$/;
 const ASSET_ATTRIBUTES = new Set(['url', 'attrs.url', 'attrs.src', 'attrs.id']);
+const MAX_ASSET_BYTES = 20 * 1024 * 1024;
 
 /** Validate a site envelope and read each declared asset from the caller's explicit asset root. */
 export async function prepareSiteSource(input: unknown, assetRoot: string): Promise<PreparedSiteSourceResult> {
@@ -42,7 +44,7 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
       const absolutePath = path.resolve(canonicalRoot, ...declaration.path.split('/'));
       if (!isWithin(canonicalRoot, absolutePath)) throw new Error('path escapes the asset root');
       const beforeChain = await inspectPathChain(canonicalRoot, declaration.path);
-      const stable = await readStableRegularFile(absolutePath, 'asset changed or is not a regular file');
+      const stable = await readStableRegularFile(absolutePath, 'asset changed or is not a regular file', MAX_ASSET_BYTES);
       const afterChain = await inspectPathChain(canonicalRoot, declaration.path);
       if (!samePathChain(beforeChain, afterChain) || stable.content.byteLength !== afterChain.at(-1)?.size) {
         throw new Error('asset changed while it was being prepared');
@@ -62,7 +64,7 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
   }
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
-  const intentJson = JSON.stringify(validated);
+  const intentJson = canonicalJson(validated);
   return {
     ok: true,
     diagnostics: [],
@@ -563,7 +565,27 @@ function validateTree(value: unknown, pathName: string, diagnostics: SiteInputDi
   checkKeys(value, ['blocks'], pathName, diagnostics);
   // Preserve native intent trees verbatim. The document compiler/finalizer owns their detailed
   // validity; this boundary consumes only the tree root for references and asset-use paths.
-  return value as unknown as IntentTree;
+  let valid = true;
+  const pending: Array<{ nodes: unknown[]; path: string }> = [{ nodes: value.blocks, path: `${pathName}/blocks` }];
+  while (pending.length > 0) {
+    const current = pending.pop()!;
+    for (let index = current.nodes.length - 1; index >= 0; index -= 1) {
+      const nodePath = `${current.path}/${index}`;
+      const candidate = current.nodes[index];
+      if (!isRecord(candidate) || typeof candidate.block !== 'string' || candidate.block.length === 0) {
+        diagnostics.push(issue(nodePath, 'intent-node-required', 'each block must be an object with a non-empty block name'));
+        valid = false;
+        continue;
+      }
+      if (Object.hasOwn(candidate, 'children')) {
+        if (!Array.isArray(candidate.children)) {
+          diagnostics.push(issue(`${nodePath}/children`, 'array-required', 'block children must be an array when present'));
+          valid = false;
+        } else pending.push({ nodes: candidate.children, path: `${nodePath}/children` });
+      }
+    }
+  }
+  return valid ? value as unknown as IntentTree : undefined;
 }
 
 function collectTrees(

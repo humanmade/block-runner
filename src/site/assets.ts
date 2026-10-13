@@ -47,11 +47,11 @@ export function buildSiteThemeAssets(source: PreparedSiteSource): SiteThemeAsset
       diagnostics.push(issue(at, 'prepared-asset-mismatch', 'prepared bytes do not match the declared site asset'));
       continue;
     }
-    const bytes = Buffer.from(prepared.bytes);
-    if (bytes.length === 0 || bytes.length > MAX_ASSET_BYTES) {
+    if (prepared.bytes.byteLength === 0 || prepared.bytes.byteLength > MAX_ASSET_BYTES) {
       diagnostics.push(issue(`${at}/path`, 'asset-size', 'asset is empty or exceeds 20 MiB'));
       continue;
     }
+    const bytes = Buffer.from(prepared.bytes);
     const hash = createHash('sha256').update(bytes).digest('hex');
     if (hash !== prepared.sha256) {
       diagnostics.push(issue(`${at}/path`, 'asset-hash', 'prepared asset bytes no longer match their SHA-256'));

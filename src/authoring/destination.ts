@@ -5,7 +5,7 @@ import { REGISTERED_BLOCK_TEMPLATE_VERSION, REGISTERED_BLOCK_STYLE_EMITTER_VERSI
   type GeneratedRegisteredBlock } from './generate.js';
 import { hashAuthoringPlan, type AuthoringPlan, type AuthoringFileOperation } from './schema.js';
 import { classifyRegisteredBlockRegeneration } from './regeneration.js';
-import { hashBytes, isNotFound as publicationNotFound, publicationHash, publishPublicationEntries, publishStagedFile, readStableRegularFile, reconcilePublicationCompletion, regularFileIdentity, replacePublicationJournal, sameFileIdentity, stagePublicationBytes, validatePublicationRetry, verifyPublicationTargets, verifyStagedPublicationBytes } from '../publication.js';
+import { canonicalizeTrustedSystemAlias, hashBytes, isNotFound as publicationNotFound, publicationHash, publishPublicationEntries, publishStagedFile, readStableRegularFile, reconcilePublicationCompletion, regularFileIdentity, replacePublicationJournal, sameFileIdentity, stagePublicationBytes, validatePublicationRetry, verifyPublicationTargets, verifyStagedPublicationBytes } from '../publication.js';
 
 /** A read-only representation of the filesystem state relevant to a plan. */
 export interface DestinationInspection {
@@ -724,35 +724,6 @@ async function inspectDirectoryPath(directory: string, entries: Map<string, Dest
       return;
     }
   }
-}
-
-/**
- * macOS exposes a few root-level directories through fixed compatibility links (for example
- * `/tmp` -> `/private/tmp`). They are not destinations a caller can create or redirect. Verify
- * the exact platform mapping before translating it, then inspect every remaining component
- * lexically. No caller-controlled symlink is ever followed.
- */
-async function canonicalizeTrustedSystemAlias(outputDirectory: string): Promise<string> {
-  const directory = path.resolve(outputDirectory);
-  for (const [alias, physical] of [
-    ['/tmp', '/private/tmp'],
-    ['/var', '/private/var'],
-    ['/etc', '/private/etc'],
-  ] as const) {
-    if (directory !== alias && !directory.startsWith(`${alias}${path.sep}`)) {
-      continue;
-    }
-    const stats = await lstatMaybe(alias);
-    if (!stats?.isSymbolicLink()) {
-      return directory;
-    }
-    const target = path.resolve(path.dirname(alias), await readlink(alias));
-    if (target !== physical) {
-      throw new Error(`symbolic-link path is not allowed in authoring destination: ${alias}`);
-    }
-    return path.join(physical, path.relative(alias, directory));
-  }
-  return directory;
 }
 
 async function inspectPlannedPath(directory: string, relativePath: string, entries: Map<string, DestinationEntry>): Promise<void> {

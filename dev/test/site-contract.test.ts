@@ -1,4 +1,4 @@
-import { mkdtemp, readFile, realpath, rm, symlink } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,29 @@ describe('site intent contract', () => {
       expect(prepared.source.sourceIntent.pages[0]?.id).toBe('home');
       expect(prepared.source.sourceIdentity).not.toBe(baseline.source.sourceIdentity);
     }
+  });
+
+  it('uses canonical source identity independent of object key insertion order', async () => {
+    const input = await loadIntent();
+    const baseline = await prepareSiteSource(input, fixtureRoot);
+    const reordered = Object.fromEntries(Object.entries(input).reverse());
+    const nested = reordered.theme as Record<string, unknown>;
+    reordered.theme = Object.fromEntries(Object.entries(nested).reverse());
+    const reversed = await prepareSiteSource(reordered, fixtureRoot);
+    expect(baseline.ok).toBe(true);
+    expect(reversed.ok).toBe(true);
+    if (baseline.ok && reversed.ok) expect(reversed.source.sourceIdentity).toBe(baseline.source.sourceIdentity);
+  });
+
+  it('reports malformed native tree nodes and children without throwing during graph preparation', async () => {
+    const input = await loadIntent();
+    input.pages[0].body.blocks = [null, { block: 'core/group', children: { block: 'core/paragraph' } }];
+    const diagnostics: Array<{ path: string; code: string }> = [];
+    expect(() => validateSiteIntent(input, diagnostics as any)).not.toThrow();
+    expect(diagnostics).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: '/pages/0/body/blocks/0', code: 'intent-node-required' }),
+      expect.objectContaining({ path: '/pages/0/body/blocks/1/children', code: 'array-required' }),
+    ]));
   });
 
   it('preserves deliberately empty content and permissive native attrs', async () => {
@@ -161,5 +184,25 @@ describe('site intent contract', () => {
     const diagnostics: Array<{ path: string; code: string }> = [];
     validateSiteIntent(input, diagnostics as any);
     expect(diagnostics).toContainEqual(expect.objectContaining({ path: '/assetUses/0/attribute', code: 'unsupported-attribute' }));
+  });
+
+  it('rejects oversized assets before reading their contents', async () => {
+    const root = await mkdtemp(path.join(await realpath(tmpdir()), 'block-runner-site-large-asset-'));
+    try {
+      const input = await loadIntent();
+      const oversized = path.join(root, 'oversized.png');
+      const { mkdir } = await import('node:fs/promises');
+      await mkdir(path.dirname(oversized), { recursive: true });
+      await writeFile(oversized, 'x');
+      await truncate(oversized, 20 * 1024 * 1024 + 1);
+      input.assets = [input.assets[0]];
+      input.assets[0].path = 'oversized.png';
+      input.assetUses = [];
+      const result = await prepareSiteSource(input, root);
+      expect(result.ok).toBe(false);
+      if (!result.ok) expect(result.diagnostics).toContainEqual(expect.objectContaining({ path: '/assets/0/path', code: 'asset-read' }));
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
   });
 });
