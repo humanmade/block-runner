@@ -25,7 +25,9 @@ npm run typecheck
 ```
 
 `npm run verify` remains the required repository gate. It runs the deterministic repository
-suite.
+product suite. Benchmark and repository-tooling tests run separately with
+`npm run test:tools`; use that command when changing benchmark engines, receipt
+tooling or project-owned-block helpers. It is not a paid model benchmark run.
 
 CI classifies both pull-request and main-push changes with [`scripts/ci-scope.mjs`](../scripts/ci-scope.mjs). Additions or modifications limited to `README.md`, `CHANGELOG.md`, `ERRORS.md`, `DECISIONS.md` and its demo allowlist use the docs route; eligible shipped-skill changes use the skill route. Runtime, package, proof, workflow, release and unclassified paths use the full route. Deletions, renames and unavailable diffs cannot select a reduced route. All `docs/` paths are currently unclassified, so they select full CI.
 
