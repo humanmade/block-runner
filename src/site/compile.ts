@@ -644,7 +644,8 @@ function usedBindings(
 ): Record<string, SiteAttachmentBinding> {
   const ids = [...new Set(intent.assetUses.filter((use) => !documentIds || documentIds.has(use.documentId))
     .map((use) => use.assetId).filter((id) => assetRole(intent, id) === 'attachment'))].sort();
-  return Object.fromEntries(ids.map((id) => [id, structuredClone(bindings[id]!)]));
+  // Missing bindings remain explicit pending uses, never undefined entries in a target fingerprint.
+  return Object.fromEntries(ids.filter((id) => bindings[id] !== undefined).map((id) => [id, structuredClone(bindings[id]!)]));
 }
 
 function assetRole(intent: SiteIntent, id: string): SiteIntent['assets'][number]['role'] | undefined {
