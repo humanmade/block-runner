@@ -1,4 +1,3 @@
-import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { mkdtemp, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
@@ -266,8 +265,5 @@ describe('site synced pattern contract and compiler', () => {
     expect(missing).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'unknown-pattern-id' })] });
     const invalidSource = await compileSiteSyncedPattern({ ...prepared.source, sourceIdentity: 'stale' }, 'card');
     expect(invalidSource).toMatchObject({ ok: false, diagnostics: [expect.objectContaining({ code: 'prepared-source-identity-mismatch' })] });
-    const legacyIdentity = createHash('sha256').update(JSON.stringify(prepared.source.sourceIntent)).digest('hex');
-    const legacy = await compileSiteSyncedPattern({ ...prepared.source, sourceIdentity: legacyIdentity }, 'card', { attachmentBindings: { 'home-hero': { id: 73, url: 'https://example.test/hero.png' } } });
-    expect(legacy).toMatchObject({ ok: true, pattern: { id: 'card', content: expect.stringContaining('"id":73') } });
   });
 });

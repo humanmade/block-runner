@@ -64,7 +64,6 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
   }
   if (diagnostics.length > 0) return { ok: false, diagnostics };
 
-  const intentJson = canonicalJson(validated);
   return {
     ok: true,
     diagnostics: [],
@@ -72,7 +71,7 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
       sourceIntent: validated,
       assetRoot: canonicalRoot,
       assets: assets.sort((a, b) => a.path.localeCompare(b.path)),
-      sourceIdentity: createHash('sha256').update(intentJson).digest('hex'),
+      sourceIdentity: hashSiteSourceIdentity(validated),
       unresolvedAssetUses: validated.assetUses.filter((use) => {
         const asset = validated.assets.find((candidate) => candidate.id === use.assetId);
         return asset?.role === 'attachment';
@@ -81,16 +80,9 @@ export async function prepareSiteSource(input: unknown, assetRoot: string): Prom
   };
 }
 
-/** Match both current canonical and previously persisted insertion-order source identities. */
-export function siteSourceIdentityMatches(sourceIntent: unknown, identity: unknown): identity is string {
-  if (typeof identity !== 'string') return false;
-  const diagnostics: SiteInputDiagnostic[] = [];
-  const validated = validateSiteIntent(sourceIntent, diagnostics);
-  if (!validated || diagnostics.length > 0) return false;
-  const canonicalIdentity = createHash('sha256').update(canonicalJson(validated)).digest('hex');
-  if (identity === canonicalIdentity) return true;
-  const legacyIdentity = createHash('sha256').update(JSON.stringify(validated)).digest('hex');
-  return identity === legacyIdentity;
+/** Hash an already validated intent without repeating envelope or graph validation. */
+export function hashSiteSourceIdentity(sourceIntent: SiteIntent): string {
+  return createHash('sha256').update(canonicalJson(sourceIntent)).digest('hex');
 }
 
 /** Graph and envelope checks are intentionally local to this contract, not a general schema engine. */

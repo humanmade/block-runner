@@ -11,7 +11,7 @@ import { buildSiteThemeAssets } from './assets.js';
 import { bindNativeImage, declaredEmbedAspectRatio, validateNativeImageSettings } from './media.js';
 import { patternOverrideContent } from '../authoring/pattern-overrides.js';
 import { compileSyncedPatterns, type CompiledSyncedPattern } from './patterns.js';
-import { siteSourceIdentityMatches, validateSiteIntent } from './input.js';
+import { hashSiteSourceIdentity, validateSiteIntent } from './input.js';
 import type {
   CompiledSite,
   CompiledSitePage,
@@ -48,7 +48,10 @@ export type CompileSiteSyncedPatternResult =
 
 /** Recompute compiler provenance from the retained source and current artifact payload. */
 export function calculateSiteArtifactIdentity(source: PreparedSiteSource, artifact: CompiledSite | ThemeArtifact): string {
-  if (!siteSourceIdentityMatches(source.sourceIntent, source.sourceIdentity)) throw new Error('prepared source identity does not match its site intent');
+  const sourceDiagnostics: Array<{ path: string; code: string; message: string }> = [];
+  const intent = validateSiteIntent(source?.sourceIntent, sourceDiagnostics);
+  if (!intent) throw new Error(sourceDiagnostics.map((item) => `${item.path}: ${item.message}`).join('; '));
+  if (hashSiteSourceIdentity(intent) !== source.sourceIdentity) throw new Error('prepared source identity does not match its canonical site intent');
   const targetBindingFingerprint = hashTargetContext(artifact.targetBindings, artifact.themeAssetBaseUrl);
   if (artifact.targetBindingFingerprint !== targetBindingFingerprint) throw new Error('compiled artifact target bindings do not match their fingerprint');
   const themeFiles = artifact.themeFiles.map((file) => {
@@ -588,7 +591,7 @@ function validatePreparedSource(source: PreparedSiteSource): { ok: true; intent:
   if (!intent) {
     return { ok: false, diagnostics: inputDiagnostics.map((entry) => ({ status: 'invalid', reason: entry.message, source: { path: entry.path }, code: entry.code })) };
   }
-  if (!siteSourceIdentityMatches(intent, source.sourceIdentity)) {
+  if (hashSiteSourceIdentity(intent) !== source.sourceIdentity) {
     return { ok: false, diagnostics: [invalid('site', 'prepared-source-identity-mismatch', 'prepared source identity does not match its canonical site intent')] };
   }
   if (!Array.isArray(source?.assets)) {

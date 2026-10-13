@@ -1,10 +1,10 @@
-import { createHash, randomUUID } from 'node:crypto';
+import { randomUUID } from 'node:crypto';
 import { cp, mkdir, mkdtemp, readFile, realpath, rm, symlink, truncate, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, expect, it } from 'vitest';
-import { prepareSiteSource, siteSourceIdentityMatches, validateSiteIntent } from '../../src/site/input.js';
+import { hashSiteSourceIdentity, prepareSiteSource, validateSiteIntent } from '../../src/site/input.js';
 import { verifyPreparedSiteAssets } from '../../src/site/assets.js';
 
 const fixtureRoot = fileURLToPath(new URL('./fixtures/site-intent', import.meta.url));
@@ -65,15 +65,12 @@ describe('site intent contract', () => {
     if (baseline.ok && reversed.ok) expect(reversed.source.sourceIdentity).toBe(baseline.source.sourceIdentity);
   });
 
-  it('accepts a legacy insertion-order source identity and verifies its source bytes unchanged', async () => {
+  it('uses the canonical source identity and verifies its source bytes unchanged', async () => {
     const prepared = await prepareSiteSource(await loadIntent(), fixtureRoot);
     expect(prepared.ok).toBe(true);
     if (!prepared.ok) return;
-    const legacyIdentity = createHash('sha256').update(JSON.stringify(prepared.source.sourceIntent)).digest('hex');
-    const legacySource = { ...prepared.source, sourceIdentity: legacyIdentity };
-    expect(siteSourceIdentityMatches(legacySource.sourceIntent, legacyIdentity)).toBe(true);
-    await expect(verifyPreparedSiteAssets(legacySource)).resolves.toBeUndefined();
-    expect(siteSourceIdentityMatches(legacySource.sourceIntent, 'sha256-not-current')).toBe(false);
+    expect(prepared.source.sourceIdentity).toBe(hashSiteSourceIdentity(prepared.source.sourceIntent));
+    await expect(verifyPreparedSiteAssets(prepared.source)).resolves.toBeUndefined();
   });
 
   it('reports malformed native tree nodes and children without throwing during graph preparation', async () => {

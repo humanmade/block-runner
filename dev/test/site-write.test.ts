@@ -117,15 +117,13 @@ describe('site bundle publication', () => {
     }
   });
 
-  it('publishes a previously prepared source without rewriting its legacy source identity', async () => {
+  it('refuses a non-canonical source identity before publishing', async () => {
     const { root, source } = await setup();
     try {
-      const legacyIdentity = createHash('sha256').update(JSON.stringify(source.sourceIntent)).digest('hex');
-      const legacySource = { ...source, sourceIdentity: legacyIdentity };
-      const output = path.join(root, 'legacy-bundle');
-      await writeCompiledSite(output, legacySource, artifact(legacySource));
-      const manifest = JSON.parse(await readFile(path.join(output, 'site.manifest.json'), 'utf8')) as { sourceIdentity: string };
-      expect(manifest.sourceIdentity).toBe(legacyIdentity);
+      const nonCanonicalSource = { ...source, sourceIdentity: createHash('sha256').update(JSON.stringify(source.sourceIntent)).digest('hex') };
+      const output = path.join(root, 'non-canonical-bundle');
+      await expect(writeCompiledSite(output, nonCanonicalSource, artifact(source))).rejects.toThrow('prepared source identity does not match');
+      await expect(lstat(output)).rejects.toThrow();
     } finally {
       await rm(root, { recursive: true, force: true });
     }
