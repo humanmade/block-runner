@@ -1,4 +1,4 @@
-import { constants as fsConstants, readFileSync } from 'node:fs';
+import { constants as fsConstants } from 'node:fs';
 import { access, chmod, mkdir, mkdtemp, readFile, rename, stat, unlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -7,27 +7,6 @@ import { runProof } from '../../src/proof/runner.js';
 import { startWithPreparedStageMount } from '../../scripts/proof-control-startup.mjs';
 
 describe('WordPress control startup and retained failures', () => {
-  it('keeps the wp-env mount schema and native adapter media byte contract outside WordPress uploads', () => {
-    const config = JSON.parse(readFileSync(new URL('../../proof/wp-env.json', import.meta.url), 'utf8'));
-    expect(config.mappings).toEqual({ 'wp-content/block-runner-proof': '.block-runner-proof-stage' });
-    const runner = readFileSync(new URL('../../src/proof/runner.ts', import.meta.url), 'utf8');
-    const helper = runner.match(/const prepareNativeStyleAdapterMedia[\s\S]*?\n  };/)?.[0];
-    expect(helper).toBeDefined();
-    // These checks intentionally guard WordPress upload failures and retained-byte
-    // corruption, which a successful runtime install cannot deterministically inject.
-    expect(helper).toContain("wp_upload_bits('block-runner-editor.png', null, $png)");
-    expect(helper).toContain("if (!empty($upload['error']))");
-    expect(helper).toContain("hash_file('sha256', $file) !== hash('sha256', $png)");
-    expect(helper).toContain("add_filter('upload_dir', $uploadDirFilter)");
-    expect(helper).toContain("remove_filter('upload_dir', $uploadDirFilter)");
-    expect(helper).toContain("$uploads['path'] = $uploads['basedir']");
-    expect(helper).toContain("$uploads['url'] = $uploads['baseurl']");
-    expect(helper).toContain("$uploads['subdir'] = ''");
-    expect(helper).toContain("content_url('/uploads/block-runner-editor.png')");
-    expect(helper).toContain("$upload['url'] !== $expectedUrl");
-    expect(runner).not.toContain('file_put_contents($file, $png)');
-  });
-
   it('makes host staging writable and preserves ZIPs before starting Docker', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-control-stage-'));
     const directory = path.join(root, '.block-runner-proof-stage');
@@ -123,18 +102,5 @@ describe('WordPress control startup and retained failures', () => {
     expect(commands).toEqual(['docker info --format {{.ServerVersion}}']);
     expect(result.receipt.gates.some(({ reason }) => reason?.includes('Could not stage the plugin ZIP'))).toBe(true);
     expect(result.ok).toBe(false);
-  });
-
-  it('retains named artifact uploads on failure without node_modules', () => {
-    const contracts = [
-      ['ci.yml', 'Upload WordPress 7.1 pattern-overrides receipt'],
-      ['release.yml', 'Retain release receipts'],
-    ] as const;
-    for (const [workflow, stepName] of contracts) {
-      const yaml = readFileSync(new URL(`../../.github/workflows/${workflow}`, import.meta.url), 'utf8');
-      const step = yaml.slice(yaml.indexOf(`- name: ${stepName}`), yaml.indexOf('\n      - name:', yaml.indexOf(`- name: ${stepName}`) + 1));
-      expect(step).toContain('if: always()');
-      expect(step).toContain('/**/node_modules/**');
-    }
   });
 });

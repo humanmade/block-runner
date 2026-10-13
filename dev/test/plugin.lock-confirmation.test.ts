@@ -1,12 +1,10 @@
 import { createHash } from 'node:crypto';
-import { mkdtemp, readFile, stat } from 'node:fs/promises';
+import { mkdtemp, readFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
   planStandalonePluginOutput,
-  STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT,
-  STANDALONE_LOCK_TEMPLATE_VERSION,
   writePluginOutput,
 } from '../../src/plugin/profile.js';
 
@@ -27,31 +25,6 @@ const block = {
 };
 
 describe('standalone lock confirmation', () => {
-  it('previews the complete versioned dependency lock without touching the destination', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-standalone-lock-'));
-    const output = path.join(root, 'notice-plugin');
-    const plan = await planStandalonePluginOutput(output, block);
-    const packageJson = JSON.parse(plan.touchedFiles.find((file) => file.relativePath === 'package.json')!.content.toString('utf8'));
-    const lock = JSON.parse(plan.touchedFiles.find((file) => file.relativePath === 'package-lock.json')!.content.toString('utf8'));
-
-    await expect(stat(output)).rejects.toThrow();
-    expect(lock).toMatchObject({
-      lockfileVersion: 3,
-      packages: {
-        '': {
-          name: 'acme-notice',
-          engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' },
-          devDependencies: { '@wordpress/scripts': '34.2.0' },
-        },
-        'node_modules/@wordpress/scripts': { version: '34.2.0' },
-        'node_modules/adm-zip': { version: '0.6.1' },
-      },
-    });
-    expect(packageJson).toMatchObject({ engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' } });
-    expect(Object.keys(lock.packages)).toHaveLength(STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT);
-    expect(plan.notes).toContain(`Complete dependency lock: ${STANDALONE_LOCK_TEMPLATE_VERSION}.`);
-  });
-
   it('writes every confirmed byte, including the complete lock, without npm', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-standalone-confirmation-'));
     const output = path.join(root, 'notice-plugin');

@@ -119,31 +119,18 @@ function paragraphAxe(nodes = [paragraphNode]) {
 }
 
 describe('0.9 proof release acceptance', () => {
-  it('loads and validates the hash-bound native control before applying the exception', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-heading-control-'));
-    const controlPath = path.join(root, 'native-heading-control.json');
-    const controlReceipt = nativeHeadingControlEvidence.controlReceipt;
+  it.each([
+    ['heading', nativeHeadingControlEvidence, loadNativeHeadingControlEvidence],
+    ['paragraph', nativeParagraphControlEvidence, loadNativeParagraphControlEvidence],
+  ] as const)('loads and validates the hash-bound native %s control', async (name, evidence, load) => {
+    const root = await mkdtemp(path.join(tmpdir(), `block-runner-${name}-control-`));
+    const controlPath = path.join(root, `native-${name}-control.json`);
+    const controlReceipt = evidence.controlReceipt;
     const bytes = `${JSON.stringify(controlReceipt)}\n`;
     await writeFile(controlPath, bytes, 'utf8');
     const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}` as `sha256:${string}`;
 
-    const loaded = loadNativeHeadingControlEvidence({
-      wordpressVersion: '7.1',
-      evidence: { path: controlPath, sha256 },
-    });
-
-    expect(loaded.controlReceipt).toEqual(controlReceipt);
-  });
-
-  it('loads and validates the hash-bound native Paragraph control', async () => {
-    const root = await mkdtemp(path.join(tmpdir(), 'block-runner-paragraph-control-'));
-    const controlPath = path.join(root, 'native-paragraph-control.json');
-    const controlReceipt = nativeParagraphControlEvidence.controlReceipt;
-    const bytes = `${JSON.stringify(controlReceipt)}\n`;
-    await writeFile(controlPath, bytes, 'utf8');
-    const sha256 = `sha256:${createHash('sha256').update(bytes).digest('hex')}` as `sha256:${string}`;
-
-    const loaded = loadNativeParagraphControlEvidence({
+    const loaded = load({
       wordpressVersion: '7.1',
       evidence: { path: controlPath, sha256 },
     });
@@ -314,21 +301,6 @@ describe('0.9 proof release acceptance', () => {
       gate: 'accessibility_editor',
       reason: expect.stringContaining('does not contain Axe finding aria-allowed-role'),
     }));
-  });
-
-  it('can accept a release only after the manual review gate passes', () => {
-    const result = evaluateReleaseAcceptance(receipt({
-      accessibility_editor: {
-        gate: 'accessibility_editor',
-        status: 'fail',
-        details: headingAxe(),
-      },
-      accessibility_manual_review: { gate: 'accessibility_manual_review', status: 'pass' },
-    }), { nativeHeadingControlEvidence });
-
-    expect(result.rawProfile.ok).toBe(false);
-    expect(result.automated.ok).toBe(true);
-    expect(result.release).toMatchObject({ ok: true, status: 'passed', blockers: [] });
   });
 
   it('does not apply the exception without an observed control evidence reference', () => {

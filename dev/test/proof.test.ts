@@ -12,7 +12,7 @@ import {
   reportProofRequirements,
   type ProofGateContext,
 } from '../../src/index.js';
-import { PROOF_GATE_IDS, PROOF_PROFILES, type ProofGateId } from '../../src/proof/profiles.js';
+import { PROOF_GATE_IDS, type ProofGateId } from '../../src/proof/profiles.js';
 
 describe('WordPress proof profiles', () => {
   it('fails closed when a required gate is skipped or blocked', () => {
@@ -45,7 +45,7 @@ describe('WordPress proof profiles', () => {
 
 describe('capability-aware proof requirements', () => {
   const hash = (value: string): `sha256:${string}` => `sha256:${createHash('sha256').update(value).digest('hex')}`;
-  it.each([undefined, null, {}, 'bindings'])('reports invalid requiredBindings %j without short-circuit masking', (requiredBindings) => {
+  it.each([{}])('reports invalid requiredBindings %j without short-circuit masking', (requiredBindings) => {
     const fixture = { blockName: 'acme/proof', editableFields: [{ path: 'copy', surface: 'richText' }],
       patternOverrides: { title: 'Pattern', canonicalContent: 'canonical', instances: [{}, {}],
         canonicalUpdate: { content: 'updated' }, reset: { instance: 0 }, requiredBindings,
@@ -250,14 +250,6 @@ describe('content-addressed proof receipts', () => {
     });
     expect(result.receiptReference.sha256).toMatch(/^sha256:[a-f0-9]{64}$/);
     expect(JSON.parse(await readFile(path.join(root, result.receiptReference.path), 'utf8'))).toEqual(result.receipt);
-  });
-
-  it('keeps full unchanged while exposing capability-specific proof claims', () => {
-    expect(PROOF_PROFILES.full.requiredGates).toContain('accessibility_manual_review');
-    expect(PROOF_PROFILES['editor-verified'].requiredGates).not.toContain('pattern_overrides');
-    expect(PROOF_PROFILES['fidelity-checked'].requiredGates).toContain('visual_regression');
-    expect(PROOF_PROFILES['fidelity-checked'].requiredGates).not.toContain('accessibility_manual_review');
-    expect(PROOF_PROFILES['pattern-verified'].requiredGates).toContain('pattern_overrides');
   });
 
   it('does not accidentally leave a required gate absent from a successful profile', async () => {

@@ -12,6 +12,8 @@ import {
   PublicationInterruptedError,
   removeMatchingAllowScriptsProjection,
   retryPluginPublication,
+  STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT,
+  STANDALONE_LOCK_TEMPLATE_VERSION,
   UnsupportedPluginLayoutError,
   writePluginOutput,
 } from '../../src/plugin/profile.js';
@@ -329,11 +331,25 @@ describe('standalone plugin profile', () => {
     const packageJson = plan.touchedFiles.find((file) => file.relativePath === 'package.json')!.content;
     const lock = plan.touchedFiles.find((file) => file.relativePath === 'package-lock.json')!.content;
     const bootstrap = plan.touchedFiles.find((file) => file.relativePath === 'plugin.php')!.content;
-    expect(JSON.parse(packageJson.toString('utf8'))).toMatchObject({ devDependencies: { '@wordpress/scripts': '34.2.0' } });
-    expect(JSON.parse(lock.toString('utf8'))).toMatchObject({
-      lockfileVersion: 3,
-      packages: { '': { name: 'acme-notice', devDependencies: { '@wordpress/scripts': '34.2.0' } } },
+    expect(JSON.parse(packageJson.toString('utf8'))).toMatchObject({
+      engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' },
+      devDependencies: { '@wordpress/scripts': '34.2.0' },
     });
+    const parsedLock = JSON.parse(lock.toString('utf8'));
+    expect(parsedLock).toMatchObject({
+      lockfileVersion: 3,
+      packages: {
+        '': {
+          name: 'acme-notice',
+          engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' },
+          devDependencies: { '@wordpress/scripts': '34.2.0' },
+        },
+        'node_modules/@wordpress/scripts': { version: '34.2.0' },
+        'node_modules/adm-zip': { version: '0.6.1' },
+      },
+    });
+    expect(Object.keys(parsedLock.packages)).toHaveLength(STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT);
+    expect(plan.notes).toContain(`Complete dependency lock: ${STANDALONE_LOCK_TEMPLATE_VERSION}.`);
     expect(bootstrap.toString()).toContain('wp_register_block_metadata_collection');
     expect(bootstrap.toString()).toContain('Requires at least: 7.1');
     expect(bootstrap.toString()).toContain('Requires PHP: 7.4');

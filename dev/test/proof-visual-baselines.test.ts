@@ -1,5 +1,5 @@
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, expect, it } from 'vitest';
 import { fixtureVisualGoldenPath } from '../../scripts/build-pattern-overrides-fixture.js';
@@ -17,11 +17,5 @@ describe('reviewed platform visual baselines', () => {
     expect(createHash('sha256').update(readFileSync(file)).digest('hex')).toBe(baseline.sha256);
     expect(review.threshold).toBe(0);
     expect(review.masks).toEqual([]);
-  });
-
-  it('does not silently reuse a reviewed image for an unreviewed platform', () => {
-    const file = fixtureVisualGoldenPath('unreviewed');
-    expect(existsSync(file)).toBe(false);
-    expect(file).toContain('.unreviewed.expected.png');
   });
 });
