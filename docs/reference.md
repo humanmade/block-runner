@@ -263,7 +263,7 @@ Use the CLI in shell scripts, pre-commit hooks or CI.
 
 ```yaml
 - repo: https://github.com/humanmade/block-runner
-  rev: v0.9.1
+  rev: v0.9.10
   hooks:
     - id: block-runner
       args: ['content/**/*.html']   # glob of files that contain block markup
@@ -302,9 +302,9 @@ unknown effects are never retried automatically.
 
 ## Library
 
-The library is ESM-only and requires Node.js ^20.19.0 || ^22.13.0 || >=24.0.0. This means
-Node 20.19.0+ on the 20.x line, Node 22.13.0+ on the 22.x line, or Node 24.0.0+. Node 21 and
-23 are intentionally unsupported. CommonJS callers should use
+The library is ESM-only and requires Node.js ^22.13.0 || >=24.0.0. This means
+Node 22.13.0+ on the 22.x line, or Node 24.0.0+. Node 20, 21 and 23 are
+unsupported. CommonJS callers should use
 `await import('block-runner')` rather than `require('block-runner')`.
 
 ```js
@@ -479,7 +479,7 @@ snapshot at `author.styles.context.theme.settings`; `--context` does not populat
 or import binding permissions. Use Wesper's validation and compatibility helpers in the calling
 harness when those checks are needed.
 
-The bundled `context` command uses the pinned Wesper 0.4.1 WP-CLI collector. Its manifests
+The bundled `context` command uses the pinned Wesper 0.5.0 WP-CLI collector. Its manifests
 provide the native preset registry consumed by the resolver above.
 
 ## Styling fidelity

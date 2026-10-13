@@ -150,7 +150,7 @@ These are page-content conversion results, not measurements of registered-block 
 | Custom HTML conversion rules | [Runnable extension example](https://github.com/humanmade/block-runner/blob/main/docs/extending.md) |
 | Repository checks and benchmarks | [Development guide](https://github.com/humanmade/block-runner/blob/main/docs/development.md) |
 
-The bundled `context` command uses Wesper **0.4.1**. See the [site-context reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#site-context-from-wesper) for what the manifest supplies and its limitations.
+The bundled `context` command uses Wesper **0.5.0**. See the [site-context reference](https://github.com/humanmade/block-runner/blob/main/docs/reference.md#site-context-from-wesper) for what the manifest supplies and its limitations.
 
 For a real WordPress Site Editor save check of a local block theme, run `block-runner proof --theme <theme-directory> --wp-env-config <wp-env.json>`. The config supplies PHP, a fixed local port and local dependency plugins; `autoPort` is refused. The proof verifies its browser target, then saves each template and part from the mounted editor state and compares a fresh REST read with the pinned source.
 
