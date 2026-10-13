@@ -2,7 +2,7 @@ import { compileThemeDocuments, compileSitePageDocuments } from './compile.js';
 import { readSiteSnapshot, type SiteWpCliOptions, type SiteReadTransport } from './wpcli.js';
 import { lstat } from 'node:fs/promises';
 import path from 'node:path';
-import { hashBytes, readStableRegularFile, regularFileIdentity, sameFileIdentity, type PublicationFileIdentity } from '../publication.js';
+import { hashBytes, readStableRegularFile, preciseRegularFileIdentity, sameFileIdentity, type PublicationFileIdentity } from '../publication.js';
 import { prepareSiteSource } from './input.js';
 import { hashCanonicalJson } from '../proof/receipt.js';
 import type { PreparedSiteSource, CompiledSitePage, SiteInputDiagnostic, ThemeArtifact, SiteAttachmentBinding } from './types.js';
@@ -328,10 +328,18 @@ export async function assertSitePlanDocumentsUnchanged(input: SitePlanInput): Pr
   if (!documents) throw new Error('site input has no captured source document identities');
   for (const [file, identity] of documents) {
     await assertSafePath(file);
-    if (!sameFileIdentity(identity, await regularFileIdentity(file, 'source bytes changed since preparation'))) {
+    if (!sameFileIdentity(identity, await preciseRegularFileIdentity(file, 'source bytes changed since preparation'))) {
       throw new Error('source bytes changed since preparation');
     }
   }
+}
+
+async function readSourceDocument(file: string, error: string): Promise<{ content: Buffer; identity: PublicationFileIdentity }> {
+  const before = await preciseRegularFileIdentity(file, error);
+  const observed = await readStableRegularFile(file, error);
+  const after = await preciseRegularFileIdentity(file, error);
+  if (!sameFileIdentity(before, after)) throw new Error(error);
+  return { content: observed.content, identity: before };
 }
 
 /** Read either an explicit source file or the retained source of a stable compiled bundle. */
@@ -341,7 +349,7 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
   const info = await lstat(input);
   if (info.isFile()) {
     if (!assetRoot) throw new Error('raw site intent planning requires an explicit asset root');
-    const file = await readStableRegularFile(input, 'site intent changed while reading');
+    const file = await readSourceDocument(input, 'site intent changed while reading');
     const prepared = await prepareSiteSource(JSON.parse(file.content.toString('utf8')), assetRoot);
     if (!prepared.ok) throw new Error(prepared.diagnostics.map(item => `${item.path}: ${item.message}`).join('\n'));
     const result: SitePlanInput = { source: prepared.source, retainedBindings: {} };
@@ -354,7 +362,7 @@ export async function readSitePlanInput(inputPath: string, assetRoot?: string): 
     if (!relative || relative.includes('\\') || relative.includes('\0') || relative.split('/').some(component => !component || component === '.' || component === '..') || path.isAbsolute(relative)) throw new Error('unsafe retained bundle path');
     const file = path.join(input, ...relative.split('/'));
     await assertSafePath(file);
-    const observed = await readStableRegularFile(file, 'retained bundle file changed while reading');
+    const observed = await (relative === 'site.intent.json' || relative === 'site.manifest.json' ? readSourceDocument : readStableRegularFile)(file, 'retained bundle file changed while reading');
     if (relative === 'site.intent.json' || relative === 'site.manifest.json') {
       const previous = documents.get(file);
       if (previous && !sameFileIdentity(previous, observed.identity)) throw new Error('retained source document changed while reading bundle');

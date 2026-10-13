@@ -7,7 +7,6 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { link, lstat, open, readFile, readlink, rename, unlink } from 'node:fs/promises';
 import path from 'node:path';
-import type { BigIntStats } from 'node:fs';
 
 export interface PublicationFileIdentity {
   dev: string;
@@ -53,11 +52,24 @@ export function sameFileIdentity(left: PublicationFileIdentity, right: Publicati
 }
 
 export async function regularFileIdentity(file: string, error: string, includeContent = false): Promise<PublicationFileIdentity> {
+  const stats = await lstat(file);
+  if (stats.isSymbolicLink() || !stats.isFile()) throw new Error(error);
+  const withNs = stats as typeof stats & { mtimeNs?: bigint; ctimeNs?: bigint };
+  return {
+    dev: String(stats.dev), ino: String(stats.ino), mode: Number(stats.mode), size: String(stats.size),
+    mtimeNs: String(withNs.mtimeNs ?? BigInt(Math.round(Number(stats.mtimeMs) * 1_000_000))),
+    ctimeNs: String(withNs.ctimeNs ?? BigInt(Math.round(Number(stats.ctimeMs) * 1_000_000))),
+    ...(includeContent ? { sha256: hashBytes(await readFile(file)) } : {}),
+  };
+}
+
+/** Exact metadata for invocation-local source guards; existing publication identities stay unchanged. */
+export async function preciseRegularFileIdentity(file: string, error: string): Promise<PublicationFileIdentity> {
   const stats = await lstat(file, { bigint: true });
   if (!stats.isFile()) throw new Error(error);
   return {
-    ...identityFromStats(stats),
-    ...(includeContent ? { sha256: hashBytes(await readFile(file)) } : {}),
+    dev: String(stats.dev), ino: String(stats.ino), mode: Number(stats.mode), size: String(stats.size),
+    mtimeNs: String(stats.mtimeNs), ctimeNs: String(stats.ctimeNs),
   };
 }
 
@@ -71,7 +83,7 @@ export async function readStableRegularFile(file: string, error: string, maximum
   } else {
     const handle = await open(file, 'r');
     try {
-      const opened = await handle.stat({ bigint: true });
+      const opened = await handle.stat();
       if (!opened.isFile() || !sameFileIdentity(before, identityFromStats(opened))) throw new Error(error);
       const chunks: Buffer[] = [];
       let total = 0;
@@ -93,10 +105,12 @@ export async function readStableRegularFile(file: string, error: string, maximum
   return { content, identity: after };
 }
 
-function identityFromStats(stats: BigIntStats): PublicationFileIdentity {
+function identityFromStats(stats: Awaited<ReturnType<import('node:fs/promises').FileHandle['stat']>>): PublicationFileIdentity {
+  const withNs = stats as typeof stats & { mtimeNs?: bigint; ctimeNs?: bigint };
   return {
     dev: String(stats.dev), ino: String(stats.ino), mode: Number(stats.mode), size: String(stats.size),
-    mtimeNs: String(stats.mtimeNs), ctimeNs: String(stats.ctimeNs),
+    mtimeNs: String(withNs.mtimeNs ?? BigInt(Math.round(Number(stats.mtimeMs) * 1_000_000))),
+    ctimeNs: String(withNs.ctimeNs ?? BigInt(Math.round(Number(stats.ctimeMs) * 1_000_000))),
   };
 }
 

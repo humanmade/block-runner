@@ -229,16 +229,15 @@ describe('bounded site template and part pull', () => {
     expect(await readFile(path.join(f.bundle, 'site.manifest.json'))).toEqual(beforeManifest);
   });
 
-  it('permits exact legacy indexed attachment ownership only with its complete baseline', async () => {
+  it('refuses attachment ownership without the required version hash and qualified index', async () => {
     const f = await fixture();
     addOwnedAttachment(f, 811, { legacy: true });
     f.setTemplates({ ...f.templates, entities: f.templates.entities.map(entity => entity.id === f.selection.entityId ? { ...entity, raw: imageRefs(811) } : entity) });
     const beforeHtml = await readFile(path.join(f.bundle, f.sourcePath));
     const beforeManifest = await readFile(path.join(f.bundle, 'site.manifest.json'));
     const preview = await previewSitePull(f.bundle, path.join(f.root, 'legacy-owned-preview'), [f.selection], f.options);
-    expect(preview.ok, JSON.stringify(preview.diagnostics)).toBe(true);
-    f.snapshot.entities[0]!.state.sha256 = 'd'.repeat(64);
-    await expect(confirmSitePull(f.bundle, preview.directory, preview.confirmationHash!, f.options)).rejects.toThrow('changed after preview');
+    expect(preview.ok).toBe(false);
+    expect(preview.diagnostics).toContainEqual(expect.objectContaining({ code: 'unsupported-attachment-dependency' }));
     expect(await readFile(path.join(f.bundle, f.sourcePath))).toEqual(beforeHtml);
     expect(await readFile(path.join(f.bundle, 'site.manifest.json'))).toEqual(beforeManifest);
   });
