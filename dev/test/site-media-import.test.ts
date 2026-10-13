@@ -188,6 +188,14 @@ echo json_encode($ownershipHash);`;
       throw error;
     }
     expect(JSON.parse(hashOutput)).toBe(managedStateHash({ sha256: hash }));
+    const rootGuard = script.match(/(\$rootInput = \$expected\['assetRoot'\];[\s\S]*?if \(!\$root \|\| !is_dir\(\$root\) \|\| \$resolvedRoot !== \$approvedRoot\) return array\('status'=>'refused'\);)/)?.[1];
+    expect(rootGuard).toBeDefined();
+    const aliasRoot = path.join(ready.root, 'asset-root-alias');
+    await symlink(ready.root, aliasRoot);
+    const rootCheckPhp = `$check = function($expected) { ${rootGuard} return array('status'=>'approved'); };
+echo json_encode(array($check(array('assetRoot'=>$argv[1]))['status'], $check(array('assetRoot'=>$argv[2]))['status']));`;
+    const { stdout: rootCheckOutput } = await run('php', ['-r', rootCheckPhp, ready.root, aliasRoot], { encoding: 'utf8' });
+    expect(JSON.parse(rootCheckOutput)).toEqual(['approved', 'refused']);
     expect(binding).toMatchObject({ id: 44, url: 'https://example.test/uploads/hero-3.png', observedSize: { width: 1200, height: 800 },
       imageSizes: { full: { url: 'https://example.test/uploads/hero-3.png', width: 1200, height: 800 } } });
   });

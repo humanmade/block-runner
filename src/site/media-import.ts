@@ -248,8 +248,11 @@ $result = (function() use ($expected, &$attempted) {
       || ($step['kind'] ?? null) !== 'attachment' || ($step['entityId'] ?? null) !== $expected['entityId']
       || ($step['assetSha256'] ?? null) !== $expected['assetSha256'] || ($step['status'] ?? null) !== 'started') return array('status'=>'refused');
 
-    $root = realpath($expected['assetRoot']);
-    if (!$root || !is_dir($root)) return array('status'=>'refused');
+    $rootInput = $expected['assetRoot'];
+    $approvedRoot = rtrim($rootInput, DIRECTORY_SEPARATOR); if ($approvedRoot === '') $approvedRoot = DIRECTORY_SEPARATOR;
+    $root = realpath($rootInput);
+    $resolvedRoot = $root ? rtrim($root, DIRECTORY_SEPARATOR) : ''; if ($resolvedRoot === '') $resolvedRoot = DIRECTORY_SEPARATOR;
+    if (!$root || !is_dir($root) || $resolvedRoot !== $approvedRoot) return array('status'=>'refused');
     $cursor = $root;
     foreach (explode('/', $expected['relativePath']) as $part) {
       $cursor = $cursor . DIRECTORY_SEPARATOR . $part;
