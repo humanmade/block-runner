@@ -2,6 +2,8 @@
 
 Start with the [README](../README.md) for a first conversion, or the [architecture guide](architecture.md) for the code paths. This reference covers commands, configuration and compatibility details. The [registered-block delivery guide](../skills/block-runner/references/AUTHORING.md#shipped-notice-source-to-standalone-zip) owns the complete source-to-ZIP procedure.
 
+This reference describes current source. Theme-folder and whole-site commands, Wesper 0.5.0 and the Node 22.13/24 floor are unreleased; the published 0.9.10 package predates them. The [theme and site guide](../skills/block-runner/references/SITE.md) owns the whole-site input and lifecycle examples.
+
 ## Native block support boundaries
 
 Four different claims need different evidence:
@@ -49,10 +51,15 @@ For a local installation, run these commands with `npx --no-install block-runner
 | `assemble` | An intent tree to native page-content blocks, assembled and validated by Gutenberg. |
 | `author preview <plan\|->` | Validate and render a versioned registered-block GeneratedAuthoringPlan without writing files. |
 | `author write <plan\|-> --confirm <hash> --output-dir <dir>` | Write the reviewed compiler-owned source package bound to its SHA-256 confirmation and destination. Build and runtime proof remain separate. |
-| `validate` | Check block markup against headless Gutenberg. |
-| `fix` | Canonicalize near-miss block markup. |
+| `validate` | Check block markup or a theme folder, including its schema and local references. |
+| `fix` | Canonicalize block markup; `--write` repairs eligible theme-folder markup in place. |
 | `context` | Read a WordPress site into a `site.context.json` manifest (read-only). |
-| `proof` | Run a real-WordPress proof profile for a built plugin ZIP and write an immutable receipt. |
+| `proof` | Run a built-plugin proof profile, or select a local theme/site with `--theme` / `--site`; retain the receipt. |
+| `site compile <intent\|-> --asset-root <dir> --out <new-dir>` | Compile a local theme/site bundle; `--theme-only` retains pending database bindings. |
+| `site plan <intent-or-bundle> --wp-path <dir> --out <new-file>` | Observe WordPress and write a source/target-bound plan; raw intent also needs `--asset-root`. |
+| `site apply <plan> --source <intent-or-bundle> --confirm <hash> --journal <file> --wp-path <dir>` | Apply reviewed owned changes, with durable per-step records and outcome checks. |
+| `site drift <bundle> --wp-path <dir>` | Inspect saved theme overrides against local files without writes. |
+| `site pull <bundle> --wp-path <dir> --out <dir>` | Stage exact selected saved theme edits; `--confirm <hash>` publishes them locally. |
 | `skill` | Print or install the agent guide. |
 | `plugin inspect` | Read-only detection of the supported `@wordpress/scripts` plugin profile. |
 | `plugin preview` / `plugin write` | Preview, confirm, and integrate a generated registered-block directory; or create a standalone plugin wrapper. |
@@ -151,8 +158,9 @@ every artifact as pattern-override-ready:
 | `full` | The exhaustive release-profile gate set. | All full-profile inputs, including pattern, visual, and manual-review evidence. |
 
 Library plus `convert`, `assemble`, `validate`, `fix`, `author`, `plugin`, `context`,
-and `skill` need only Block Runner's production dependencies. WP-CLI remains an
-external requirement only when selected for context, token, or media resolution.
+`site compile` and `skill` need only Block Runner's production dependencies. WP-CLI
+is external tooling when selected for context, token or media resolution, and for
+`site plan`, `apply`, `drift` and `pull`.
 
 The browser-proof packages are optional peers with compatible caret ranges, absent from a basic
 installation. The proof setup below deliberately pins the known-good versions for reproducible
@@ -178,6 +186,12 @@ npm install --save-dev --save-exact pixelmatch@7.1.0 pngjs@7.0.0
 Proof never downloads tooling or browsers or calls a model. Missing or mismatched tooling blocks
 the run before Docker starts and reports the required installation command. Runtime profiles
 also require a working Docker daemon.
+
+Theme/site proofs use the same runtime/editor prerequisites. `proof --theme <dir>
+--wp-env-config <file>` saves mounted editor content and compares fresh REST bytes.
+`proof --site <bundle> --wp-env-config <file>` exercises an owned sandbox with
+explicitly published pages and header/footer parts. Neither is a visual fidelity
+claim; see the [theme/site proof boundaries](../skills/block-runner/references/SITE.md#prove-the-right-result).
 
 ```sh
 block-runner proof dist/acme-hero.zip --profile full \
@@ -255,6 +269,9 @@ preserved root-level `GUIDE.md` after confirming the new `references/GUIDE.md` c
 - `2`: usage or I/O error
 - `3`: headless Gutenberg boot failure
 
+`site drift` has its own exit codes: 0 clean, 1 actionable, 2 blocked, 3 inspection
+failure. An apply receipt is successful only when its status is `completed`.
+
 ## Run it anywhere
 
 Use the CLI in shell scripts, pre-commit hooks or CI.
@@ -306,6 +323,12 @@ The library is ESM-only and requires Node.js ^22.13.0 || >=24.0.0. This means
 Node 22.13.0+ on the 22.x line, or Node 24.0.0+. Node 20, 21 and 23 are
 unsupported. CommonJS callers should use
 `await import('block-runner')` rather than `require('block-runner')`.
+
+Whole-site exports include `prepareSiteSource`, `compileThemeDocuments`, `compileSite`,
+`writeCompiledSite`, `planSite`, `applySite`, `inspectSiteDrift`, `previewSitePull` and
+`confirmSitePull`. Use the [SiteIntent and lifecycle guide](../skills/block-runner/references/SITE.md)
+and exported TypeScript option/result types; compilation, local publication and
+WordPress mutation are separate calls.
 
 ```js
 import { canonicalize, convert, validate } from 'block-runner';
@@ -380,8 +403,9 @@ insertions; existing saved content remains its own content record, though change
 
 A same-identity change to saved markup, registration identity, or attribute schema is refused.
 Use a new block identity, or add a tested WordPress deprecation/migration before replacing it.
-Block Runner does not edit a site's database, templates, or posts. Synced-pattern canonical updates
-are separate site operations and source changes make no sitewide propagation claim. Direct insertion,
+Registered-block regeneration does not edit a site's database, templates, or posts.
+The separate `site apply` workflow can update owned pages and synced patterns;
+registered-block source changes make no sitewide propagation claim. Direct insertion,
 synced-pattern use, and plugin deactivation each need their own WordPress acceptance proof. Generated
 packages are static WordPress source and contain no Block Runner runtime dependency.
 

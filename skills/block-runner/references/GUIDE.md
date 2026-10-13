@@ -107,6 +107,7 @@ to adding a plugin merely because it is easier to generate. The handoff is descr
 | New content for a page or post, including explicit native styles and theme presets | **`assemble`** | An intent tree becomes native page blocks with the attributes you supply. |
 | Existing authored HTML/CSS that must become page or post `post_content` | **`convert`** | Rule-based interpretation of authored markup and supported CSS. Do not use frontend-scraped render output. |
 | Block markup you already produced, before saving it to WordPress | **`validate`** → **`fix`** → **`validate`** | Checks block markup; site references and editor behavior still need target-site verification. |
+| A block-theme folder or whole-site intent | See **[SITE.md](SITE.md)** | Folder/schema/reference checks, local compilation, confirmed owned apply and staged theme pull have separate boundaries. Check installed command availability first. |
 
 Choose by the requested artifact, not merely by the input format. A supplied HTML design still
 uses registered-block authoring when the user wants a reusable named block in code. Conversely,

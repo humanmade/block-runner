@@ -1,6 +1,6 @@
 # Architecture
 
-Block Runner has two outputs: Gutenberg markup for page content, and source files for a reusable registered block. Both are available through the CLI and library. The optional skill teaches an external coding agent how to use them; the package does not call a model.
+Block Runner produces Gutenberg page markup, reusable registered-block source and whole-site block-theme bundles. These are available through the CLI and library. The optional skill teaches an external coding agent how to use them; the package does not call a model. Theme/site routes are current-source features, unreleased after npm 0.9.10.
 
 ## Choose a workflow
 
@@ -10,6 +10,10 @@ Block Runner has two outputs: Gutenberg markup for page content, and source file
 | A JSON tree describing blocks | `realize(json)` / CLI `assemble` | Block markup and the same kind of report |
 | HTML for a reusable named block, with an optional proposal | `author(html, options)` / CLI `author` | A generated plan and source files in a report |
 | Existing Gutenberg markup | `validate(markup)` or `canonicalize(markup)` / CLI `validate` or `fix` | A validation report or canonicalised markup |
+| An existing block theme | CLI `validate <dir>` / `fix <dir> --write` | Markup, theme.json schema and local-reference checks; eligible file repairs |
+| Caller-authored `SiteIntent` | `prepareSiteSource` → `compileSite` or `compileThemeDocuments` → `writeCompiledSite` | A local hashed bundle, including retained source/assets |
+| Reviewed source and a deployed active theme | `planSite` → confirmed `applySite` | Owned WordPress pages, media, synced patterns and front-page options |
+| Saved template/part overrides | `inspectSiteDrift` → `previewSitePull` → confirmed `confirmSitePull` | Read-only comparison, then selected local theme edits |
 
 An agent can interpret a design and supply a tree or proposal. A program or person can supply the same inputs. Installing the skill does not add a model client to the library.
 
@@ -66,11 +70,37 @@ An error found in generated markup may have an offset that means nothing in the 
 
 These checks establish markup validity against the bundled Gutenberg version. They do not establish visual fidelity, support for every installed block, or compatibility with every site.
 
+## Whole-site compilation and owned apply
+
+[`src/site/input.ts`](../src/site/input.ts) prepares explicit SiteIntent and an asset
+root. [`compile.ts`](../src/site/compile.ts) finalises native documents through the
+existing intent pipeline and [`src/theme/`](../src/theme/) checks. Theme-only output
+can retain pending database bindings; complete site output requires resolved content.
+[`write.ts`](../src/site/write.ts) publishes the local bundle and hashed manifest.
+Compilation never contacts WordPress or deploys a theme.
+
+[`plan.ts`](../src/site/plan.ts) makes one WordPress observation and binds its plan to
+source/assets, target, principal, active theme and live state. After confirmation,
+[`apply.ts`](../src/site/apply.ts) records steps before mutation, uses the WP-CLI/PHP
+adapter and requires provable outcomes before retrying. Ownership indexes, a shared
+blog lock and initial/final source/live comparisons retain the safety boundary.
+Hard-stop recovery requires guarded operator reconciliation; no held lock is stolen.
+
+[`drift.ts`](../src/site/drift.ts) compares database template/part overrides with the
+bundle. [`pull.ts`](../src/site/pull.ts) previews selected saved markup and publishes it
+locally after confirmation, leaving WordPress overrides intact. It cannot reconstruct
+intent: the retained input must be reconciled before further apply planning.
+
+The [theme and site guide](../skills/block-runner/references/SITE.md) owns command
+examples and mutation boundaries. Mounted-editor save proof and desktop visual/editor
+acceptance remain separate from deterministic compilation and headless validity.
+
 ## Names used in the code
 
 | Term | Meaning and example |
 | --- | --- |
 | Intent tree | A block description, such as a `core/paragraph` node with text, consumed by the page-content assembly workflow. |
+| `SiteIntent` | Caller-authored theme documents, pages, assets and explicit bindings with stable logical IDs; each body is an intent tree. |
 | Authoring proposal | Source-linked choices for a registered block: structure, editable fields and locks. `collectSourceEvidence` supplies the source references. |
 | `AuthoringPlan` / `SemanticAuthoringPlan` | The older semantic input type retained for compatibility. The deprecated `compileAuthoringPlan` adapter turns it into a generated plan. It is distinct from an HTML proposal. |
 | `GeneratedAuthoringPlan` | The complete public plan used for preview, confirmation and generation. Internally, `src/authoring/schema.ts` calls this type `AuthoringPlan`; the package exports it under the longer name. |
@@ -87,9 +117,11 @@ These checks establish markup validity against the bundled Gutenberg version. Th
 | Change media or theme-token handling | [`src/convert/finalize.ts`](../src/convert/finalize.ts), [`src/media/`](../src/media/), [`src/tokens/`](../src/tokens/) |
 | Change a validation diagnostic | [`src/gate/`](../src/gate/); also check how [`src/report/`](../src/report/) presents it |
 | Change registered-block source analysis | [`src/author/`](../src/author/) |
+| Change theme discovery, schema or local references | [`src/theme/`](../src/theme/) |
+| Change site compilation, planning, apply, drift or pull | [`src/site/`](../src/site/) |
 | Change generated files or confirmed writes | [`src/authoring/`](../src/authoring/) |
 | Change plugin integration or runtime verification | [`src/plugin/`](../src/plugin/), [`src/proof/`](../src/proof/) |
 | Trace a public command or import | [`src/cli.ts`](../src/cli.ts), [`src/index-implementation.ts`](../src/index-implementation.ts) |
 | Change instructions used by an agent | [`skills/block-runner/`](../skills/block-runner/) |
 
-The public entry point includes advanced compiler helpers as well as everyday operations. Start with `convert`, `realize`, `author`, `validate` or `canonicalize`; follow their callers before changing lower-level helpers or compatibility aliases.
+The public entry point includes advanced compiler helpers as well as everyday operations. Start with `convert`, `realize`, `author`, `validate`, `canonicalize` or the site lifecycle exports above; follow their callers before changing lower-level helpers or compatibility aliases.
