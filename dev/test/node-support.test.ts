@@ -44,8 +44,12 @@ describe('Node support contract', () => {
     expect(packageJson.engines.node).toBe(SUPPORTED_NODE_RANGE);
     expect(readme).toContain(`Node.js ${SUPPORTED_NODE_RANGE}`);
     expect(skill).toContain(`compatibility: Requires Node.js ${SUPPORTED_NODE_RANGE}`);
-    expect(ci).toContain(SUPPORTED_NODE_RANGE);
-    expect(ci).toContain('node: [22.23.4, 24.22.1, 26.12.1]');
+    expect(ci).toContain('node: [24.22.1, 26.12.1]');
+    const node22Job = ci.split('  packed-node22:\n')[1]?.split('\n  package-boundary:')[0] ?? '';
+    expect(node22Job).toContain('node-version: 24.22.1');
+    expect(node22Job).toContain('node-version: 22.23.4');
+    expect(node22Job).toContain('npm run smoke:package');
+    expect(ci).toContain('test, packed-node22, package-boundary, wordpress-proof]');
     expect(ci).toContain('npm ci --engine-strict');
     expect(ci).toContain('npm run smoke:package');
   });
