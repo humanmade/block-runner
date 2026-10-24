@@ -1,0 +1,4 @@
+/* Three intentional presentation defects; native content stays identical. */
+.review-article { max-width: 480px; }
+.review-highlight { min-width: 520px; }
+.review-note { max-width: 440px; text-align: left; }

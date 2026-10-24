@@ -289,6 +289,10 @@ tool is broken.
 **Always say what you did** — where it went, how many blocks, and anything that fell back to
 Custom HTML. A silent success is indistinguishable from a silent failure.
 
+For a rendered delivery, follow [VISUAL.md](VISUAL.md) by default: compare desktop/mobile,
+correct meaningful differences and check native editing/save. Source-only delivery still
+finishes normally; say when rendering or persistence has not been verified.
+
 ---
 
 ## 7. Matching the user's site

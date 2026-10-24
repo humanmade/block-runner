@@ -1,0 +1,14 @@
+/* Shared design vocabulary; reference and native markup deliberately differ. */
+body { margin: 0; background: #f6f4ee; color: #252c28; font: 18px/1.6 Georgia, serif; }
+.wp-site-blocks { padding: 0; }
+.reference-article, .review-article { box-sizing: border-box; width: calc(100% - 48px); max-width: 720px; margin: 48px auto; }
+.reference-article h1, .review-article h1 { font: bold 44px/1.12 Georgia, serif; margin: 0 0 24px; }
+.reference-article p, .review-article p { margin: 0 0 24px; }
+.reference-highlight, .review-highlight { box-sizing: border-box; background: #e2e8dd; padding: 24px; border-left: 4px solid #596d4e; margin: 32px 0; }
+.reference-highlight p, .review-highlight p { margin: 0; }
+.reference-note, .review-note { box-sizing: border-box; width: calc(100% - 48px); max-width: 960px; margin: 48px auto; padding: 24px; background: #252c28; color: #f6f4ee; text-align: center; }
+.reference-note p, .review-note p { margin: 0; }
+@media (max-width: 600px) {
+  .reference-article, .review-article { margin-top: 24px; }
+  .reference-article h1, .review-article h1 { font-size: 34px; }
+}

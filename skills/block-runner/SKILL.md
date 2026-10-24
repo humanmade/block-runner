@@ -19,7 +19,7 @@ compatibility: Requires Node.js ^22.13.0 || >=24.0.0 and shell access. An uncach
 ## Pick the artifact first
 
 Choose the visible result before discovering a project. Read the named first reference, use the
-condition, and stop at its stated boundary. Do not load a construction taxonomy for a
+condition, and respect its stated boundary. Do not load a construction taxonomy for a
 self-contained page-content or markup-repair task.
 
 | Requested artifact | First reference | Use when | Completion boundary |
@@ -35,6 +35,15 @@ self-contained page-content or markup-repair task.
 If “reusable section” does not say whether it is page `post_content` or a named registered source
 block, ask that one artifact question before writing. Do not use this skill for unrelated WordPress
 administration, non-WordPress HTML, or frontend-scraped HTML presented as source.
+
+## Finish rendered delivery
+
+When the task creates or changes visible WordPress output, follow
+[VISUAL.md](references/VISUAL.md) by default before calling the delivery complete.
+Check the affected region on desktop/mobile, correct meaningful differences and verify
+the applicable native edit/save behaviour. Do not ask whether the user wants this check.
+Respect source-only delivery and explicit skips; disclose unavailable rendering or
+unverified checks. Existing CLI/API behaviour and write permissions remain unchanged.
 
 ## Discover only missing project facts
 

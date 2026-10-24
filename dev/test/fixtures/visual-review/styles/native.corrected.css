@@ -1,0 +1,8 @@
+/* Scoped source correction, after the initial comparison identifies the defects. */
+.review-article { max-width: 720px; }
+.review-highlight { min-width: 0; }
+.review-note { max-width: 960px; text-align: center; }
+
+/* Keep the authored top spacing against WordPress first-child layout defaults. */
+.wp-block-post-content > .review-article { margin-block-start: 48px; }
+@media (max-width: 600px) { .wp-block-post-content > .review-article { margin-block-start: 24px; } }
