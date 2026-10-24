@@ -32,3 +32,13 @@ On 2026-10-24, local WordPress 7.1 / PHP 8.4.27 and the in-app Chromium browser 
 Matched mobile viewports used 390 CSS pixels with scrollbars hidden on both sides; desktop used 1280. The corrected region text, widths, heights, positions and alignment matched the reference. The screenshots showed the same wrapping and spacing. Both strict compilations had no diagnostics; the site applies completed with readback. These are separate validity, operational and visual observations, not a universal fidelity score.
 
 No new helper, renderer, command or dependency was needed. A clean comparison ends after the paired inspection; it does not require a correction loop. Missing-reference, unavailable-browser and source-only cases remain explicitly unverified under the workflow, and do not block ordinary source delivery.
+
+## Native editing and retained evidence
+
+In Chrome 154, the page highlight paragraph was edited, saved and reopened in the native editor; the saved WordPress content and frontend both contained the test sentence. The closing-note template part passed the same edit/save/reopen and frontend check. Both original texts were then restored through the editor. The restored page also passed the existing validation gate.
+
+- Desktop: [reference](evidence/reference-desktop-matched.png), [before](evidence/before-desktop-matched.png), [after](evidence/after-desktop-matched.png).
+- Mobile: [reference](evidence/reference-mobile-matched.png), [before](evidence/before-mobile-matched.png), [after](evidence/after-mobile-matched.png).
+- Native persistence: [page reopened](evidence/editor-reopened.png), [template part reopened](evidence/part-editor-reopened.png).
+
+The paired after comparison was taken before the deliberate editor test edits. These captures show synthetic content only. The exercise was performed by one operator; independent reviewer replay remains separate.
