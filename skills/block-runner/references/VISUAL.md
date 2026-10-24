@@ -32,9 +32,13 @@ This check grants no deployment, credential or production-write authority.
 ## Compare, explain, correct
 
 1. **Check content first:** section order, headings, body text, media, links and required
-   interactions. A similar silhouette cannot compensate for lost content.
+   interactions, including fragment-link destinations and drawn/animated graphics.
+   A similar silhouette cannot compensate for lost content. A present canvas element
+   does not prove that its artwork rendered.
 2. **Compare corresponding regions:** widths/alignment, spacing, typography/wrapping,
-   image crop and mobile overflow. Match regions by meaning; source and native DOM
+   image crop and mobile overflow or clipping. `overflow: hidden` can conceal broken
+   layouts while document width still looks correct. Confirm breakpoint rules still
+   affect the native regions. Match regions by meaning; source and native DOM
    trees need not share selectors. Inspect the screenshots, not just capture success.
 3. **Measure a discrepancy:** use the browser's bounding boxes/computed styles for
    the affected region. Record both selectors or region labels. Missing/ambiguous
