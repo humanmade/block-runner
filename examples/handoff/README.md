@@ -67,3 +67,12 @@ attempted; target registration, appearance and save persistence are unverified.
 **Continuation:** retain the original input/report alongside any corrected revision.
 Only the selected JSON files and pinned package are needed to reproduce this failure;
 no original checkout, browser, site state or credentials are required.
+
+## Recorded replay
+
+On 2026-10-24, both commands were run from a fresh temporary directory with Node
+22.23.1 and the published `block-runner@0.9.11` package. Only the three JSON files
+above were copied in; the run did not read the original checkout. Success returned
+exit 0 and `blocks: 2, valid: 2, invalid: 0, warnings: 0`. Failure returned exit 1,
+`ok: false`, `invalid: 1`, and the exact reason above at `failure.json`.
+This verifies a clean consumer replay, not an independent engineer's review.
