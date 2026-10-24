@@ -4,6 +4,10 @@ Start with the [README](../README.md) for a first conversion, or the [architectu
 
 Theme-folder and whole-site commands, Wesper 0.5.0 and the Node 22.13/24 floor require 0.9.11 or later; 0.9.10 predates them. The [theme and site guide](../skills/block-runner/references/SITE.md) owns the whole-site input and lifecycle examples.
 
+When a formal handoff or portable failure reproduction is requested, use the optional
+[handoff template](../skills/block-runner/references/HANDOFF.md) and
+[worked examples](../examples/handoff/README.md). Ordinary runs do not require a handoff package.
+
 ## Native block support boundaries
 
 Four different claims need different evidence:

@@ -87,3 +87,7 @@ otherwise ask in plain language.
 Block structure rules, the full node schema and per-section mappings are in
 `references/ASSEMBLE.md`. Token and media resolution, exit codes, and failure posture are in
 `references/GUIDE.md`.
+
+For an explicitly requested formal handoff or reproducible failure package, use
+[HANDOFF.md](references/HANDOFF.md). Do not create a formal handoff by default;
+ordinary delivery needs only the result, relevant evidence and remaining limits.
