@@ -43,7 +43,7 @@ describe('wp-scripts plugin profile', () => {
 
     expect(profile).toMatchObject({
       kind: 'recognized',
-      wpScriptsVersion: '34.2.0',
+      wpScriptsVersion: '37.0.0',
       sourceRoot: 'src/blocks',
       buildRoot: 'build/blocks',
       registration: 'direct',
@@ -262,7 +262,7 @@ describe('wp-scripts plugin profile', () => {
   it('rejects version ranges and webpack configurations that wp-scripts loads implicitly', async () => {
     const ranged = await existingDirectPlugin();
     await writeFile(path.join(ranged, 'package.json'), JSON.stringify({
-      devDependencies: { '@wordpress/scripts': '^34.2.0' },
+      devDependencies: { '@wordpress/scripts': '^37.0.0' },
       scripts: { build: 'wp-scripts build --source-path=src/blocks --output-path=build/blocks' },
     }));
     await expect(detectWpScriptsPlugin(ranged)).resolves.toMatchObject({ kind: 'unsupported' });
@@ -332,8 +332,8 @@ describe('standalone plugin profile', () => {
     const lock = plan.touchedFiles.find((file) => file.relativePath === 'package-lock.json')!.content;
     const bootstrap = plan.touchedFiles.find((file) => file.relativePath === 'plugin.php')!.content;
     expect(JSON.parse(packageJson.toString('utf8'))).toMatchObject({
-      engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' },
-      devDependencies: { '@wordpress/scripts': '34.2.0' },
+      engines: { node: '^22.23.4 || ^24.22.1 || >=26.12.1' },
+      devDependencies: { '@wordpress/scripts': '37.0.0' },
     });
     const parsedLock = JSON.parse(lock.toString('utf8'));
     expect(parsedLock).toMatchObject({
@@ -341,10 +341,10 @@ describe('standalone plugin profile', () => {
       packages: {
         '': {
           name: 'acme-notice',
-          engines: { node: '^20.19.0 || ^22.13.0 || >=24.0.0' },
-          devDependencies: { '@wordpress/scripts': '34.2.0' },
+          engines: { node: '^22.23.4 || ^24.22.1 || >=26.12.1' },
+          devDependencies: { '@wordpress/scripts': '37.0.0' },
         },
-        'node_modules/@wordpress/scripts': { version: '34.2.0' },
+        'node_modules/@wordpress/scripts': { version: '37.0.0' },
         'node_modules/adm-zip': { version: '0.6.1' },
       },
     });
@@ -399,7 +399,7 @@ describe('standalone plugin profile', () => {
 async function existingDirectPlugin(): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-'));
   await writeFile(path.join(root, 'package.json'), JSON.stringify({
-    devDependencies: { '@wordpress/scripts': '34.2.0' },
+    devDependencies: { '@wordpress/scripts': '37.0.0' },
     scripts: { build: 'wp-scripts build --source-path src/blocks --output-path build/blocks' },
   }, null, 2));
   await writeFile(path.join(root, 'main.php'), `<?php\nadd_action( 'init', function() {\n\tregister_block_type( __DIR__ . '/build/blocks/existing' );\n} );\n`);
@@ -411,7 +411,7 @@ async function existingDirectPlugin(): Promise<string> {
 async function existingDefaultDirectPlugin(build: string): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-'));
   await writeFile(path.join(root, 'package.json'), JSON.stringify({
-    devDependencies: { '@wordpress/scripts': '34.2.0' },
+    devDependencies: { '@wordpress/scripts': '37.0.0' },
     scripts: { build },
   }, null, 2));
   await writeFile(path.join(root, 'main.php'), `<?php\nadd_action( 'init', function() {\n\tregister_block_type( __DIR__ . '/build/existing' );\n} );\n`);
@@ -422,7 +422,7 @@ async function existingDefaultDirectPlugin(build: string): Promise<string> {
 async function existingCollectionPlugin(bulk: boolean): Promise<string> {
   const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-'));
   await writeFile(path.join(root, 'package.json'), JSON.stringify({
-    devDependencies: { '@wordpress/scripts': '34.2.0' },
+    devDependencies: { '@wordpress/scripts': '37.0.0' },
     scripts: { build: 'wp-scripts build --source-path=src --output-path=build' },
   }, null, 2));
   const registration = bulk

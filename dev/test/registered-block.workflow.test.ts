@@ -106,7 +106,7 @@ async function existingPlugin(root: string): Promise<string> {
   await mkdir(path.join(host, 'src', 'blocks', 'existing'), { recursive: true });
   await Promise.all([
     writeFile(path.join(host, 'package.json'), JSON.stringify({
-      devDependencies: { '@wordpress/scripts': '34.2.0' },
+      devDependencies: { '@wordpress/scripts': '37.0.0' },
       scripts: { build: 'wp-scripts build --source-path src/blocks --output-path build/blocks' },
     })),
     writeFile(path.join(host, 'main.php'), "<?php\nregister_block_type( __DIR__ . '/build/blocks/existing' );\n"),

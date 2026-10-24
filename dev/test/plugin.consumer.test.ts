@@ -63,7 +63,7 @@ describe('standalone consumer release archive', () => {
         version?: string;
       }>;
     };
-    expect(lock.packages['node_modules/@wordpress/scripts']?.version).toBe('34.2.0');
+    expect(lock.packages['node_modules/@wordpress/scripts']?.version).toBe('37.0.0');
     await expect(stat(path.join(output, 'node_modules'))).rejects.toThrow();
     const npmEnvironment = await npmEnvironmentForGeneratedPlugin(output);
     await execFileAsync('npm', ['ci', '--include=dev', '--no-audit', '--no-fund'], { cwd: output, timeout: 120_000, env: npmEnvironment });

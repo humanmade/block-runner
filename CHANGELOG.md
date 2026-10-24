@@ -1,5 +1,14 @@
 # Changelog
 
+## 1.0.0 — 2026-10-24
+
+- Establish the stable public CLI and library compatibility baseline. Future breaking changes require a major release.
+- Make visual finishing the default agent-skill workflow for rendered delivery: compare desktop and mobile, correct authored source, regenerate through the existing gate, and verify native edit/save/reopen.
+- Keep source-only work, unavailable render targets and explicit skips deliverable with clear verification gaps. A clean first comparison requires no correction loop.
+- Include reproducible visual-review fixtures and retained native editing evidence.
+- Refresh the Gutenberg, React, validation, browser and build toolchains, plus generated-plugin dependencies.
+- Require security-patched Node releases (^22.23.4 || ^24.22.1 || >=26.12.1) and target WordPress 7.1.3 for release proof.
+
 ## 0.9.11 — 2026-10-13
 
 - Add block-theme folder validation, in-place markup repair, WordPress 7.1 theme.json schema checks and local part/pattern/preset references.

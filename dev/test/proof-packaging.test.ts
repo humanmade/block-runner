@@ -17,11 +17,11 @@ const pins = JSON.parse(readFileSync(new URL('../../proof/dependency-pins.json',
 };
 
 const proofTooling = {
-  '@wordpress/env': '11.15.0',
-  '@playwright/test': '1.61.1',
-  '@wordpress/e2e-test-utils-playwright': '1.51.0',
-  'axe-core': '4.11.0',
-  pixelmatch: '7.1.0',
+  '@wordpress/env': '12.0.0',
+  '@playwright/test': '1.64.1',
+  '@wordpress/e2e-test-utils-playwright': '3.1.0',
+  'axe-core': '4.14.0',
+  pixelmatch: '8.0.0',
   pngjs: '7.0.0',
 } as const;
 

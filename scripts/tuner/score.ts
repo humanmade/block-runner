@@ -78,7 +78,7 @@ export const EVAL_DIR = path.join(ROOT, 'dev', 'benchmarks');
 export const SPEC_DIR = path.join(EVAL_DIR, 'specs');
 export const PRODUCERS_DIR = path.join(EVAL_DIR, 'producers');
 export const RESULTS_PATH = path.join(EVAL_DIR, 'results.jsonl');
-export const WORDPRESS_TARGET = '7.1';
+export const WORDPRESS_TARGET = '7.1.3';
 
 export function gutenbergVersion(): string {
   try {

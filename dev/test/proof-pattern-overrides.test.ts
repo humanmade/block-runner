@@ -176,7 +176,7 @@ describe('pattern-override receipts', () => {
     }));
   });
 
-  it('rejects a runtime whose observed version is 7.1 but whose configured core source is not', async () => {
+  it('rejects a runtime whose observed version is 7.1.3 but whose configured core source is not', async () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-wp-source-'));
     const input = path.join(root, 'plan.json');
     const plugin = path.join(root, 'fixture.zip');
@@ -211,7 +211,7 @@ describe('pattern-override receipts', () => {
         if (joined.includes('db query')) return response('8.0.36');
         if (joined.includes('theme list')) return response('[{"name":"Twenty Twenty-Six","version":"1.0"}]');
         if (joined.includes("hash_file('sha256', get_stylesheet_directory()")) return response('theme-hash');
-        if (joined.includes('core version')) return response('7.1');
+        if (joined.includes('core version')) return response('7.1.3');
         if (joined.includes("hash_file('sha256', ABSPATH")) return response('core-hash');
         if (joined.includes('run wordpress sh')) return response('abcdef123456');
         if (joined.includes('run mysql sh')) return response('abcdef123456');
@@ -224,7 +224,7 @@ describe('pattern-override receipts', () => {
 
     expect(result.receipt.environment.wordpress).toMatchObject({
       coreSource: 'WordPress/WordPress#7.0',
-      version: '7.1',
+      version: '7.1.3',
     });
     expect(result.profile.failedGates).toContainEqual(expect.objectContaining({
       gate: 'environment_observation',

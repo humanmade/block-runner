@@ -2,241 +2,241 @@
   "schemaVersion": 1,
   "source": "package-lock.json",
   "packages": {
-    "node_modules/@wordpress/block-editor": {
-      "version": "17.1.0",
-      "integrity": "sha512-p+4YgopJOP/gXif9QEjE3LpQY8fGMtGCVkRZ37Ia6fl9rH8QPD6MDhgCjsg1LDazMTc18MwbMyRKLFfFrwqeUw=="
-    },
-    "node_modules/@wordpress/block-library": {
-      "version": "11.0.0",
-      "integrity": "sha512-WdtkEUkvbJKw1t+GVRl/nl2bgqhsYqsdsPxCl4BfEw4Xtc+i5MwRXN0d3cY6ZMIP/e51L+QxASvk50VBtla17A=="
-    },
-    "node_modules/@wordpress/blocks": {
-      "version": "16.0.0",
-      "integrity": "sha512-wDL8R5VuJK0vvavZbvSUjWagPB5Vt9bmNQo1G8OAoAjl/JUCICjU9BvZWM8XK/BXSS95qcb5l3H3UIca5onuwQ=="
-    },
-    "node_modules/@wordpress/e2e-test-utils-playwright": {
-      "version": "1.51.0",
-      "integrity": "sha512-ekxMfC8MUTf0fKjAQd2IO4m/l1jXC9NznveRf7r8ntmx9nXqd9IHOiYJcH2SBo20C53nWdA4w8+Mbqedf0qzEw=="
-    },
-    "node_modules/@wordpress/env": {
-      "version": "11.15.0",
-      "integrity": "sha512-FZq3eMDXBlZVZU8jVSX/4XoexgiBM4ZBqk69Mh23pz+1MMeQ13l7g5v7zKAAnyA3F9eHd+1sWsUpQnuS1f1T6Q=="
-    },
     "node_modules/@wordpress/a11y": {
-      "version": "4.55.0",
-      "integrity": "sha512-vhAsPgOgfOZ09IMNDBUf2KgERY1ZhzOADnpIr2JeH27EL2HtPOTLZGPB8pi30JdTHfff2ttZ8EWf1XU2iF17Tg=="
+      "version": "5.0.0",
+      "integrity": "sha512-ocYyNn7Z85gDzvto3ppOPeuaj4VoDk03ymsO3ubuAoEDdxXgsTiJIZIBTYrwxvQZ3KznBe5i/HzPKrpvdpJQ+Q=="
     },
     "node_modules/@wordpress/api-fetch": {
-      "version": "7.55.0",
-      "integrity": "sha512-xT80VXmnvFdK71FJQwZ+9sWaWYvBavm9TCaySzbXYAT24sHzONSa9lCvAOcfvPKVFQcBFExT6EalB4U3A0JKPg=="
+      "version": "8.0.0",
+      "integrity": "sha512-3+GnPoqIIxehutRZNJcutDjMFqnDiatBFD88Ecw8FksbPfFIeK4ONG9ORCQKsfLiCpu5DHWVrPJrvtzGw4ZffQ=="
     },
     "node_modules/@wordpress/autop": {
-      "version": "4.55.0",
-      "integrity": "sha512-j7XVZ4ypUBZSTcZkJ8OI+4KA4EU2J+zL4kyLnraec/sVZ/1YlGsPL9oSF6fA+jyOWmi4OBszPEIG0XvkntHB/g=="
+      "version": "5.0.0",
+      "integrity": "sha512-aHfC5Z7TmwvuRT0iV9e6l/N17C3VVcXcOlzouEC0x2/SNEc0dR71b3WPc0Qx4P44TAvpp7YQPJcaaM/Fz7Bfbg=="
     },
     "node_modules/@wordpress/base-styles": {
-      "version": "13.1.0",
-      "integrity": "sha512-6bdgpXZi0ajrB139xYd9okoMWYRNe3engXh5GLDhG5lIyL8wvM976Ref1I0+5LafnQQUk9Ug4IPruHx3tJcZgA=="
+      "version": "14.0.0",
+      "integrity": "sha512-BkxwZfnaazn6qziF1yBcYPyGziFArrcsyKgm09fDd0SdegRsh2ZmlENwAcvfuQ23ENS/m3vuFMMmBUbqg+Efmg=="
     },
     "node_modules/@wordpress/blob": {
-      "version": "4.55.0",
-      "integrity": "sha512-EUP9pxKkWW8qwJ0ddFPRpiOXOlsfqkrjSN/MNOESebXsyV6ZPKDdKkVZn1mnpvLjKPY7ebkKtn4exHIQmu9wpg=="
+      "version": "5.0.0",
+      "integrity": "sha512-BB2FpHEOq1my0Qe6BD/K5SAWt5I40vDZaFxH5PeeUyZ1KCEszaidkwYsY02sXxRK8rK/WOHGii2fOcpIqrmajA=="
+    },
+    "node_modules/@wordpress/block-editor": {
+      "version": "19.0.0",
+      "integrity": "sha512-HZqOQC10gR7NOU1cUWRrIKx/6XuZBrlbezw8fLgbMpZD91E0oglSqrkvejhE+Ezw8zpDHvD9L/SacfZv8BP/Hw=="
+    },
+    "node_modules/@wordpress/block-library": {
+      "version": "12.0.0",
+      "integrity": "sha512-1Jp/IOHFb1/V8uCG3SUAWcrbsNbuK6e0Xq0Vyi6/DdxEPlfj4FSPDh+0TCkLWvkt62jG1YFrKRh3ubY9WVUqPA=="
     },
     "node_modules/@wordpress/block-serialization-default-parser": {
-      "version": "5.55.0",
-      "integrity": "sha512-1VxsFa72StKmVKFnmxBYg9adcWUdTqIgbPubtelOgeYi0LXVRrJNXKG89JP3GXnE2Hk1iK3TbtZJj956E+ANRA=="
+      "version": "6.0.0",
+      "integrity": "sha512-C9HgZeToeeNouMGjTnz5WV8z4vNZ+NBrX4af4Npy6F/VrikOpMAYYJ5hi1K07g/o9hzalZMYN+fHXvuQcYK9MQ=="
+    },
+    "node_modules/@wordpress/blocks": {
+      "version": "17.0.0",
+      "integrity": "sha512-6lZpvRhaFvg/GxYa6RXauU67g7ocjR2UloY1i53wFrCPoNgZAIIfn2q94IX5KeE35nSr0u8XdzDjyRwFz0QGYw=="
     },
     "node_modules/@wordpress/commands": {
-      "version": "1.55.0",
-      "integrity": "sha512-AM/r2cTB8Ijql9O9f5yuNS4Zb55h718E8Dsa30agsf0zQIunJ+tSHWjzJBiqOtNqDxDtU5jdjhWApsauEEFZpA=="
+      "version": "2.0.0",
+      "integrity": "sha512-pfkGCvuEOJ6v67++VKdn387pM3AFbAQKVLZJ2lq9Ei75xvd7pkmsnz3iqLA326E88IiXmSY49KSXuU/4bGsCYA=="
     },
     "node_modules/@wordpress/components": {
-      "version": "40.1.0",
-      "integrity": "sha512-kSMoGcAwf752S18Y2RCEy6EM94NpemrMKWOM6+GSFE3wLYDArO8g9rXXOVBSd1R09Vc+s6Rk//Z+d3pN+DOx6A=="
+      "version": "43.0.0",
+      "integrity": "sha512-8IfVyT0QXTlhcw9id9aSygYISKR+xjyyVWuJuwMGgb/SqHGBFLnBBKBRq/ypamF/eB0vE8Gb+AmdjP6G8P1LBw=="
     },
     "node_modules/@wordpress/compose": {
-      "version": "8.8.0",
-      "integrity": "sha512-jxTRusB3rd6qn+Fu6TJuKGP9EcUy2aeLw0aKFvYGa31E4oW6IapZdjW3vy4evyXEegzJMNqL+0Vu8zSlUoauNw=="
+      "version": "9.0.0",
+      "integrity": "sha512-xP7EDOTyJrc5fC48Zh/u9Hvu+eHvKlU+qn5OyDQi1ahmg5GqNq3UAaODnsgeLyggGgWtmJhbzgN0qIJvhn52Sw=="
     },
     "node_modules/@wordpress/core-data": {
-      "version": "8.0.0",
-      "integrity": "sha512-7chxh7PWSHaZVgz99W6SqaZLWxkAnYLut9G/xikhvgk8BW09aGKykWpi7fFi0GgtMELPZSWRCcMCJDbZZpZK5w=="
+      "version": "9.0.0",
+      "integrity": "sha512-mN1phvZu4k5eVr5tP7TwxxhE8Wd4bZt59/drgbN4PziAJvV/4tuY2d9qUme3+CvXP4BTG46gAWv3/G32ap7f2Q=="
     },
     "node_modules/@wordpress/data": {
-      "version": "10.55.0",
-      "integrity": "sha512-eBnMTN2+L9KFfdcfm2s98Fg18xCehHhWwuIoZcuO1RTsy0aL4XsEKy+jrAMKg08HrDi5AfXaytr4Shh86ny7gA=="
+      "version": "11.0.0",
+      "integrity": "sha512-z74Y4/cfyw+Kel5uhVYsoZTytFtUw2xRrfFpa7uWIdfrdQxSVgxajd74pRjxGQ6W+g0VWzV6ZBptHDxYf58Nmg=="
     },
     "node_modules/@wordpress/dataviews": {
-      "version": "19.0.0",
-      "integrity": "sha512-jvY4snbIm8tSPD0gZwPNBEykMpuzktiX+jq/7R08MKPKYXVFKtjRFN5S5pjNF2EWRdQhuRMBDDqWFM7K2zD3VQ=="
+      "version": "21.0.0",
+      "integrity": "sha512-/aojI+0aZEpMYkteZ404V2Bhyxu0Kr5zcf7WhEgmIyHEcfBmuoKIxiPjnVQgAC990gmwW522LYBLnepOymdIOg=="
     },
     "node_modules/@wordpress/date": {
-      "version": "5.55.0",
-      "integrity": "sha512-Z7Y7vj0MSXO75Inf9m7KXoTgocjmO4HsSSCiqSpBuYjIkQHEuloYZfL9y/PCxMfxhQb/qa4ueRH+XT7csXE68Q=="
+      "version": "6.0.0",
+      "integrity": "sha512-knjw0jMLk2RzLq8wUzLuS0lvNI1UqwpbqxYVuSyXrUb+8GKXaT/uq0ql82Dha0RiagNCfrneowZFo3mJc7EyTw=="
     },
     "node_modules/@wordpress/deprecated": {
-      "version": "4.55.0",
-      "integrity": "sha512-XZgQeaODuOVhiDgho9I5Gd+oO/O6R8BHj9aXWZMZycsSt33XWNdzt2XnPmjazO9eMiIL2Vw6PwJjT6iUP3Ac3Q=="
+      "version": "5.0.0",
+      "integrity": "sha512-PZjrzeX15ZNIDvcBzOXnXF/FpKNwZgz23hQ+xpcmRBjZKCyT6YoxC45O3jFIGyZZtBwxoxCYQPBkCjRuKbVcpg=="
     },
     "node_modules/@wordpress/dom": {
-      "version": "4.55.0",
-      "integrity": "sha512-wXmpmvA06O7py+Qf8ed2rBkS4/rI6V+IQMWHGCbDVyudLIYpUkng+NaS1YftLDDBbOWd7DPditmwf2xZwWEUSA=="
+      "version": "5.0.0",
+      "integrity": "sha512-jKRFuQgNuAbFhiIU/b1xQl00rEphMdBQal6pmiN/pDVfIR1idZFaaI8K+eH/Gqn+yb/q20YIqPLM1+SXR4xy8w=="
     },
     "node_modules/@wordpress/dom-ready": {
-      "version": "4.55.0",
-      "integrity": "sha512-tQ53SGYvknpYIusqI7OHddZqlC9t4tXmhRC/aEicm8YFLyBsccg4Lprp78AsaFkOIhbaNTOw41vzN3rVpGT5zg=="
+      "version": "5.0.0",
+      "integrity": "sha512-a2Y+loEwENAM+kyTnXU7LTe8GgriXWfoxbco4486e2FuNpfELPLjDLAeJVbaFuw8pbtkk6xARlLh32y7yGG7Rg=="
+    },
+    "node_modules/@wordpress/e2e-test-utils-playwright": {
+      "version": "3.1.0",
+      "integrity": "sha512-ybc60l3g1syfpVJ7L/zOculIYBsfVfwsWOAn/bm4vN4+irRT6jJ/11bbPhclb9yjDyGatn+aHw89OhhHLjz8mQ=="
     },
     "node_modules/@wordpress/element": {
-      "version": "8.7.0",
-      "integrity": "sha512-cdsapQymvTBNt2gvWT10fEfM15z/2cO4Yas/4qQDXkcKWVV+mNmY26lwIUDl2uoglZt5eKwso+yZ4eq5ZiEWxQ=="
+      "version": "10.0.0",
+      "integrity": "sha512-gv3cZ3O2j4y7qUUBo/h1Ni9OxG6ak78+D0YhggMsGyIPavT4CpJtRyMbarhENJ7K1MM9JzpuecdlMID8Cfd51Q=="
+    },
+    "node_modules/@wordpress/env": {
+      "version": "12.0.0",
+      "integrity": "sha512-RoUQV3sl1qF4h/kg+vrec9PCfr2bwXSOmWoLd9NmV8rD/sCBMt7tSBfeTWZEbClMhWHce8tu4hJ+pQeHXNnu2A=="
     },
     "node_modules/@wordpress/escape-html": {
-      "version": "3.55.0",
-      "integrity": "sha512-/KuueukNLGHzQrTcXXqwRSZ0qPMD0AKheYXadDZFJBr3BGmdUBR7Z7rCoW7l9VfUFWfMmBj4ltyNAEZtrg0oBA=="
+      "version": "4.0.0",
+      "integrity": "sha512-fWEvTJvNyPUSAXz3pMETrt1DHKaQ9CJVirhuBqb1xuZmIdRY4AlsjLgayd+lUSTkTU+0gRIPu1TDdU5/6Ue2Nw=="
     },
     "node_modules/@wordpress/global-styles-engine": {
-      "version": "1.22.0",
-      "integrity": "sha512-TBqF5uTErL15mpzjd8ncCJLi/NDmIWceS1aMKWSjbyT0qg4JJHIResqiVPqVOx562Tj86Jwq05ENdMSxALf/Qg=="
+      "version": "2.0.0",
+      "integrity": "sha512-lhMen98kG/nLv3QPD8HWXPdhuXDbOje7/gYpljv4zKBjAf3tfbRQ11MblKW8OvYUux3Iu9vaZE+DB2LOgNee5g=="
     },
     "node_modules/@wordpress/hooks": {
-      "version": "4.55.0",
-      "integrity": "sha512-oI5NkudaBOewGR/qxPKx7us4h/D+Iokr1UPJHdh3pSnwhUgXFS1ptY7O98Hl6HpUZMyTwdP60fZJ5hlgSyivVA=="
+      "version": "5.0.0",
+      "integrity": "sha512-jA2hDMNr2Ky/D14s8K+TQ/ZI125icjZfTPZYcsgEHM6mTtSJY2dhcmp9+tfSrcnY+M17svzplIxXma+bpBzcFg=="
     },
     "node_modules/@wordpress/html-entities": {
-      "version": "4.55.0",
-      "integrity": "sha512-RQhGSbG0Lnnr+WLFJav3917a9L56/jI1K+cPcFidR87f1w8QJDCvmO3Jr9rzuGdCtgIfGKjaOHGFxjxYE/Milg=="
+      "version": "5.0.0",
+      "integrity": "sha512-rj95Op3y+4+QsdOzlguOT8lpAHegJwdMsDx9Eq/9/fL/CGskgugUm4aqqeFQDNd7B+gOzXM7NZMX2ohaYYXYdA=="
     },
     "node_modules/@wordpress/i18n": {
-      "version": "6.28.0",
-      "integrity": "sha512-it2GLsty4A6YLf30DOt+qSc40EjpCXavLwaKxREQkkSJgCPvka2jn3bKcku4KCrf4wAlYArxoY0yiEf8CSC5gw=="
+      "version": "7.0.0",
+      "integrity": "sha512-xk7qKLDB08c3LDUtThfmuumq//354bXLGRrPWfC1gmwPMNJPRC7ggwtSFxzH+ImdssxIKk8NaG4H3yF5WJoS5w=="
     },
     "node_modules/@wordpress/icons": {
-      "version": "16.0.0",
-      "integrity": "sha512-dWoe+vgVd/hCvGK33LJH5mRvHxNp4iQlDs5e/vyVANRqnyUdxqnGHVvlqGygJF2b4dQXDN6/pwyyNkcw2VBBug=="
+      "version": "19.0.0",
+      "integrity": "sha512-LPx0Tppj5Y/54fuqIRMUqzplP0ZQL1nNvWthUv+ctpylDbGe4qdlWJpLCLZq1BpI1IXS2s3g5NaN2dXFi5H45w=="
     },
     "node_modules/@wordpress/image-cropper": {
-      "version": "1.19.0",
-      "integrity": "sha512-7wm+iPooVcLetdKZbTjhlXWKaY5zNe4M6CmfytR014Av4AuTu5dv/0Ou4lkogwRVAEcPWW7PX2F3jh5gNuYwQg=="
+      "version": "2.0.0",
+      "integrity": "sha512-Ach0WfHZbwM8oomQtgHsTMgG0+wuhlZYD7ZHsygREkPVD9f0Kd+513rtRFfMdQ2NJzdjqJXSD2nEK0hT/gGjOQ=="
     },
     "node_modules/@wordpress/interactivity": {
-      "version": "6.55.0",
-      "integrity": "sha512-5OWCPNOUXO8sDnt6HlMVtBGAO4Lbw8TD77JgKc7tSRKjNXfEJpdFiLGG6L68yuf8VjvWNsk0VvLZV17g6+TQRQ=="
+      "version": "8.0.0",
+      "integrity": "sha512-VI60fYRVsSErIs/K9xnUNoAXUycgQwMGP7cq7YHvWdKROPE285+lnv9GarRGFR7W5/9i5fk3a8ifV+2o6sMCOg=="
     },
     "node_modules/@wordpress/interactivity-router": {
-      "version": "2.55.0",
-      "integrity": "sha512-DYp5ouk12M5BDCIz3hJndnfHThbhK5Qe2a9ttJIEwzHSahKhBQNmQVp84ICAgb4JDhtw45VQE7a+66+Pl7e2Fw=="
+      "version": "3.0.0",
+      "integrity": "sha512-L81IoErzlankKbxETr109IO6C8OxeOwU8KAIBVzgnS4dKnJ7ZeI8ZddwYjpqExV6JMIKycAX1SneLmt0GEHtcA=="
     },
     "node_modules/@wordpress/is-shallow-equal": {
-      "version": "5.55.0",
-      "integrity": "sha512-hL3fkQ6ac/Zq0hSQlqxq0fW1hVjyJGzLQYTC2S1n7aJhNyrkEMN9ozoTyeMlUWUx8uPakWbmsAwm/dGPiVHo3Q=="
+      "version": "6.0.0",
+      "integrity": "sha512-KMEZTCaXWp5udPNdPc8lEky3AEhKnUej0aKfjV38Ggox2e87SDXALt3DdMhydO//2xlXZXfGtYtBJ0qk9LpnLQ=="
     },
     "node_modules/@wordpress/kebab-case": {
-      "version": "1.2.0",
-      "integrity": "sha512-7NJKsIHbWYqXjG6ku6t9GhXPz2vBXlH25lAH9SUYKV8EvyupeeboIiI/+tr9fAjCxwunW9smZB0nq+X44zIVpw=="
+      "version": "2.0.0",
+      "integrity": "sha512-JjPgCJ5SRbbiKboK1U+k37NY8Hb42hHzMphczPtYPGGRNiasMV7T4RkbKlvUo+Qcm0hE6G8ct9VnEsfSsEbjoQ=="
     },
     "node_modules/@wordpress/keyboard-shortcuts": {
-      "version": "5.55.0",
-      "integrity": "sha512-puQs8nFf2ltCDRXXUBmjSRN9J8n5tTKSwDlwi1RPEARRYZ8EPz6kCTNqsUvSIx8+aeRTXQUmzpded9u5uR5v7g=="
+      "version": "6.0.0",
+      "integrity": "sha512-6OkdL+ZFJ+0llQtiDkP5OifzKvX7NMJpwsbBssm9vfNa93okyLOWY3j8HzUyKQLnuSrO8z+SwBzSJjImUHorTg=="
     },
     "node_modules/@wordpress/keycodes": {
-      "version": "4.55.0",
-      "integrity": "sha512-a6kz0pADBOSgMpNPsHix0b3tk7Tc0DSp6IxFgYofdQsI97Md3+FvI703KoM0DKObdlK/Vo52z4wxlImNe5UeAw=="
+      "version": "5.0.0",
+      "integrity": "sha512-15T931kJjj90KlDcsXKaGucK+iyqY9CftR7tXO60m8T8gDC2GVuUWMIX3Sq9+4fsahABuqoUd+QTiW4xSDlpCg=="
     },
     "node_modules/@wordpress/latex-to-mathml": {
-      "version": "1.23.0",
-      "integrity": "sha512-/KWZFZ/VRNncPtfO5peNUjR58rAk+WLInU0O4WMvzo7569LqFSg55htGOQ3TbV5Cly1ywd99QWi9SZ+/PGOzqg=="
+      "version": "2.0.0",
+      "integrity": "sha512-/rZsNX8OZ8t3OxfLnedUTV/ScG856yoLBFffDqyLKH7llFf//07ZeKRT9SSwPPM1nxL6XlxjfN2IQDOtQf+kig=="
     },
     "node_modules/@wordpress/notices": {
-      "version": "5.55.0",
-      "integrity": "sha512-D/kosXrqc+vlTmzdcV0aH1FflOtwqTTx4lSL0KJ2MR8x0qOHAiiZBjaI327Rt9nZzHXefKWNYYWtxF9sauogXw=="
+      "version": "6.0.0",
+      "integrity": "sha512-IDiPfOgUvswr1aXVm3SwOziTtZY+R8t0CfO0jHzK1M50ddzRRTReZPM1bPftU23PAW5k1UqxPc/aYRwLK4Xopg=="
     },
     "node_modules/@wordpress/patterns": {
-      "version": "2.55.0",
-      "integrity": "sha512-V7XtItWhAHF8KFB9jrwEeA/pNVknwjRgDtKkpTCN4pAU3IB24Ay+MogN+9FRHX9AW3jOjMFE4j0TYmMhdZqGBg=="
+      "version": "3.0.0",
+      "integrity": "sha512-WhiupPA4ARaezlFsEb5zxUa08qkx2oJqzb0q1rITU8ckYx9+VsgUmCQQpkGYy34Q3OxW8+e9FECeWAFkipzN3A=="
     },
     "node_modules/@wordpress/preferences": {
-      "version": "4.55.0",
-      "integrity": "sha512-cS9AfTAtzduOfJd+RYuDKJAgu6dKQT0z/IFt3h6/RTzAmXG/nUYt3taVDtVfJQjRJoGJ9HBsYVsAxtA69tXG/g=="
+      "version": "5.0.0",
+      "integrity": "sha512-rQaSz2di9k3tzm9BkO26ikydgevBDf+QU9ET97rFjlSaoDqQ1YqOLcFH61o8vtthr3NjQFBq/XAz38VMCVVsXw=="
     },
     "node_modules/@wordpress/primitives": {
-      "version": "4.55.0",
-      "integrity": "sha512-xvxKWRo1ikIqHcLQjXCQqoyw9jYuVNx6Ue1DEwgokoJ4bRxucz+u83HpQW9Z3Lxicmw1w6x9ZiQa74PFBDmXrQ=="
+      "version": "5.0.0",
+      "integrity": "sha512-XrRJIbNXai/jlL9FLEANUzaAigTdN8XgWzAHTfAjDskvy3X6CjUbMyjXLWE5OhyCKhq+JAd3mWb9zq4sgl+V2w=="
     },
     "node_modules/@wordpress/priority-queue": {
-      "version": "3.55.0",
-      "integrity": "sha512-QyYEjFXH5IPrkHetVRv4RDZ+nq2RrocFo1VjWVaiwTXsw3V6MBLplx9zfyYw2QmCNi1uEB3CSwRTiQUsC6GMrg=="
+      "version": "4.0.0",
+      "integrity": "sha512-YXEwn7xtr4bUts2IOPREjlWYa3n/ba7ndLCqFN3ofeRvvr2ZVCI1WP20v7a+CQZi+n9FS7fy+lYqx3wnTYtGzg=="
     },
     "node_modules/@wordpress/private-apis": {
-      "version": "1.55.0",
-      "integrity": "sha512-i3VIoRP7XXOQoNSNFO8yqRIX3ujzUg+qK//Ldz/7hPtY3kRuvGRJhadJuifC9donXe2265am3LSO1lwxvq2uWA=="
+      "version": "3.0.0",
+      "integrity": "sha512-IDXGi2VWfjUFwBTDtWj7/FMY240JpqraxFEIaXIeD3KFumX8lQuAYvE9gU8GcNBt/NlXZCDEmNioxCbAZN+jiA=="
     },
     "node_modules/@wordpress/redux-routine": {
-      "version": "5.55.0",
-      "integrity": "sha512-ui7VqyNSD4JEKmXUbPdxQ18lAGN/ive8bwMZ9eLpBjyEUhUFw/hEZaT/rvCVX3EGlGu1o7FxnFxM2QJfIouKVA=="
+      "version": "6.0.0",
+      "integrity": "sha512-mJm9DeHXFIPeaCA6E+VYupWXBW7g1QuKqEgBclm3HCDN+Th6OO+HMLfa2eS+dAPyoTu2NhSF0QlY1ArijOzuiw=="
     },
     "node_modules/@wordpress/rich-text": {
-      "version": "7.55.0",
-      "integrity": "sha512-x21ZIJBvc4DZpbXGVpK/EjVFfKJjvdM5Z67PKdhNYLz4BZqQAoZIS17oX8l7KzvbWsA+U37pRbaX1PqHi2VNTw=="
+      "version": "8.0.0",
+      "integrity": "sha512-2Jg50SJwE82+qO8tnQbIhSqCIb9I+rW6bi0hRVcTMOtRxC8wBisw5n0zngLfGRSHtAA9irnEzrOfPk2m6LtyuQ=="
     },
     "node_modules/@wordpress/server-side-render": {
-      "version": "6.31.0",
-      "integrity": "sha512-jTiiR+TG+gcuXzCbrSjwiKdWQ0m/+n5nibK4Ej2F5UA1L3yvRtZfd8THw7dRjxrCOZGtEMi2kfF+DzSgctDdyw=="
+      "version": "7.0.0",
+      "integrity": "sha512-0MGJf1lZUFJpPMeY1CVLT0E/q9eu3cbbsSkfQ7Z1DgQP8U+1y4iRZVC0XvYexhq3qX+UiUWcqDjdI1WaYPVOmw=="
     },
     "node_modules/@wordpress/shortcode": {
-      "version": "4.55.0",
-      "integrity": "sha512-8RTQ/deDMfbtKBmKr+Dcgg8/xSvOJwwvkWL23e2soGnwoh2+Rzt6Tp/RWUt6e+MFBMe4fk8fquOwsYTdUHMhoQ=="
+      "version": "5.0.0",
+      "integrity": "sha512-anwstb/SfweKgw8BNEouvzwCII9AAY7I/asPZJf084rEtG/5V2II9ls0PdfamYuDedNvFdToCV3uiK9NFD06jw=="
     },
     "node_modules/@wordpress/style-engine": {
-      "version": "2.55.0",
-      "integrity": "sha512-mcXbq65cy3TuYpuTfO72RvQjEaJ6LuNdcekMSBWVq4jxyHCLAqjzwiJ4EwO2SYDw4CqN27h7h7BABs1KShr38A=="
+      "version": "3.0.0",
+      "integrity": "sha512-obU8yuXphfCZVdcv7bVf/dn6AlzBqYfglyyc/ymqEyjmh4cTY0pF/Do1sraT/XP5n+NZrFGV5D9wcJILTNC3Lg=="
     },
     "node_modules/@wordpress/style-runtime": {
-      "version": "0.11.0",
-      "integrity": "sha512-bVtgHLe7dfN3o4OzgYD9owOxuiwVu2SzfKjtndFI7kkYFVNZ48goiHQ8X1bJT+iXz8ay8/A4chVjrRbhSlPjiw=="
+      "version": "0.14.0",
+      "integrity": "sha512-cWk3G7Pe6Wo9uMpaPAbrhsPJAmkShPn3LLc8vkte1ZQ7ls1M+e6m78KQxd0HYy4ty2nbGGlhnHE7ISxQzGhrsQ=="
     },
     "node_modules/@wordpress/sync": {
-      "version": "1.55.0",
-      "integrity": "sha512-DAJXkrlLX7NvqtsX9JNLXEtqGBMdUDTm1L6hDQA/k1P5aLEYt2s1r09AfO+oIKiykmf2KDXn/ZERurOHPFOp4g=="
+      "version": "3.0.0",
+      "integrity": "sha512-qRKTOGLkaK37oqhB7Eyw7Di4sLEiJSFo/L+rSIZo7P+9qRLNRdNxEMquncfWt9IpwOI+h+NSCKZi2O2+oZUpcg=="
     },
     "node_modules/@wordpress/theme": {
-      "version": "2.1.0",
-      "integrity": "sha512-oQ/G8ukGqhigL6vpfRQNKZc7lDUzISPkkH1O5SXz1i1TuIfTR5Yj0QtWC6p12YARyXGMQlU/FF++tKTduKyeww=="
+      "version": "3.0.0",
+      "integrity": "sha512-m25ORtLD77WL40vG3Vt/0WKzg/liuiM2PGMNaDv4SDO1hZ7H0t+Lp8rfTlsYnBdI+iO8+juICyK4OiVRde1I0Q=="
     },
     "node_modules/@wordpress/token-list": {
-      "version": "3.55.0",
-      "integrity": "sha512-CLz1GMkRP2FsG8gWxDTGAfcsXVnPQlHrb27+UhtSN8Vbygaj1w7vvOaaQGQTBbLxLzxvwByPKKsBv7TJqx/Osg=="
+      "version": "4.0.0",
+      "integrity": "sha512-W8WY1B4POIXLQcWM/N3Zz9TGMMqtfJvS2VcIql889eEFKk1trx0ynsbzVFO/UblGiSjAdxpANES9yHNKa43VWw=="
     },
     "node_modules/@wordpress/ui": {
-      "version": "0.22.0",
-      "integrity": "sha512-4mljrQzSG7c5v1LxgOLMisewPVoZIHHX2f3ixixl++D5jNDUGJlRilxi8Mo5eGjN8McoBvyunIu+PkeZ5I2y6Q=="
+      "version": "0.25.0",
+      "integrity": "sha512-G/aUYgQpL18q3DfyV/1ebB8tEjXBubWPPXitcs4IvXYbAAFNBLsoUUGv5K3sfqJuxhi51lbyKT0Eap6Wj0kkCQ=="
     },
     "node_modules/@wordpress/undo-manager": {
-      "version": "1.55.0",
-      "integrity": "sha512-yyNXz7ts0DKJ6hxqurnvqCMxsHV62M0sheQNDL2INdayj+9b0ZiawPW+x4+rjSfHW6kAu8yqPZssb45eJNvEpw=="
+      "version": "2.0.0",
+      "integrity": "sha512-OQfGPUBz79/NKkkBvF5L/k1DmxuCQGYvczA/BOef+ECCCnjpIXF6HS1txpULozI5owejQDDjhZp25bq25jF5Vg=="
     },
     "node_modules/@wordpress/upload-media": {
-      "version": "0.40.0",
-      "integrity": "sha512-LCADF7BRGhQiw5HGqvLpvIIyJbXukFvAZfNBgzLQazc0g6/cMd/v0mMQKU6VI+KLa5QcOcKt7UGpkPXwOAsJwQ=="
+      "version": "0.43.0",
+      "integrity": "sha512-Cgi0XNoWurFFbCJPljPaii2cy7hHwMml3Dbf9zhlUsyihT3H9LfkSR/Oox+NHFPOqAPv1q2YPWCGuZe3mXDZEQ=="
     },
     "node_modules/@wordpress/url": {
-      "version": "4.55.0",
-      "integrity": "sha512-BOT83/0a5N8NVjGXbu3aOeowpDL9xw6jPegxNViSjWYwmR6ceN49hw94+YTcUkMqBZOXEk1KH0XFKuklArMo4Q=="
+      "version": "5.0.0",
+      "integrity": "sha512-oPDn3vjO7unimaiFSnwoP8Ys6TVGp3UXwF0CwRDMoYLqRIjDuPpZLoUbkPAnWnLOrNP+GjIzCm7qQNCrze/UAA=="
     },
     "node_modules/@wordpress/video-conversion": {
-      "version": "0.6.0",
-      "integrity": "sha512-4/68n731fbXGyQCq1ReV64iRMjASo6yw+CsZbLZYbGhPbNdX34BAQy++9iOI0nK4ukl7jFz1WqiLB/eAsklyPg=="
+      "version": "0.9.0",
+      "integrity": "sha512-fxU5BDB809r/AbxM70LUst3CjWpn85ugT6QebwugOlX+s7aUQ7/HZ5ON0XZE4V2nPtOeUsT1HyVDcikcbaMZbQ=="
     },
     "node_modules/@wordpress/warning": {
-      "version": "3.55.0",
-      "integrity": "sha512-fDRpNPEYxAYhHFhW8uZiqMVKq2hujxT643Kp0+mm5gthjut1Y/SUS3PtYwGBY7o7CslFq0ZvB/rw19t1iET3FA=="
+      "version": "4.0.0",
+      "integrity": "sha512-qhAwfjMUYT1TfyMlrkO4i1IbcqfjfjLBFepXSRvMUhNbL8CRRu3cgjdZNCf82FkvUwmuCEuMsrmGisxu4CGr1A=="
     },
     "node_modules/@wordpress/wordcount": {
-      "version": "4.55.0",
-      "integrity": "sha512-wUFN+8nhHVkRNFMHatzIuFEcAG70rp6l0tvji7ISME8un/0wObRkQMhqmI7qQR9ir5JoYP9vXFAiKETejd+mVA=="
+      "version": "5.0.0",
+      "integrity": "sha512-ql2VWACqm37+8JxO+rFDhZBPHWFHuFqqMQ2SDrSyiQgHQJ/MezFP+VD22xcZjcBjjbbwk/R4sL6tPsCboh75EQ=="
     },
     "node_modules/@wordpress/worker-threads": {
-      "version": "1.15.0",
-      "integrity": "sha512-DOd88jdCUAPtk9w3FTmgISltTXRUOOSAVBkh2IaPyBs7dcqH07i6KNU38fSGT3TPgPA2AlvkHdSyqDLvoxxToA=="
+      "version": "2.0.0",
+      "integrity": "sha512-ytIahXlVLdMMDfdDvOl1X4GrzVRcxc4JB+41zWJFdkNnzxDe6xbuyKujNe6kwrWFvr2YfC41wXfPViHEzB96pw=="
     }
   }
 }

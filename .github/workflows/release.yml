@@ -17,14 +17,13 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22.13.0
+          node-version: 22.23.4
           registry-url: https://registry.npmjs.org
-      # Trusted publishing needs npm >= 11.5.1; pin 11.x (npm 12 needs Node ≥22.22
-      # and changes pack --json shape — we support both, but stay on the proven line).
-      - run: npm install -g npm@11
+      # npm 12 supports Trusted Publishing on the patched Node baseline.
+      - run: npm install -g npm@12.2.1
       - run: npm ci --engine-strict
       - name: Verify benchmark and evidence tooling
         run: npm run test:tools
@@ -43,7 +42,7 @@ jobs:
       - name: Run the receipt-backed release candidate matrix
         # No --plans is intentional: the optional registered-block authoring
         # benchmark remains pending/unscored and is not a release prerequisite.
-        run: npm run release:check -- --matrix full-release-matrix --manual-review proof/reviews/0.9.0/owner-acceptance.json --receipt "dev/release/0.9-testing/receipts/${RELEASE_RECEIPT_TAG}.json"
+        run: npm run release:check -- --matrix full-release-matrix --manual-review proof/reviews/1.0.0/agent-review.json --receipt "dev/release/0.9-testing/receipts/${RELEASE_RECEIPT_TAG}.json"
         env:
           # Release names are data, never shell syntax. Keep the expansion
           # quoted so valid Git tag punctuation cannot alter this command.
@@ -53,7 +52,7 @@ jobs:
         run: npx --no-install wp-env --config=proof/wp-env.json stop
       - name: Retain release receipts
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: release-receipts-${{ github.event.release.tag_name }}
           path: |

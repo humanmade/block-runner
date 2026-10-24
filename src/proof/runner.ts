@@ -63,8 +63,8 @@ const stagedZipDirectory = path.join(projectRoot, '.block-runner-proof-stage');
 // Keep staging outside uploads: a nested Docker mount can create its parent as
 // root on a fresh Linux host, preventing WordPress from creating media folders.
 const stagedZipContainerDirectory = '/var/www/html/wp-content/block-runner-proof';
-const REQUIRED_WORDPRESS_VERSION = '7.1' as const;
-const REQUIRED_WORDPRESS_CORE_SOURCE = 'WordPress/WordPress#7.1' as const;
+const REQUIRED_WORDPRESS_VERSION = '7.1.3' as const;
+const REQUIRED_WORDPRESS_CORE_SOURCE = 'WordPress/WordPress#7.1.3' as const;
 const REQUIRED_PHP_SERIES = '8.3' as const;
 const PROOF_TOOLING = [
   '@wordpress/env',
@@ -425,7 +425,7 @@ export interface ProofEnvironment {
   };
   input?: ProofFilePin;
   wordpress: {
-    requestedVersion: '7.1';
+    requestedVersion: '7.1.3';
     /** Exact `core` source read from the pinned wp-env configuration. */
     coreSource: string;
     wpEnv: string;
@@ -2137,9 +2137,7 @@ function parseContainerImage(value: string, expectedContainerId = ''): Sha256 | 
 }
 
 function isExactWordPressVersion(value: string): boolean {
-  // `WordPress/WordPress#7.1` tracks the 7.1 maintenance line. A patch
-  // release is still the configured 7.1 runtime; another major/minor is not.
-  return new RegExp(`^${REQUIRED_WORDPRESS_VERSION.replace('.', '\\.')}(?:\\.\\d+)?$`).test(value);
+  return value === REQUIRED_WORDPRESS_VERSION;
 }
 
 function isRequiredPhpVersion(value: string): boolean {

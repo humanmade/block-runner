@@ -114,8 +114,8 @@ describe('real WordPress generated-pattern full-profile receipt', () => {
     expect(result.ok).toBe(result.receipt.profile.ok);
     expect(result.receipt.ok).toBe(result.receipt.profile.ok);
     expect(result.receipt.environment.wordpress).toMatchObject({
-      requestedVersion: '7.1',
-      coreSource: 'WordPress/WordPress#7.1',
+      requestedVersion: '7.1.3',
+      coreSource: 'WordPress/WordPress#7.1.3',
     });
     expect(result.receipt.environment.wordpress.version).toMatch(/^7\.1(?:\.\d+)?$/);
     expect(result.receipt.gates).toHaveLength(PROOF_PROFILES.full.requiredGates.length);

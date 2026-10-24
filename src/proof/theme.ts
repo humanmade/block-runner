@@ -180,8 +180,8 @@ export function themePreflightFailure(theme: PreparedThemeProof, config: ThemeWp
   if (theme.requiresPhp && compareVersion(effective.phpVersion, theme.requiresPhp) < 0) {
     return `Theme requires PHP ${theme.requiresPhp}, but the effective wp-env development PHP version is ${effective.phpVersion}.`;
   }
-  if (effective.core !== 'WordPress/WordPress#7.1') {
-    return `Theme proof requires WordPress/WordPress#7.1; effective development core is ${effective.core ?? 'unspecified'}.`;
+  if (effective.core !== 'WordPress/WordPress#7.1.3') {
+    return `Theme proof requires WordPress/WordPress#7.1.3; effective development core is ${effective.core ?? 'unspecified'}.`;
   }
   if (effective.plugins.some((source) => !isLocalSource(source))) {
     return 'Theme proof accepts local dependency plugins only; remove remote plugin sources from --wp-env-config.';

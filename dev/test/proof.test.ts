@@ -241,7 +241,7 @@ describe('content-addressed proof receipts', () => {
     expect(result.receipt.environment).toMatchObject({
       generator: { package: 'block-runner' },
       plugin: { slug: 'proof' },
-      wordpress: { requestedVersion: '7.1' },
+      wordpress: { requestedVersion: '7.1.3' },
       php: { version: expect.any(String) },
       database: { engine: 'mysql' },
       theme: { name: expect.any(String) },
@@ -270,7 +270,7 @@ describe('content-addressed proof receipts', () => {
       gateRunner: async ({ gate, environment }) => {
         records.add(gate);
         Object.assign(environment.plugin, { slug: 'proof', name: 'Proof', version: '1.0.0', file: 'proof.php' });
-        Object.assign(environment.wordpress, { version: '7.1', coreHash: 'sha256:core', dockerImage: 'sha256:wordpress' });
+        Object.assign(environment.wordpress, { version: '7.1.3', coreHash: 'sha256:core', dockerImage: 'sha256:wordpress' });
         Object.assign(environment.php, { version: '8.3' });
         Object.assign(environment.database, { image: 'sha256:mysql', version: '11.0' });
         Object.assign(environment.theme, { name: 'twentytwentyfive', version: '1.0', fileHash: 'sha256:theme' });
@@ -353,7 +353,7 @@ function verifiedRuntimeGateRunner(
     const { environment } = context;
     Object.assign(environment.plugin, { slug: 'proof', name: 'Proof', version: '1.0.0', file: 'proof.php' });
     Object.assign(environment.wordpress, {
-      version: '7.1',
+      version: '7.1.3',
       coreHash: observationHash('c'),
       dockerImage: observationHash('a'),
     });
@@ -368,7 +368,7 @@ function verifiedRuntimeGateRunner(
         database: successfulCommand('11.0.2'),
         theme: successfulCommand('[{"name":"twentytwentyfive","version":"1.0"}]'),
         themeHash: successfulCommand('d'.repeat(64)),
-        wordpress: successfulCommand('7.1'),
+        wordpress: successfulCommand('7.1.3'),
         coreHash: successfulCommand('c'.repeat(64)),
         wordpressContainer: successfulCommand('abcdef123456'),
         databaseContainer: successfulCommand('abcdef123456'),

@@ -115,7 +115,7 @@ draft product-preview brief.
 
 The development compatibility suite builds the existing pattern-override plugin once,
 then installs the same ZIP in three sequential, isolated PHP 8.3 environments:
-WordPress 7.1; WordPress 7.1.2; and WordPress 7.1.2 with Gutenberg 24.0.0.
+WordPress 7.1; WordPress 7.1.3; and WordPress 7.1.3 with Gutenberg 24.2.0.
 It uses ports 8891–8893 and refuses to claim an already-running lane.
 
 ```sh

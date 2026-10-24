@@ -17,10 +17,10 @@ Theme-folder and whole-site workflows, Wesper 0.5.0 and the Node 22.13/24 floor 
 
 ## Quickstart
 
-Requires Node.js **22.13.0+ on 22.x, or 24.0.0+**. Node 20, 21 and 23 are unsupported. Basic conversion needs no AI agent, Docker or running WordPress site.
+Requires Node.js **22.23.4+ on 22.x, 24.22.1+ on 24.x, or 26.12.1+**. Node 20, 21, 23 and 25 are unsupported. Basic conversion needs no AI agent, Docker or running WordPress site.
 
 ```sh
-npm install block-runner # Node.js ^22.13.0 || >=24.0.0
+npm install block-runner # Node.js ^22.23.4 || ^24.22.1 || >=26.12.1
 printf '<p>Hello WordPress</p>\n' > hello.html
 npx --no-install block-runner convert hello.html
 ```

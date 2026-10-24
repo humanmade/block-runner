@@ -1,8 +1,9 @@
 {
   "targetWordPress": "7.1",
   "schemaUrl": "https://schemas.wp.org/wp/7.1/block.json",
-  "upstream": "https://github.com/WordPress/gutenberg/blob/trunk/schemas/json/block.json",
-  "retrieved": "2026-09-03",
-  "sha256": "d45bc343763d21d2b34987fa86b826d1820ff3322945cbe60e63da5f7be5a81a",
-  "note": "The checked-in WordPress schema snapshot is the validation authority. Change it only with a target-version and hash review."
+  "upstream": "https://schemas.wp.org/wp/7.1/block.json",
+  "retrieved": "2026-10-24",
+  "sha256": "6dd56b10a6ad62d3f33400ba7d16a9dceff63a85bda8ed96b7f7eea6fa15c177",
+  "note": "The checked-in WordPress schema snapshot is the validation authority. Change it only with a target-version and hash review.",
+  "upstreamSha256": "33a52755c3ad9a1fdc9ad817cfac68ab17cc85f4748bfec3f1191cfc7b3ad0a1"
 }

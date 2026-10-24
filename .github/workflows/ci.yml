@@ -18,7 +18,7 @@ jobs:
       base: ${{ steps.scope.outputs.base }}
       head: ${{ steps.scope.outputs.head }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           fetch-depth: 0
       - name: Test CI scope classification
@@ -62,16 +62,16 @@ jobs:
     if: needs.classify.outputs.route == 'docs'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           # The local-link gate diffs the event's base and head. A rebased PR
           # head does not retain its base in checkout's default shallow clone.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22.13.0
+          node-version: 22.23.4
           cache: npm
-      - run: npm install -g npm@11
+      - run: npm install -g npm@12.2.1
       - run: npm ci --engine-strict
       - name: Verify documentation contracts
         run: npx --no-install vitest run dev/test/skill.test.ts dev/test/node-support.test.ts
@@ -124,16 +124,16 @@ jobs:
     if: needs.classify.outputs.route == 'skill'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7.0.1
         with:
           # The local-link gate diffs the event's base and head. A rebased PR
           # head does not retain its base in checkout's default shallow clone.
           fetch-depth: 0
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22.13.0
+          node-version: 22.23.4
           cache: npm
-      - run: npm install -g npm@11
+      - run: npm install -g npm@12.2.1
       - run: npm ci --engine-strict
       - name: Verify documentation and skill CLI contracts
         run: npx --no-install vitest run dev/test/skill.test.ts dev/test/node-support.test.ts dev/test/cli.test.ts
@@ -177,29 +177,27 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        # engines.node: ^22.13.0 || >=24.0.0. These are its exact lowest
-        # releases; Node 20, 21, and 23 are intentionally unsupported.
-        node: [22.13.0, 24.0.0]
+        # engines.node: ^22.23.4 || ^24.22.1 || >=26.12.1. These are its exact lowest
+        # releases; Node 20, 21, 23, and 25 are intentionally unsupported.
+        node: [22.23.4, 24.22.1, 26.12.1]
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
           node-version: ${{ matrix.node }}
           cache: npm
-      # Pin npm 11: lockfile is npm-10/11 compatible; npm 12 needs newer Node
-      # and changed `npm pack --json` shape (handled in check-private-refs, but
-      # avoid `npm@latest` floating across majors on the matrix).
-      - run: npm install -g npm@11
+      # Pin the package manager across the security-patched Node matrix.
+      - run: npm install -g npm@12.2.1
       - run: npm ci --engine-strict
       - name: Verify
         run: npm run verify
       - name: Verify benchmark and evidence tooling
-        if: matrix.node == '22.13.0'
+        if: matrix.node == '22.23.4'
         run: npm run test:tools
       - name: Smoke the packed CLI in a clean engine-strict consumer
         run: npm run smoke:package
       - name: Reject unsupported Node before packed CLI dependencies load
-        if: matrix.node == '22.13.0'
+        if: matrix.node == '22.23.4'
         run: npm run smoke:package:unsupported-node
 
   package-boundary:
@@ -207,12 +205,12 @@ jobs:
     if: needs.classify.outputs.route == 'full'
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22
+          node-version: 22.23.4
           cache: npm
-      - run: npm install -g npm@11
+      - run: npm install -g npm@12.2.1
       - run: npm ci
       - run: npm run build
       - name: Verify basic and proof-enabled packed consumers
@@ -226,12 +224,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7.0.1
+      - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22.13.0
+          node-version: 22.23.4
           cache: npm
-      - run: npm install -g npm@11
+      - run: npm install -g npm@12.2.1
       - run: npm ci --engine-strict
       - run: npx --no-install playwright install --with-deps chromium
       - name: Collect native WordPress Heading and Paragraph controls
@@ -257,7 +255,7 @@ jobs:
         run: npx --no-install wp-env --config=proof/wp-env.json stop
       - name: Upload WordPress 7.1 pattern-overrides receipt
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7.0.2
         with:
           name: wordpress-7.1-pattern-overrides-receipt
           path: |

@@ -10,7 +10,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const unsupportedNode = '20.19.0';
-const expectedMessage = 'block-runner requires Node.js ^22.13.0 || >=24.0.0; found v' + unsupportedNode + '.';
+const expectedMessage = 'block-runner requires Node.js ^22.23.4 || ^24.22.1 || >=26.12.1; found v' + unsupportedNode + '.';
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 const packDirectory = mkdtempSync(path.join(tmpdir(), 'block-runner-pack-'));
 const consumer = mkdtempSync(path.join(tmpdir(), 'block-runner-consumer-'));
@@ -60,9 +60,10 @@ function expectUnsupported(subject, args) {
 }
 
 function parsePackJson(stdout) {
-  const start = stdout.indexOf('[\n');
+  const start = stdout.search(/^[\[{]/m);
   if (start < 0) throw new Error('npm pack did not return JSON output:\n' + stdout);
-  return JSON.parse(stdout.slice(start));
+  const result = JSON.parse(stdout.slice(start));
+  return Array.isArray(result) ? result : Object.values(result);
 }
 
 function trash(target) {
