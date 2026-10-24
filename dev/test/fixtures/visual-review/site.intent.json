@@ -1,0 +1,136 @@
+{
+  "version": 1,
+  "siteId": "visual-review-demo",
+  "homePageId": "home",
+  "theme": {
+    "slug": "visual-review-demo",
+    "title": "Visual Review Demo",
+    "themeJson": {
+      "version": 3,
+      "settings": {
+        "appearanceTools": true
+      },
+      "styles": {
+        "spacing": {
+          "blockGap": "0"
+        },
+        "typography": {
+          "fontFamily": "Georgia, serif",
+          "fontSize": "18px",
+          "lineHeight": "1.6"
+        },
+        "color": {
+          "background": "#f6f4ee",
+          "text": "#252c28"
+        }
+      }
+    }
+  },
+  "templates": {
+    "index": {
+      "body": {
+        "blocks": [
+          {
+            "block": "core/post-content"
+          },
+          {
+            "block": "core/template-part",
+            "attrs": {
+              "slug": "closing-note"
+            }
+          }
+        ]
+      }
+    }
+  },
+  "parts": {
+    "closing-note": {
+      "body": {
+        "blocks": [
+          {
+            "block": "core/group",
+            "attrs": {
+              "className": "review-note"
+            },
+            "children": [
+              {
+                "block": "core/paragraph",
+                "text": "This is a shared closing note. Its text remains a native paragraph."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  },
+  "patterns": {},
+  "pages": [
+    {
+      "id": "home",
+      "route": "/",
+      "title": "Reading page",
+      "template": "index",
+      "status": "publish",
+      "body": {
+        "blocks": [
+          {
+            "block": "core/group",
+            "attrs": {
+              "className": "review-article"
+            },
+            "children": [
+              {
+                "block": "core/heading",
+                "level": 1,
+                "text": "A quiet place to read"
+              },
+              {
+                "block": "core/paragraph",
+                "text": "A good reading page gives every sentence enough room. The words should feel unhurried, with a clear measure, familiar type and a useful rhythm between paragraphs. The design is modest on purpose: changes to its width are easy to see, but the content must remain exactly the same."
+              },
+              {
+                "block": "core/paragraph",
+                "text": "The article can be read on a large screen or on a phone. Neither reader should need to scroll sideways to finish a sentence. When a theme adds a narrower container, the extra wrapping can look like a content problem even though every word is still present."
+              },
+              {
+                "block": "core/group",
+                "attrs": {
+                  "className": "review-highlight"
+                },
+                "children": [
+                  {
+                    "block": "core/paragraph",
+                    "text": "Keep the words. Correct the layout. Check the result at both sizes."
+                  }
+                ]
+              },
+              {
+                "block": "core/paragraph",
+                "text": "The highlighted note is part of the article, not a picture of some text. It should fit within the available width, stay in the reading order and remain editable through the normal paragraph control. A successful correction fixes the layout without rewriting the message."
+              },
+              {
+                "block": "core/paragraph",
+                "text": "After checking the page, inspect the shared closing note as a separate region. It has a different purpose and a wider measure. Matching these two regions by meaning makes the comparison useful even when the reference and WordPress use different element trees."
+              }
+            ]
+          }
+        ]
+      }
+    }
+  ],
+  "assets": [
+    {
+      "id": "base",
+      "path": "styles/base.css",
+      "kind": "stylesheet",
+      "role": "theme-file"
+    },
+    {
+      "id": "native",
+      "path": "styles/native.css",
+      "kind": "stylesheet",
+      "role": "theme-file"
+    }
+  ],
+  "assetUses": []
+}
