@@ -289,7 +289,7 @@ jobs:
   ci-scope:
     name: CI scope
     if: always()
-    needs: [classify, documentation-contracts, skill-contracts, test, package-boundary, wordpress-proof]
+    needs: [classify, documentation-contracts, skill-contracts, test, packed-node22, package-boundary, wordpress-proof]
     runs-on: ubuntu-latest
     steps:
       - name: Require the selected route and accept only intentional skips
@@ -299,6 +299,7 @@ jobs:
           DOCS: ${{ needs.documentation-contracts.result }}
           SKILL: ${{ needs.skill-contracts.result }}
           TEST: ${{ needs.test.result }}
+          PACKED_NODE22: ${{ needs.packed-node22.result }}
           PACKAGE_BOUNDARY: ${{ needs.package-boundary.result }}
           WORDPRESS_PROOF: ${{ needs.wordpress-proof.result }}
         run: |
@@ -310,14 +311,14 @@ jobs:
           case "$ROUTE" in
             docs)
               selected="$DOCS"
-              skipped="$SKILL $TEST $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
+              skipped="$SKILL $TEST $PACKED_NODE22 $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
               ;;
             skill)
               selected="$SKILL"
-              skipped="$DOCS $TEST $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
+              skipped="$DOCS $TEST $PACKED_NODE22 $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
               ;;
             full)
-              selected="$TEST $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
+              selected="$TEST $PACKED_NODE22 $PACKAGE_BOUNDARY $WORDPRESS_PROOF"
               skipped="$DOCS $SKILL"
               ;;
             *)
