@@ -142,6 +142,8 @@ saved-content reopening, or frontend behavior.
 
 ### WordPress proof requirements
 
+Use Node 24.22.1+ on 24.x or 26.12.1+ for proof: the current WordPress tooling requires Node 24+. The basic CLI and library also support Node 22.23.4+ on 22.x.
+
 Headless validation is a fast first rung. A generated plugin needs a separate
 real-WordPress proof before any claim that it activates, registers, edits, or
 renders is credible. Before running, the proof report derives the required gates

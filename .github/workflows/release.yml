@@ -20,7 +20,7 @@ jobs:
       - uses: actions/checkout@v7.0.1
       - uses: actions/setup-node@v7.1.0
         with:
-          node-version: 22.23.4
+          node-version: 24.22.1
           registry-url: https://registry.npmjs.org
       # npm 12 supports Trusted Publishing on the patched Node baseline.
       - run: npm install -g npm@12.2.1

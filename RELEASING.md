@@ -25,7 +25,7 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 
 The 1.x line establishes the public CLI and library compatibility baseline described below.
 Check `npm view block-runner dist-tags` for published versions. Before creating a release, run the
-deterministic release candidate gates from the candidate checkout:
+deterministic release candidate gates from the candidate checkout on Node 24.22.1+ or 26.12.1+:
 
 ```sh
 npm run release:check -- --manual-review proof/reviews/1.0.0/agent-review.json --receipt dev/release/0.9-testing/receipts/<version>.json
