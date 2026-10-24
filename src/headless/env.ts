@@ -14,7 +14,11 @@ export async function bootHeadlessWordPress(): Promise<WpModules> {
 /** The pinned registry is local and bootstraps synchronously for compiler capability checks. */
 export function bootHeadlessWordPressSync(): WpModules {
   if (booted) return booted;
+  const hostStorage = Object.getOwnPropertyDescriptor(globalThis, 'localStorage');
   try {
+    // Gutenberg's collaboration dependencies must use their in-memory fallback.
+    // Reading Node's host storage getter can warn or access persistent caller data.
+    Object.defineProperty(globalThis, 'localStorage', { configurable: true, value: undefined });
     installDomGlobals();
 
     const require = createRequire(import.meta.url);
@@ -49,6 +53,9 @@ export function bootHeadlessWordPressSync(): WpModules {
   } catch (error) {
     bootPromise = undefined;
     throw new HeadlessBootError('Failed to boot headless Gutenberg.', { cause: error });
+  } finally {
+    if (hostStorage) Object.defineProperty(globalThis, 'localStorage', hostStorage);
+    else Reflect.deleteProperty(globalThis, 'localStorage');
   }
 }
 
