@@ -151,3 +151,7 @@ theme proof checks the theme's declared PHP requirement. Both routes require the
 optional pinned WordPress/browser tooling. They pin the captured theme snapshot
 automatically, so a separate plugin-style `--input` is unnecessary. Save proof and
 visual/editor acceptance are separate claims.
+
+When delivering a rendered site or theme change, use [VISUAL.md](VISUAL.md) by default
+to compare the affected views, correct source-level differences and retain the observed
+limits. The proof commands above do not replace that comparison or authorise production writes.
