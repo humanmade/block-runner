@@ -74,7 +74,7 @@ describe('theme Site Editor proof profile', () => {
     const config = {
       testsEnvironment: false,
       port: 8891,
-      core: 'WordPress/WordPress#7.1',
+      core: 'WordPress/WordPress#7.1.3',
       phpVersion: '8.4',
       plugins: ['./plugins/root-helper'],
       themes: ['./themes/root-theme'],
@@ -183,11 +183,11 @@ describe('theme Site Editor proof profile', () => {
       phpVersion: '8.2',
       plugins: ['./plugins/ignored'],
       mappings: { 'wp-content/uploads': localUploads },
-      env: { development: { core: 'WordPress/WordPress#7.1', phpVersion: '8.4', plugins: [localDependency] } },
+      env: { development: { core: 'WordPress/WordPress#7.1.3', phpVersion: '8.4', plugins: [localDependency] } },
     };
     await writeFile(configPath, JSON.stringify(sourceConfig));
     expect(effectiveWpEnvConfig(sourceConfig)).toMatchObject({
-      core: 'WordPress/WordPress#7.1', phpVersion: '8.4', plugins: [localDependency],
+      core: 'WordPress/WordPress#7.1.3', phpVersion: '8.4', plugins: [localDependency],
     });
     const evidence = new EvidenceStore(path.join(root, 'evidence'));
     const pins = await pinLocalPluginDirectories([localDependency], process.cwd(), evidence);
@@ -211,7 +211,7 @@ describe('theme Site Editor proof profile', () => {
     const root = await mkdtemp(path.join(tmpdir(), 'block-runner-plugin-config-'));
     const config = path.join(root, 'wp-env.json');
     await writeFile(config, JSON.stringify({
-      core: 'WordPress/WordPress#7.1', phpVersion: '8.3',
+      core: 'WordPress/WordPress#7.1.3', phpVersion: '8.3',
       env: { development: { core: 'WordPress/WordPress#6.9', phpVersion: '8.4' } },
     }));
     const result = await runProof({
@@ -219,7 +219,7 @@ describe('theme Site Editor proof profile', () => {
       outputDir: path.join(root, 'receipts'),
       gateRunner: async () => ({ status: 'blocked', reason: 'Configuration-pin control only.' }),
     });
-    expect(result.receipt.environment.wordpress.coreSource).toBe('WordPress/WordPress#7.1');
+    expect(result.receipt.environment.wordpress.coreSource).toBe('WordPress/WordPress#7.1.3');
     expect(result.receipt.environment.php.requestedVersion).toBe('8.3');
   });
 
@@ -232,7 +232,7 @@ describe('theme Site Editor proof profile', () => {
     await writeFile(path.join(theme, 'style.css'), '/*\nTheme Name: Fixture\nVersion: 1.0.0\nRequires PHP: 8.4\n*/\n');
     await writeFile(path.join(theme, 'templates', 'index.html'), '<!-- wp:paragraph --><p>Fixture</p><!-- /wp:paragraph -->');
     await writeFile(config, JSON.stringify({
-      core: 'WordPress/WordPress#7.1',
+      core: 'WordPress/WordPress#7.1.3',
       phpVersion: '8.2',
       env: { development: { port: 9999 } },
     }));
@@ -263,7 +263,7 @@ describe('theme Site Editor proof profile', () => {
     await mkdir(path.join(theme, 'templates'), { recursive: true });
     await writeFile(path.join(theme, 'style.css'), '/*\nTheme Name: Fixture\nVersion: 1.0.0\n*/\n');
     await writeFile(path.join(theme, 'templates', 'index.html'), '<!-- wp:paragraph --><p>Fixture</p><!-- /wp:paragraph -->');
-    await writeFile(config, JSON.stringify({ core: 'WordPress/WordPress#7.1', phpVersion: '8.4' }));
+    await writeFile(config, JSON.stringify({ core: 'WordPress/WordPress#7.1.3', phpVersion: '8.4' }));
     let blogdescription = 'Original site description';
     const result = await runProof({
       theme,
@@ -307,7 +307,7 @@ describe('theme Site Editor proof profile', () => {
     await mkdir(path.join(theme, 'templates'), { recursive: true });
     await writeFile(path.join(theme, 'style.css'), '/*\nTheme Name: Fixture\nVersion: 1.0.0\n*/\n');
     await writeFile(path.join(theme, 'templates', 'index.html'), markup);
-    await writeFile(config, JSON.stringify({ core: 'WordPress/WordPress#7.1', phpVersion: '8.4' }));
+    await writeFile(config, JSON.stringify({ core: 'WordPress/WordPress#7.1.3', phpVersion: '8.4' }));
     let blogdescription = 'Original site description';
     let browserFiles: Array<Record<string, unknown>> = [];
     const result = await runProof({

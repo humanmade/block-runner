@@ -10,7 +10,8 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const unsupportedNode = '20.19.0';
-const expectedMessage = 'block-runner requires Node.js ^22.13.0 || >=24.0.0; found v' + unsupportedNode + '.';
+const nodeLauncher = ['--yes', '--allow-scripts=node', '--package=node@' + unsupportedNode, 'node'];
+const expectedMessage = 'block-runner requires Node.js ^22.23.4 || ^24.22.1 || >=26.12.1; found v' + unsupportedNode + '.';
 const root = path.resolve(new URL('..', import.meta.url).pathname);
 const packDirectory = mkdtempSync(path.join(tmpdir(), 'block-runner-pack-'));
 const consumer = mkdtempSync(path.join(tmpdir(), 'block-runner-consumer-'));
@@ -30,6 +31,10 @@ try {
   const dependencyEntry = path.join(consumer, 'node_modules', '@wordpress', 'blocks', 'build-module', 'index.mjs');
   const dependencySentinel = path.join(consumer, 'dependency-loaded');
   writeFileSync(dependencyEntry, `import { writeFileSync } from 'node:fs';\nwriteFileSync(${JSON.stringify(dependencySentinel)}, 'loaded');\nthrow new Error('DEPENDENCY_LOAD_SENTINEL');\n`);
+  const runtimeVersion = run('npx', [...nodeLauncher, '--version'], consumer).stdout.trim();
+  if (runtimeVersion !== 'v' + unsupportedNode) {
+    throw new Error('Requested Node ' + unsupportedNode + ' but launched ' + runtimeVersion + '.');
+  }
   expectUnsupported('CLI', [cli, '--version']);
   expectDependencyNotLoaded(dependencySentinel);
   expectUnsupported('library', ['--input-type=module', '--eval', "await import('block-runner')"]);
@@ -48,7 +53,7 @@ function expectDependencyNotLoaded(sentinel) {
 }
 
 function expectUnsupported(subject, args) {
-  const result = spawnSync('npx', ['--yes', '--package=node@' + unsupportedNode, 'node', ...args], {
+  const result = spawnSync('npx', [...nodeLauncher, ...args], {
     cwd: consumer,
     encoding: 'utf8',
     env: process.env,
@@ -60,9 +65,10 @@ function expectUnsupported(subject, args) {
 }
 
 function parsePackJson(stdout) {
-  const start = stdout.indexOf('[\n');
+  const start = stdout.search(/^[\[{]/m);
   if (start < 0) throw new Error('npm pack did not return JSON output:\n' + stdout);
-  return JSON.parse(stdout.slice(start));
+  const result = JSON.parse(stdout.slice(start));
+  return Array.isArray(result) ? result : Object.values(result);
 }
 
 function trash(target) {

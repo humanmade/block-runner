@@ -6,8 +6,8 @@
  */
 import { readFileSync } from 'node:fs';
 
-const SUPPORTED_NODE_RANGE = '^22.13.0 || >=24.0.0';
-const SUPPORT_FLOORS = ['22.13.0', '24.0.0'];
+const SUPPORTED_NODE_RANGE = '^22.23.4 || ^24.22.1 || >=26.12.1';
+const SUPPORT_FLOORS = ['22.23.4', '24.22.1', '26.12.1'];
 const packageJson = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8'));
 const lockfile = JSON.parse(readFileSync(new URL('../package-lock.json', import.meta.url), 'utf8'));
 

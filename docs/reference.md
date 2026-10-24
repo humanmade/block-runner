@@ -142,6 +142,8 @@ saved-content reopening, or frontend behavior.
 
 ### WordPress proof requirements
 
+Use Node 24.22.1+ on 24.x or 26.12.1+ for proof: the current WordPress tooling requires Node 24+. The basic CLI and library also support Node 22.23.4+ on 22.x.
+
 Headless validation is a fast first rung. A generated plugin needs a separate
 real-WordPress proof before any claim that it activates, registers, edits, or
 renders is credible. Before running, the proof report derives the required gates
@@ -170,17 +172,17 @@ Set up the runtime/editor proof boundary before requesting `runtime` or `editor`
 
 ```sh
 npm install --save-dev --save-exact \
-  @wordpress/env@11.15.0 \
-  @playwright/test@1.61.1 \
-  @wordpress/e2e-test-utils-playwright@1.51.0 \
-  axe-core@4.11.0
+  @wordpress/env@12.0.0 \
+  @playwright/test@1.64.1 \
+  @wordpress/e2e-test-utils-playwright@3.1.0 \
+  axe-core@4.14.0
 npx --no-install playwright install chromium
 ```
 
 The `full` profile adds the visual-proof pair:
 
 ```sh
-npm install --save-dev --save-exact pixelmatch@7.1.0 pngjs@7.0.0
+npm install --save-dev --save-exact pixelmatch@8.0.0 pngjs@7.0.0
 ```
 
 Proof never downloads tooling or browsers or calls a model. Missing or mismatched tooling blocks
@@ -290,7 +292,7 @@ Use the CLI in shell scripts, pre-commit hooks or CI.
 
 ```yaml
 - uses: actions/setup-node@v4
-  with: { node-version: 22.13.0 }
+  with: { node-version: 22.23.4 }
 - run: npx block-runner validate "content/**/*.html" --strict
 ```
 
@@ -319,8 +321,8 @@ unknown effects are never retried automatically.
 
 ## Library
 
-The library is ESM-only and requires Node.js ^22.13.0 || >=24.0.0. This means
-Node 22.13.0+ on the 22.x line, or Node 24.0.0+. Node 20, 21 and 23 are
+The library is ESM-only and requires Node.js ^22.23.4 || ^24.22.1 || >=26.12.1. This means
+Node 22.23.4+ on 22.x, 24.22.1+ on 24.x, or 26.12.1+. Node 20, 21, 23 and 25 are
 unsupported. CommonJS callers should use
 `await import('block-runner')` rather than `require('block-runner')`.
 

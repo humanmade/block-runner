@@ -1,6 +1,6 @@
 # Development and verification
 
-Work from a repository checkout on a supported Node version:
+Use Node 24.22.1+ on 24.x or 26.12.1+ for repository development and WordPress proof. The latest WordPress tooling requires Node 24+, while the packed CLI and library also support Node 22.23.4+ on 22.x:
 
 ```sh
 npm ci
@@ -27,7 +27,7 @@ npm run typecheck
 `npm run verify` remains the required repository gate. It runs the deterministic repository
 product suite. Benchmark and repository-tooling tests run separately with
 `npm run test:tools`; use that command when changing benchmark engines, receipt
-tooling or project-owned-block helpers. Full CI runs it once on Node 22, and the
+tooling or project-owned-block helpers. Full CI runs it once on Node 24, and the
 skill and release routes also run it. It is not a paid model benchmark run.
 
 CI classifies both pull-request and main-push changes with [`scripts/ci-scope.mjs`](../scripts/ci-scope.mjs). Additions or modifications limited to `README.md`, `CHANGELOG.md`, `ERRORS.md`, `DECISIONS.md` and its demo allowlist use the docs route; eligible shipped-skill changes use the skill route. Runtime, package, proof, workflow, release and unclassified paths use the full route. Deletions, renames and unavailable diffs cannot select a reduced route. All `docs/` paths are currently unclassified, so they select full CI.
@@ -115,7 +115,7 @@ draft product-preview brief.
 
 The development compatibility suite builds the existing pattern-override plugin once,
 then installs the same ZIP in three sequential, isolated PHP 8.3 environments:
-WordPress 7.1; WordPress 7.1.2; and WordPress 7.1.2 with Gutenberg 24.0.0.
+WordPress 7.1; WordPress 7.1.3; and WordPress 7.1.3 with Gutenberg 24.2.0.
 It uses ports 8891–8893 and refuses to claim an already-running lane.
 
 ```sh

@@ -24,7 +24,7 @@ const ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..')
 const DEFAULT_BASE_URL = 'http://localhost:8888';
 const WP_ENV_CONFIG = path.join(ROOT, 'proof', 'wp-env.json');
 const BROWSER_HELPER = path.join(ROOT, 'scripts', 'proof-playwright.mjs');
-const EXPECTED_WORDPRESS_VERSION = '7.1';
+const EXPECTED_WORDPRESS_VERSION = '7.1.3';
 const CONTROL_CONFIGS = {
   heading: {
     blockName: 'core/heading',

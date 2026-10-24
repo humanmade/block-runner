@@ -1,8 +1,9 @@
 {
-  "wordpressVersion": "7.1",
-  "source": "https://github.com/WordPress/WordPress/tree/7.1",
-  "retrievedOn": "2026-10-12",
+  "wordpressVersion": "7.1.3",
+  "source": "https://github.com/WordPress/WordPress/tree/7.1.3",
+  "retrievedOn": "2026-10-24",
   "sha256": "7adec2a120f3740c9c0dfcba286727dbeb91299eb0fc059828169955a6ac31f1",
   "capture": "WP_Block_Type_Registry::get_instance()->get_all_registered(), core namespace; public registration metadata only; no active plugins",
+  "revalidation": "All 116 definitions match the WordPress 7.1.3 registry structurally; retained the canonical serialized bytes and their hash.",
   "purpose": "Server-side core attribute schemas supplied before Gutenberg registration, matching the editor bootstrap."
 }

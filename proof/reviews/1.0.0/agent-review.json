@@ -1,0 +1,34 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "Codex agent-assisted browser review",
+  "reviewedAt": "2026-10-24T11:48:18.448050+00:00",
+  "inputHash": "sha256:649d3f2c2a813926397b4dacf3e8377b9d1b8a9f9313163bb806c3b55ff4d1d0",
+  "pluginZipHash": "sha256:7995e82a4dbe591dfa6b8bd2fcb722977e67f87877b004cdbc71505ed09fa7d9",
+  "status": "pass",
+  "checks": {
+    "editor-keyboard": "In Chrome on WordPress 7.1.3, selected the native heading, appended text with the keyboard and undid it. The original heading returned and Save became disabled. Tab moved out to the Block settings tab, then through Close Settings to Edit pattern without trapping focus.",
+    "frontend-keyboard": "Activated Skip to content with Return, then used Tab through author/category metadata to the generated Canonical action. Subsequent tabs reached the next canonical action, First instance action and Second instance action in document order.",
+    "focus-visibility": "Observed the visible blue outline on the focused editor Block tab and a contrasting outline around the focused frontend Canonical action; screenshots retained.",
+    "content-reading-order": "Inspected rendered layout and accessibility tree: static SVG image, heading, paragraph, content image and action repeat in source order. Image alternatives and distinct overridden headings/actions appear in the accessibility tree."
+  },
+  "findings": [],
+  "limitations": [
+    "Agent-assisted review on macOS Chrome; not a human owner attestation, screen-reader session or independent accessibility certification.",
+    "Native WordPress editor axe findings remain in the automated receipt and require exact native-control matching.",
+    "Fixture actions use example.test destinations; keyboard reachability and exposed destinations were checked without navigating to external placeholder URLs."
+  ],
+  "evidence": {
+    "wordpressVersion": "7.1.3",
+    "phpVersion": "8.3.36",
+    "screenshots": [
+      {
+        "path": "manual-editor-focus.png",
+        "sha256": "sha256:dc99c798474251d74456a2ceb991a4da800b957564af2a04dd7f44850b4c7793"
+      },
+      {
+        "path": "manual-frontend-focus.png",
+        "sha256": "sha256:ebf688284fdc10a3b8fb09f803b2028befa0c3c1fd723a537ce012d5f5e4bcca"
+      }
+    ]
+  }
+}

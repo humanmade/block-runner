@@ -1,11 +1,11 @@
 /** The Node.js releases supported by the resolved production dependency graph. */
-export const SUPPORTED_NODE_RANGE = '^22.13.0 || >=24.0.0';
+export const SUPPORTED_NODE_RANGE = '^22.23.4 || ^24.22.1 || >=26.12.1';
 
 /**
  * Test a Node version without pulling a semver dependency into the runtime bootstrap.
  *
- * The supported set intentionally excludes Node 20, 21, and 23: Wesper 0.5.0
- * requires Node 22.12+, while the resolved production graph supports Node 22 and 24+.
+ * Require the security-patched floors of supported Node release lines.
+ * Node 20, 21, 23 and 25 are no longer supported.
  */
 export function isSupportedNodeVersion(version: string): boolean {
   const match = /^v?(\d+)\.(\d+)\.(\d+)$/.exec(version.trim());
@@ -13,7 +13,12 @@ export function isSupportedNodeVersion(version: string): boolean {
 
   const major = Number(match[1]);
   const minor = Number(match[2]);
-  return (major === 22 && minor >= 13) || major >= 24;
+  const patch = Number(match[3]);
+  const atLeast = (minMinor: number, minPatch: number) => minor > minMinor || (minor === minMinor && patch >= minPatch);
+  return (major === 22 && atLeast(23, 4))
+    || (major === 24 && atLeast(22, 1))
+    || (major === 26 && atLeast(12, 1))
+    || major > 26;
 }
 
 /** Fail before the CLI or library can report an unsupported runtime as successful. */

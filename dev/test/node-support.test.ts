@@ -5,13 +5,13 @@ import { describe, expect, it } from 'vitest';
 import { planStandalonePluginOutput } from '../../src/plugin/profile.js';
 import { assertSupportedNodeVersion, isSupportedNodeVersion, SUPPORTED_NODE_RANGE } from '../../src/node-support.js';
 
-const floors = ['22.13.0', '24.0.0'];
-const GENERATED_PLUGIN_NODE_RANGE = '^20.19.0 || ^22.13.0 || >=24.0.0';
+const floors = ['22.23.4', '24.22.1', '26.12.1'];
+const GENERATED_PLUGIN_NODE_RANGE = '^22.23.4 || ^24.22.1 || >=26.12.1';
 
 describe('Node support contract', () => {
   it('accepts each supported floor and rejects the gaps and lower patches', () => {
     for (const version of floors) expect(isSupportedNodeVersion(version)).toBe(true);
-    for (const version of ['20.19.0', '21.0.0', '22.12.0', '23.0.0']) {
+    for (const version of ['20.19.0', '21.0.0', '22.23.3', '23.0.0', '24.22.0', '25.0.0', '26.12.0']) {
       expect(isSupportedNodeVersion(version)).toBe(false);
     }
   });
@@ -44,8 +44,12 @@ describe('Node support contract', () => {
     expect(packageJson.engines.node).toBe(SUPPORTED_NODE_RANGE);
     expect(readme).toContain(`Node.js ${SUPPORTED_NODE_RANGE}`);
     expect(skill).toContain(`compatibility: Requires Node.js ${SUPPORTED_NODE_RANGE}`);
-    expect(ci).toContain(SUPPORTED_NODE_RANGE);
-    expect(ci).toContain('node: [22.13.0, 24.0.0]');
+    expect(ci).toContain('node: [24.22.1, 26.12.1]');
+    const node22Job = ci.split('  packed-node22:\n')[1]?.split('\n  package-boundary:')[0] ?? '';
+    expect(node22Job).toContain('node-version: 24.22.1');
+    expect(node22Job).toContain('node-version: 22.23.4');
+    expect(node22Job).toContain('npm run smoke:package');
+    expect(ci).toContain('test, packed-node22, package-boundary, wordpress-proof]');
     expect(ci).toContain('npm ci --engine-strict');
     expect(ci).toContain('npm run smoke:package');
   });
@@ -61,6 +65,5 @@ describe('Node support contract', () => {
 
     expect(JSON.parse(packageJson).engines.node).toBe(GENERATED_PLUGIN_NODE_RANGE);
     expect(JSON.parse(lockfile).packages[''].engines.node).toBe(GENERATED_PLUGIN_NODE_RANGE);
-    expect(GENERATED_PLUGIN_NODE_RANGE).not.toBe(SUPPORTED_NODE_RANGE);
   });
 });

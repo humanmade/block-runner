@@ -20,8 +20,8 @@ export async function proveGutenbergCompatibility({ root, outputDir, built, expe
   const receipt = { kind: 'development-compatibility', identity, lanes: [], status: 'failed' };
   const lanes = [
     { name: 'wordpress-7.1', core: '7.1', port: 8891 },
-    { name: 'wordpress-7.1.2', core: '7.1.2', port: 8892 },
-    { name: 'wordpress-7.1.2-gutenberg-24.0.0', core: '7.1.2', gutenberg: '24.0.0', port: 8893 },
+    { name: 'wordpress-7.1.3', core: '7.1.3', port: 8892 },
+    { name: 'wordpress-7.1.3-gutenberg-24.2.0', core: '7.1.3', gutenberg: '24.2.0', port: 8893 },
   ];
   try {
     for (const lane of lanes) {

@@ -26,7 +26,7 @@ const enabled = process.env.BLOCK_RUNNER_PROOF_MUTATIONS === '1';
  * Keep the archives, complete
  * status matrix, and failed-run evidence; never delete the only receipt.
  */
-(enabled ? describe.sequential : describe.skip)('real WordPress proof mutations', () => {
+(enabled ? describe : describe.skip)('real WordPress proof mutations', { concurrent: false }, () => {
   let root: string;
   let built: BuiltPatternOverridesFixture;
   let baseline: ProofRunResult;

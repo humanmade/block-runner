@@ -21,14 +21,14 @@ Block Runner publishes to npm from CI with **provenance** via **Trusted Publishi
 
 ## Per-release flow
 
-### 0.9 release
+### Stable releases
 
-The 0.9 line includes registered-block authoring and retains the pre-1.0 API policy below.
+The 1.x line establishes the public CLI and library compatibility baseline described below.
 Check `npm view block-runner dist-tags` for published versions. Before creating a release, run the
-deterministic release candidate gates from the candidate checkout:
+deterministic release candidate gates from the candidate checkout on Node 24.22.1+ or 26.12.1+:
 
 ```sh
-npm run release:check -- --manual-review proof/reviews/0.9.0/owner-acceptance.json --receipt dev/release/0.9-testing/receipts/<version>.json
+npm run release:check -- --manual-review proof/reviews/1.0.0/agent-review.json --receipt dev/release/0.9-testing/receipts/<version>.json
 ```
 
 The 13-fixture registered-block authoring benchmark is optional and does not
@@ -55,15 +55,21 @@ product-preview state live in
 3. Draft a **GitHub Release** for that tag and **Publish** it.
 4. The Release workflow runs the complete release candidate check then publishes with
    `npm publish --provenance --access public --tag latest`.
-5. Confirm afterward: `npm view block-runner@latest version` shows the new 0.9 version, and
+5. Confirm afterward: `npm view block-runner@latest version` shows the new release version, and
    `npm audit signatures` passes (provenance attestation present).
 
-## Pre-1.0 note
+## Compatibility policy
 
-While on `0.x`, any release may include breaking changes — that's expected semver for `0.x`.
-Do **not** promote 0.9 to 1.0 merely because the release matrix is green: 1.0 remains contingent
-on real-project feedback and resolution of all release failures. Move to `1.0.0` only when the
-public API (CLI flags + library exports) is stable enough to promise backward compatibility and
-those conditions are satisfied. At that point, consider adopting
-[changesets](https://github.com/changesets/changesets) to automate version bumps, changelogs, and
-the publish PR.
+Starting with 1.0.0, backward-incompatible changes to public CLI flags and library
+exports require a major release. Minor releases add compatible functionality;
+patch releases contain compatible fixes. Document behaviour changes and migration
+requirements in the changelog.
+
+The 1.0 release follows owner acceptance of a real-project rendered result and the
+required deterministic release checks. Valid block markup, rendered fidelity and
+native editing remain separate proof layers; the version does not promise fidelity
+for arbitrary input or remove warnings and verification gaps. Optional model
+benchmarks remain separately authorised and unscored when not run.
+
+Historical 0.x releases used the pre-1.0 policy and could include breaking changes
+in any release. Existing release-evidence paths retain their original names.

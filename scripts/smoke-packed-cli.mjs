@@ -145,9 +145,10 @@ try {
 }
 
 function parsePackJson(stdout) {
-  const start = stdout.indexOf('[\n');
+  const start = stdout.search(/^[\[{]/m);
   if (start < 0) throw new Error('npm pack did not return JSON output:\n' + stdout);
-  return JSON.parse(stdout.slice(start));
+  const result = JSON.parse(stdout.slice(start));
+  return Array.isArray(result) ? result : Object.values(result);
 }
 
 function flatten(nodes) {
