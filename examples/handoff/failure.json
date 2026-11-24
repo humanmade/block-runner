@@ -1,0 +1,5 @@
+{
+  "blocks": [
+    { "block": "example/not-registered", "text": "Keep this source when reporting the failure." }
+  ]
+}
