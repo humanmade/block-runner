@@ -333,7 +333,7 @@ describe('standalone plugin profile', () => {
     const bootstrap = plan.touchedFiles.find((file) => file.relativePath === 'plugin.php')!.content;
     expect(JSON.parse(packageJson.toString('utf8'))).toMatchObject({
       engines: { node: '^22.23.4 || ^24.22.1 || >=26.12.1' },
-      devDependencies: { '@wordpress/scripts': '37.0.0' },
+      devDependencies: { '@wordpress/scripts': '37.2.0' },
     });
     const parsedLock = JSON.parse(lock.toString('utf8'));
     expect(parsedLock).toMatchObject({
@@ -342,9 +342,9 @@ describe('standalone plugin profile', () => {
         '': {
           name: 'acme-notice',
           engines: { node: '^22.23.4 || ^24.22.1 || >=26.12.1' },
-          devDependencies: { '@wordpress/scripts': '37.0.0' },
+          devDependencies: { '@wordpress/scripts': '37.2.0' },
         },
-        'node_modules/@wordpress/scripts': { version: '37.0.0' },
+        'node_modules/@wordpress/scripts': { version: '37.2.0' },
         'node_modules/adm-zip': { version: '0.6.1' },
       },
     });
