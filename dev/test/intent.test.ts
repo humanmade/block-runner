@@ -374,6 +374,37 @@ describe('intent assembly', () => {
     await expect(assemble(nodes as IntentNode[])).rejects.toThrow(`${location}: expected`);
   });
 
+  it.each(['paragraph', 'heading', 'html', 'button', 'image', 'pullquote', 'table'])(
+    'rejects supplied children of core/%s at their intent path', async (leaf) => {
+      const block = `core/${leaf}`;
+      const nodes = [{ block: 'core/group', children: [
+        { block: 'core/paragraph', text: 'First' },
+        { block, children: [{ block: 'core/paragraph', text: 'Child detail must survive' }] },
+      ] }];
+      const reason = `blocks[0].children[1].children: ${block} does not accept children`;
+      await expect(assemble(nodes)).rejects.toThrow(reason);
+      for (const strict of [false, true]) {
+        const report = await realize(JSON.stringify({ blocks: nodes }), { strict, sourcePath: 'intent.json' });
+        expect(report).toMatchObject({
+          ok: false, output: '', summary: { blocks: 0, invalid: 1 },
+          items: [{ status: 'invalid', reason: expect.stringContaining(reason), source: { path: 'intent.json' } }],
+        });
+      }
+    },
+  );
+
+  it('preserves sibling paragraphs in a group and accepts an empty children array on a leaf', async () => {
+    const nodes = [{ block: 'core/group', children: [
+      { block: 'core/paragraph', text: 'Parent', children: [] },
+      { block: 'core/paragraph', text: 'Child detail must survive' },
+    ] }];
+    const report = await realize(JSON.stringify(nodes), { strict: true });
+    expect(report.ok).toBe(true);
+    expect(report.summary).toEqual({ blocks: 3, valid: 3, invalid: 0, warnings: 0 });
+    expect(report.output).toContain('<p>Parent</p>');
+    expect(report.output).toContain('<p>Child detail must survive</p>');
+  });
+
   it('rejects malformed input before constructing the media resolver', async () => {
     const resolver = vi.spyOn(media, 'createMediaResolver');
     try {
