@@ -100,6 +100,38 @@ describe('gate', () => {
     });
   });
 
+  function queryMarkup(attributes: object, child = '<!-- wp:post-title /-->'): string {
+    return [
+      `<!-- wp:query ${JSON.stringify(attributes)} -->`,
+      '<div class="wp-block-query"><!-- wp:post-template -->',
+      child,
+      '<!-- /wp:post-template --></div>',
+      '<!-- /wp:query -->',
+    ].join('\n');
+  }
+
+  it.each([
+    { query: { categoryIds: [] } },
+    { query: { tagIds: [] } },
+    { query: {}, layout: { inherit: true } },
+    { query: {} },
+    { query: {}, layout: { type: 'constrained' } },
+  ])('validates a Query and its descendants with attributes %j', async (attributes) => {
+    const report = await validate(queryMarkup(attributes), { strict: true });
+    expect(report).toMatchObject({
+      ok: true, summary: { blocks: 3, valid: 3, invalid: 0, warnings: 0 }, items: [],
+    });
+  });
+
+  it('still reports invalid authored descendants inside a migrated Query', async () => {
+    const child = '<!-- wp:paragraph --><h2>Wrong tag</h2><!-- /wp:paragraph -->';
+    const report = await validate(queryMarkup({ query: { tagIds: [] } }, child), { sourcePath: 'index.html' });
+    expect(report.ok).toBe(false);
+    expect(report.items).toMatchObject([{
+      block: 'core/paragraph', status: 'invalid', source: { path: 'index.html', htmlLine: 3 },
+    }]);
+  });
+
   it('reports invalid block markup with source', async () => {
     const report = await validate('<!-- wp:paragraph --><h2>Hello</h2><!-- /wp:paragraph -->', {
       sourcePath: 'invalid.html',
