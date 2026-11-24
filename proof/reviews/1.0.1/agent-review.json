@@ -1,0 +1,33 @@
+{
+  "schemaVersion": 1,
+  "reviewer": "Codex agent-assisted browser review",
+  "reviewedAt": "2026-11-24T12:08:15.688311+00:00",
+  "inputHash": "sha256:649d3f2c2a813926397b4dacf3e8377b9d1b8a9f9313163bb806c3b55ff4d1d0",
+  "pluginZipHash": "sha256:12cdbbe09bed9ad3d2bb01944616182a0d993a7d27a208ecfc94c44dfaac7884",
+  "status": "pass",
+  "checks": {
+    "editor-keyboard": "In Chrome, typed a character at the end of the native heading. The heading changed and Save became available. Tab left the canvas for Open save panel. Using the toolbar Undo restored the original heading and disabled Save.",
+    "frontend-keyboard": "Tab reached Skip to content. Return moved to the main section and the next Tab focused Canonical action. One more Tab left the fixture for the footer site link.",
+    "focus-visibility": "The editor showed a blue double outline around Open save panel. The frontend showed a contrasting ring around Canonical action against the pale blue background.",
+    "content-reading-order": "The frontend accessibility tree and rendered page agreed on the sequence: Static SVG check mark, Canonical heading, the layout paragraph, Canonical image and Canonical action. The title was H1 and the fixture heading was H2."
+  },
+  "findings": [],
+  "limitations": [
+    "Agent-assisted keyboard and visual review of one fixture on macOS, using Chrome for the editor and the in-app browser for the frontend. Screen-reader and human owner review were outside this check.",
+    "The example.test destination was inspected without following the link."
+  ],
+  "evidence": {
+    "wordpressVersion": "7.1.3",
+    "phpVersion": "8.3.36",
+    "screenshots": [
+      {
+        "path": "manual-editor-focus.png",
+        "sha256": "sha256:d4df58fa9033ea78d99a61cb61c8a231023f6db496d96cf77d95ae64813ceb37"
+      },
+      {
+        "path": "manual-frontend-focus.png",
+        "sha256": "sha256:ac23ed3f51edcb27c3fece5c5d27ebc72f0cbc20f6abf37373aba06ba52d3c5d"
+      }
+    ]
+  }
+}

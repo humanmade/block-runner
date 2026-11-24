@@ -1,5 +1,11 @@
 # Changelog
 
+## 1.0.1 — 2026-11-24
+
+- Validate legacy Query blocks whose Gutenberg migration rebuilds their Post Template. Invalid markup inside the template still reports its source location.
+- Reject nonempty intent children on paragraphs, headings, Custom HTML, buttons, images, pullquotes and tables. Move intended siblings into a container such as a Group. Both strict and ordinary assembly report the input path and preserve existing output files.
+- Update Wesper to 0.5.1 and refresh compatible runtime and proof dependencies. New generated plugins use WordPress Scripts 37.2.0. Existing 37.0.0 hosts remain supported.
+
 ## 1.0.0 — 2026-10-24
 
 - Establish the stable public CLI and library compatibility baseline. Future breaking changes require a major release.
