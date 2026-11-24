@@ -106,7 +106,7 @@ async function assembleNode(
   const childAccordionIconPosition = name === 'core/accordion'
     ? (typeof attrs.iconPosition === 'string' ? attrs.iconPosition : 'right')
     : inheritedAccordionIconPosition;
-  const children = await assembleWithWp(
+  const assembleChildren = () => assembleWithWp(
     node.children === undefined ? [] : node.children,
     wp,
     `${intentPath}.children`,
@@ -134,44 +134,52 @@ async function assembleNode(
     return block;
   };
 
+  const createLeaf = (): WpBlock => {
+    if (node.children !== undefined) {
+      if (!Array.isArray(node.children)) throw new Error(`${intentPath}.children: expected an array of block nodes`);
+      if (node.children.length > 0) throw new Error(`${intentPath}.children: ${name} does not accept children`);
+    }
+    return createBlock([]);
+  };
+
   switch (name) {
     case 'core/html':
       if (text != null) attrs.content = text;
       if (attrs.content === undefined) attrs.content = '';
       if (typeof attrs.content !== 'string') throw new Error(`${intentPath}.content: expected a string`);
-      return createBlock([]);
+      return createLeaf();
 
     case 'core/heading':
       if (text != null) attrs.content = text;
       attrs.level = node.level ?? attrs.level ?? 2;
-      return createBlock([]);
+      return createLeaf();
 
     case 'core/accordion-heading':
       if (!Object.hasOwn(node.attrs ?? {}, 'iconPosition') && inheritedAccordionIconPosition !== undefined) {
         attrs.iconPosition = inheritedAccordionIconPosition;
       }
-      return createBlock(children);
+      return createBlock(await assembleChildren());
 
     case 'core/paragraph':
       if (text != null) attrs.content = text;
-      return createBlock([]);
+      return createLeaf();
 
     case 'core/list-item':
       if (text != null) attrs.content = text;
-      return createBlock(children);
+      return createBlock(await assembleChildren());
 
     case 'core/button':
       if (text != null) attrs.text = text;
       if (node.url != null) attrs.url = node.url;
-      return createBlock([]);
+      return createLeaf();
 
     case 'core/image':
       if (node.url != null) attrs.url = node.url;
       if (node.alt != null) attrs.alt = node.alt;
-      return createBlock([]);
+      return createLeaf();
 
     case 'core/list': {
-      let items = children;
+      let items = await assembleChildren();
       if (items.length === 0 && node.items !== undefined) {
         if (!Array.isArray(node.items)) throw new Error(`${intentPath}.items: expected an array of strings`);
         items = node.items.map((item, index) => {
@@ -184,7 +192,7 @@ async function assembleNode(
 
     case 'core/quote': {
       if (node.citation != null) attrs.citation = node.citation;
-      const body = children;
+      const body = await assembleChildren();
       if (body.length === 0 && text != null) {
         body.push(wp.createBlock('core/paragraph', { content: text }, []));
       }
@@ -193,12 +201,12 @@ async function assembleNode(
 
     case 'core/details':
       if (text != null) attrs.summary = text;
-      return createBlock(children);
+      return createBlock(await assembleChildren());
 
     case 'core/pullquote':
       if (text != null) attrs.value = text;
       if (node.citation != null) attrs.citation = node.citation;
-      return createBlock([]);
+      return createLeaf();
 
     case 'core/table': {
       if (node.rows !== undefined && !Array.isArray(node.rows)) {
@@ -215,12 +223,12 @@ async function assembleNode(
         attrs.head = [toCells(node.rows[0], 0, 'th')];
         attrs.body = node.rows.slice(1).map((row, index) => toCells(row, index + 1, 'td'));
       }
-      return createBlock([]);
+      return createLeaf();
     }
 
     case 'core/cover':
       if (node.url != null) attrs.url = node.url;
-      return createBlock(children);
+      return createBlock(await assembleChildren());
 
     case 'core/media-text':
       if (node.url != null) {
@@ -228,18 +236,18 @@ async function assembleNode(
         attrs.mediaType = 'image';
       }
       if (node.alt != null) attrs.mediaAlt = node.alt;
-      return createBlock(children);
+      return createBlock(await assembleChildren());
 
     case 'core/columns':
     case 'core/column':
     case 'core/buttons':
     case 'core/group':
     case 'core/gallery':
-      return createBlock(children);
+      return createBlock(await assembleChildren());
 
     default:
       if (text != null) attrs.content = text;
-      return createBlock(children);
+      return createBlock(await assembleChildren());
   }
 }
 
