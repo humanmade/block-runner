@@ -209,6 +209,8 @@
     "esbuild": "0.28.2",
     "@wordpress/vips": "npm:empty-npm-package@1.0.0",
     "wasm-vips": "npm:empty-npm-package@1.0.0",
-    "qs@<6.16.0": "6.16.1"
+    "qs@<6.16.0": "6.17.1",
+    "isomorphic-git@<=1.38.5": "1.44.19",
+    "rimraf@^5.0.10": "6.1.4"
   }
 }

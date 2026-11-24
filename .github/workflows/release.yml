@@ -23,7 +23,7 @@ jobs:
           node-version: 24.22.1
           registry-url: https://registry.npmjs.org
       # npm 12 supports Trusted Publishing on the patched Node baseline.
-      - run: npm install -g npm@12.2.1
+      - run: npm install -g npm@12.2.3
       - run: npm ci --engine-strict
       - name: Verify benchmark and evidence tooling
         run: npm run test:tools
