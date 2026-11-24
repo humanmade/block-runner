@@ -66,11 +66,13 @@ export async function validate(markup: string, options: ValidateOptions = {}): P
     }
 
     const problem = patternReferenceProblem(block);
-    const [isValid, issues] = problem
-      ? [false, [] as unknown[]] as const
+    // Parent migrations can construct a fresh child with no saved HTML to
+    // compare. Use Gutenberg's verdict for that node and still visit its children.
+    const [isValid, issues] = block.originalContent === undefined
+      ? [block.isValid === true, block.validationIssues]
       : withMutedWordPressConsole(() => wp.validateBlock(block));
 
-    if (isValid) {
+    if (!problem && isValid) {
       summary.valid += 1;
       continue;
     }
