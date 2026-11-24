@@ -448,6 +448,21 @@ describe('CLI', () => {
     expect(await readFile(outPath, 'utf8')).toBe('Keep existing output');
   });
 
+  it.each([false, true])('preserves existing output for invalid paragraph children (strict: %s)', async (strict) => {
+    const dir = await mkdtemp(path.join(tmpdir(), 'block-runner-cli-'));
+    const outPath = path.join(dir, 'out.html');
+    await writeFile(outPath, 'Keep existing output');
+    const result = await runCli(['assemble', '-', '--out', outPath, '--json', ...(strict ? ['--strict'] : [])],
+      JSON.stringify({ blocks: [{ block: 'core/paragraph', text: 'Parent', children: [
+        { block: 'core/paragraph', text: 'Child detail must survive' },
+      ] }] }));
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({
+      ok: false, output: '', items: [{ reason: expect.stringContaining('blocks[0].children') }],
+    });
+    expect(await readFile(outPath, 'utf8')).toBe('Keep existing output');
+  });
+
   it('rejects styling flags on assemble and points callers to convert', async () => {
     for (const args of [
       ['assemble', '-', '--styling', 'strict'],
