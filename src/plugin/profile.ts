@@ -77,7 +77,7 @@ export type PluginPlanMode = 'existing' | 'standalone';
 export type PluginFileOperation = 'create' | 'modify';
 /** Versioned, complete npm lock snapshot owned by the standalone plugin template. */
 export const STANDALONE_LOCK_TEMPLATE_VERSION = 'wordpress-scripts-37.2.0-lock-v1' as const;
-export const STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT = 1293 as const;
+export const STANDALONE_LOCK_TEMPLATE_PACKAGE_COUNT = 1292 as const;
 
 // Upstream build tools still select vulnerable versions; constrain only affected ranges.
 const STANDALONE_DEPENDENCY_OVERRIDES = {
