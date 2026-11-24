@@ -84,7 +84,7 @@ const STANDALONE_DEPENDENCY_OVERRIDES = {
   'markdownlint-cli@^0.49.1': '0.50.1',
   'js-yaml@>=5.0.0 <5.4.1': '5.5.0',
   'katex@<0.18.2': '0.19.1',
-  'postcss-selector-parser@<7.1.6': '7.1.7',
+  'postcss-selector-parser@<7.1.6': '7.2.1',
   'serialize-javascript@<7.1.3': '7.1.4',
   'smol-toml@<1.9.0': '1.9.1',
 } as const;
