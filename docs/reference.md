@@ -172,10 +172,10 @@ Set up the runtime/editor proof boundary before requesting `runtime` or `editor`
 
 ```sh
 npm install --save-dev --save-exact \
-  @wordpress/env@12.0.0 \
-  @playwright/test@1.64.1 \
-  @wordpress/e2e-test-utils-playwright@3.1.0 \
-  axe-core@4.14.0
+  @wordpress/env@12.2.0 \
+  @playwright/test@1.65.1 \
+  @wordpress/e2e-test-utils-playwright@3.3.0 \
+  axe-core@4.14.1
 npx --no-install playwright install chromium
 ```
 
